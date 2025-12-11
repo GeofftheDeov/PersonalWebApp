@@ -1,13 +1,15 @@
 import express from "express";
 import mongoose from "mongoose";
 import cors from "cors";
-import userRoutes from "./routes/userRoutes";
-require("dotenv").config();
+import userRoutes from "./routes/userRoutes.js";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-mongoose.connect(process.env.MONGO_URI)
+mongoose.connect(process.env.MONGO_URI || "mongodb://localhost:27017/personal_web_app")
   .then(() => console.log("MongoDB Connected"))
   .catch((err) => console.error(err));
 app.listen(5000, () => console.log("Server running on port 5000"));

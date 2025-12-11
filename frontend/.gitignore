@@ -16,6 +16,7 @@
 # next.js
 /.next/
 /out/
+/frontend/node_modules/@next/swc-win32-x64-msvc/next-swc.win32-x64-msvc.node
 
 # production
 /build
@@ -39,3 +40,5 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+

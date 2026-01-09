@@ -78,7 +78,7 @@ export const loginToSalesforce = async () => {
     }
 };
 
-export const createLeadFromAccount = async (account: any) => {
+export const createLeadInSalesforce = async (lead: any) => {
     await loginToSalesforce();
     if (!isLoggedIn) {
         console.warn("Not logged in to Salesforce. Skipping Lead creation.");
@@ -86,24 +86,39 @@ export const createLeadFromAccount = async (account: any) => {
     }
 
     try {
-        // Map Account fields to Lead fields
-        // Note: Lead requires Company and LastName (usually). 
-        // We'll use account name for Company and Last Name.
         const ret = await conn.sobject("Lead").create({
-            Company: account.name,
-            LastName: account.name, // Required field fallback
-            Email: account.email || undefined,
+            FirstName: lead.firstName,
+            LastName: lead.lastName,
+            Company: lead.company,
+            Email: lead.email || undefined,
+            Phone: lead.phone || undefined,
             Status: "Open - Not Contacted",
-            LeadSource: "Web App"
+            LeadSource: lead.source || "Web App"
         });
 
         if (ret.success) {
             console.log(`Created Lead in Salesforce with ID: ${ret.id}`);
-            return ret.id;
+            console.log(`Here is the full response: `);
+            console.info(ret);
+            return ret;
         } else {
             console.error(`Failed to create Lead: ${JSON.stringify(ret.errors)}`);
+            return null;
         }
     } catch (err) {
         console.error("Error creating Salesforce Lead:", err);
+        return null;
     }
+};
+
+// Keep the old function for backward compatibility with Account model
+export const createLeadFromAccount = async (account: any) => {
+    return createLeadInSalesforce({
+        firstName: account.name,
+        lastName: account.name,
+        company: account.name,
+        email: account.email,
+        phone: account.phone,
+        source: "Web App"
+    });
 };

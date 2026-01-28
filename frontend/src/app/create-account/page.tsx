@@ -67,111 +67,113 @@ export default function CreateAccountPage() {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-slate-950 relative overflow-hidden">
-            {/* Background gradients */}
-            <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-indigo-950 via-slate-950 to-black z-0"></div>
-            <div className="absolute -top-20 -left-20 w-96 h-96 bg-purple-900/30 rounded-full blur-3xl"></div>
-            <div className="absolute -bottom-20 -right-20 w-96 h-96 bg-indigo-900/30 rounded-full blur-3xl"></div>
+        <div className="min-h-screen flex items-center justify-center bg-bricks relative overflow-hidden text-black dark:text-white pb-20 pt-32">
+             {/* Grain Overlay */}
+            <div className="absolute inset-0 bg-grain mix-blend-overlay z-40 pointer-events-none"></div>
 
-            <div className="relative z-10 w-full max-w-md p-8">
-                <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl p-8 transform transition-all hover:scale-[1.01]">
+            {/* Atmosphere/Lighting */}
+            <div className="absolute -top-40 -left-40 w-[600px] h-[600px] bg-teal-600/20 blur-[120px] rounded-full z-0 animate-pulse pointer-events-none"></div>
+            <div className="absolute top-1/2 -right-60 w-[800px] h-[800px] bg-yellow-400/10 blur-[150px] rounded-full z-0 pointer-events-none"></div>
+            <div className="absolute bottom-[-20%] left-1/4 w-[500px] h-[500px] bg-orange-500/15 blur-[100px] rounded-full z-0 animate-pulse pointer-events-none"></div>
+
+            <div className="relative z-10 w-full max-w-2xl px-6">
+                <div className="bg-white dark:bg-zinc-900 border-4 border-black dark:border-white p-8 md:p-12 shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] dark:shadow-[12px_12px_0px_0px_rgba(255,255,255,1)] transform rotate-1">
                     <div className="text-center mb-8">
-                        <h2 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-indigo-400">
-                            Create Account
+                        <h2 className="text-5xl font-permanent uppercase tracking-tighter mb-4 transform -rotate-1 relative inline-block">
+                             <span className="relative z-10">Create Account</span>
+                             <span className="absolute -bottom-2 left-0 w-full h-4 bg-teal-600/30 -z-10 -rotate-1"></span>
                         </h2>
-                        <p className="text-slate-400 mt-2 text-sm">Join us and start your journey</p>
+                        <p className="text-xl font-bold font-sans uppercase tracking-wide text-zinc-600 dark:text-zinc-400">Join the chaos. Build something real.</p>
                     </div>
 
                     {success && (
-                        <div className="mb-6 p-4 bg-green-500/10 border border-green-500/30 rounded-xl">
-                            <p className="text-green-400 text-sm text-center">
-                                Account created successfully! Redirecting to login...
-                            </p>
+                        <div className="mb-6 p-4 bg-green-100 border-4 border-black text-black font-bold text-center shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
+                            <p>Account created successfully! Redirecting to login...</p>
                         </div>
                     )}
 
                     {error && (
-                        <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-xl">
-                            <p className="text-red-400 text-sm text-center">{error}</p>
+                        <div className="mb-6 p-4 bg-red-100 border-4 border-black text-black font-bold text-center shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
+                            <p>{error}</p>
                         </div>
                     )}
 
-                    <form className="space-y-5" onSubmit={handleSubmit}>
-                        <div className="grid grid-cols-2 gap-4">
+                    <form className="space-y-6" onSubmit={handleSubmit}>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="space-y-2">
-                                <label className="text-slate-300 text-sm font-medium ml-1">First Name *</label>
+                                <label className="text-lg font-black uppercase tracking-tight ml-1">First Name</label>
                                 <input
                                     type="text"
                                     name="firstName"
                                     value={formData.firstName}
                                     onChange={handleChange}
                                     required
-                                    className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition-all"
-                                    placeholder="John"
+                                    className="w-full bg-white dark:bg-black border-4 border-black dark:border-white px-4 py-3 font-bold focus:outline-none focus:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)] transition-shadow placeholder-zinc-400"
+                                    placeholder="JOHNNY"
                                 />
                             </div>
 
                             <div className="space-y-2">
-                                <label className="text-slate-300 text-sm font-medium ml-1">Last Name *</label>
+                                <label className="text-lg font-black uppercase tracking-tight ml-1">Last Name</label>
                                 <input
                                     type="text"
                                     name="lastName"
                                     value={formData.lastName}
                                     onChange={handleChange}
                                     required
-                                    className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition-all"
-                                    placeholder="Doe"
+                                    className="w-full bg-white dark:bg-black border-4 border-black dark:border-white px-4 py-3 font-bold focus:outline-none focus:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)] transition-shadow placeholder-zinc-400"
+                                    placeholder="SILVERHAND"
                                 />
                             </div>
                         </div>
 
                         <div className="space-y-2">
-                            <label className="text-slate-300 text-sm font-medium ml-1">Email *</label>
+                            <label className="text-lg font-black uppercase tracking-tight ml-1">Email</label>
                             <input
                                 type="email"
                                 name="email"
                                 value={formData.email}
                                 onChange={handleChange}
                                 required
-                                className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition-all"
+                                className="w-full bg-white dark:bg-black border-4 border-black dark:border-white px-4 py-3 font-bold focus:outline-none focus:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)] transition-shadow placeholder-zinc-400"
                                 placeholder="name@example.com"
                             />
                         </div>
 
                         <div className="space-y-2">
-                            <label className="text-slate-300 text-sm font-medium ml-1">Password *</label>
+                            <label className="text-lg font-black uppercase tracking-tight ml-1">Password</label>
                             <input
                                 type="password"
                                 name="password"
                                 value={formData.password}
                                 onChange={handleChange}
                                 required
-                                className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition-all"
+                                className="w-full bg-white dark:bg-black border-4 border-black dark:border-white px-4 py-3 font-bold focus:outline-none focus:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)] transition-shadow placeholder-zinc-400"
                                 placeholder="••••••••"
                             />
                         </div>
 
                         <div className="space-y-2">
-                            <label className="text-slate-300 text-sm font-medium ml-1">Company *</label>
+                            <label className="text-lg font-black uppercase tracking-tight ml-1">Company</label>
                             <input
                                 type="text"
                                 name="company"
                                 value={formData.company}
                                 onChange={handleChange}
                                 required
-                                className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition-all"
-                                placeholder="Acme Inc."
+                                className="w-full bg-white dark:bg-black border-4 border-black dark:border-white px-4 py-3 font-bold focus:outline-none focus:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)] transition-shadow placeholder-zinc-400"
+                                placeholder="ARASAKA"
                             />
                         </div>
 
                         <div className="space-y-2">
-                            <label className="text-slate-300 text-sm font-medium ml-1">Phone</label>
+                            <label className="text-lg font-black uppercase tracking-tight ml-1">Phone</label>
                             <input
                                 type="tel"
                                 name="phone"
                                 value={formData.phone}
                                 onChange={handleChange}
-                                className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition-all"
+                                className="w-full bg-white dark:bg-black border-4 border-black dark:border-white px-4 py-3 font-bold focus:outline-none focus:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)] transition-shadow placeholder-zinc-400"
                                 placeholder="+1 (555) 123-4567"
                             />
                         </div>
@@ -179,16 +181,16 @@ export default function CreateAccountPage() {
                         <button
                             type="submit"
                             disabled={loading}
-                            className="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold rounded-xl shadow-lg shadow-indigo-500/20 transition-all transform active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="w-full mt-4 py-4 bg-black dark:bg-white text-white dark:text-black border-4 border-black dark:border-white font-black uppercase text-xl tracking-widest hover:text-orange-500 hover:border-orange-500 transition-colors shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] dark:shadow-[8px_8px_0px_0px_rgba(255,255,255,1)] hover:translate-x-1 hover:translate-y-1 hover:shadow-none active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                            {loading ? 'Creating Account...' : 'Create Account'}
+                            {loading ? 'Creating...' : 'Create Account'}
                         </button>
                     </form>
 
-                    <div className="mt-8 text-center">
-                        <p className="text-slate-500 text-sm">
+                    <div className="mt-8 text-center text-lg font-bold uppercase">
+                        <p className="text-zinc-500">
                             Already have an account?{' '}
-                            <a href="/login" className="text-indigo-400 hover:text-indigo-300 font-medium transition-colors">Sign in</a>
+                            <a href="/login" className="text-teal-600 hover:text-teal-500 underline decoration-4 decoration-teal-600 underline-offset-4 hover:no-underline">Sign in</a>
                         </p>
                     </div>
                 </div>

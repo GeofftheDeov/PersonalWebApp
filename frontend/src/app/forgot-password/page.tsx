@@ -39,42 +39,50 @@ export default function ForgotPasswordPage() {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-slate-950 relative overflow-hidden">
-            {/* Background gradients */}
-            <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-indigo-950 via-slate-950 to-black z-0"></div>
-            <div className="absolute -top-20 -left-20 w-96 h-96 bg-purple-900/30 rounded-full blur-3xl"></div>
-            <div className="absolute -bottom-20 -right-20 w-96 h-96 bg-indigo-900/30 rounded-full blur-3xl"></div>
+        <div className="min-h-screen bg-bricks p-8 md:p-16 overflow-hidden relative flex items-center justify-center">
+            {/* High-fidelity grain overlay */}
+            <div className="absolute inset-0 bg-grain mix-blend-overlay z-40 pointer-events-none"></div>
 
-            <div className="relative z-10 w-full max-w-md p-8">
-                <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl p-8 transform transition-all hover:scale-[1.01]">
-                    <div className="text-center mb-8">
-                        <h2 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-indigo-400">
-                            Forgot Password
-                        </h2>
-                        <p className="text-slate-400 mt-2 text-sm">Enter your email to receive a reset link</p>
-                    </div>
+            {/* Advanced atmospheric lighting gradients */}
+            <div className="absolute -top-40 -left-40 w-[600px] h-[600px] bg-teal-600/20 blur-[120px] rounded-full -z-10 animate-pulse"></div>
+            <div className="absolute top-1/2 -right-60 w-[800px] h-[800px] bg-yellow-400/10 blur-[150px] rounded-full -z-10"></div>
+            <div className="absolute bottom-[-20%] left-1/4 w-[500px] h-[500px] bg-orange-500/15 blur-[100px] rounded-full -z-10 animate-duration-[10s] animate-pulse"></div>
 
+            <div className="relative z-10 w-full max-w-md">
+                <div className="text-center mb-12">
+                    <h1 className="text-5xl md:text-7xl font-permanent text-black dark:text-white leading-none tracking-tight uppercase transform -rotate-2">
+                        <span className="relative inline-block">
+                            <span className="drop-shadow-[6px_6px_0px_rgba(250,204,21,1)]">FORGOT</span>
+                        </span>
+                        <br className="hidden md:block"/>
+                        <span className="relative inline-block md:mt-4 ml-4 md:ml-0">
+                            <span className="drop-shadow-[6px_6px_0px_rgba(250,204,21,1)]">PASSWORD</span>
+                        </span>
+                    </h1>
+                </div>
+
+                <div className="bg-white dark:bg-slate-900 border-4 border-black dark:border-white p-8 relative transform rotate-1 hover:rotate-0 transition-transform duration-300 shadow-[12px_12px_0px_rgba(0,0,0,1)] dark:shadow-[12px_12px_0px_rgba(255,255,255,1)]">
                     {error && (
-                        <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-xl">
-                            <p className="text-red-400 text-sm text-center">{error}</p>
+                        <div className="mb-6 p-4 bg-red-500 border-4 border-black -rotate-1 shadow-[4px_4px_0px_rgba(0,0,0,1)]">
+                            <p className="text-black font-permanent text-lg text-center uppercase">{error}</p>
                         </div>
                     )}
 
                     {message && (
-                        <div className="mb-6 p-4 bg-green-500/10 border border-green-500/30 rounded-xl">
-                            <p className="text-green-400 text-sm text-center">{message}</p>
+                        <div className="mb-6 p-4 bg-teal-500 border-4 border-black rotate-1 shadow-[4px_4px_0px_rgba(0,0,0,1)]">
+                            <p className="text-black font-permanent text-lg text-center uppercase">{message}</p>
                         </div>
                     )}
 
                     <form className="space-y-6" onSubmit={handleSubmit}>
                         <div className="space-y-2">
-                            <label className="text-slate-300 text-sm font-medium ml-1">Email</label>
+                            <label className="text-black dark:text-white text-xl font-permanent uppercase ml-1">Email</label>
                             <input
                                 type="email"
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
                                 required
-                                className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition-all"
+                                className="w-full bg-transparent border-4 border-black dark:border-white p-3 text-black dark:text-white font-medium placeholder-slate-500 focus:outline-none focus:shadow-[4px_4px_0px_rgba(13,148,136,1)] transition-all"
                                 placeholder="name@example.com"
                             />
                         </div>
@@ -82,19 +90,23 @@ export default function ForgotPasswordPage() {
                         <button
                             type="submit"
                             disabled={loading}
-                            className="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold rounded-xl shadow-lg shadow-indigo-500/20 transition-all transform active:scale-[0.98] disabled:opacity-50"
+                            className="w-full py-4 mt-4 bg-orange-500 border-4 border-black text-black font-permanent text-2xl hover:-translate-y-1 hover:shadow-[6px_6px_0px_rgba(0,0,0,1)] active:translate-y-0 active:shadow-none transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                            {loading ? 'Sending...' : 'Send Reset Link'}
+                            {loading ? 'SENDING...' : 'SEND RESET LINK'}
                         </button>
                     </form>
 
                      <div className="mt-8 text-center">
-                        <a href="/login" className="text-indigo-400 hover:text-indigo-300 font-medium transition-colors text-sm">
+                        <a href="/login" className="text-teal-600 hover:text-teal-500 font-permanent uppercase underline decoration-2 underline-offset-2">
                             Back to Login
                         </a>
                     </div>
                 </div>
             </div>
+
+             {/* Additional Decorative Elements */}
+             <div className="absolute top-1/2 right-10 w-16 h-16 bg-teal-500 border-4 border-black rounded-full animate-bounce opacity-80 shadow-[4px_4px_0px_rgba(0,0,0,1)] delay-700"></div>
+             <div className="absolute bottom-1/4 left-20 w-12 h-12 bg-yellow-400 border-4 border-black rounded-none -rotate-12 animate-ping opacity-60"></div>
         </div>
     );
 }

@@ -1,0 +1,1 @@
+http://localhost:3000/reset-password?token=461716eb3bfb150e850817d43d8b2f1c0316bd3f

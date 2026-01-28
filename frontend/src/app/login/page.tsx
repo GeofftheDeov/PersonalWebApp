@@ -31,6 +31,9 @@ export default function LoginPage() {
             // Save token and user info
             localStorage.setItem('token', data.token);
             localStorage.setItem('user', JSON.stringify(data.user));
+            
+            // Notify navigation of auth state change
+            window.dispatchEvent(new Event('authChange'));
 
             router.push('/dashboard');
         } catch (err: any) {
@@ -92,7 +95,7 @@ export default function LoginPage() {
                                 <input type="checkbox" className="mr-2 rounded border-white/10 bg-white/5 text-indigo-500 focus:ring-indigo-500/50" />
                                 Remember me
                             </label>
-                            <a href="#" className="text-indigo-400 hover:text-indigo-300 transition-colors">Forgot Password?</a>
+                            <a href="/forgot-password" className="text-indigo-400 hover:text-indigo-300 transition-colors">Forgot Password?</a>
                         </div>
 
                         <button

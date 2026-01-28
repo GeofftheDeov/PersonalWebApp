@@ -6,6 +6,8 @@ const leadSchema = new mongoose.Schema({
     lastName: { type: String, required: true },
     email: { type: String, required: true },
     password: { type: String, required: true },
+    resetPasswordToken: String,
+    resetPasswordExpires: Date,
     company: { type: String, required: false },
     phone: String,
     status: {

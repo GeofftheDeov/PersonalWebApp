@@ -22,13 +22,15 @@
     "express": "^5.2.1",
     "jsforce": "^3.10.10",
     "jsonwebtoken": "^9.0.3",
-    "mongoose": "^9.0.1"
+    "mongoose": "^9.0.1",
+    "nodemailer": "^7.0.13"
   },
   "devDependencies": {
     "@types/bcryptjs": "^3.0.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^25.0.0",
+    "@types/nodemailer": "^7.0.9",
     "nodemon": "^3.1.11",
     "tsx": "^4.21.0"
   }

@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Permanent+Marker&family=Sedgwick+Ave+Display&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -20,4 +20,40 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: 'Inter', sans-serif;
+}
+
+@layer utilities {
+  .bg-grain {
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+    opacity: 0.15;
+    pointer-events: none;
+  }
+
+  .bg-bricks {
+    background-color: #6b7280;
+    /* Ultra-refined bricks: Rounded corners + Turbulent Edge Displacement */
+    background-image: url("data:image/svg+xml,%3Csvg width='600' height='520' viewBox='0 0 600 520' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='masonry'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.04' numOctaves='3' result='noise'/%3E%3CfeDisplacementMap in='SourceGraphic' in2='noise' scale='4' xChannelSelector='R' yChannelSelector='G'/%3E%3C/filter%3E%3Cg filter='url(%23masonry)'%3E%3C!-- Row 1 --%3E%3Crect x='4' y='4' width='292' height='122' rx='10' fill='%23b91c1c' /%3E%3Crect x='304' y='4' width='292' height='122' rx='10' fill='%23991b1b' /%3E%3C!-- Row 2 --%3E%3Crect x='-146' y='134' width='292' height='122' rx='10' fill='%23dc2626' /%3E%3Crect x='154' y='134' width='292' height='122' rx='10' fill='%23b91c1c' /%3E%3Crect x='454' y='134' width='292' height='122' rx='10' fill='%23dc2626' /%3E%3C!-- Row 3 --%3E%3Crect x='4' y='264' width='292' height='122' rx='10' fill='%237f1d1d' /%3E%3Crect x='304' y='264' width='292' height='122' rx='10' fill='%23b91c1c' /%3E%3C!-- Row 4 --%3E%3Crect x='-146' y='394' width='292' height='122' rx='10' fill='%23b91c1c' /%3E%3Crect x='154' y='394' width='292' height='122' rx='10' fill='%23dc2626' /%3E%3Crect x='454' y='394' width='292' height='122' rx='10' fill='%23b91c1c' /%3E%3C/g%3E%3C/svg%3E");
+    background-size: 600px 520px;
+  }
+
+  .dark .bg-bricks {
+    background-color: #1a1a1a;
+    background-image: url("data:image/svg+xml,%3Csvg width='600' height='520' viewBox='0 0 600 520' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='masonryDark'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.05' numOctaves='4' result='noise'/%3E%3CfeDisplacementMap in='SourceGraphic' in2='noise' scale='5' xChannelSelector='R' yChannelSelector='G'/%3E%3C/filter%3E%3Cg filter='url(%23masonryDark)'%3E%3C!-- Row 1 --%3E%3Crect x='1' y='1' width='293' height='123' rx='12' fill='%237f1d1d' /%3E%3Crect x='301' y='1' width='293' height='123' rx='12' fill='%23450a0a' /%3E%3C!-- Row 2 --%3E%3Crect x='-147' y='131' width='293' height='123' rx='12' fill='%237f1d1d' /%3E%3Crect x='151' y='131' width='293' height='123' rx='12' fill='%23450a0a' /%3E%3Crect x='451' y='131' width='293' height='123' rx='12' fill='%237f1d1d' /%3E%3C!-- Row 3 --%3E%3Crect x='1' y='261' width='293' height='123' rx='12' fill='%23b91c1c' opacity='0.5' /%3E%3Crect x='301' y='261' width='293' height='123' rx='12' fill='%237f1d1d' /%3E%3C!-- Row 4 --%3E%3Crect x='-147' y='391' width='293' height='123' rx='12' fill='%23450a0a' /%3E%3Crect x='151' y='391' width='293' height='123' rx='12' fill='%237f1d1d' /%3E%3Crect x='451' y='391' width='293' height='123' rx='12' fill='%23450a0a' /%3E%3C/g%3E%3C/svg%3E");
+  }
+
+  .font-permanent {
+    font-family: 'Permanent Marker', cursive;
+  }
+
+  .font-sedgwick {
+    font-family: 'Sedgwick Ave Display', cursive;
+  }
+
+  .text-stroke-3 {
+    -webkit-text-stroke: 3px black;
+  }
+
+  .text-stroke-white-3 {
+    -webkit-text-stroke: 3px white;
+  }
 }

@@ -31,7 +31,7 @@ export default function CreateAccountPage() {
         setSuccess(false);
 
         try {
-            const response = await fetch('http://localhost:5000/api/leads', {
+            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/leads`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -77,7 +77,7 @@ export default function CreateAccountPage() {
             <div className="absolute bottom-[-20%] left-1/4 w-[500px] h-[500px] bg-orange-500/15 blur-[100px] rounded-full z-0 animate-pulse pointer-events-none"></div>
 
             <div className="relative z-10 w-full max-w-2xl px-6">
-                <div className="bg-white dark:bg-zinc-900 border-4 border-black dark:border-white p-8 md:p-12 shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] dark:shadow-[12px_12px_0px_0px_rgba(255,255,255,1)] transform rotate-1">
+                <div className="bg-white dark:bg-zinc-900 border-4 border-black dark:border-black p-8 md:p-12 shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] transform rotate-1">
                     <div className="text-center mb-8">
                         <h2 className="text-5xl font-permanent uppercase tracking-tighter mb-4 transform -rotate-1 relative inline-block">
                              <span className="relative z-10">Create Account</span>
@@ -181,7 +181,7 @@ export default function CreateAccountPage() {
                         <button
                             type="submit"
                             disabled={loading}
-                            className="w-full mt-4 py-4 bg-black dark:bg-white text-white dark:text-black border-4 border-black dark:border-white font-black uppercase text-xl tracking-widest hover:text-orange-500 hover:border-orange-500 transition-colors shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] dark:shadow-[8px_8px_0px_0px_rgba(255,255,255,1)] hover:translate-x-1 hover:translate-y-1 hover:shadow-none active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="w-full mt-4 py-4 bg-black  text-white dark:text-white border-4 border-black dark:border-white font-black uppercase text-xl tracking-widest hover:text-orange-500 hover:border-orange-500 transition-colors shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] dark:shadow-[8px_8px_0px_0px_rgba(255,255,255,1)] hover:translate-x-1 hover:translate-y-1 hover:shadow-none active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {loading ? 'Creating...' : 'Create Account'}
                         </button>

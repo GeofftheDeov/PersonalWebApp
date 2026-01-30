@@ -1,7 +1,8 @@
 const nextConfig = {
     swcMinify: false,
     eslint: { ignoreDuringBuilds: true },
-    typescript: { ignoreBuildErrors: true }
+    typescript: { ignoreBuildErrors: true },
+    output: 'standalone'
 }
 
 console.log("-----------------------------------------");

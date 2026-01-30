@@ -16,7 +16,7 @@ export default function LoginPage() {
         setError('');
 
         try {
-            const res = await fetch('http://localhost:5000/api/users/login', {
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/users/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email, password }),
@@ -55,14 +55,14 @@ export default function LoginPage() {
 
             <div className="relative z-10 w-full max-w-md">
                 <div className="text-center mb-12">
-                     <h1 className="text-6xl md:text-8xl font-permanent text-black dark:text-white leading-none tracking-tight uppercase transform -rotate-2">
+                     <h1 className="text-6xl md:text-8xl font-permanent text-black leading-none tracking-tight uppercase transform -rotate-2">
                         <span className="relative inline-block">
                             <span className="drop-shadow-[6px_6px_0px_rgba(250,204,21,1)]">LOGIN</span>
                         </span>
                     </h1>
                 </div>
 
-                <div className="bg-white dark:bg-slate-900 border-4 border-black dark:border-white p-8 relative transform rotate-1 hover:rotate-0 transition-transform duration-300 shadow-[12px_12px_0px_rgba(0,0,0,1)] dark:shadow-[12px_12px_0px_rgba(255,255,255,1)]">
+                <div className="bg-white dark:bg-slate-900 border-4 border-black dark:border-white p-8 relative transform rotate-1 hover:rotate-0 transition-transform duration-300 shadow-[12px_12px_0px_rgba(0,0,0,1)]">
                     {error && (
                         <div className="mb-6 p-4 bg-red-500 border-4 border-black -rotate-1 shadow-[4px_4px_0px_rgba(0,0,0,1)]">
                             <p className="text-black font-permanent text-lg text-center uppercase">{error}</p>
@@ -120,9 +120,6 @@ export default function LoginPage() {
                 </div>
             </div>
             
-            {/* Additional Decorative Elements */}
-            <div className="absolute top-1/2 left-10 w-16 h-16 bg-teal-500 border-4 border-black rounded-full animate-bounce opacity-80 shadow-[4px_4px_0px_rgba(0,0,0,1)]"></div>
-            <div className="absolute top-1/4 right-20 w-12 h-12 bg-yellow-400 border-4 border-black rounded-none rotate-12 animate-ping opacity-60"></div>
         </div>
     );
 }

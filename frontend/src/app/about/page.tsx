@@ -13,12 +13,12 @@ export default function AboutPage() {
         <div className="absolute bottom-[-20%] left-1/4 w-[500px] h-[500px] bg-orange-500/15 blur-[100px] rounded-full -z-10 animate-duration-[10s] animate-pulse"></div>
         
         <header className="mb-48 relative group">
-          <h1 className="text-7xl md:text-9xl font-permanent text-black dark:text-white leading-none tracking-tight uppercase transform -rotate-3 relative">
+          <h1 className="text-7xl md:text-9xl font-permanent text-black dark:text-black leading-none tracking-tight uppercase transform -rotate-3 relative">
             <span className="relative inline-block">
               <span className="drop-shadow-[8px_8px_0px_rgba(250,204,21,1)]">ABOUT</span>
             </span>
             <span className="text-yellow-400 block ml-4 md:ml-12 translate-y-[-20px] relative w-fit">
-              <span className="drop-shadow-[8px_8px_0px_rgba(0,0,0,1)] dark:drop-shadow-[8px_8px_0px_rgba(255,255,255,1)]">THE SITE</span>
+              <span className="drop-shadow-[8px_8px_0px_rgba(0,0,0,1)]">THE SITE</span>
             </span>
           </h1>
           
@@ -38,9 +38,9 @@ export default function AboutPage() {
         <section className="flex flex-col gap-56 text-left">
           <div className="transform rotate-2 hover:rotate-0 transition-transform duration-500 max-w-5xl relative">
             <h2 className="text-7xl md:text-9xl font-permanent mb-12 text-teal-600 uppercase relative w-fit">
-              <span className="drop-shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:drop-shadow-[6px_6px_0px_rgba(255,255,255,1)]">Purpose</span>
+              <span className="drop-shadow-[6px_6px_0px_rgba(0,0,0,1)]">Purpose</span>
             </h2>
-            <p className="text-4xl md:text-6xl font-permanent leading-tight text-teal-600 drop-shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:drop-shadow-[4px_4px_0px_rgba(255,255,255,1)] tracking-tight">
+            <p className="text-4xl md:text-6xl font-permanent leading-tight text-teal-600 drop-shadow-[4px_4px_0px_rgba(0,0,0,1)] tracking-tight">
               THIS PLATFORM IS THE CENTRAL HUB FOR ALL MY EXPERIMENTS, BUILDS, AND DIGITAL ADVENTURES. 
               IT'S WHERE CODE MEETS CREATIVITY, SERVING AS A LIVING PORTFOLIO OF WHAT I'M CAPABLE OF.
             </p>
@@ -48,9 +48,9 @@ export default function AboutPage() {
 
           <div className="transform -rotate-2 hover:rotate-0 transition-transform duration-500 max-w-5xl self-end text-right relative">
             <h2 className="text-7xl md:text-9xl font-permanent mb-12 text-yellow-400 uppercase relative w-fit ml-auto">
-              <span className="drop-shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:drop-shadow-[6px_6px_0px_rgba(255,255,255,1)]">Goal</span>
+              <span className="drop-shadow-[6px_6px_0px_rgba(0,0,0,1)]">Goal</span>
             </h2>
-            <p className="text-4xl md:text-6xl font-permanent leading-tight text-yellow-400 drop-shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:drop-shadow-[4px_4px_0px_rgba(255,255,255,1)] tracking-tight">
+            <p className="text-4xl md:text-6xl font-permanent leading-tight text-yellow-400 drop-shadow-[4px_4px_0px_rgba(0,0,0,1)] tracking-tight">
               TO PROVIDE SEAMLESS ACCESS TO MY PERSONAL PROJECTS, SHOWCASING TECHNOLOGY STACKS 
               FROM FRONTEND TO BACKEND, AND EVERYTHING IN BETWEEN.
             </p>
@@ -58,7 +58,7 @@ export default function AboutPage() {
         </section>
 
         <footer className="mt-72 mb-20 text-center">
-          <div className="inline-block border-[12px] border-black dark:border-white px-20 py-12 bg-orange-500 transform skew-x-12 hover:skew-x-0 transition-transform shadow-[20px_20px_0px_0px_rgba(250,204,21,1)] rounded-3xl">
+          <div className="inline-block border-[12px] border-black dark:border-black px-20 py-12 bg-orange-500 transform skew-x-12 hover:skew-x-0 transition-transform shadow-[20px_20px_0px_0px_rgba(250,204,21,1)] rounded-3xl">
             <p className="text-5xl md:text-7xl font-permanent text-black uppercase leading-tight">
               Bold Innovations.<br/>Creative Solutions.<br/>Common Sense Implementations.
             </p>
@@ -67,8 +67,6 @@ export default function AboutPage() {
       </div>
       
       {/* Additional Decorative Elements */}
-      <div className="absolute top-1/2 left-10 w-10 h-10 bg-teal-500 rounded-full animate-bounce opacity-20"></div>
-      <div className="absolute top-1/4 right-20 w-8 h-8 bg-yellow-400 rounded-full animate-ping opacity-15"></div>
     </div>
   );
 }

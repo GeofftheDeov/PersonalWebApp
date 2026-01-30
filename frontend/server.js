@@ -3,7 +3,7 @@ const { parse } = require('url');
 const next = require('next');
 
 const dev = process.env.NODE_ENV !== 'production';
-const hostname = '127.0.0.1';
+const hostname = process.env.HOSTNAME || '0.0.0.0';
 const port = 3000;
 
 console.log("-> Initializing Next.js app object...");

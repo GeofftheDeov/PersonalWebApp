@@ -17,7 +17,7 @@ export default function ForgotPasswordPage() {
         setMessage('');
 
         try {
-            const res = await fetch('http://localhost:5000/api/users/forgot-password', {
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/users/forgot-password`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email }),
@@ -50,7 +50,7 @@ export default function ForgotPasswordPage() {
 
             <div className="relative z-10 w-full max-w-md">
                 <div className="text-center mb-12">
-                    <h1 className="text-5xl md:text-7xl font-permanent text-black dark:text-white leading-none tracking-tight uppercase transform -rotate-2">
+                    <h1 className="text-5xl md:text-7xl font-permanent text-black leading-none tracking-tight uppercase transform -rotate-2">
                         <span className="relative inline-block">
                             <span className="drop-shadow-[6px_6px_0px_rgba(250,204,21,1)]">FORGOT</span>
                         </span>
@@ -61,7 +61,7 @@ export default function ForgotPasswordPage() {
                     </h1>
                 </div>
 
-                <div className="bg-white dark:bg-slate-900 border-4 border-black dark:border-white p-8 relative transform rotate-1 hover:rotate-0 transition-transform duration-300 shadow-[12px_12px_0px_rgba(0,0,0,1)] dark:shadow-[12px_12px_0px_rgba(255,255,255,1)]">
+                <div className="bg-white dark:bg-slate-900 border-4 border-black p-8 relative transform rotate-1 hover:rotate-0 transition-transform duration-300 shadow-[12px_12px_0px_rgba(0,0,0,1)] dark:shadow-[12px_12px_0px_rgba(255,255,255,1)]">
                     {error && (
                         <div className="mb-6 p-4 bg-red-500 border-4 border-black -rotate-1 shadow-[4px_4px_0px_rgba(0,0,0,1)]">
                             <p className="text-black font-permanent text-lg text-center uppercase">{error}</p>
@@ -76,13 +76,13 @@ export default function ForgotPasswordPage() {
 
                     <form className="space-y-6" onSubmit={handleSubmit}>
                         <div className="space-y-2">
-                            <label className="text-black dark:text-white text-xl font-permanent uppercase ml-1">Email</label>
+                            <label className="text-black text-xl font-permanent uppercase ml-1">Email</label>
                             <input
                                 type="email"
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
                                 required
-                                className="w-full bg-transparent border-4 border-black dark:border-white p-3 text-black dark:text-white font-medium placeholder-slate-500 focus:outline-none focus:shadow-[4px_4px_0px_rgba(13,148,136,1)] transition-all"
+                                className="w-full bg-transparent border-4 border-black p-3 text-black font-medium placeholder-slate-500 focus:outline-none focus:shadow-[4px_4px_0px_rgba(13,148,136,1)] transition-all"
                                 placeholder="name@example.com"
                             />
                         </div>
@@ -104,9 +104,6 @@ export default function ForgotPasswordPage() {
                 </div>
             </div>
 
-             {/* Additional Decorative Elements */}
-             <div className="absolute top-1/2 right-10 w-16 h-16 bg-teal-500 border-4 border-black rounded-full animate-bounce opacity-80 shadow-[4px_4px_0px_rgba(0,0,0,1)] delay-700"></div>
-             <div className="absolute bottom-1/4 left-20 w-12 h-12 bg-yellow-400 border-4 border-black rounded-none -rotate-12 animate-ping opacity-60"></div>
         </div>
     );
 }

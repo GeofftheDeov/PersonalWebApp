@@ -60,7 +60,7 @@ export default function Navigation() {
           {isLoggedIn ? (
             <>
               <a 
-                href={`http://localhost:5000/admin?token=${token}`} 
+                href={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/admin?token=${token}`} 
                 target="_blank"
                 rel="noopener noreferrer"
                 className="group relative text-lg font-bold text-black dark:text-white"
@@ -73,6 +73,13 @@ export default function Navigation() {
                 className="group relative text-lg font-bold text-black dark:text-white"
               >
                 <span className="relative z-10 group-hover:text-teal-600 transition-colors">DASHBOARD</span>
+                <div className="absolute -bottom-1 left-0 h-2 w-0 bg-orange-500 group-hover:w-full transition-all duration-300 -rotate-1"></div>
+              </Link>
+              <Link 
+                href="/calendar" 
+                className="group relative text-lg font-bold text-black dark:text-white"
+              >
+                <span className="relative z-10 group-hover:text-teal-600 transition-colors">CALENDAR</span>
                 <div className="absolute -bottom-1 left-0 h-2 w-0 bg-orange-500 group-hover:w-full transition-all duration-300 -rotate-1"></div>
               </Link>
               <button

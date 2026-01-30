@@ -9,13 +9,15 @@ const verifyToken = (req: express.Request, res: express.Response, next: express.
     const token = req.query.token as string;
 
     if (!token) {
+        console.log(`[AUTH] 401: No token provided for ${req.originalUrl}`);
         return res.status(401).send("<h1>401 Unauthorized: No token provided</h1>");
     }
 
     try {
         jwt.verify(token, process.env.JWT_SECRET || "your-secret-key-change-this");
         next();
-    } catch (err) {
+    } catch (err: any) {
+        console.log(`[AUTH] 401: Invalid token for ${req.originalUrl}. Error: ${err.message}`);
         return res.status(401).send("<h1>401 Unauthorized: Invalid token</h1>");
     }
 };

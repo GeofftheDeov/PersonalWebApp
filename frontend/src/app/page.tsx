@@ -41,7 +41,7 @@ export default function Home() {
       <section className="relative z-10 flex flex-col items-center justify-center px-4 pt-32 pb-20 text-center">
         
         <div className="max-w-5xl">
-          <h1 className="mb-8 text-6xl font-permanent uppercase tracking-tighter text-black dark:text-white sm:text-8xl md:text-9xl transform -rotate-2">
+          <h1 className="mb-8 text-6xl font-permanent uppercase tracking-tighter text-black sm:text-8xl md:text-9xl transform -rotate-2">
             Geoff's <br />
             <span className="relative inline-block skew-x-[-12deg] text-teal-600">
               <span className="drop-shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:drop-shadow-[6px_6px_0px_rgba(255,255,255,1)]">Mark</span>
@@ -62,7 +62,7 @@ export default function Home() {
             </Link>
             <Link
               href="/create-account"
-              className="group relative inline-flex h-16 w-full items-center justify-center overflow-hidden border-4 border-black bg-black px-8 font-black uppercase tracking-widest text-white transition-transform active:scale-95 dark:border-white dark:bg-white dark:text-black sm:w-auto shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] hover:shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] hover:-translate-y-1 dark:shadow-[8px_8px_0px_0px_rgba(255,255,255,1)] dark:hover:shadow-[12px_12px_0px_0px_rgba(255,255,255,1)]"
+              className="group relative inline-flex h-16 w-full items-center justify-center overflow-hidden border-4 border-black bg-black px-8 font-black uppercase tracking-widest text-white transition-transform active:scale-95 dark:border-black dark:border-white dark:bg-black dark:text-white sm:w-auto shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] hover:shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] hover:-translate-y-1 dark:shadow-[8px_8px_0px_0px_rgba(255,255,255,1)] dark:hover:shadow-[12px_12px_0px_0px_rgba(255,255,255,1)]"
             >
               <span className="absolute inset-0 translate-x-[-100%] bg-orange-500 transition-transform duration-300 group-hover:translate-x-0"></span>
               <span className="relative z-10 group-hover:text-black font-permanent text-xl">

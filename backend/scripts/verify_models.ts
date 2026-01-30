@@ -40,14 +40,16 @@ const verifyModels = async () => {
 
         // Create Lead
         const lead = new Lead({
-            name: "Bob Jones",
+            firstName: "Bob",
+            lastName: "Jones",
             email: "bob@startup.io",
+            password: "password123",
             company: "StartupIO",
             status: "New",
             source: "Web"
         });
         const savedLead = await lead.save();
-        console.log(`Saved Lead: ${savedLead.name}`);
+        console.log(`Saved Lead: ${savedLead.firstName} ${savedLead.lastName}`);
 
         // Create Opportunity linked to Account
         const opportunity = new Opportunity({

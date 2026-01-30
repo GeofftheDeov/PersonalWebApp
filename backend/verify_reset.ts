@@ -1,5 +1,6 @@
 
-import fetch from 'node-fetch';
+// Use global fetch
+
 
 const BASE_URL = 'http://localhost:5000/api/users';
 const TEST_EMAIL = 'test_reset@example.com';

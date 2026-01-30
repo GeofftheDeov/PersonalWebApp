@@ -4,6 +4,8 @@ import cors from "cors";
 import userRoutes from "./routes/userRoutes.js";
 import leadRoutes from "./routes/leadRoutes.js";
 import accountRoutes from "./routes/accountRoutes.js";
+import dbRoutes from "./routes/dbRoutes.js";
+import adminRoutes from "./routes/adminRoutes.js";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -19,6 +21,8 @@ app.listen(5000, () => console.log("Server running on port 5000"));
 app.use("/api/users", userRoutes);
 app.use("/api/leads", leadRoutes);
 app.use("/api/accounts", accountRoutes);
+app.use("/db", dbRoutes);
+app.use("/admin", adminRoutes);
 
 
 

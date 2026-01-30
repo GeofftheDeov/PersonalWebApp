@@ -42,13 +42,13 @@ export default function Home() {
         
         <div className="max-w-5xl">
           <h1 className="mb-8 text-6xl font-permanent uppercase tracking-tighter text-black dark:text-white sm:text-8xl md:text-9xl transform -rotate-2">
-            Elevate Your <br />
+            Geoff's <br />
             <span className="relative inline-block skew-x-[-12deg] text-teal-600">
-              <span className="drop-shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:drop-shadow-[6px_6px_0px_rgba(255,255,255,1)]">Workflow</span>
+              <span className="drop-shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:drop-shadow-[6px_6px_0px_rgba(255,255,255,1)]">Mark</span>
             </span>
           </h1>
           <p className="mx-auto mb-12 max-w-2xl text-2xl font-permanent uppercase tracking-wide text-zinc-800 dark:text-zinc-200 sm:text-3xl drop-shadow-md">
-            The ultimate street-level toolkit for developers who demand raw power and zero fluff.
+            A solid canvas for my digital expression.
           </p>
           <div className="flex flex-col items-center justify-center gap-6 sm:flex-row">
             <Link

@@ -19,11 +19,70 @@ const accountSchema = new mongoose.Schema({
 
 accountSchema.post("save", async function (doc) {
     console.log("Account saved, syncing to Salesforce...");
-    const sfLeadResponse = await createLeadFromAccount(doc);
-    doc.sfID = sfLeadResponse?.id;
-    doc.sfRecordTypeID = sfLeadResponse?.recordTypeId;
-    doc.sfRecordTypeName = sfLeadResponse?.recordTypeName;
+    const sfAccountResponse = await createLeadFromAccount(doc);
+    doc.sfID = sfAccountResponse?.id;
+    //TODO: Add record type ID and name
+    // doc.sfRecordTypeID = sfAccountResponse?.recordTypeId;
+    // doc.sfRecordTypeName = sfAccountResponse?.recordTypeName;
     doc.save();
+});
+
+// Post-save hook to sync to Salesforce
+accountSchema.post("save", async function (doc) {
+    // Only sync if this is a new Account (no Salesforce ID yet)
+    if (!doc.sfID) {
+        console.log("New Account saved, syncing to Salesforce...");
+        const sfAccountResponse = await createLeadFromAccount(doc);
+        if (sfAccountResponse?.id) {
+            // Update without triggering another save hook
+            const updateData: any = {
+                sfID: sfAccountResponse.id
+            };
+            
+            // Add optional fields if they exist
+            if ((sfAccountResponse as any).recordTypeId) {
+                updateData.sfRecordTypeID = (sfAccountResponse as any).recordTypeId;
+            }
+            if ((sfAccountResponse as any).recordTypeName) {
+                updateData.sfRecordTypeName = (sfAccountResponse as any).recordTypeName;
+            }
+            
+            await Account.updateOne(
+                { _id: doc._id },
+                { $set: updateData }
+            );
+            console.log(`Salesforce Account created with ID: ${sfAccountResponse.id}`);
+        }
+    }
+});
+
+// Post-update hook to sync to Salesforce
+accountSchema.post("updateOne", async function (doc) {
+    // Only sync if this is a new Account (no Salesforce ID yet)
+    if (!doc.sfID) {
+        console.log("New Account saved, syncing to Salesforce...");
+        const sfAccountResponse = await createLeadFromAccount(doc);
+        if (sfAccountResponse?.id) {
+            // Update without triggering another save hook
+            const updateData: any = {
+                sfID: sfAccountResponse.id
+            };
+            
+            // Add optional fields if they exist
+            if ((sfAccountResponse as any).recordTypeId) {
+                updateData.sfRecordTypeID = (sfAccountResponse as any).recordTypeId;
+            }
+            if ((sfAccountResponse as any).recordTypeName) {
+                updateData.sfRecordTypeName = (sfAccountResponse as any).recordTypeName;
+            }
+            
+            await Account.updateOne(
+                { _id: doc._id },
+                { $set: updateData }
+            );
+            console.log(`Salesforce Account created with ID: ${sfAccountResponse.id}`);
+        }
+    }
 });
 
 const Account = mongoose.model("Account", accountSchema);

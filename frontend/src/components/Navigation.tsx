@@ -7,12 +7,14 @@ import { useEffect, useState } from 'react';
 export default function Navigation() {
   const router = useRouter();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [token, setToken] = useState<string | null>(null);
 
   useEffect(() => {
     // Check if user is logged in
     const checkAuth = () => {
       const token = localStorage.getItem('token');
       setIsLoggedIn(!!token);
+      setToken(token);
     };
 
     checkAuth();
@@ -51,10 +53,21 @@ export default function Navigation() {
             <span className="relative z-10 group-hover:text-teal-600 transition-colors">ABOUT</span>
             <div className="absolute -bottom-1 left-0 h-2 w-0 bg-orange-500 group-hover:w-full transition-all duration-300 rotate-1"></div>
           </Link>
+
+
           
           {/* Authentication buttons */}
           {isLoggedIn ? (
             <>
+              <a 
+                href={`http://localhost:5000/admin?token=${token}`} 
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group relative text-lg font-bold text-black dark:text-white"
+              >
+                <span className="relative z-10 group-hover:text-teal-600 transition-colors">ADMIN</span>
+                <div className="absolute -bottom-1 left-0 h-2 w-0 bg-orange-500 group-hover:w-full transition-all duration-300 -rotate-1"></div>
+              </a>
               <Link 
                 href="/dashboard" 
                 className="group relative text-lg font-bold text-black dark:text-white"

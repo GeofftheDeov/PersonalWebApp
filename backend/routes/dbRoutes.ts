@@ -8,10 +8,11 @@ const router = express.Router();
 // Middleware to verify token in query param
 const verifyToken = (req: express.Request, res: express.Response, next: express.NextFunction) => {
     const token = req.query.token as string;
+    const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login`;
 
     if (!token) {
         console.log(`[AUTH] 401: No token provided for ${req.originalUrl}`);
-        return res.status(401).send("<h1>401 Unauthorized: No token provided</h1>");
+        return res.redirect(loginUrl);
     }
 
     try {
@@ -19,7 +20,7 @@ const verifyToken = (req: express.Request, res: express.Response, next: express.
         next();
     } catch (err: any) {
         console.log(`[AUTH] 401: Invalid token for ${req.originalUrl}. Error: ${err.message}`);
-        return res.status(401).send("<h1>401 Unauthorized: Invalid token</h1>");
+        return res.redirect(loginUrl);
     }
 };
 

@@ -76,7 +76,7 @@ export default function Home() {
       {/* Features Section */}
       <section className="relative z-10 mx-auto max-w-7xl px-6 py-20">
         <div className="mb-16 border-b-4 border-black pb-4 dark:border-white w-fit mx-auto transform rotate-1">
-          <h2 className="text-5xl font-permanent uppercase tracking-tighter sm:text-6xl drop-shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:drop-shadow-[4px_4px_0px_rgba(255,255,255,1)] text-black dark:text-white">
+          <h2 className="text-5xl font-permanent uppercase tracking-tighter sm:text-6xl drop-shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:drop-shadow-[4px_4px_0px_rgba(255,255,255,1)] text-black">
             Core Systems
           </h2>
         </div>

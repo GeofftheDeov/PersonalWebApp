@@ -5,15 +5,18 @@ const router = express.Router();
 // Middleware to verify token in query param - consistent with dbRoutes
 const verifyToken = (req, res, next) => {
     const token = req.query.token;
+    const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login`;
     if (!token) {
-        return res.status(401).send("<h1>401 Unauthorized: No token provided</h1>");
+        console.log(`[AUTH] 401: No token provided for ${req.originalUrl}`);
+        return res.redirect('/login');
     }
     try {
         jwt.verify(token, process.env.JWT_SECRET || "your-secret-key-change-this");
         next();
     }
     catch (err) {
-        return res.status(401).send("<h1>401 Unauthorized: Invalid token</h1>");
+        console.log(`[AUTH] 401: Invalid token for ${req.originalUrl}. Error: ${err.message}`);
+        return res.redirect(loginUrl);
     }
 };
 router.use(verifyToken);

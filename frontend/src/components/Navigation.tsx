@@ -60,7 +60,7 @@ export default function Navigation() {
           {isLoggedIn ? (
             <>
               <a 
-                href={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/admin?token=${token}`} 
+                href={`/admin?token=${token}`} 
                 target="_blank"
                 rel="noopener noreferrer"
                 className="group relative text-lg font-bold text-black dark:text-white"

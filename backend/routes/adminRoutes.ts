@@ -11,7 +11,7 @@ const verifyToken = (req: express.Request, res: express.Response, next: express.
 
     if (!token) {
         console.log(`[AUTH] 401: No token provided for ${req.originalUrl}`);
-        return res.redirect(loginUrl);
+        return res.redirect('/login');
     }
 
     try {

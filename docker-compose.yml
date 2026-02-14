@@ -29,7 +29,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:5000
+      - NODE_ENV=production
     depends_on:
       - backend
     env_file:

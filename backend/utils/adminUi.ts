@@ -107,7 +107,7 @@ export const renderPage = ({ token, title, activePage, content, extraStyles = ''
                     <div class="nav-links">
                         <a href="/admin?token=${token}" class="nav-link ${activePage === 'admin' ? 'active' : ''}">DASHBOARD</a>
                         <a href="/db?token=${token}" class="nav-link ${activePage === 'db' ? 'active' : ''}">THE SHOP</a>
-                        <a href="http://localhost:3000" class="nav-link ${activePage === 'frontend' ? 'active' : ''}">BACK TO FRONTEND</a>
+                        <a href="/" class="nav-link ${activePage === 'frontend' ? 'active' : ''}">BACK TO FRONTEND</a>
 
                     </div>
                 </nav>

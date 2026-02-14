@@ -1,4 +1,5 @@
-const { createServer } = require('http');
+const { createServer } = require('https');
+const fs = require('fs');
 const { parse } = require('url');
 const next = require('next');
 
@@ -14,7 +15,12 @@ console.log("-> Preparing Next.js app (compilation)...");
 app.prepare().then(() => {
     console.log("-> App prepared. Creating HTTP server...");
 
-    createServer(async (req, res) => {
+    const httpsOptions = {
+        key: fs.readFileSync('./key.pem'),
+        cert: fs.readFileSync('./cert.pem'),
+    };
+
+    createServer(httpsOptions, async (req, res) => {
         try {
             const parsedUrl = parse(req.url, true);
             await handle(req, res, parsedUrl);
@@ -30,8 +36,8 @@ app.prepare().then(() => {
             process.exit(1);
         })
         .listen(port, hostname, () => {
-            console.log(`> Ready on http://${hostname}:${port}`);
-            console.log("> If you see this message, the server is DEFINITELY listening.");
+            console.log(`> Ready on https://${hostname}:${port}`);
+            console.log("> If you see this message, the server is DEFINITELY listening (HTTPS).");
         });
 }).catch((err) => {
     console.error("-> Failed to prepare app:");

@@ -23,12 +23,15 @@
     "jsforce": "^3.10.10",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.0.1",
+    "multer": "^1.4.5-lts.1",
+    "csv-parser": "^3.2.0",
     "nodemailer": "^7.0.13"
   },
   "devDependencies": {
     "@types/bcryptjs": "^3.0.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
+    "@types/multer": "^1.4.12",
     "@types/node": "^25.0.0",
     "@types/nodemailer": "^7.0.9",
     "nodemon": "^3.1.11",

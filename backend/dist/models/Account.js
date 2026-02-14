@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import bcrypt from "bcryptjs";
 import { createLeadFromAccount } from "../services/salesforceService.js";
 const accountSchema = new mongoose.Schema({
     name: { type: String, required: true },
@@ -10,10 +11,21 @@ const accountSchema = new mongoose.Schema({
     website: String,
     phone: String,
     address: String,
-    createdAt: { type: Date, default: Date.now },
     sfID: String,
     sfRecordTypeID: String,
     sfRecordTypeName: String,
+    createdAt: { type: Date, default: Date.now },
+});
+accountSchema.pre("save", async function () {
+    if (!this.isModified("password") || !this.password)
+        return;
+    try {
+        const salt = await bcrypt.genSalt(10);
+        this.password = await bcrypt.hash(this.password, salt);
+    }
+    catch (err) {
+        throw err;
+    }
 });
 accountSchema.post("save", async function (doc) {
     console.log("Account saved, syncing to Salesforce...");

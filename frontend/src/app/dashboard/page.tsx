@@ -20,19 +20,12 @@ export default function DashboardPage() {
     }, [router]);
 
     if (!user) {
-        return <div className="min-h-screen bg-bricks flex items-center justify-center"><span className="text-4xl font-permanent text-teal-600">LOADING...</span></div>;
+        return <div className="min-h-screen flex items-center justify-center"><span className="text-4xl font-permanent text-teal-600">LOADING...</span></div>;
     }
 
     return (
-        <div className="min-h-[calc(100vh-76px)] bg-bricks p-8 md:p-16 overflow-hidden relative">
-            {/* High-fidelity grain overlay for a gritty, professional cinematic texture */}
-            <div className="absolute inset-0 bg-grain mix-blend-overlay z-40 pointer-events-none"></div>
-
+        <div className="min-h-[calc(100vh-76px)] p-8 md:p-16 overflow-hidden relative">
             <div className="max-w-6xl mx-auto relative z-10">
-                {/* Advanced atmospheric lighting gradients */}
-                <div className="absolute -top-40 -left-40 w-[600px] h-[600px] bg-teal-600/20 blur-[120px] rounded-full -z-10 animate-pulse"></div>
-                <div className="absolute top-1/2 -right-60 w-[800px] h-[800px] bg-yellow-400/10 blur-[150px] rounded-full -z-10"></div>
-                <div className="absolute bottom-[-20%] left-1/4 w-[500px] h-[500px] bg-orange-500/15 blur-[100px] rounded-full -z-10 animate-duration-[10s] animate-pulse"></div>
 
                 <header className="mb-16 relative">
                     <h1 className="text-5xl md:text-7xl font-permanent text-black dark:text-black leading-none tracking-tight uppercase">

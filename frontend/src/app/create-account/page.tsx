@@ -67,15 +67,7 @@ export default function CreateAccountPage() {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-bricks relative overflow-hidden text-black dark:text-white pb-20 pt-32">
-             {/* Grain Overlay */}
-            <div className="absolute inset-0 bg-grain mix-blend-overlay z-40 pointer-events-none"></div>
-
-            {/* Atmosphere/Lighting */}
-            <div className="absolute -top-40 -left-40 w-[600px] h-[600px] bg-teal-600/20 blur-[120px] rounded-full z-0 animate-pulse pointer-events-none"></div>
-            <div className="absolute top-1/2 -right-60 w-[800px] h-[800px] bg-yellow-400/10 blur-[150px] rounded-full z-0 pointer-events-none"></div>
-            <div className="absolute bottom-[-20%] left-1/4 w-[500px] h-[500px] bg-orange-500/15 blur-[100px] rounded-full z-0 animate-pulse pointer-events-none"></div>
-
+        <div className="min-h-screen flex items-center justify-center relative overflow-hidden text-black dark:text-white pb-20 pt-32">
             <div className="relative z-10 w-full max-w-2xl px-6">
                 <div className="bg-white dark:bg-zinc-900 border-4 border-black dark:border-black p-8 md:p-12 shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] transform rotate-1">
                     <div className="text-center mb-8">

@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import Navigation from "@/components/Navigation";
+import PageTransitionProvider from "@/components/PageTransitionProvider";
+import PersistentBackground from "@/components/PersistentBackground";
 
 export const metadata: Metadata = {
   title: "Geoff the Dev's Personal Web App",
@@ -14,9 +16,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="font-sans antialiased min-h-screen bg-white dark:bg-black text-black dark:text-white">
+      <body className="font-sans antialiased min-h-screen bg-white dark:bg-black text-black dark:text-white overflow-x-hidden">
+        <PersistentBackground />
         <Navigation />
-        {children}
+        <PageTransitionProvider>
+          {children}
+        </PageTransitionProvider>
       </body>
     </html>
   );

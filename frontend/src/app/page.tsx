@@ -28,15 +28,8 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-bricks text-black dark:text-white pb-20 relative overflow-hidden">
-        {/* Grain Overlay */}
-        <div className="absolute inset-0 bg-grain mix-blend-overlay z-40 pointer-events-none"></div>
-
-        {/* Atmosphere/Lighting */}
-        <div className="absolute -top-40 -left-40 w-[600px] h-[600px] bg-teal-600/20 blur-[120px] rounded-full z-0 animate-pulse pointer-events-none"></div>
-        <div className="absolute top-1/2 -right-60 w-[800px] h-[800px] bg-yellow-400/10 blur-[150px] rounded-full z-0 pointer-events-none"></div>
-        <div className="absolute bottom-[-20%] left-1/4 w-[500px] h-[500px] bg-orange-500/15 blur-[100px] rounded-full z-0 animate-pulse pointer-events-none"></div>
-
+    <div className="min-h-[calc(100vh-76px)] p-8 md:p-16 overflow-hidden relative">
+      <div className="max-w-6xl mx-auto relative z-10">
       {/* Hero Section */}
       <section className="relative z-10 flex flex-col items-center justify-center px-4 pt-32 pb-20 text-center">
         
@@ -123,6 +116,7 @@ export default function Home() {
           © 2026 Geoff The Dev. All Rights Reserved.
         </p>
       </footer>
+      </div>
     </div>
   );
 }

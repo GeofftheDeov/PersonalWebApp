@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Start Docker Containers
-echo "Starting Docker Containers..."
-docker-compose up --build -d
+echo "Starting Docker Containers (excluding MongoDB)..."
+docker-compose up --build -d backend frontend
 
 # Wait for containers to spin up
 sleep 5

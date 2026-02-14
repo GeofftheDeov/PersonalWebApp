@@ -4,27 +4,28 @@ const nextConfig = {
     typescript: { ignoreBuildErrors: true },
     output: 'standalone',
     async rewrites() {
+        const backendUrl = process.env.BACKEND_URL || 'http://backend:5000';
         return {
             beforeFiles: [
                 {
                     source: '/api/:path*',
-                    destination: 'http://backend:5000/api/:path*',
+                    destination: `${backendUrl}/api/:path*`,
                 },
                 {
                     source: '/admin/:path*',
-                    destination: 'http://backend:5000/admin/:path*',
+                    destination: `${backendUrl}/admin/:path*`,
                 },
                 {
                     source: '/admin',
-                    destination: 'http://backend:5000/admin',
+                    destination: `${backendUrl}/admin`,
                 },
                 {
                     source: '/db/:path*',
-                    destination: 'http://backend:5000/db/:path*',
+                    destination: `${backendUrl}/db/:path*`,
                 },
                 {
                     source: '/db',
-                    destination: 'http://backend:5000/db',
+                    destination: `${backendUrl}/db`,
                 },
             ]
         }

@@ -44,15 +44,7 @@ export default function LoginPage() {
     };
 
     return (
-        <div className="min-h-screen bg-bricks p-8 md:p-16 overflow-hidden relative flex items-center justify-center">
-            {/* High-fidelity grain overlay */}
-            <div className="absolute inset-0 bg-grain mix-blend-overlay z-40 pointer-events-none"></div>
-
-            {/* Advanced atmospheric lighting gradients */}
-            <div className="absolute -top-40 -left-40 w-[600px] h-[600px] bg-teal-600/20 blur-[120px] rounded-full -z-10 animate-pulse"></div>
-            <div className="absolute top-1/2 -right-60 w-[800px] h-[800px] bg-yellow-400/10 blur-[150px] rounded-full -z-10"></div>
-            <div className="absolute bottom-[-20%] left-1/4 w-[500px] h-[500px] bg-orange-500/15 blur-[100px] rounded-full -z-10 animate-duration-[10s] animate-pulse"></div>
-
+        <div className="min-h-screen p-8 md:p-16 overflow-hidden relative flex items-center justify-center">
             <div className="relative z-10 w-full max-w-md">
                 <div className="text-center mb-12">
                      <h1 className="text-6xl md:text-8xl font-permanent text-black leading-none tracking-tight uppercase transform -rotate-2">

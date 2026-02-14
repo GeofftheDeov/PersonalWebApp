@@ -12,6 +12,28 @@ export const renderPage = ({ token, title, activePage, content, extraStyles = ''
             <head>
                 <title>${title}</title>
                 <style>
+                    * {
+                        user-select: none !important;
+                        -webkit-user-select: none !important;
+                        -moz-user-select: none !important;
+                        -ms-user-select: none !important;
+                        caret-color: transparent !important;
+                        cursor: default;
+                    }
+
+                    input, textarea, [contenteditable="true"] {
+                        user-select: text !important;
+                        -webkit-user-select: text !important;
+                        -moz-user-select: text !important;
+                        -ms-user-select: text !important;
+                        caret-color: auto !important;
+                        cursor: text !important;
+                    }
+
+                    a, button, .btn, .nav-link, th, .sidebar li a {
+                        cursor: pointer !important;
+                    }
+
                     body { 
                         font-family: 'Courier New', monospace; 
                         background-color: #1a1a1a; 
@@ -26,7 +48,6 @@ export const renderPage = ({ token, title, activePage, content, extraStyles = ''
                         background-image: repeating-linear-gradient(45deg, #1f1f1f 0, #1f1f1f 10px, #1a1a1a 10px, #1a1a1a 20px);
                         background-size: 28px 28px;
                         padding-top: 60px; /* Space for top nav */
-                        box-sizing: border-box;
                         box-sizing: border-box;
                     }
                     /* Vignette overlay */

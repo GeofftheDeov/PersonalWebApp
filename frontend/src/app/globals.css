@@ -20,6 +20,19 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: 'Inter', sans-serif;
+  user-select: none; /* Disable text selection globally */
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  caret-color: transparent; /* Hide flashing bar */
+}
+
+input, textarea {
+  user-select: text !important; /* Re-enable selection for inputs */
+  -webkit-user-select: text !important;
+  -moz-user-select: text !important;
+  -ms-user-select: text !important;
+  caret-color: auto !important; /* Restore flashing bar for inputs */
 }
 
 @layer utilities {

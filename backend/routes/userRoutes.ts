@@ -25,7 +25,7 @@ router.post("/login", async (req, res) => {
 
     try {
         let user: any = await User.findOne({ email });
-        let userType = "User";
+        let userType = "User";     
 
         if (!user) {
             user = await Lead.findOne({ email });

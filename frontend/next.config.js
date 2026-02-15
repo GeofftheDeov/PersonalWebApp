@@ -2,9 +2,9 @@ const nextConfig = {
     swcMinify: false,
     eslint: { ignoreDuringBuilds: true },
     typescript: { ignoreBuildErrors: true },
-    output: 'standalone',
+    // output: 'standalone',
     async rewrites() {
-        const backendUrl = process.env.BACKEND_URL || 'http://backend:5000';
+        const backendUrl = process.env.BACKEND_URL || 'https://backend:5001';
         return {
             beforeFiles: [
                 {

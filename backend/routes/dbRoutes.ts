@@ -43,7 +43,7 @@ const renderSidebar = (token: string, collectionNames: string[], activeCollectio
                 </a>
             </li>
         `;
-    }).join('');
+    }).sort().join('');
 
     return `
         <nav class="sidebar">

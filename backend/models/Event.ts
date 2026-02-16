@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 
-const taskSchema = new mongoose.Schema({
+const EventSchema = new mongoose.Schema({
     title: { type: String, required: true },
     description: String,
     status: {
@@ -8,16 +8,12 @@ const taskSchema = new mongoose.Schema({
         enum: ["Not Started", "In Progress", "Completed"],
         default: "Not Started"
     },
-    dueDate: Date,
+    startDate: Date,
+    endDate: Date,
     // Polymorphic reference or just generic related fields? 
     // For simplicity now, let's keep it unlinked or manual until specific requirements allow
     createdAt: { type: Date, default: Date.now },
-    sfID: String,
-    sfRecordTypeID: String,
-    sfRecordTypeName: String,
-    ownerId: String,
-    ownerName: String
 });
 
-const Task = mongoose.model("Task", taskSchema);
-export default Task;
+const Event = mongoose.model("Event", EventSchema);
+export default Event;

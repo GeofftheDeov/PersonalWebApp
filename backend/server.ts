@@ -1,6 +1,5 @@
 import dotenv from "dotenv";
 dotenv.config();
-
 import express from "express";
 import mongoose from "mongoose";
 import cors from "cors";
@@ -9,6 +8,9 @@ import leadRoutes from "./routes/leadRoutes.js";
 import accountRoutes from "./routes/accountRoutes.js";
 import dbRoutes from "./routes/dbRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
+import campaignRoutes from "./routes/campaignRoutes.js";
+import taskRoutes from "./routes/taskRoutes.js";
+import eventRoutes from "./routes/eventRoutes.js";
 import https from "https";
 import http from "http";
 import fs from "fs";
@@ -33,12 +35,15 @@ app.use(express.urlencoded({ extended: true }));
 mongoose.connect(process.env.MONGO_URI || "mongodb://localhost:27017/personal_web_app")
   .then(() => console.log("MongoDB Connected"))
   .catch((err) => console.error(err));
-
+app.use("/db", dbRoutes);
+app.use("/admin", adminRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/leads", leadRoutes);
 app.use("/api/accounts", accountRoutes);
-app.use("/db", dbRoutes);
-app.use("/admin", adminRoutes);
+app.use("/api/campaigns", campaignRoutes);
+app.use("/api/tasks", taskRoutes);
+app.use("/api/events", eventRoutes);
+
 const httpsServer = https.createServer(credentials, app);
 const httpServer = http.createServer(app);
 

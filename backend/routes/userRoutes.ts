@@ -23,6 +23,8 @@ router.post("/login", async (req, res) => {
         return res.status(400).json({ error: "Email and password are required" });
     }
 
+    console.log(`[AUTH] Login attempt for: ${email}`);
+
     try {
         let user: any = await User.findOne({ email });
         let userType = "User";     
@@ -30,22 +32,29 @@ router.post("/login", async (req, res) => {
         if (!user) {
             user = await Lead.findOne({ email });
             userType = "Lead";
+            if (user) console.log(`[AUTH] Found match in Leads`);
         }
 
         if (!user) {
             user = await Account.findOne({ email });
             userType = "Account";
+            if (user) console.log(`[AUTH] Found match in Accounts`);
         }
 
         if (!user) {
+            console.log(`[AUTH] No user found with email: ${email} in any collection`);
             return res.status(401).json({ error: "Invalid credentials" });
         }
+
+        console.log(`[AUTH] User found in ${userType}. Verifying password...`);
 
         // Verify password
         const isMatch = await bcrypt.compare(password, user.password || "");
         if (!isMatch) {
+             console.log(`[AUTH] Password mismatch for: ${email}`);
              return res.status(401).json({ error: "Invalid credentials" });
         }
+        console.log(`[AUTH] Login successful for: ${email}`);
 
         // Generate Token
         const token = jwt.sign(
@@ -54,7 +63,21 @@ router.post("/login", async (req, res) => {
             { expiresIn: "1h" }
         );
 
-        res.json({ token, user: { id: user._id, type: userType, email: user.email, name: user.name || user.firstName || user.title } });
+        res.json({ 
+            token, 
+            user: { 
+                id: user._id, 
+                type: userType, 
+                email: user.email, 
+                name: user.name || user.firstName || user.title,
+                userNumber: user.userNumber,
+                phone: user.phone,
+                role: user.role,
+                company: user.company,
+                industry: user.industry,
+                website: user.website
+            } 
+        });
 
     } catch (error: any) {
         console.error("Login error:", error);

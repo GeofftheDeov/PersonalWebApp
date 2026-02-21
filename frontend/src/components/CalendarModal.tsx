@@ -63,16 +63,16 @@ export default function CalendarModal({ isOpen, onClose, onSelectDate, currentDa
                         <header className="flex items-center justify-between mb-6">
                             <button 
                                 onClick={() => changeMonth(-1)}
-                                className="border-4 border-black bg-teal-500 p-2 font-permanent hover:bg-teal-600 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-y-1 active:shadow-none transition-all"
+                                className="border-4 border-black bg-teal-500 dark:bg-yellow-400 text-white dark:text-black p-2 font-permanent hover:bg-teal-600 dark:hover:bg-yellow-500 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-y-1 active:shadow-none transition-all"
                             >
                                 PREV
                             </button>
-                            <h2 className="text-3xl font-permanent text-black uppercase tracking-tight drop-shadow-[2px_2px_0px_rgba(255,255,255,1)]">
+                            <h2 className="text-3xl font-permanent text-purple-800 dark:text-orange-400 uppercase tracking-tight drop-shadow-[2px_2px_0px_rgba(255,255,255,1)] dark:drop-shadow-[2px_2px_0px_rgba(0,0,0,1)]">
                                 {monthName} {year}
                             </h2>
                             <button 
                                 onClick={() => changeMonth(1)}
-                                className="border-4 border-black bg-teal-500 p-2 font-permanent hover:bg-teal-600 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-y-1 active:shadow-none transition-all"
+                                className="border-4 border-black bg-teal-500 dark:bg-yellow-400 text-white dark:text-black p-2 font-permanent hover:bg-teal-600 dark:hover:bg-yellow-500 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-y-1 active:shadow-none transition-all"
                             >
                                 NEXT
                             </button>
@@ -80,17 +80,17 @@ export default function CalendarModal({ isOpen, onClose, onSelectDate, currentDa
 
                         <div className="grid grid-cols-7 gap-2">
                             {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(day => (
-                                <div key={day} className="text-center font-permanent text-black text-xl mb-2">{day}</div>
+                                <div key={day} className="text-center font-permanent text-purple-800 dark:text-orange-400 text-xl mb-2">{day}</div>
                             ))}
                             {days.map((day, idx) => (
                                 <div key={idx} className="aspect-square flex items-center justify-center">
                                     {day && (
                                         <button
                                             onClick={() => handleDateSelect(day)}
-                                            className={`w-full h-full border-4 border-black font-permanent text-xl transition-all shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:bg-teal-400 hover:-translate-y-1 active:translate-y-0 active:shadow-none
+                                            className={`w-full h-full border-4 border-black font-permanent text-xl transition-all shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:bg-teal-400 dark:hover:bg-yellow-500 hover:-translate-y-1 active:translate-y-0 active:shadow-none
                                                 ${currentDate && new Date(currentDate).getDate() === day && new Date(currentDate).getMonth() === month && new Date(currentDate).getFullYear() === year 
-                                                    ? 'bg-teal-500 text-white' 
-                                                    : 'bg-white text-black'}`}
+                                                    ? 'bg-teal-500 dark:bg-yellow-400 text-white dark:text-black' 
+                                                    : 'bg-zinc-100 dark:bg-slate-900 text-teal-600 dark:text-yellow-400'}`}
                                         >
                                             {day}
                                         </button>
@@ -101,7 +101,7 @@ export default function CalendarModal({ isOpen, onClose, onSelectDate, currentDa
 
                         <button 
                             onClick={onClose}
-                            className="mt-8 w-full border-4 border-black bg-teal-500 text-black p-3 font-permanent text-xl uppercase hover:bg-teal-600 transition-colors"
+                            className="mt-8 w-full border-4 border-black bg-teal-500 dark:bg-yellow-400 text-white dark:text-black p-3 font-permanent text-xl uppercase hover:bg-teal-600 dark:hover:bg-yellow-500 transition-colors shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]"
                         >
                             CLOSE
                         </button>

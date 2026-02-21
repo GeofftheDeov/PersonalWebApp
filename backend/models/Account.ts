@@ -9,6 +9,7 @@ const accountSchema = new mongoose.Schema({
     resetPasswordToken: String,
     resetPasswordExpires: Date,
     industry: String,
+    company: String,
     website: String,
     phone: String,
     address: String,

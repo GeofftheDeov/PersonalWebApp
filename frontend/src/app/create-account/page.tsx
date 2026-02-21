@@ -31,7 +31,7 @@ export default function CreateAccountPage() {
         setSuccess(false);
 
         try {
-            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/leads`, {
+            const response = await fetch(`/api/leads`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -152,7 +152,6 @@ export default function CreateAccountPage() {
                                 name="company"
                                 value={formData.company}
                                 onChange={handleChange}
-                                required
                                 className="w-full bg-white dark:bg-black border-4 border-black dark:border-white px-4 py-3 font-bold focus:outline-none focus:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)] transition-shadow placeholder-zinc-400"
                                 placeholder="ARASAKA"
                             />

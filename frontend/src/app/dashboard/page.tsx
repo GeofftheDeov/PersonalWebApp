@@ -2,12 +2,15 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import CalendarModal from '@/components/CalendarModal';
 
 export default function DashboardPage() {
     const router = useRouter();
     const [user, setUser] = useState<any>(null);
     const [tasks, setTasks] = useState<any>([]);
     const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+    const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+    const [calendarTarget, setCalendarTarget] = useState<{ type: 'new' | 'edit', taskId?: string } | null>(null);
 
     useEffect(() => {
         const token = localStorage.getItem('token');
@@ -117,7 +120,7 @@ export default function DashboardPage() {
                                     (e.target as HTMLFormElement).reset();
                                 }
                             }}
-                            className="mb-10 p-4 border-4 border-black bg-white dark:bg-zinc-900 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]"
+                            className="mb-10 p-4 border-4 border-black bg-zinc-200 dark:bg-slate-800 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:border-white"
                         >
                             <input 
                                 name="title"
@@ -127,13 +130,23 @@ export default function DashboardPage() {
                                 className="w-full p-2 mb-3 border-4 border-black bg-white text-black font-permanent text-xl uppercase placeholder-gray-500 focus:outline-none focus:ring-0 dark:border-white dark:bg-black dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)] placeholder-zinc-400 dark:text-white"
 
                             />
-                            <input
-                                name="dueDate"
-                                type="date"
-                                placeholder="DUE DATE"
-                                required
-                                className="w-full p-2 mb-3 border-4 border-black bg-white text-black font-permanent text-xl uppercase placeholder-gray-500 focus:outline-none focus:ring-0 dark:border-white dark:bg-black dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)] placeholder-zinc-400 dark:text-white"
-                            />
+                            <div 
+                                className="relative mb-3 cursor-pointer"
+                                onClick={() => {
+                                    console.log("[DASHBOARD] Opening calendar for NEW task");
+                                    setCalendarTarget({ type: 'new' });
+                                    setIsCalendarOpen(true);
+                                }}
+                            >
+                                <input
+                                    name="dueDate"
+                                    type="date"
+                                    placeholder="DUE DATE"
+                                    required
+                                    readOnly
+                                    className="w-full p-2 border-4 border-black bg-white text-black font-permanent text-xl uppercase placeholder-gray-500 focus:outline-none focus:ring-0 dark:border-white dark:bg-black dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)] placeholder-zinc-400 dark:text-white pointer-events-none"
+                                />
+                            </div>
                             <textarea 
                                 name="description"
                                 placeholder="TASK DESCRIPTION" 
@@ -144,7 +157,7 @@ export default function DashboardPage() {
                             <select
                                 name="status"
                                 required
-                                className="w-full p-2 mb-3 border-4 border-black dark:bg-black bg-white text-black font-permanent text-xl uppercase placeholder-gray-500 focus:outline-none focus:ring-0 dark:border-white  dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)] placeholder-zinc-400 dark:text-white"
+                                className="w-full p-2 pr-10 mb-3 border-4 border-black dark:bg-black bg-white text-black font-permanent text-xl uppercase placeholder-gray-500 focus:outline-none focus:ring-0 dark:border-white  dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)] placeholder-zinc-400 dark:text-white appearance-none"
                             >
                                 <option value="Not Started">Not Started</option>
                                 <option value="In Progress">In Progress</option>
@@ -161,7 +174,7 @@ export default function DashboardPage() {
 
                         <div className="">
                             {tasks.map((task: any) => (
-                                <div key={task._id} className="relative mb-10 p-4 border-4 border-black bg-white dark:bg-zinc-900 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]">
+                                <div key={task._id} className="relative mb-10 p-4 border-4 border-black bg-zinc-200 dark:bg-slate-800 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:border-white">
                                     <form 
                                         onSubmit={async (e) => {
                                             e.preventDefault();
@@ -194,28 +207,28 @@ export default function DashboardPage() {
                                     <div className="">
                                     {editingTaskId !== task._id && (
                                         <>
-                                            <h3 className="w-full p-2 mb-3 text-2xl font-permanent text-yellow-400 tracking-tight dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)]">
-                                                <span className="text-teal dark:text-orange-400">TITLE:</span> {task.title}
+                                            <h3 className="w-full p-2 mb-3 text-2xl font-permanent text-teal-600 dark:text-yellow-400 tracking-tight">
+                                                <span className="text-purple-700 dark:text-orange-400">TITLE:</span> {task.title}
                                             </h3>
-                                            <p className="w-full p-2 mb-3 text-xl font-permanent text-yellow-400 tracking-tight dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)]">
-                                                <span className="text-teal dark:text-orange-400">DUE DATE:</span> {new Date(task.dueDate).toLocaleDateString()}
+                                            <p className="w-full p-2 mb-3 text-xl font-permanent text-teal-600 dark:text-yellow-400 tracking-tight">
+                                                <span className="text-purple-700 dark:text-orange-400">DUE DATE:</span> {new Date(task.dueDate).toLocaleDateString()}
                                             </p>
-                                            <p className="w-full p-2 mb-3 text-xl font-permanent text-yellow-400 tracking-tight dark:bg-zinc-900 dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)]">
-                                                <span className="text-teal dark:text-orange-400">DESCRIPTION:</span> {task.description}
+                                            <p className="w-full p-2 mb-3 text-xl font-permanent text-teal-600 dark:text-yellow-400 tracking-tight">
+                                                <span className="text-purple-700 dark:text-orange-400">DESCRIPTION:</span> {task.description}
                                             </p>
-                                            <p className="w-full p-2 mb-3 text-xl font-permanent text-yellow-400 tracking-tight dark:bg-zinc-900 dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)]">
-                                                <span className="text-teal dark:text-orange-400">STATUS:</span>                                             
+                                            <p className="w-full p-2 mb-3 text-xl font-permanent text-teal-600 dark:text-yellow-400 tracking-tight">
+                                                <span className="text-purple-700 dark:text-orange-400">STATUS:</span>                                             
                                                 <select
                                                 value={task.status}
                                                 name="status"
                                                 onChange={(e) => {
                                                     updateTask(task._id, { ...task, status: e.target.value });
                                                 }}
-                                                className="w-full p-4 border-2 border-black dark:border-white mb-3 text-xl font-permanent bg-transparent text-yellow-400 tracking-tight dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)]"
+                                                className="w-full p-4 pr-10 border-2 border-black dark:border-white mb-3 text-xl font-permanent bg-transparent text-teal-600 dark:text-yellow-400 tracking-tight appearance-none"
                                                 >
-                                                <option value="Not Started" className ="text-xl font-permanent text-yellow-400 dark:bg-black drop-shadow-[3px_3px_0px_rgba(0,0,0,1)] tracking-tight dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)]">Not Started</option>
-                                                <option value="In Progress" className ="text-xl font-permanent text-yellow-400 dark:bg-black drop-shadow-[3px_3px_0px_rgba(0,0,0,1)] tracking-tight dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)]">In Progress</option>
-                                                <option value="Completed" className ="text-xl font-permanent text-yellow-400 dark:bg-black drop-shadow-[3px_3px_0px_rgba(0,0,0,1)] tracking-tight dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)]">Completed</option>
+                                                <option value="Not Started" className ="text-xl font-permanent text-teal-600 dark:text-yellow-400 dark:bg-black drop-shadow-[3px_3px_0px_rgba(0,0,0,1)] tracking-tight">Not Started</option>
+                                                <option value="In Progress" className ="text-xl font-permanent text-teal-600 dark:text-yellow-400 dark:bg-black drop-shadow-[3px_3px_0px_rgba(0,0,0,1)] tracking-tight">In Progress</option>
+                                                <option value="Completed" className ="text-xl font-permanent text-teal-600 dark:text-yellow-400 dark:bg-black drop-shadow-[3px_3px_0px_rgba(0,0,0,1)] tracking-tight">Completed</option>
                                                 </select>
                                             </p>
                                         </>
@@ -223,43 +236,51 @@ export default function DashboardPage() {
 
                                     {editingTaskId === task._id && (
                                         <>
-                                        <p>
-                                            <span className="text-teal dark:text-orange-400 font-permanent">TITLE:</span>
+                                            <p>
+                                            <span className="text-purple-700 dark:text-orange-400 font-permanent">TITLE:</span>
                                             <input
                                                 type="text"
                                                 value={task.title}
                                                 name="title"
                                                 
-                                                className="w-full p-4 mb-3 border-2 border-black dark:border-white text-xl font-permanent bg-transparent text-yellow-400 tracking-tight dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)]"
+                                                className="w-full p-4 mb-3 border-2 border-black dark:border-white text-xl font-permanent bg-transparent text-teal-600 dark:text-yellow-400 tracking-tight"
                                             />
                                             </p>
                                             <p>
-                                            <span className="text-teal dark:text-orange-400 font-permanent">DESCRIPTION:</span>
+                                            <span className="text-purple-700 dark:text-orange-400 font-permanent">DESCRIPTION:</span>
                                             <textarea
                                                 value={task.description}
                                                 name="description"
-                                                className="w-full p-4 mb-3 border-2 border-black dark:border-white text-xl fit-content font-permanent bg-transparent text-yellow-400 tracking-tight dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)]"
+                                                className="w-full p-4 mb-3 border-2 border-black dark:border-white text-xl fit-content font-permanent bg-transparent text-teal-600 dark:text-yellow-400 tracking-tight"
                                             />
                                             </p>
-                                            <p>
-                                            <span className="text-teal dark:text-orange-400 font-permanent">DUE DATE:</span>
-                                            <input
-                                                type="date" 
-                                                value={new Date(task.dueDate).toISOString().split('T')[0]}
-                                                name="dueDate"
-                                                className="w-full p-4 mb-3 border-2 border-black icon-white dark:border-white text-xl font-permanent bg-transparent text-yellow-400 tracking-tight dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)]"
-                                            />
+                                            <p 
+                                                className="relative cursor-pointer"
+                                                onClick={() => {
+                                                    console.log(`[DASHBOARD] Opening calendar for EDIT task: ${task._id}`);
+                                                    setCalendarTarget({ type: 'edit', taskId: task._id });
+                                                    setIsCalendarOpen(true);
+                                                }}
+                                            >
+                                                <span className="text-purple-700 dark:text-orange-400 font-permanent">DUE DATE:</span>
+                                                <input
+                                                    type="date" 
+                                                    value={new Date(task.dueDate).toISOString().split('T')[0]}
+                                                    name="dueDate"
+                                                    readOnly
+                                                    className="w-full p-4 mb-3 border-2 border-black dark:border-white icon-white text-xl font-permanent bg-transparent text-teal-600 dark:text-yellow-400 tracking-tight pointer-events-none"
+                                                />
                                             </p>
                                             <p>
-                                            <span className="text-teal dark:text-orange-400 font-permanent">STATUS:</span>
+                                            <span className="text-purple-700 dark:text-orange-400 font-permanent">STATUS:</span>
                                             <select
                                                 value={task.status}
                                                 name="status"
-                                                className="w-full p-2 mb-3 border-2 border-black dark:border-white text-xl font-permanent bg-transparent text-yellow-400 tracking-tight dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)]"
+                                                className="w-full p-2 pr-10 mb-3 border-2 border-black dark:border-white text-xl font-permanent bg-transparent text-teal-600 dark:text-yellow-400 tracking-tight appearance-none"
                                             >
-                                                <option value="Not Started" className ="text-xl font-permanent text-yellow-400 dark:bg-black drop-shadow-[3px_3px_0px_rgba(0,0,0,1)] tracking-tight dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)]">Not Started</option>
-                                                <option value="In Progress" className ="text-xl font-permanent text-yellow-400 dark:bg-black drop-shadow-[3px_3px_0px_rgba(0,0,0,1)] tracking-tight dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)]">In Progress</option>
-                                                <option value="Completed" className ="text-xl font-permanent text-yellow-400 dark:bg-black drop-shadow-[3px_3px_0px_rgba(0,0,0,1)] tracking-tight dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)]">Completed</option>
+                                                <option value="Not Started" className ="text-xl font-permanent text-teal-600 dark:text-yellow-400 dark:bg-black drop-shadow-[3px_3px_0px_rgba(0,0,0,1)] tracking-tight">Not Started</option>
+                                                <option value="In Progress" className ="text-xl font-permanent text-teal-600 dark:text-yellow-400 dark:bg-black drop-shadow-[3px_3px_0px_rgba(0,0,0,1)] tracking-tight">In Progress</option>
+                                                <option value="Completed" className ="text-xl font-permanent text-teal-600 dark:text-yellow-400 dark:bg-black drop-shadow-[3px_3px_0px_rgba(0,0,0,1)] tracking-tight">Completed</option>
                                             </select>
                                             </p>
                                         </>
@@ -272,7 +293,7 @@ export default function DashboardPage() {
                                             <button
                                                 type="button"
                                                 onClick={() => setEditingTaskId(task._id)}
-                                                className="text-xl font-permanent text-yellow-400 tracking-tight"
+                                                className="text-xl font-permanent text-teal-600 dark:text-yellow-400 tracking-tight"
                                             >
                                                 Edit
                                             </button>
@@ -285,13 +306,13 @@ export default function DashboardPage() {
                                         <button
                                             type="button"
                                             onClick={() => setEditingTaskId(null)}
-                                            className="text-xl font-permanent text-yellow-400 tracking-tight"
+                                            className="text-xl font-permanent text-teal-600 dark:text-yellow-400 tracking-tight"
                                         >
                                             Cancel
                                         </button>
                                         <button
                                             type="submit"
-                                            className="w-full ml-2 mr-2 p-3 border-4 border-black bg-yellow-400 text-black font-permanent text-xl uppercase hover:bg-yellow-500 transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]"
+                                            className="w-full ml-2 mr-2 p-3 border-4 border-black bg-teal-500 dark:bg-yellow-400 text-white dark:text-black font-permanent text-xl uppercase hover:bg-teal-600 dark:hover:bg-yellow-500 transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]"
                                         >
                                             Save
                                         </button>
@@ -300,7 +321,7 @@ export default function DashboardPage() {
                                     )}
                                     <button
                                         onClick={() => deleteTask(task._id)}
-                                        className="text-xl font-permanent text-yellow-400 tracking-tight "
+                                        className="text-xl font-permanent text-teal-600 dark:text-yellow-400 tracking-tight "
                                     >
                                         Delete
                                     </button>
@@ -339,6 +360,24 @@ export default function DashboardPage() {
                 </footer>
             </div>
 
+            <CalendarModal 
+                isOpen={isCalendarOpen}
+                onClose={() => setIsCalendarOpen(false)}
+                onSelectDate={(date) => {
+                    if (calendarTarget?.type === 'new') {
+                        const form = document.querySelector('form') as HTMLFormElement;
+                        if (form) {
+                            const input = form.querySelector('input[name="dueDate"]') as HTMLInputElement;
+                            if (input) input.value = date;
+                        }
+                    } else if (calendarTarget?.type === 'edit' && calendarTarget.taskId) {
+                        const taskToUpdate = tasks.find((t: any) => t._id === calendarTarget.taskId);
+                        if (taskToUpdate) {
+                            updateTask(calendarTarget.taskId, { ...taskToUpdate, dueDate: date });
+                        }
+                    }
+                }}
+            />
         </div>
     );
 }

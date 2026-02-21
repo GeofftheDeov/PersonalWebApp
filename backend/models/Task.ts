@@ -16,7 +16,7 @@ const taskSchema = new mongoose.Schema({
     sfRecordTypeID: String,
     sfRecordTypeName: String,
     ownerId: String,
-    ownerName: String
+    ownerName: String,
 });
 
 const Task = mongoose.model("Task", taskSchema);

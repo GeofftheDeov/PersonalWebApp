@@ -55,10 +55,7 @@ export default function CreateAccountPage() {
                 phone: ''
             });
 
-            // Redirect to login after 2 seconds
-            setTimeout(() => {
-                router.push('/login');
-            }, 2000);
+            // Leave user on page to read success message
         } catch (err: any) {
             setError(err.message || 'An error occurred');
         } finally {
@@ -80,7 +77,7 @@ export default function CreateAccountPage() {
 
                     {success && (
                         <div className="mb-6 p-4 bg-green-100 border-4 border-black text-black font-bold text-center shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
-                            <p>Account created successfully! Redirecting to login...</p>
+                            <p>Account created successfully! Please check your email for a verification link.</p>
                         </div>
                     )}
 

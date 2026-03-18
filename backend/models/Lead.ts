@@ -9,6 +9,8 @@ const leadSchema = new mongoose.Schema({
     password: { type: String, required: true },
     resetPasswordToken: String,
     resetPasswordExpires: Date,
+    isVerified: { type: Boolean, default: false },
+    emailVerificationToken: String,
     company: { type: String, required: false },
     phone: String,
     status: {

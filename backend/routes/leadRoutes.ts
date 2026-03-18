@@ -3,6 +3,8 @@ const router = express.Router();
 import Lead from "../models/Lead.js";
 
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
+import { sendVerificationEmail } from "../services/emailService.js";
 
 // Create a new lead
 router.post("/", async (req, res) => {
@@ -17,12 +19,15 @@ router.post("/", async (req, res) => {
         }
         
         const hashedPassword = await bcrypt.hash(password, 10);
+        const token = crypto.randomBytes(20).toString("hex");
         
         const lead = new Lead({ 
             firstName, 
             lastName, 
             email, 
             password: hashedPassword,
+            isVerified: false,
+            emailVerificationToken: token,
             company, 
             phone,
             status: "New",
@@ -30,9 +35,10 @@ router.post("/", async (req, res) => {
         });
         
         await lead.save();
+        await sendVerificationEmail(email, token);
         
         res.status(201).json({ 
-            message: "Lead created successfully!",
+            message: "Lead created successfully! Please check your email to verify your account.",
             lead: {
                 id: lead._id,
                 firstName: lead.firstName,

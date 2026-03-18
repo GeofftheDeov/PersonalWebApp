@@ -6,17 +6,70 @@ import Account from "../models/Account.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
-import { sendResetPasswordEmail } from "../services/emailService.js";
+import { sendResetPasswordEmail, sendVerificationEmail } from "../services/emailService.js";
 import { OAuth2Client } from "google-auth-library";
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 router.post("/register", async (req, res) => {
-  const { name, email, password } = req.body;
-  const hashedPassword = await bcrypt.hash(password, 10);
-  const user = new User({ name, email, password: hashedPassword });
-  await user.save();
-  res.send("User registered successfully!");
+  try {
+    const { name, email, password } = req.body;
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const token = crypto.randomBytes(20).toString("hex");
+    
+    const user = new User({ 
+      name, 
+      email, 
+      password: hashedPassword,
+      isVerified: false,
+      emailVerificationToken: token
+    });
+    
+    await user.save();
+    await sendVerificationEmail(email, token);
+    
+    res.status(201).json({ message: "User registered successfully! Please check your email to verify your account." });
+  } catch (error: any) {
+    console.error("Register Error:", error);
+    res.status(500).json({ error: "Failed to register user" });
+  }
+});
+
+router.post("/verify-email", async (req, res) => {
+    const { token } = req.body;
+    if (!token) return res.status(400).json({ error: "Token is required" });
+
+    try {
+        let user: any = await User.findOne({ emailVerificationToken: token });
+        let Model: any = User;
+
+        if (!user) {
+            user = await Account.findOne({ emailVerificationToken: token });
+            Model = Account;
+        }
+
+        if (!user) {
+            user = await Lead.findOne({ emailVerificationToken: token });
+            Model = Lead;
+        }
+
+        if (!user) {
+            return res.status(400).json({ error: "Invalid or expired token" });
+        }
+
+        await Model.updateOne(
+            { _id: user._id },
+            { 
+                $set: { isVerified: true },
+                $unset: { emailVerificationToken: "" }
+            }
+        );
+
+        res.json({ message: "Email verified successfully" });
+    } catch (error) {
+        console.error("Verify Email Error:", error);
+        res.status(500).json({ error: "Error verifying email" });
+    }
 });
 
 router.post("/login", async (req, res) => {
@@ -240,10 +293,21 @@ router.post("/forgot-password", async (req, res) => {
         }
 
         const token = crypto.randomBytes(20).toString("hex");
-        user.resetPasswordToken = token;
-        user.resetPasswordExpires = Date.now() + 3600000; // 1 hour
+        
+        let Model: any;
+        if (userType === "User") Model = User;
+        else if (userType === "Account") Model = Account;
+        else Model = Lead;
 
-        await user.save();
+        await Model.updateOne(
+            { _id: user._id },
+            { 
+                $set: { 
+                    resetPasswordToken: token, 
+                    resetPasswordExpires: Date.now() + 3600000 // 1 hour
+                } 
+            }
+        );
 
         await sendResetPasswordEmail(user.email, token);
 

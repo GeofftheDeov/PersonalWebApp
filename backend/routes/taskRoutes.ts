@@ -30,7 +30,7 @@ router.post("/", async (req, res) => {
         res.status(201).json({ 
             message: "Task created successfully!",
             task: {
-                id: task._id,
+                _id: task._id,
                 title: task.title,
                 description: task.description,
                 status: task.status,

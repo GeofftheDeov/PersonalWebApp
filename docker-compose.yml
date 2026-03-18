@@ -27,6 +27,7 @@ services:
       dockerfile: Dockerfile
       args:
         - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://backend:5000}
+        - NEXT_PUBLIC_GOOGLE_CLIENT_ID=${NEXT_PUBLIC_GOOGLE_CLIENT_ID:-375045167895-0ft5nbpu6f2defkd4aflkag0l6470i7q.apps.googleusercontent.com}
     ports:
       - "3000:3000"
       - "3001:3001"

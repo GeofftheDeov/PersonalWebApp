@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import CalendarModal from '@/components/CalendarModal';
+import Footer from "@/components/Footer";
 
 export default function DashboardPage() {
     const router = useRouter();
@@ -74,8 +75,8 @@ export default function DashboardPage() {
     };
     
     return (
-        <div className="min-h-[calc(100vh-76px)] p-8 md:p-16 overflow-hidden relative">
-            <div className="max-w-6xl mx-auto relative z-10">
+        <div className="min-h-[calc(100vh-76px)] flex flex-col overflow-hidden relative w-full">
+            <div className="flex-grow w-full max-w-6xl mx-auto p-8 md:p-16 relative z-10">
 
                 <header className="mb-16 relative">
                     <h1 className="text-5xl md:text-7xl font-permanent text-black dark:text-black leading-none tracking-tight uppercase">
@@ -115,7 +116,8 @@ export default function DashboardPage() {
                                 });
                                 
                                 if (response.ok) {
-                                    const newTask = await response.json();
+                                    const data = await response.json();
+                                    const newTask = data.task;
                                     setTasks((prev: any) => [...prev, newTask]);
                                     (e.target as HTMLFormElement).reset();
                                 }
@@ -351,15 +353,15 @@ export default function DashboardPage() {
                     </div>
                 </section>
 
-                <footer className="mt-16 text-center">
-                    <div className="inline-block border-8 border-black dark:border-black px-12 py-8 bg-orange-500 shadow-[12px_12px_0px_0px_rgba(250,204,21,1)]">
-                        <p className="text-3xl md:text-4xl font-permanent text-black uppercase leading-tight">
-                            Authenticated.<br/>Secure.<br/>Ready to Build.
-                        </p>
-                    </div>
-                </footer>
             </div>
 
+            <Footer>
+                <div className="inline-block border-8 border-black dark:border-black px-12 py-8 mb-12 bg-orange-500 shadow-[12px_12px_0px_0px_rgba(250,204,21,1)]">
+                    <p className="text-3xl md:text-4xl font-permanent text-black uppercase leading-tight">
+                        Authenticated.<br/>Secure.<br/>Ready to Build.
+                    </p>
+                </div>
+            </Footer>
             <CalendarModal 
                 isOpen={isCalendarOpen}
                 onClose={() => setIsCalendarOpen(false)}

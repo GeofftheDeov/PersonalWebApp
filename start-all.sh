@@ -19,6 +19,8 @@ echo "Services started."
 echo "Cloudflare Tunnel PID: $CF_PID"
 echo "Press Ctrl+C to stop the tunnel (Containers will keep running)."
 
+913447902637.dkr.ecr.us-east-2.amazonaws.com/personal-web-app
+
 # Trap Ctrl+C to kill Cloudflare Tunnel
 trap "kill $CF_PID; exit" SIGINT
 

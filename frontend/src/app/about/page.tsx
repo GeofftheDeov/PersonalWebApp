@@ -1,9 +1,10 @@
 "use strict";
+import Footer from "@/components/Footer";
 
 export default function AboutPage() {
   return (
-    <div className="min-h-[calc(100vh-76px)] p-8 md:p-16 overflow-hidden relative">
-      <div className="max-w-6xl mx-auto relative z-10">
+    <div className="min-h-[calc(100vh-76px)] flex flex-col overflow-hidden relative w-full">
+      <div className="flex-grow w-full max-w-6xl mx-auto p-8 md:p-16 relative z-10">
         <header className="mb-48 relative group">
           <h1 className="text-7xl md:text-9xl font-permanent text-black dark:text-black leading-none tracking-tight uppercase transform -rotate-3 relative">
             <span className="relative inline-block">
@@ -48,15 +49,14 @@ export default function AboutPage() {
             </p>
           </div>
         </section>
-
-        <footer className="mt-72 mb-20 text-center">
-          <div className="inline-block border-[12px] border-black dark:border-black px-20 py-12 bg-orange-500 transform skew-x-12 hover:skew-x-0 transition-transform shadow-[20px_20px_0px_0px_rgba(250,204,21,1)] rounded-3xl">
-            <p className="text-5xl md:text-7xl font-permanent text-black uppercase leading-tight">
-              Bold Innovations.<br/>Creative Solutions.<br/>Common Sense Implementations.
-            </p>
-          </div>
-        </footer>
       </div>
+      <Footer>
+        <div className="inline-block border-[12px] border-black dark:border-black px-20 py-12 mb-12 bg-orange-500 transform skew-x-12 hover:skew-x-0 transition-transform shadow-[20px_20px_0px_0px_rgba(250,204,21,1)] rounded-3xl z-20 relative">
+          <p className="text-5xl md:text-7xl font-permanent text-black uppercase leading-tight">
+            Bold Innovations.<br/>Creative Solutions.<br/>Common Sense Implementations.
+          </p>
+        </div>
+      </Footer>
       
       {/* Additional Decorative Elements */}
     </div>

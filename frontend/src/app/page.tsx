@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Footer from "@/components/Footer";
 
 export default function Home() {
   const router = useRouter();
@@ -28,8 +29,8 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-[calc(100vh-76px)] p-8 md:p-16 overflow-hidden relative">
-      <div className="max-w-6xl mx-auto relative z-10">
+    <div className="min-h-[calc(100vh-76px)] flex flex-col overflow-hidden relative w-full">
+      <div className="flex-grow w-full max-w-6xl mx-auto p-8 md:p-16 relative z-10">
       {/* Hero Section */}
       <section className="relative z-10 flex flex-col items-center justify-center px-4 pt-32 pb-20 text-center">
         
@@ -110,13 +111,9 @@ export default function Home() {
         </div>
       </section>
 
-       {/* Footer */}
-       <footer className="relative z-10 mt-20 border-t-4 border-black bg-zinc-100/90 py-12 text-center dark:border-white dark:bg-zinc-900/90 backdrop-blur-sm">
-        <p className="text-2xl font-permanent uppercase tracking-wider text-zinc-500">
-          © 2026 Geoff The Dev. All Rights Reserved.
-        </p>
-      </footer>
       </div>
+       {/* Footer */}
+       <Footer />
     </div>
   );
 }

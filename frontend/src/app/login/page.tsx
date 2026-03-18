@@ -3,12 +3,66 @@
 import React from 'react';
 import { useRouter } from 'next/navigation';
 
+declare global {
+    interface Window {
+        google: any;
+    }
+}
+
 export default function LoginPage() {
     const [email, setEmail] = React.useState('');
     const [password, setPassword] = React.useState('');
     const [error, setError] = React.useState('');
     const [loading, setLoading] = React.useState(false);
     const router = useRouter();
+
+    const handleGoogleLogin = async (response: any) => {
+        setLoading(true);
+        setError('');
+        try {
+            const res = await fetch('/api/users/google-login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ idToken: response.credential }),
+            });
+
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Google Login failed');
+
+            localStorage.setItem('token', data.token);
+            localStorage.setItem('user', JSON.stringify(data.user));
+            window.dispatchEvent(new Event('authChange'));
+            router.push('/dashboard');
+        } catch (err: any) {
+            setError(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    React.useEffect(() => {
+        const script = document.createElement('script');
+        script.src = 'https://accounts.google.com/gsi/client';
+        script.async = true;
+        script.defer = true;
+        script.onload = () => {
+            if (window.google) {
+                window.google.accounts.id.initialize({
+                    client_id: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
+                    callback: handleGoogleLogin,
+                });
+                window.google.accounts.id.renderButton(
+                    document.getElementById('google-signin-btn'),
+                    { theme: 'outline', size: 'large', width: '100%' }
+                );
+            }
+        };
+        document.body.appendChild(script);
+
+        return () => {
+            document.body.removeChild(script);
+        };
+    }, []);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -102,6 +156,17 @@ export default function LoginPage() {
                             {loading ? 'SIGNING IN...' : 'SIGN IN'}
                         </button>
                     </form>
+
+                    <div className="relative my-8">
+                        <div className="absolute inset-0 flex items-center">
+                            <span className="w-full border-t-2 border-black dark:border-white"></span>
+                        </div>
+                        <div className="relative flex justify-center text-sm">
+                            <span className="px-2 bg-white dark:bg-slate-900 text-black dark:text-white font-permanent">OR CONTINUE WITH</span>
+                        </div>
+                    </div>
+
+                    <div id="google-signin-btn" className="w-full"></div>
 
                     <div className="mt-8 text-center">
                         <p className="text-black dark:text-white font-permanent">

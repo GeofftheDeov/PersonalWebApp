@@ -7,6 +7,9 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { sendResetPasswordEmail } from "../services/emailService.js";
+import { OAuth2Client } from "google-auth-library";
+
+const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 router.post("/register", async (req, res) => {
   const { name, email, password } = req.body;
@@ -27,19 +30,20 @@ router.post("/login", async (req, res) => {
 
     try {
         let user: any = await User.findOne({ email });
-        let userType = "User";     
+        let userType = "User";   
+        
+         if (!user) {
+            user = await Account.findOne({ email });
+            userType = "Account";
+            if (user) console.log(`[AUTH] Found match in Accounts`);
+        }
 
         if (!user) {
             user = await Lead.findOne({ email });
             userType = "Lead";
             if (user) console.log(`[AUTH] Found match in Leads`);
         }
-
-        if (!user) {
-            user = await Account.findOne({ email });
-            userType = "Account";
-            if (user) console.log(`[AUTH] Found match in Accounts`);
-        }
+``    
 
         if (!user) {
             console.log(`[AUTH] No user found with email: ${email} in any collection`);
@@ -52,7 +56,7 @@ router.post("/login", async (req, res) => {
         const isMatch = await bcrypt.compare(password, user.password || "");
         if (!isMatch) {
              console.log(`[AUTH] Password mismatch for: ${email}`);
-             return res.status(401).json({ error: "Invalid credentials" });
+             return res.status(401).json({ error: "Incorrect Password" });
         }
         console.log(`[AUTH] Login successful for: ${email}`);
 
@@ -85,6 +89,134 @@ router.post("/login", async (req, res) => {
     }
 });
 
+router.post("/google-login", async (req, res) => {
+    const { idToken } = req.body;
+
+    if (!idToken) {
+        return res.status(400).json({ error: "ID Token is required" });
+    }
+
+    try {
+        const ticket = await client.verifyIdToken({
+            idToken,
+            audience: process.env.GOOGLE_CLIENT_ID,
+        });
+
+        const payload = ticket.getPayload() as any;
+        if (!payload) return res.status(400).json({ error: "Invalid Google Token" });
+
+        const { email, name, given_name, family_name, picture, phone_number } = payload;
+        console.log(`[AUTH] Google login attempt for: ${email}`);
+
+        let user: any = null;
+        let userType = "";
+
+        // 1. Unified Lookup: Search by Email
+        user = await User.findOne({ email });
+        if (user) userType = "User";
+
+        if (!user) {
+            user = await Account.findOne({ email });
+            if (user) userType = "Account";
+        }
+
+        if (!user) {
+            user = await Lead.findOne({ email });
+            if (user) userType = "Lead";
+        }
+
+        // 2. Fallback: Search by Phone
+        if (!user && phone_number) {
+            console.log(`[AUTH] Email match failed. Searching by phone: ${phone_number}`);
+            user = await User.findOne({ phone: phone_number });
+            if (user) userType = "User";
+
+            if (!user) {
+                user = await Account.findOne({ phone: phone_number });
+                if (user) userType = "Account";
+            }
+
+            if (!user) {
+                user = await Lead.findOne({ phone: phone_number });
+                if (user) userType = "Lead";
+            }
+        }
+
+        // 3. Fallback: Search by Name
+        if (!user && name) {
+            console.log(`[AUTH] Phone match failed. Searching by name: ${name}`);
+            const firstName = given_name || name.split(" ")[0];
+            const lastName = family_name || name.split(" ").slice(1).join(" ") || "N/A";
+
+            user = await User.findOne({ name }); // User model uses 'name'
+            if (user) userType = "User";
+
+            if (!user) {
+                user = await Account.findOne({ name }); // Account model uses 'name'
+                if (user) userType = "Account";
+            }
+
+            if (!user) {
+                user = await Lead.findOne({ firstName, lastName }); // Lead model uses firstName/lastName
+                if (user) userType = "Lead";
+            }
+        }
+
+        // 4. Auto-creation: If still not found, create a new Lead
+        if (!user) {
+            console.log(`[AUTH] User not found. Creating new Lead for: ${email}`);
+            const firstName = given_name || (name ? name.split(" ")[0] : "New");
+            const lastName = family_name || (name ? name.split(" ").slice(1).join(" ") : "Google User");
+            
+            // Create a randomized password since they use Google
+            const password = await bcrypt.hash(crypto.randomBytes(16).toString("hex"), 10);
+
+            user = new Lead({
+                firstName,
+                lastName,
+                email,
+                password,
+                phone: phone_number,
+                source: "Google Login",
+                status: "New"
+            });
+            await user.save();
+            userType = "Lead";
+            console.log(`[AUTH] New Lead created successfully`);
+        }
+
+        console.log(`[AUTH] Google login successful for: ${email} (${userType})`);
+
+        // Generate Token
+        const jwtToken = jwt.sign(
+            { id: user._id, type: userType, email: user.email },
+            process.env.JWT_SECRET || "your-secret-key-change-this",
+            { expiresIn: "1h" }
+        );
+
+        res.json({
+            token: jwtToken,
+            user: {
+                id: user._id,
+                type: userType,
+                email: user.email,
+                name: user.name || user.firstName || user.lastName || "User",
+                userNumber: user.userNumber,
+                phone: user.phone,
+                role: user.role,
+                company: user.company,
+                industry: user.industry,
+                website: user.website
+            }
+        });
+
+    } catch (error: any) {
+        console.error("Google login error:", error);
+        res.status(500).json({ error: "Google login failed" });
+    }
+});
+
+
 router.post("/forgot-password", async (req, res) => {
     const { email } = req.body;
     try {
@@ -92,14 +224,16 @@ router.post("/forgot-password", async (req, res) => {
         let userType = "User";
 
         if (!user) {
+            user = await Account.findOne({ email });
+            userType = "Account";
+        }
+
+        if (!user) {
             user = await Lead.findOne({ email });
             userType = "Lead";
         }
 
-        if (!user) {
-            user = await Account.findOne({ email });
-            userType = "Account";
-        }
+        
 
         if (!user) {
             return res.status(404).json({ error: "User not found" });
@@ -129,18 +263,20 @@ router.post("/reset-password", async (req, res) => {
         });
 
         if (!user) {
-            user = await Lead.findOne({
+            user = await Account.findOne({
                 resetPasswordToken: token,
                 resetPasswordExpires: { $gt: Date.now() },
             });
         }
 
         if (!user) {
-            user = await Account.findOne({
+            user = await Lead.findOne({
                 resetPasswordToken: token,
                 resetPasswordExpires: { $gt: Date.now() },
             });
         }
+
+
 
         if (!user) {
             return res.status(400).json({ error: "Invalid or expired token" });

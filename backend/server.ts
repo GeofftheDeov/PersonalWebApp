@@ -35,8 +35,20 @@ if (hasCerts) {
 
 
 app.use(cors());
+app.get("/", (req, res) => {
+    res.json({ message: "Personal Web App Backend API is Running", version: "1.2.0" });
+});
+
 app.get("/health", (req, res) => {
-    res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
+    const mongoStatus = mongoose.connection.readyState;
+    // 0 = disconnected, 1 = connected, 2 = connecting, 3 = disconnecting
+    const statusMap: any = { 0: "disconnected", 1: "connected", 2: "connecting", 3: "disconnecting" };
+    
+    res.status(200).json({ 
+        status: "ok", 
+        timestamp: new Date().toISOString(),
+        mongodb: statusMap[mongoStatus] || "unknown"
+    });
 });
 app.use((req, res, next) => {
     console.log(`[BACKEND] ${req.method} ${req.url}`);
@@ -66,6 +78,18 @@ if (hasCerts) {
 const httpServer = http.createServer(app);
 httpServer.listen(httpPort, () => {
     console.log(`HTTP server listening on http://localhost:${httpPort}`);
+});
+
+// Global Error Handler
+app.use((err: any, req: any, res: any, next: any) => {
+    console.error("!!! [BACKEND] UNHANDLED EXCEPTION:", err);
+    console.error("!!! Error stack:", err.stack);
+    
+    res.status(500).json({
+        error: "Internal Server Error",
+        message: err.message,
+        stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
 });
 
 

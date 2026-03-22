@@ -50,8 +50,14 @@ router.post("/", async (req, res) => {
             }
         });
     } catch (error: any) {
-        console.error("Error creating lead:", error);
-        res.status(500).json({ error: "Failed to create lead", details: error.message });
+        console.error("!!! [BACKEND/LEADS] CRITICAL ERROR CREATING LEAD:", error);
+        console.error("!!! Error stack:", error.stack);
+
+        res.status(500).json({ 
+            error: "Internal Server Error during account creation", 
+            message: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
     }
 });
 

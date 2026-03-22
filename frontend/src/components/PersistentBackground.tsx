@@ -8,13 +8,14 @@ const routes = ["/", "/about", "/admin", "/dashboard", "/calendar", "/login", "/
 
 export default function PersistentBackground() {
   const pathname = usePathname();
+  const normalizedPathname = pathname.endsWith('/') && pathname !== '/' ? pathname.slice(0, -1) : pathname;
   
   // Calculate the background offset based on the route index
   // We move it 200px per page for a nice parallax effect.
   const backgroundX = useMemo(() => {
-    const index = routes.indexOf(pathname);
+    const index = routes.indexOf(normalizedPathname);
     return (index === -1 ? 0 : index) * -200;
-  }, [pathname]);
+  }, [normalizedPathname]);
 
   return (
     <div className="fixed inset-0 -z-50 overflow-hidden pointer-events-none">

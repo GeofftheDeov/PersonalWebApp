@@ -8,23 +8,24 @@ const routes = ["/", "/about", "/admin", "/dashboard", "/calendar", "/login", "/
 
 export default function Template({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const normalizedPathname = pathname.endsWith('/') && pathname !== '/' ? pathname.slice(0, -1) : pathname;
   
   const direction = useMemo(() => {
     if (typeof window === "undefined") return 0;
-    const currentIndex = routes.indexOf(pathname);
+    const currentIndex = routes.indexOf(normalizedPathname);
     const prevIndexStr = sessionStorage.getItem("prevRouteIndex");
     const prevIndex = prevIndexStr ? parseInt(prevIndexStr, 10) : 0;
 
     if (currentIndex > prevIndex) return 1;
     if (currentIndex < prevIndex) return -1;
     return 0;
-  }, [pathname]);
+  }, [normalizedPathname]);
 
   useEffect(() => {
-    const currentIndex = routes.indexOf(pathname);
+    const currentIndex = routes.indexOf(normalizedPathname);
     sessionStorage.setItem("prevRouteIndex", currentIndex.toString());
-    console.log(`[TRANSITION] Navigated to ${pathname}, direction: ${direction}`);
-  }, [pathname, direction]);
+    console.log(`[TRANSITION] Navigated to ${normalizedPathname}, direction: ${direction}`);
+  }, [normalizedPathname, direction]);
 
   const variants = {
     initial: (dir: number) => ({

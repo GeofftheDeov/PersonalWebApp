@@ -19,10 +19,19 @@ const app = express();
 const httpsPort = process.env.HTTPS_PORT || 5001;
 const httpPort = process.env.HTTP_PORT || 5000;
 
-const credentials = {
-    key: fs.readFileSync("./key.pem"),
-    cert: fs.readFileSync("./cert.pem"),
-};
+// Helper to check for certs
+const hasCerts = fs.existsSync("./key.pem") && fs.existsSync("./cert.pem");
+let credentials = {};
+
+if (hasCerts) {
+    console.log("[BACKEND] SSL certificates found. Preparing HTTPS...");
+    credentials = {
+        key: fs.readFileSync("./key.pem"),
+        cert: fs.readFileSync("./cert.pem"),
+    };
+} else {
+    console.log("[BACKEND] No SSL certificates found. Skipping HTTPS server initialization.");
+}
 
 
 app.use(cors());
@@ -47,15 +56,16 @@ app.use("/api/campaigns", campaignRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/events", eventRoutes);
 
-const httpsServer = https.createServer(credentials, app);
+if (hasCerts) {
+    const httpsServer = https.createServer(credentials, app);
+    httpsServer.listen(httpsPort, () => {
+        console.log(`HTTPS server listening on https://localhost:${httpsPort}`);
+    });
+}
+
 const httpServer = http.createServer(app);
-
-httpsServer.listen(httpsPort, () => {
-  console.log(`HTTPS server listening on https://localhost:${httpsPort}`);
-});
-
 httpServer.listen(httpPort, () => {
-  console.log(`HTTP server listening on http://localhost:${httpPort}`);
+    console.log(`HTTP server listening on http://localhost:${httpPort}`);
 });
 
 

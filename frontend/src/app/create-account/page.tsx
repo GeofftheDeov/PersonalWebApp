@@ -45,7 +45,6 @@ export default function CreateAccountPage() {
                 throw new Error(data.error || 'Failed to create account');
             }
 
-            setSuccess(true);
             setFormData({
                 firstName: '',
                 lastName: '',
@@ -55,7 +54,8 @@ export default function CreateAccountPage() {
                 phone: ''
             });
 
-            // Leave user on page to read success message
+            // Redirect to success page
+            router.push('/check-email');
         } catch (err: any) {
             setError(err.message || 'An error occurred');
         } finally {

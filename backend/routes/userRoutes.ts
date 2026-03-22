@@ -14,13 +14,11 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 router.post("/register", async (req, res) => {
   try {
     const { name, email, password } = req.body;
-    const hashedPassword = await bcrypt.hash(password, 10);
     const token = crypto.randomBytes(20).toString("hex");
-    
     const user = new User({ 
       name, 
       email, 
-      password: hashedPassword,
+      password: password,
       isVerified: false,
       emailVerificationToken: token
     });
@@ -221,14 +219,11 @@ router.post("/google-login", async (req, res) => {
             const firstName = given_name || (name ? name.split(" ")[0] : "New");
             const lastName = family_name || (name ? name.split(" ").slice(1).join(" ") : "Google User");
             
-            // Create a randomized password since they use Google
-            const password = await bcrypt.hash(crypto.randomBytes(16).toString("hex"), 10);
-
             user = new Lead({
                 firstName,
                 lastName,
                 email,
-                password,
+                password: crypto.randomBytes(16).toString("hex"),
                 phone: phone_number,
                 source: "Google Login",
                 status: "New"
@@ -346,8 +341,7 @@ router.post("/reset-password", async (req, res) => {
             return res.status(400).json({ error: "Invalid or expired token" });
         }
 
-        const hashedPassword = await bcrypt.hash(newPassword, 10);
-        user.password = hashedPassword;
+        user.password = newPassword;
         user.resetPasswordToken = undefined;
         user.resetPasswordExpires = undefined;
 

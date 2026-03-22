@@ -20,16 +20,14 @@ router.post("/", async (req, res) => {
             });
         }
         
-        console.log(">>> [BACKEND/LEADS] Hashing password...");
-        const hashedPassword = await bcrypt.hash(password, 10);
         const token = crypto.randomBytes(20).toString("hex");
         
         console.log(">>> [BACKEND/LEADS] Saving lead to MongoDB...");
         const lead = new Lead({ 
-            firstName, 
-            lastName, 
-            email, 
-            password: hashedPassword,
+            firstName: firstName, 
+            lastName: lastName, 
+            email: email, 
+            password: password,
             isVerified: false,
             emailVerificationToken: token,
             company, 

@@ -6,11 +6,10 @@ const next = require('next');
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOSTNAME || '0.0.0.0';
-const httpsPort = 3000;
-const httpPort = 3001;
+const port = 3000;
 
 console.log("-> Initializing Next.js app object...");
-const app = next({ dev, hostname, port: httpsPort });
+const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
 
 console.log("-> Preparing Next.js app (compilation)...");
@@ -28,31 +27,15 @@ app.prepare().then(() => {
         }
     };
 
-    // HTTPS Server
-    const httpsOptions = {
-        key: fs.readFileSync('./key.pem'),
-        cert: fs.readFileSync('./cert.pem'),
-    };
-
-    createHttpsServer(httpsOptions, requestHandler)
-        .once('error', (err) => {
-            console.error("-> HTTPS server binding error:");
-            console.error(err);
-            process.exit(1);
-        })
-        .listen(httpsPort, hostname, () => {
-            console.log(`> HTTPS Ready on https://${hostname}:${httpsPort}`);
-        });
-
-    // HTTP Server (for Cloudflare tunnel)
+    // HTTP Server (behind AWS ALB)
     createHttpServer(requestHandler)
         .once('error', (err) => {
             console.error("-> HTTP server binding error:");
             console.error(err);
             process.exit(1);
         })
-        .listen(httpPort, hostname, () => {
-            console.log(`> HTTP Ready on http://${hostname}:${httpPort} (for tunnel)`);
+        .listen(port, hostname, () => {
+            console.log(`> Server Ready on http://${hostname}:${port}`);
         });
 
 }).catch((err) => {

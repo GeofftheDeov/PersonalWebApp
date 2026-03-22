@@ -4,7 +4,7 @@ const nextConfig = {
     typescript: { ignoreBuildErrors: true },
     // output: 'standalone',
     async rewrites() {
-        const backendUrl = process.env.BACKEND_URL || 'https://backend:5001';
+        const backendUrl = process.env.BACKEND_URL || 'http://localhost:5000';
         return {
             beforeFiles: [
                 {

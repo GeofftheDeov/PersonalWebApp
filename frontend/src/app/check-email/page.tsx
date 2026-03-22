@@ -1,42 +1,44 @@
 "use client";
 
 import React from 'react';
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { Mail } from 'lucide-react';
 
 export default function CheckEmailPage() {
-    const router = useRouter();
-
     return (
-        <div className="min-h-screen flex items-center justify-center relative overflow-hidden text-black dark:text-white pb-20 pt-32">
+        <div className="min-h-screen flex items-center justify-center relative overflow-hidden bg-white dark:bg-black">
             <div className="relative z-10 w-full max-w-2xl px-6">
-                <div className="bg-white dark:bg-zinc-900 border-4 border-black dark:border-black p-8 md:p-12 shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] transform -rotate-1">
-                    <div className="text-center mb-8">
-                        <h2 className="text-5xl font-permanent uppercase tracking-tighter mb-6 transform rotate-1 relative inline-block">
-                             <span className="relative z-10">Check Your Email</span>
-                             <span className="absolute -bottom-2 left-0 w-full h-4 bg-orange-500/30 -z-10 rotate-1"></span>
-                        </h2>
-                        
-                        <div className="space-y-6 text-xl font-bold font-sans uppercase tracking-tight text-zinc-800 dark:text-zinc-200">
-                            <p className="bg-yellow-200 dark:bg-yellow-900/40 p-2 transform -rotate-1 inline-block border-2 border-black">
-                                Almost there!
-                            </p>
-                            <p>
-                                We sent a verification link to your inbox. 
-                                Click it to activate your account and join the system.
-                            </p>
-                            <p className="text-sm text-zinc-500 dark:text-zinc-400 normal-case italic font-medium">
-                                (Don't forget to check your spam folder just in case.)
-                            </p>
+                <div className="bg-white dark:bg-slate-900 border-4 border-black p-12 relative transform rotate-1 transition-transform duration-300 shadow-[16px_16px_0px_rgba(0,0,0,1)] dark:shadow-[16px_16px_0px_rgba(255,255,255,1)]">
+                    <div className="text-center">
+                        <div className="mb-8 flex justify-center">
+                            <div className="p-6 bg-teal-500 border-4 border-black -rotate-3 shadow-[8px_8px_0px_rgba(0,0,0,1)]">
+                                <Mail className="w-16 h-16 text-black" />
+                            </div>
                         </div>
-                    </div>
 
-                    <div className="mt-12 flex flex-col space-y-4">
-                        <button
-                            onClick={() => router.push('/login')}
-                            className="w-full py-4 bg-teal-600 text-white border-4 border-black font-black uppercase text-xl tracking-widest hover:bg-teal-500 transition-all shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] hover:translate-x-1 hover:translate-y-1 hover:shadow-none active:scale-95"
-                        >
-                            Back to Login
-                        </button>
+                        <h1 className="text-6xl font-permanent uppercase text-black dark:text-white mb-6 -rotate-1">
+                            Check Your Email!
+                        </h1>
+
+                        <p className="text-2xl font-permanent uppercase text-zinc-600 dark:text-zinc-400 mb-10 leading-relaxed">
+                            We've sent a verification link to your inbox. <br />
+                            Please click the link to confirm your account and get started.
+                        </p>
+
+                        <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                            <Link 
+                                href="/login"
+                                className="px-10 py-4 bg-orange-500 border-4 border-black text-black font-permanent text-2xl hover:-translate-y-1 hover:shadow-[6px_6px_0px_rgba(0,0,0,1)] active:translate-y-0 active:shadow-none transition-all"
+                            >
+                                GO TO LOGIN
+                            </Link>
+                            <Link 
+                                href="/"
+                                className="px-10 py-4 bg-white border-4 border-black text-black font-permanent text-2xl hover:-translate-y-1 hover:shadow-[6px_6px_0px_rgba(0,0,0,1)] active:translate-y-0 active:shadow-none transition-all dark:bg-slate-800 dark:text-white"
+                            >
+                                BACK HOME
+                            </Link>
+                        </div>
                     </div>
                 </div>
             </div>

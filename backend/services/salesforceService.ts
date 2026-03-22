@@ -5,7 +5,15 @@ import fs from "fs";
 
 dotenv.config();
 
-const { SF_LOGIN_URL, SF_USERNAME, SF_PASSWORD, SF_TOKEN, SF_CLIENT_ID, SF_PRIVATE_KEY_PATH } = process.env;
+const { 
+    SF_LOGIN_URL, 
+    SF_USERNAME, 
+    SF_PASSWORD, 
+    SF_TOKEN, 
+    SF_CLIENT_ID, 
+    SF_PRIVATE_KEY_PATH,
+    SF_PRIVATE_KEY_CONTENT 
+} = process.env;
 
 // Initialize connection placeholder
 let conn = new jsforce.Connection({
@@ -18,10 +26,20 @@ export const loginToSalesforce = async () => {
     if (isLoggedIn) return;
 
     // 1. Try JWT Auth
-    if (SF_CLIENT_ID && SF_USERNAME && SF_PRIVATE_KEY_PATH) {
+    if (SF_CLIENT_ID && SF_USERNAME && (SF_PRIVATE_KEY_PATH || SF_PRIVATE_KEY_CONTENT)) {
         try {
             console.log("Attempting Salesforce JWT Auth...");
-            const privateKey = fs.readFileSync(SF_PRIVATE_KEY_PATH, "utf8");
+            let privateKey = "";
+
+            if (SF_PRIVATE_KEY_CONTENT) {
+                console.log("[SALESFORCE] Using salted Base64 key from environment...");
+                // Remove the "salt" (prefix/suffix) as requested by user
+                const base64Content = SF_PRIVATE_KEY_CONTENT.replace(/GEOFF_SALT_/g, "");
+                privateKey = Buffer.from(base64Content, "base64").toString("utf8");
+            } else if (SF_PRIVATE_KEY_PATH) {
+                console.log("[SALESFORCE] Using local certificate file...");
+                privateKey = fs.readFileSync(SF_PRIVATE_KEY_PATH, "utf8");
+            }
 
             const payload = {
                 iss: SF_CLIENT_ID,

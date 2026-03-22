@@ -1,12 +1,23 @@
-const { createServer: createHttpsServer } = require('https');
 const { createServer: createHttpServer } = require('http');
-const fs = require('fs');
 const { parse } = require('url');
 const next = require('next');
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOSTNAME || '0.0.0.0';
-const port = 3000;
+const port = parseInt(process.env.PORT, 10) || 3000;
+
+process.on('uncaughtException', (err) => {
+    console.error('FATAL: Uncaught Exception:', err);
+    process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('FATAL: Unhandled Rejection at:', promise, 'reason:', reason);
+    process.exit(1);
+});
+
+console.log(`-> Starting server in ${dev ? 'development' : 'production'} mode...`);
+console.log(`-> Target: http://${hostname}:${port}`);
 
 console.log("-> Initializing Next.js app object...");
 const app = next({ dev, hostname, port });

@@ -34,7 +34,5 @@ ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
 COPY https-server.js ./
-COPY key.pem ./
-COPY cert.pem ./
 
 CMD ["node", "https-server.js"]

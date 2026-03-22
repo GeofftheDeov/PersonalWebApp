@@ -2,6 +2,7 @@ import express from "express";
 const router = express.Router();
 import User from "../models/User.js";
 import Lead from "../models/Lead.js";
+import Contact from "../models/Contact.js";
 import Account from "../models/Account.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
@@ -47,6 +48,11 @@ router.post("/verify-email", async (req, res) => {
         }
 
         if (!user) {
+            user = await Contact.findOne({ emailVerificationToken: token });
+            Model = Contact;
+        }
+
+        if (!user) {
             user = await Lead.findOne({ emailVerificationToken: token });
             Model = Lead;
         }
@@ -87,6 +93,12 @@ router.post("/login", async (req, res) => {
             user = await Account.findOne({ email });
             userType = "Account";
             if (user) console.log(`[AUTH] Found match in Accounts`);
+        }
+
+        if (!user) {
+            user = await Contact.findOne({ email });
+            userType = "Contact";
+            if (user) console.log(`[AUTH] Found match in Contacts`);
         }
 
         if (!user) {
@@ -172,6 +184,11 @@ router.post("/google-login", async (req, res) => {
         }
 
         if (!user) {
+            user = await Contact.findOne({ email });
+            if (user) userType = "Contact";
+        }
+
+        if (!user) {
             user = await Lead.findOne({ email });
             if (user) userType = "Lead";
         }
@@ -185,6 +202,11 @@ router.post("/google-login", async (req, res) => {
             if (!user) {
                 user = await Account.findOne({ phone: phone_number });
                 if (user) userType = "Account";
+            }
+
+            if (!user) {
+                user = await Contact.findOne({ phone: phone_number });
+                if (user) userType = "Contact";
             }
 
             if (!user) {
@@ -205,6 +227,11 @@ router.post("/google-login", async (req, res) => {
             if (!user) {
                 user = await Account.findOne({ name }); // Account model uses 'name'
                 if (user) userType = "Account";
+            }
+
+            if (!user) {
+                user = await Contact.findOne({ name }); // Contact uses 'name'
+                if (user) userType = "Contact";
             }
 
             if (!user) {
@@ -277,11 +304,14 @@ router.post("/forgot-password", async (req, res) => {
         }
 
         if (!user) {
+            user = await Contact.findOne({ email });
+            userType = "Contact";
+        }
+
+        if (!user) {
             user = await Lead.findOne({ email });
             userType = "Lead";
         }
-
-        
 
         if (!user) {
             return res.status(404).json({ error: "User not found" });
@@ -292,6 +322,7 @@ router.post("/forgot-password", async (req, res) => {
         let Model: any;
         if (userType === "User") Model = User;
         else if (userType === "Account") Model = Account;
+        else if (userType === "Contact") Model = Contact;
         else Model = Lead;
 
         await Model.updateOne(
@@ -306,7 +337,7 @@ router.post("/forgot-password", async (req, res) => {
 
         await sendResetPasswordEmail(user.email, token);
 
-        res.json({ message: "Password reset email sent", mockToken: token }); // Return mockToken just in case
+        res.json({ message: "Password reset email sent", mockToken: token });
     } catch (error) {
         console.error("Forgot Password Error:", error);
         res.status(500).json({ error: "Error sending email" });
@@ -320,12 +351,22 @@ router.post("/reset-password", async (req, res) => {
             resetPasswordToken: token,
             resetPasswordExpires: { $gt: Date.now() },
         });
+        let userType = "User";
 
         if (!user) {
             user = await Account.findOne({
                 resetPasswordToken: token,
                 resetPasswordExpires: { $gt: Date.now() },
             });
+            userType = "Account";
+        }
+
+        if (!user) {
+            user = await Contact.findOne({
+                resetPasswordToken: token,
+                resetPasswordExpires: { $gt: Date.now() },
+            });
+            userType = "Contact";
         }
 
         if (!user) {
@@ -333,19 +374,29 @@ router.post("/reset-password", async (req, res) => {
                 resetPasswordToken: token,
                 resetPasswordExpires: { $gt: Date.now() },
             });
+            userType = "Lead";
         }
-
-
 
         if (!user) {
             return res.status(400).json({ error: "Invalid or expired token" });
         }
 
-        user.password = newPassword;
-        user.resetPasswordToken = undefined;
-        user.resetPasswordExpires = undefined;
+        // We need to use the model specifically to trigger pre-save hooks if they exist
+        let Model: any;
+        if (userType === "User") Model = User;
+        else if (userType === "Account") Model = Account;
+        else if (userType === "Contact") Model = Contact;
+        else Model = Lead;
 
-        await user.save();
+        // Fetch the document again to ensure it's a Mongoose document for .save()
+        const doc = await Model.findById(user._id);
+        if (!doc) return res.status(404).json({ error: "User no longer exists" });
+
+        doc.password = newPassword;
+        doc.resetPasswordToken = undefined;
+        doc.resetPasswordExpires = undefined;
+
+        await doc.save();
 
         res.json({ message: "Password reset successfully" });
     } catch (error) {
@@ -355,4 +406,3 @@ router.post("/reset-password", async (req, res) => {
 });
 
 export default router;
-

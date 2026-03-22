@@ -8,6 +8,8 @@ const leadSchema = new mongoose.Schema({
     password: { type: String, required: true },
     resetPasswordToken: String,
     resetPasswordExpires: Date,
+    isVerified: { type: Boolean, default: false },
+    emailVerificationToken: String,
     company: { type: String, required: false },
     phone: String,
     status: {
@@ -36,46 +38,25 @@ leadSchema.pre("save", async function () {
 leadSchema.post("save", async function (doc) {
     // Only sync if this is a new lead (no Salesforce ID yet)
     if (!doc.sfLeadId) {
-        console.log("New Lead saved, syncing to Salesforce...");
-        const sfLeadResponse = await createLeadInSalesforce(doc);
-        if (sfLeadResponse?.id) {
-            // Update without triggering another save hook
-            const updateData = {
-                sfLeadId: sfLeadResponse.id
-            };
-            // Add optional fields if they exist
-            if (sfLeadResponse.recordTypeId) {
-                updateData.sfRecordTypeId = sfLeadResponse.recordTypeId;
+        setImmediate(async () => {
+            try {
+                console.log("[SALESFORCE] New Lead saved, starting background sync...");
+                const sfLeadResponse = await createLeadInSalesforce(doc);
+                if (sfLeadResponse?.id) {
+                    const updateData = { sfLeadId: sfLeadResponse.id };
+                    if (sfLeadResponse.recordTypeId)
+                        updateData.sfRecordTypeId = sfLeadResponse.recordTypeId;
+                    if (sfLeadResponse.recordTypeName)
+                        updateData.sfRecordTypeName = sfLeadResponse.recordTypeName;
+                    // Use model directly from this context
+                    await doc.constructor.updateOne({ _id: doc._id }, { $set: updateData });
+                    console.log(`[SALESFORCE] Result: Success (ID: ${sfLeadResponse.id})`);
+                }
             }
-            if (sfLeadResponse.recordTypeName) {
-                updateData.sfRecordTypeName = sfLeadResponse.recordTypeName;
+            catch (err) {
+                console.error("[SALESFORCE] Background Sync Error:", err);
             }
-            await Lead.updateOne({ _id: doc._id }, { $set: updateData });
-            console.log(`Salesforce Lead created with ID: ${sfLeadResponse.id}`);
-        }
-    }
-});
-// Post-update hook to sync to Salesforce
-leadSchema.post("updateOne", async function (doc) {
-    // Only sync if this is a new lead (no Salesforce ID yet)
-    if (!doc.sfLeadId) {
-        console.log("New Lead saved, syncing to Salesforce...");
-        const sfLeadResponse = await createLeadInSalesforce(doc);
-        if (sfLeadResponse?.id) {
-            // Update without triggering another save hook
-            const updateData = {
-                sfLeadId: sfLeadResponse.id
-            };
-            // Add optional fields if they exist
-            if (sfLeadResponse.recordTypeId) {
-                updateData.sfRecordTypeId = sfLeadResponse.recordTypeId;
-            }
-            if (sfLeadResponse.recordTypeName) {
-                updateData.sfRecordTypeName = sfLeadResponse.recordTypeName;
-            }
-            await Lead.updateOne({ _id: doc._id }, { $set: updateData });
-            console.log(`Salesforce Lead created with ID: ${sfLeadResponse.id}`);
-        }
+        });
     }
 });
 const Lead = mongoose.model("Lead", leadSchema);

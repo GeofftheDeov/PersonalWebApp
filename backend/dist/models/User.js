@@ -10,11 +10,14 @@ const userSchema = new mongoose.Schema({
     },
     resetPasswordToken: String,
     resetPasswordExpires: Date,
+    isVerified: { type: Boolean, default: false },
+    emailVerificationToken: String,
     role: {
         type: String,
         enum: ["user", "admin"],
         default: "user"
     },
+    userNumber: String,
     createdAt: {
         type: Date,
         default: Date.now

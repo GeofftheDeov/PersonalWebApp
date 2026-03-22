@@ -7,7 +7,10 @@ const accountSchema = new mongoose.Schema({
     password: { type: String, required: false },
     resetPasswordToken: String,
     resetPasswordExpires: Date,
+    isVerified: { type: Boolean, default: false },
+    emailVerificationToken: String,
     industry: String,
+    company: String,
     website: String,
     phone: String,
     address: String,
@@ -26,15 +29,6 @@ accountSchema.pre("save", async function () {
     catch (err) {
         throw err;
     }
-});
-accountSchema.post("save", async function (doc) {
-    console.log("Account saved, syncing to Salesforce...");
-    const sfAccountResponse = await createLeadFromAccount(doc);
-    doc.sfID = sfAccountResponse?.id;
-    //TODO: Add record type ID and name
-    // doc.sfRecordTypeID = sfAccountResponse?.recordTypeId;
-    // doc.sfRecordTypeName = sfAccountResponse?.recordTypeName;
-    doc.save();
 });
 // Post-save hook to sync to Salesforce
 accountSchema.post("save", async function (doc) {

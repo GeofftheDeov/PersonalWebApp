@@ -37,7 +37,7 @@ const renderSidebar = (token, collectionNames, activeCollection) => {
                 </a>
             </li>
         `;
-    }).join('');
+    }).sort().join('');
     return `
         <nav class="sidebar">
             <div class="sidebar-header">

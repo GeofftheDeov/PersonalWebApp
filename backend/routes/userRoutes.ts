@@ -94,7 +94,7 @@ router.post("/login", async (req, res) => {
             userType = "Lead";
             if (user) console.log(`[AUTH] Found match in Leads`);
         }
-``    
+    
 
         if (!user) {
             console.log(`[AUTH] No user found with email: ${email} in any collection`);

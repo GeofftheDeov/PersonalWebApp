@@ -1,45 +1,55 @@
 import express from "express";
 const router = express.Router();
 import Lead from "../models/Lead.js";
-import bcrypt from "bcryptjs";
+import crypto from "crypto";
+import { sendVerificationEmail } from "../services/emailService.js";
 // Create a new lead
 router.post("/", async (req, res) => {
+    console.log("!!! [BACKEND/LEADS] RECEIVED REGISTRATION REQUEST:", JSON.stringify(req.body));
     try {
         const { firstName, lastName, email, password, company, phone } = req.body;
         // Validation
         if (!firstName || !lastName || !email || !password) {
+            console.warn("!!! [BACKEND/LEADS] Validation failed: Missing required fields");
             return res.status(400).json({
                 error: "Missing required fields: firstName, lastName, email, password"
             });
         }
-        const hashedPassword = await bcrypt.hash(password, 10);
+        const token = crypto.randomBytes(20).toString("hex");
+        console.log(">>> [BACKEND/LEADS] Saving lead to MongoDB...");
         const lead = new Lead({
-            firstName,
-            lastName,
-            email,
-            password: hashedPassword,
+            firstName: firstName,
+            lastName: lastName,
+            email: email,
+            password: password,
+            isVerified: false,
+            emailVerificationToken: token,
             company,
             phone,
             status: "New",
             source: "Web App"
         });
         await lead.save();
+        console.log(">>> [BACKEND/LEADS] Lead saved. Sending verification email...");
+        await sendVerificationEmail(email, token);
+        console.log(">>> [BACKEND/LEADS] Success! Sending response to client.");
         res.status(201).json({
-            message: "Lead created successfully!",
+            message: "Lead created successfully! Please check your email to verify your account.",
             lead: {
                 id: lead._id,
-                firstName: lead.firstName,
-                lastName: lead.lastName,
                 email: lead.email,
-                company: lead.company,
-                phone: lead.phone,
                 status: lead.status
             }
         });
     }
     catch (error) {
-        console.error("Error creating lead:", error);
-        res.status(500).json({ error: "Failed to create lead", details: error.message });
+        console.error("!!! [BACKEND/LEADS] CRITICAL ERROR CREATING LEAD:", error);
+        console.error("!!! Error stack:", error.stack);
+        res.status(500).json({
+            error: "Internal Server Error during account creation",
+            message: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
     }
 });
 // Get all leads

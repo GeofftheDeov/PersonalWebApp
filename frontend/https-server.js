@@ -17,8 +17,17 @@ app.prepare().then(() => {
     console.log("-> App prepared. Creating servers...");
 
     const requestHandler = async (req, res) => {
+        // Simple health check logging
+        if (req.url === '/health' || req.url === '/ping') {
+            console.log(`[HEALTHCHECK] ${req.method} ${req.url} - 200 OK`);
+            res.statusCode = 200;
+            res.end('ok');
+            return;
+        }
+
         try {
             const parsedUrl = parse(req.url, true);
+            console.log(`[FRONTEND] ${req.method} ${req.url}`);
             await handle(req, res, parsedUrl);
         } catch (err) {
             console.error('Error occurred handling', req.url, err);

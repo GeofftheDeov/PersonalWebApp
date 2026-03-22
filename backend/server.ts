@@ -16,8 +16,9 @@ import http from "http";
 import fs from "fs";
 
 const app = express();
-const httpsPort = process.env.HTTPS_PORT || 5001;
-const httpPort = process.env.HTTP_PORT || 5000;
+const httpsPort = Number(process.env.HTTPS_PORT) || 5001;
+const httpPort = Number(process.env.HTTP_PORT) || 5000;
+const hostname = '0.0.0.0'; // Bind to all interfaces for Fargate internal networking 
 
 // Helper to check for certs
 const hasCerts = fs.existsSync("./key.pem") && fs.existsSync("./cert.pem");
@@ -76,8 +77,8 @@ if (hasCerts) {
 }
 
 const httpServer = http.createServer(app);
-httpServer.listen(httpPort, () => {
-    console.log(`HTTP server listening on http://localhost:${httpPort}`);
+httpServer.listen(httpPort, hostname, () => {
+    console.log(`[BACKEND] HTTP server listening on http://${hostname}:${httpPort}`);
 });
 
 // Global Error Handler

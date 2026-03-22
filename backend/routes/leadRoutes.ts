@@ -8,19 +8,23 @@ import { sendVerificationEmail } from "../services/emailService.js";
 
 // Create a new lead
 router.post("/", async (req, res) => {
+    console.log("!!! [BACKEND/LEADS] RECEIVED REGISTRATION REQUEST:", JSON.stringify(req.body));
     try {
         const { firstName, lastName, email, password, company, phone } = req.body;
         
         // Validation
         if (!firstName || !lastName || !email || !password) {
+            console.warn("!!! [BACKEND/LEADS] Validation failed: Missing required fields");
             return res.status(400).json({ 
                 error: "Missing required fields: firstName, lastName, email, password" 
             });
         }
         
+        console.log(">>> [BACKEND/LEADS] Hashing password...");
         const hashedPassword = await bcrypt.hash(password, 10);
         const token = crypto.randomBytes(20).toString("hex");
         
+        console.log(">>> [BACKEND/LEADS] Saving lead to MongoDB...");
         const lead = new Lead({ 
             firstName, 
             lastName, 
@@ -35,17 +39,16 @@ router.post("/", async (req, res) => {
         });
         
         await lead.save();
+        console.log(">>> [BACKEND/LEADS] Lead saved. Sending verification email...");
+        
         await sendVerificationEmail(email, token);
+        console.log(">>> [BACKEND/LEADS] Success! Sending response to client.");
         
         res.status(201).json({ 
             message: "Lead created successfully! Please check your email to verify your account.",
             lead: {
                 id: lead._id,
-                firstName: lead.firstName,
-                lastName: lead.lastName,
                 email: lead.email,
-                company: lead.company,
-                phone: lead.phone,
                 status: lead.status
             }
         });

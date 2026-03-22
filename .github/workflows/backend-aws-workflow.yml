@@ -36,7 +36,7 @@ env:
   ECR_FRONTEND_REPOSITORY: personal-web-app-frontend # set this to your Amazon ECR repository name
   ECS_SERVICE: personal-web-app-task-definition-service-4t236x8c                 # set this to your Amazon ECS service name
   ECS_CLUSTER: artistic-hippopotamus-hw7oq2                 # set this to your Amazon ECS cluster name
-  ECS_TASK_DEFINITION: .aws/backend-task-definition  # set this to the path to your Amazon ECS task definition
+  ECS_TASK_DEFINITION: .aws/backend-task-definition.json  # set this to the path to your Amazon ECS task definition
                                                # file, e.g. .aws/task-definition.json
   CONTAINER_BACKEND: backend                   # set this to the backend container name
   CONTAINER_FRONTEND: frontend                 # set this to the frontend container name

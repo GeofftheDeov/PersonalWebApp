@@ -1,0 +1,1 @@
+https://personal-web-app-load-balancer-1602669254.us-east-2.elb.amazonaws.com/verify-email?token=698ddfb1003df57cb379deb7842d55441e8fb4a0

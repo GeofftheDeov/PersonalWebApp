@@ -77,51 +77,57 @@ router.post("/verify-email", async (req, res) => {
 });
 
 router.post("/login", async (req, res) => {
-    const { email, password } = req.body;
-
-    if (!email || !password) {
-        return res.status(400).json({ error: "Email and password are required" });
-    }
-
-    console.log(`[AUTH] Login attempt for: ${email}`);
-
     try {
-        let user: any = await User.findOne({ email });
+        let { email, password } = req.body;
+
+        if (!email || !password) {
+            return res.status(400).json({ error: "Email and password are required" });
+        }
+
+        console.log(`[AUTH/DEBUG] DB URI: ${process.env.MONGO_URI ? process.env.MONGO_URI.replace(/:([^@]+)@/, ':***@') : 'MISSING'}`);
+        email = email.trim().toLowerCase();
+        console.log(`[AUTH/DEBUG] Normalized login attempt for: "${email}"`);
+
+        let user: any = await User.findOne({ email: { $regex: new RegExp(`^${email}$`, 'i') } });
         let userType = "User";   
         
-         if (!user) {
-            user = await Account.findOne({ email });
+        if (!user) {
+            console.log(`[AUTH/DEBUG] Not found in Users. Checking Accounts...`);
+            user = await Account.findOne({ email: { $regex: new RegExp(`^${email}$`, 'i') } });
             userType = "Account";
-            if (user) console.log(`[AUTH] Found match in Accounts`);
         }
 
         if (!user) {
-            user = await Contact.findOne({ email });
+            console.log(`[AUTH/DEBUG] Not found in Accounts. Checking Contacts...`);
+            user = await Contact.findOne({ email: { $regex: new RegExp(`^${email}$`, 'i') } });
             userType = "Contact";
-            if (user) console.log(`[AUTH] Found match in Contacts`);
         }
 
         if (!user) {
-            user = await Lead.findOne({ email });
+            console.log(`[AUTH/DEBUG] Not found in Contacts. Checking Leads...`);
+            user = await Lead.findOne({ email: { $regex: new RegExp(`^${email}$`, 'i') } });
             userType = "Lead";
-            if (user) console.log(`[AUTH] Found match in Leads`);
         }
-    
 
         if (!user) {
-            console.log(`[AUTH] No user found with email: ${email} in any collection`);
-            return res.status(401).json({ error: "Invalid credentials" });
+            console.log(`[AUTH/DEBUG] CRITICAL: No user found with email: "${email}" in any collection (even case-insensitive).`);
+            return res.status(401).json({ error: "Invalid credentials [DEBUG-817]" });
         }
 
-        console.log(`[AUTH] User found in ${userType}. Verifying password...`);
+        console.log(`[AUTH/DEBUG] User found in ${userType}. ID: ${user._id}`);
+        console.log(`[AUTH/DEBUG] Stored Email: "${user.email}"`);
 
         // Verify password
+        console.log(`[AUTH/DEBUG] Comparing passwords...`);
         const isMatch = await bcrypt.compare(password, user.password || "");
+        console.log(`[AUTH/DEBUG] Password match result: ${isMatch}`);
+
         if (!isMatch) {
-             console.log(`[AUTH] Password mismatch for: ${email}`);
+             console.log(`[AUTH/DEBUG] Authentication FAILED for: "${email}"`);
              return res.status(401).json({ error: "Incorrect Password" });
         }
-        console.log(`[AUTH] Login successful for: ${email}`);
+
+        console.log(`[AUTH/DEBUG] Authentication SUCCESS for: "${email}"`);
 
         // Generate Token
         const token = jwt.sign(

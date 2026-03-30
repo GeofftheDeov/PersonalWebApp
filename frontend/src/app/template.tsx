@@ -8,7 +8,7 @@ const routes = ["/", "/about", "/admin", "/dashboard", "/calendar", "/login", "/
 
 export default function Template({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const normalizedPathname = pathname.endsWith('/') && pathname !== '/' ? pathname.slice(0, -1) : pathname;
+  const normalizedPathname = pathname?.endsWith('/') && pathname !== '/' ? pathname.slice(0, -1) : (pathname || "/");
   
   const direction = useMemo(() => {
     if (typeof window === "undefined") return 0;

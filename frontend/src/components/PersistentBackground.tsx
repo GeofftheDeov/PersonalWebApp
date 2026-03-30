@@ -8,7 +8,7 @@ const routes = ["/", "/about", "/admin", "/dashboard", "/calendar", "/login", "/
 
 export default function PersistentBackground() {
   const pathname = usePathname();
-  const normalizedPathname = pathname.endsWith('/') && pathname !== '/' ? pathname.slice(0, -1) : pathname;
+  const normalizedPathname = pathname?.endsWith('/') && pathname !== '/' ? pathname.slice(0, -1) : (pathname || "/");
   
   // Calculate the background offset based on the route index
   // We move it 200px per page for a nice parallax effect.

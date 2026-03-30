@@ -1,4 +1,4 @@
-"use strict";
+"use client";
 import Footer from "@/components/Footer";
 
 export default function AboutPage() {

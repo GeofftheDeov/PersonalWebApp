@@ -1,5 +1,5 @@
 import React from 'react';
-import { SiGithub, SiFacebook, SiX } from '@icons-pack/react-simple-icons';
+import { SiGithub, SiFacebook, SiX, SiLinkedin, SiSalesforce } from '@icons-pack/react-simple-icons';
 
 interface FooterProps {
   children?: React.ReactNode;
@@ -32,6 +32,12 @@ function FooterContent() {
         </a>
         <a href="https://x.com/GeoffTheDeov" target="_blank" rel="noopener noreferrer" aria-label="Twitter" className="group relative inline-flex items-center justify-center border-2 border-transparent hover:border-black dark:hover:border-white p-3 hover:bg-purple-600 hover:text-white dark:hover:text-black transition-all">
           <SiX className="w-8 h-8" />
+        </a>
+        <a href="https://www.linkedin.com/in/geoffrey-murray-771316107/" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn" className="group relative inline-flex items-center justify-center border-2 border-transparent hover:border-black dark:hover:border-white p-3 hover:bg-[#0077b5] hover:text-white transition-all">
+          <SiLinkedin className="w-8 h-8" />
+        </a>
+        <a href="https://www.salesforce.com/trailblazer/geoffreym" target="_blank" rel="noopener noreferrer" aria-label="Salesforce" className="group relative inline-flex items-center justify-center border-2 border-transparent hover:border-black dark:hover:border-white p-3 hover:bg-[#00a1e0] hover:text-white transition-all">
+          <SiSalesforce className="w-8 h-8" />
         </a>
       </div>
       <p className="text-xl font-permanent uppercase tracking-wider text-zinc-500">

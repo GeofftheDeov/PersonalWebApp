@@ -47,7 +47,7 @@ function VerifyEmailContent() {
     }, [token, router]);
 
     return (
-        <div className="bg-white dark:bg-zinc-900 border-4 border-black dark:border-black p-8 md:p-12 shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] text-center text-black dark:text-white">
+        <div className="bg-white/95 dark:bg-zinc-900/95 backdrop-blur-sm border-4 border-black dark:border-black p-8 md:p-12 shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] text-center text-black dark:text-white">
             <h2 className="text-4xl font-permanent uppercase tracking-tighter mb-6 relative inline-block">
                 <span className="relative z-10">Email Verification</span>
                 <span className="absolute -bottom-2 left-0 w-full h-4 bg-teal-600/30 -z-10 -rotate-1"></span>

@@ -4,7 +4,7 @@ import React, { useMemo } from "react";
 import { motion } from "framer-motion";
 import { usePathname } from "next/navigation";
 
-const routes = ["/", "/about", "/admin", "/dashboard", "/calendar", "/login", "/create-account", "/forgot-password", "/reset-password"];
+const routes = ["/", "/about", "/admin", "/dashboard", "/calendar", "/login", "/create-account", "/forgot-password", "/reset-password", "/verify-email"];
 
 export default function PersistentBackground() {
   const pathname = usePathname();

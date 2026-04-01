@@ -12,6 +12,8 @@ export default function DashboardPage() {
     const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
     const [isCalendarOpen, setIsCalendarOpen] = useState(false);
     const [calendarTarget, setCalendarTarget] = useState<{ type: 'new' | 'edit', taskId?: string } | null>(null);
+    const [isEditingProfile, setIsEditingProfile] = useState(false);
+    const [profileData, setProfileData] = useState<any>({});
 
     useEffect(() => {
         const token = localStorage.getItem('token');
@@ -24,6 +26,7 @@ export default function DashboardPage() {
 
         const parsedUser = JSON.parse(userData);
         setUser(parsedUser);
+        setProfileData(parsedUser);
         console.info("User loaded:", parsedUser.userNumber);
 
         const fetchTasks = async () => {
@@ -74,6 +77,25 @@ export default function DashboardPage() {
         }
     };
     
+    const updateProfile = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const token = localStorage.getItem('token');
+        const response = await fetch(`/api/users/profile`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(profileData)
+        });
+        if (response.ok) {
+            const data = await response.json();
+            const updatedUser = { ...user, ...data.user };
+            setUser(updatedUser);
+            localStorage.setItem('user', JSON.stringify(updatedUser));
+            setIsEditingProfile(false);
+        }
+    };
     return (
         <div className="min-h-[calc(100vh-76px)] flex flex-col overflow-hidden relative w-full">
             <div className="flex-grow w-full max-w-6xl mx-auto p-8 md:p-16 relative z-10">
@@ -337,19 +359,99 @@ export default function DashboardPage() {
                     </div>
 
                     <div className="relative">
-                        <h2 className="text-4xl md:text-5xl font-permanent mb-6 text-yellow-400 uppercase relative w-fit">
-                            <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Profile</span>
-                        </h2>
-                        <div className="text-xl md:text-2xl font-permanent leading-tight text-yellow-400 drop-shadow-[3px_3px_0px_rgba(0,0,0,1)] tracking-tight space-y-3">
-                            <p><span className="text-teal dark:text-orange-400">USER NUMBER:</span> {user.userNumber || 'N/A'}</p>
-                            <p><span className="text-teal dark:text-orange-400">EMAIL:</span> {user.email?.toUpperCase() || 'N/A'}</p>
-                            <p><span className="text-teal dark:text-orange-400">TYPE:</span> {user.type?.toUpperCase() || 'N/A'}</p>
-                            <p><span className="text-teal dark:text-orange-400">PHONE:</span> {user.phone?.toUpperCase() || 'N/A'}</p>
-                            <p><span className="text-teal dark:text-orange-400">ROLE:</span> {user.role?.toUpperCase() || 'N/A'}</p>
-                            <p><span className="text-teal dark:text-orange-400">COMPANY:</span> {user.company?.toUpperCase() || 'N/A'}</p>
-                            <p><span className="text-teal dark:text-orange-400">INDUSTRY:</span> {user.industry?.toUpperCase() || 'N/A'}</p>
-                            <p><span className="text-teal dark:text-orange-400">WEBSITE:</span> {user.website?.toUpperCase() || 'N/A'}</p>
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-4xl md:text-5xl font-permanent text-yellow-400 uppercase relative w-fit">
+                                <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Profile</span>
+                            </h2>
+                            {!isEditingProfile && (
+                                <button 
+                                    onClick={() => {
+                                        setProfileData(user);
+                                        setIsEditingProfile(true);
+                                    }}
+                                    className="text-xl font-permanent text-yellow-400 uppercase hover:text-white transition-colors drop-shadow-[2px_2px_0px_rgba(0,0,0,1)]"
+                                >
+                                    [ EDIT ]
+                                </button>
+                            )}
                         </div>
+
+                        {isEditingProfile ? (
+                            <form onSubmit={updateProfile} className="space-y-4 font-permanent text-xl text-yellow-400">
+                                <div className="flex flex-col">
+                                    <label className="text-teal dark:text-orange-400 uppercase text-sm mb-1">NAME:</label>
+                                    <input 
+                                        type="text" 
+                                        value={profileData.name || ''} 
+                                        onChange={(e) => setProfileData({...profileData, name: e.target.value})}
+                                        className="bg-black border-2 border-yellow-400 p-2 text-white outline-none focus:border-teal-500"
+                                    />
+                                </div>
+                                <div className="flex flex-col">
+                                    <label className="text-teal dark:text-orange-400 uppercase text-sm mb-1">PHONE:</label>
+                                    <input 
+                                        type="text" 
+                                        value={profileData.phone || ''} 
+                                        onChange={(e) => setProfileData({...profileData, phone: e.target.value})}
+                                        className="bg-black border-2 border-yellow-400 p-2 text-white outline-none focus:border-teal-500"
+                                    />
+                                </div>
+                                <div className="flex flex-col">
+                                    <label className="text-teal dark:text-orange-400 uppercase text-sm mb-1">COMPANY:</label>
+                                    <input 
+                                        type="text" 
+                                        value={profileData.company || ''} 
+                                        onChange={(e) => setProfileData({...profileData, company: e.target.value})}
+                                        className="bg-black border-2 border-yellow-400 p-2 text-white outline-none focus:border-teal-500"
+                                    />
+                                </div>
+                                <div className="flex flex-col">
+                                    <label className="text-teal dark:text-orange-400 uppercase text-sm mb-1">INDUSTRY:</label>
+                                    <input 
+                                        type="text" 
+                                        value={profileData.industry || ''} 
+                                        onChange={(e) => setProfileData({...profileData, industry: e.target.value})}
+                                        className="bg-black border-2 border-yellow-400 p-2 text-white outline-none focus:border-teal-500"
+                                    />
+                                </div>
+                                <div className="flex flex-col">
+                                    <label className="text-teal dark:text-orange-400 uppercase text-sm mb-1">WEBSITE:</label>
+                                    <input 
+                                        type="text" 
+                                        value={profileData.website || ''} 
+                                        onChange={(e) => setProfileData({...profileData, website: e.target.value})}
+                                        className="bg-black border-2 border-yellow-400 p-2 text-white outline-none focus:border-teal-500"
+                                    />
+                                </div>
+                                <div className="flex gap-4 pt-4">
+                                    <button 
+                                        type="submit"
+                                        className="flex-1 p-3 bg-yellow-400 text-black font-black uppercase hover:bg-white transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]"
+                                    >
+                                        SAVE CHANGES
+                                    </button>
+                                    <button 
+                                        type="button"
+                                        onClick={() => setIsEditingProfile(false)}
+                                        className="flex-1 p-3 bg-zinc-600 text-white font-black uppercase hover:bg-zinc-700 transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]"
+                                    >
+                                        CANCEL
+                                    </button>
+                                </div>
+                            </form>
+                        ) : (
+                            <div className="text-xl md:text-2xl font-permanent leading-tight text-yellow-400 drop-shadow-[3px_3px_0px_rgba(0,0,0,1)] tracking-tight space-y-3">
+                                <p><span className="text-teal dark:text-orange-400">NAME:</span> {user.name?.toUpperCase() || 'N/A'}</p>
+                                <p><span className="text-teal dark:text-orange-400">USER NUMBER:</span> {user.userNumber || 'N/A'}</p>
+                                <p><span className="text-teal dark:text-orange-400">EMAIL:</span> {user.email?.toUpperCase() || 'N/A'}</p>
+                                <p><span className="text-teal dark:text-orange-400">TYPE:</span> {user.type?.toUpperCase() || 'N/A'}</p>
+                                <p><span className="text-teal dark:text-orange-400">PHONE:</span> {user.phone?.toUpperCase() || 'N/A'}</p>
+                                
+                                <p><span className="text-teal dark:text-orange-400">COMPANY:</span> {user.company?.toUpperCase() || 'N/A'}</p>
+                                <p><span className="text-teal dark:text-orange-400">INDUSTRY:</span> {user.industry?.toUpperCase() || 'N/A'}</p>
+                                <p><span className="text-teal dark:text-orange-400">WEBSITE:</span> {user.website?.toUpperCase() || 'N/A'}</p>
+                            </div>
+                        )}
                     </div>
                 </section>
 

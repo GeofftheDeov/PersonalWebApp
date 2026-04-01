@@ -5,6 +5,8 @@ import multer from 'multer';
 import csv from 'csv-parser';
 import { Readable } from 'stream';
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
+import { sendResetPasswordEmail } from "../services/emailService.js";
 import { renderPage } from '../utils/adminUi.js';
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -328,10 +330,11 @@ router.get('/:collection', async (req, res) => {
                             return `<td><div class="cell-content">${displayVal}</div></td>`;
                         }).join('')}
                         <td>
-                            <div class="actions-cell">
-                                <a href="/db/${collection}/edit/${id}?token=${token}" class="btn btn-teal">EDIT</a>
-                                <button onclick="deleteDoc('${collection}', '${id}')" class="btn btn-red">DELETE</button>
-                            </div>
+                                <div class="actions-cell">
+                                    <a href="/db/${collection}/edit/${id}?token=${token}" class="btn btn-teal">EDIT</a>
+                                    ${['users', 'leads', 'accounts'].includes(collection) ? `<button onclick="resetPassword('${collection}', '${id}')" class="btn btn-orange">RESET PASS</button>` : ''}
+                                    <button onclick="deleteDoc('${collection}', '${id}')" class="btn btn-red">DELETE</button>
+                                </div>
                         </td>
                     </tr>`;
              }).join('');
@@ -408,6 +411,19 @@ router.get('/:collection', async (req, res) => {
                             });
                             
                             rows.forEach(row => tbody.appendChild(row));
+                        }
+
+                        async function resetPassword(coll, id) {
+                            if (confirm('Are you sure you want to send a password reset link to this record?')) {
+                                const res = await fetch(\`/db/\${coll}/reset-password/\${id}?token=${token}\`, { method: 'POST' });
+                                if (res.ok) {
+                                    const msg = await res.text();
+                                    alert(msg || 'Reset email sent');
+                                } else {
+                                    const err = await res.text();
+                                    alert('Reset failed: ' + err);
+                                }
+                            }
                         }
 
                         async function deleteDoc(coll, id) {
@@ -658,6 +674,34 @@ router.post('/:collection/delete/:id', async (req, res) => {
         res.sendStatus(200);
     } catch (err) {
         res.status(500).send("Delete failed");
+    }
+});
+
+// RESET PASSWORD ACTION
+router.post('/:collection/reset-password/:id', async (req, res) => {
+    const { collection, id } = req.params;
+    try {
+        const doc = await mongoose.connection.db?.collection(collection).findOne({ _id: new mongoose.Types.ObjectId(id) });
+        if (!doc) return res.status(404).send("Document not found");
+
+        const email = doc.email;
+        if (!email) return res.status(400).send("Document has no email field");
+
+        const token = crypto.randomBytes(20).toString("hex");
+        await mongoose.connection.db?.collection(collection).updateOne(
+            { _id: new mongoose.Types.ObjectId(id) },
+            { 
+                $set: { 
+                    resetPasswordToken: token, 
+                    resetPasswordExpires: Date.now() + 3600000 // 1 hour
+                } 
+            }
+        );
+
+        await sendResetPasswordEmail(email, token);
+        res.status(200).send(`Reset email sent to ${email}`);
+    } catch (err: any) {
+        res.status(500).send("Reset failed: " + err.message);
     }
 });
 

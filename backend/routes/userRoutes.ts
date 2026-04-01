@@ -8,6 +8,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { sendResetPasswordEmail, sendVerificationEmail } from "../services/emailService.js";
+import { auth } from "../middleware/auth.js";
 import { OAuth2Client } from "google-auth-library";
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
@@ -297,6 +298,64 @@ router.post("/google-login", async (req, res) => {
     }
 });
 
+router.get("/profile", auth, async (req: any, res) => {
+    try {
+        const { id, type } = req.user;
+        let Model: any;
+        if (type === "User") Model = User;
+        else if (type === "Account") Model = Account;
+        else if (type === "Contact") Model = Contact;
+        else Model = Lead;
+
+        const user = await Model.findById(id).select("-password -resetPasswordToken -resetPasswordExpires -emailVerificationToken");
+        if (!user) return res.status(404).json({ error: "User not found" });
+
+        res.json(user);
+    } catch (err) {
+        res.status(500).json({ error: "Failed to fetch profile" });
+    }
+});
+
+router.put("/profile", auth, async (req: any, res) => {
+    try {
+        const { id, type } = req.user;
+        const updateData = req.body;
+        
+        // Prevent sensitive field updates
+        delete updateData._id;
+        delete updateData.password;
+        delete updateData.email;
+        delete updateData.role;
+        delete updateData.isVerified;
+
+        let Model: any;
+        if (type === "User") Model = User;
+        else if (type === "Account") Model = Account;
+        else if (type === "Contact") Model = Contact;
+        else Model = Lead;
+
+        // Special handling for Lead model which uses firstName/lastName
+        if (type === "Lead" && updateData.name) {
+             const parts = updateData.name.split(' ');
+             updateData.firstName = parts[0];
+             updateData.lastName = parts.slice(1).join(' ') || 'N/A';
+             delete updateData.name;
+        }
+
+        const updatedUser = await Model.findByIdAndUpdate(
+            id,
+            { $set: updateData },
+            { new: true }
+        ).select("-password");
+
+        if (!updatedUser) return res.status(404).json({ error: "User not found" });
+
+        res.json({ message: "Profile updated successfully", user: updatedUser });
+    } catch (err) {
+        console.error("Profile update error:", err);
+        res.status(500).json({ error: "Failed to update profile" });
+    }
+});
 
 router.post("/forgot-password", async (req, res) => {
     const { email } = req.body;

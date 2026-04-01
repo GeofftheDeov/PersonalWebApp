@@ -10,7 +10,6 @@ export default function CreateAccountPage() {
         lastName: '',
         email: '',
         password: '',
-        company: '',
         phone: ''
     });
     const [loading, setLoading] = useState(false);
@@ -50,7 +49,6 @@ export default function CreateAccountPage() {
                 lastName: '',
                 email: '',
                 password: '',
-                company: '',
                 phone: ''
             });
 
@@ -139,18 +137,6 @@ export default function CreateAccountPage() {
                                 required
                                 className="w-full bg-white dark:bg-black border-4 border-black dark:border-white px-4 py-3 font-bold focus:outline-none focus:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)] transition-shadow placeholder-zinc-400"
                                 placeholder="••••••••"
-                            />
-                        </div>
-
-                        <div className="space-y-2">
-                            <label className="text-lg font-black uppercase tracking-tight ml-1">Company</label>
-                            <input
-                                type="text"
-                                name="company"
-                                value={formData.company}
-                                onChange={handleChange}
-                                className="w-full bg-white dark:bg-black border-4 border-black dark:border-white px-4 py-3 font-bold focus:outline-none focus:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)] transition-shadow placeholder-zinc-400"
-                                placeholder="ARASAKA"
                             />
                         </div>
 

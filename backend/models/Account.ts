@@ -23,6 +23,12 @@ const accountSchema = new mongoose.Schema({
 
 accountSchema.pre("save", async function() {
     if (!this.isModified("password") || !this.password) return;
+    
+    // Don't re-hash if it looks like an existing bcrypt hash
+    if (this.password.startsWith('$2a$') || this.password.startsWith('$2b$')) {
+        return;
+    }
+
     try {
         const salt = await bcrypt.genSalt(10);
         this.password = await bcrypt.hash(this.password, salt);

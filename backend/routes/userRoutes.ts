@@ -119,8 +119,18 @@ router.post("/login", async (req, res) => {
         console.log(`[AUTH/DEBUG] Stored Email: "${user.email}"`);
 
         // Verify password
+        console.log(`[AUTH/DEBUG] Checking if password is set...`);
+        if (!user.password) {
+            console.log(`[AUTH/DEBUG] No password set for: "${email}". Prompting for reset.`);
+            return res.status(403).json({ 
+                error: "Password not set", 
+                message: "Professional accounts synced from Salesforce must set a password for first-time login. Please use 'Forgot Password'.",
+                requiresReset: true 
+            });
+        }
+
         console.log(`[AUTH/DEBUG] Comparing passwords...`);
-        const isMatch = await bcrypt.compare(password, user.password || "");
+        const isMatch = await bcrypt.compare(password, user.password);
         console.log(`[AUTH/DEBUG] Password match result: ${isMatch}`);
 
         if (!isMatch) {

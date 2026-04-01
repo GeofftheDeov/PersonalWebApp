@@ -1,0 +1,163 @@
+{
+    "tasks": [
+        {
+            "attachments": [
+                {
+                    "id": "92d41428-55eb-41e6-bc73-1d9d7c409115",
+                    "type": "ElasticNetworkInterface",
+                    "status": "ATTACHED",
+                    "details": [
+                        {
+                            "name": "subnetId",
+                            "value": "subnet-0c33b8b801beec11a"
+                        },
+                        {
+                            "name": "networkInterfaceId",
+                            "value": "eni-0b70d1a173edeb802"
+                        },
+                        {
+                            "name": "macAddress",
+                            "value": "02:75:b9:f1:92:a1"
+                        },
+                        {
+                            "name": "privateDnsName",
+                            "value": "ip-172-31-10-239.us-east-2.compute.internal"
+                        },
+                        {
+                            "name": "privateIPv4Address",
+                            "value": "172.31.10.239"
+                        }
+                    ]
+                }
+            ],
+            "attributes": [
+                {
+                    "name": "ecs.cpu-architecture",
+                    "value": "x86_64"
+                }
+            ],
+            "availabilityZone": "us-east-2a",
+            "capacityProviderName": "FARGATE",
+            "clusterArn": "arn:aws:ecs:us-east-2:913447902637:cluster/artistic-hippopotamus-hw7oq2",
+            "connectivity": "CONNECTED",
+            "connectivityAt": "2026-04-01T16:26:14.777000-05:00",
+            "containers": [
+                {
+                    "containerArn": "arn:aws:ecs:us-east-2:913447902637:container/artistic-hippopotamus-hw7oq2/c389898eb26f40cfbb10c8e4a7b03438/19f0eacc-89ca-4aa7-bb1c-cd3d9dc16f09",
+                    "taskArn": "arn:aws:ecs:us-east-2:913447902637:task/artistic-hippopotamus-hw7oq2/c389898eb26f40cfbb10c8e4a7b03438",
+                    "name": "frontend",
+                    "image": "913447902637.dkr.ecr.us-east-2.amazonaws.com/personal-web-app-frontend:10979d1b8c6784d8c77d57d99409756e8bc49024",
+                    "imageDigest": "sha256:4c551baa5b0692933fe41fa33e9db567ee78aed2c41325656426c3337a12bfc3",
+                    "runtimeId": "c389898eb26f40cfbb10c8e4a7b03438-3860412285",
+                    "lastStatus": "RUNNING",
+                    "networkBindings": [],
+                    "networkInterfaces": [
+                        {
+                            "attachmentId": "92d41428-55eb-41e6-bc73-1d9d7c409115",
+                            "privateIpv4Address": "172.31.10.239"
+                        }
+                    ],
+                    "healthStatus": "UNKNOWN",
+                    "managedAgents": [
+                        {
+                            "lastStartedAt": "2026-04-01T16:26:55.182000-05:00",
+                            "name": "ExecuteCommandAgent",
+                            "lastStatus": "RUNNING"
+                        }
+                    ],
+                    "cpu": "0"
+                },
+                {
+                    "containerArn": "arn:aws:ecs:us-east-2:913447902637:container/artistic-hippopotamus-hw7oq2/c389898eb26f40cfbb10c8e4a7b03438/43910cce-d7b0-492d-8094-7c556a44d6c9",
+                    "taskArn": "arn:aws:ecs:us-east-2:913447902637:task/artistic-hippopotamus-hw7oq2/c389898eb26f40cfbb10c8e4a7b03438",
+                    "name": "mongodb",
+                    "image": "913447902637.dkr.ecr.us-east-2.amazonaws.com/personal-web-app-mongodb",
+                    "imageDigest": "sha256:f480daf5d2787802b36bb879f113bdf25029e2ab701ff68b3c4e8dc7a66b7ae0",
+                    "runtimeId": "c389898eb26f40cfbb10c8e4a7b03438-0638392289",
+                    "lastStatus": "STOPPED",
+                    "exitCode": 100,
+                    "networkBindings": [],
+                    "networkInterfaces": [
+                        {
+                            "attachmentId": "92d41428-55eb-41e6-bc73-1d9d7c409115",
+                            "privateIpv4Address": "172.31.10.239"
+                        }
+                    ],
+                    "healthStatus": "UNKNOWN",
+                    "managedAgents": [
+                        {
+                            "name": "ExecuteCommandAgent",
+                            "lastStatus": "STOPPED"
+                        }
+                    ],
+                    "cpu": "0"
+                },
+                {
+                    "containerArn": "arn:aws:ecs:us-east-2:913447902637:container/artistic-hippopotamus-hw7oq2/c389898eb26f40cfbb10c8e4a7b03438/e9782aa6-cb35-4566-bddb-00b945cbafd5",
+                    "taskArn": "arn:aws:ecs:us-east-2:913447902637:task/artistic-hippopotamus-hw7oq2/c389898eb26f40cfbb10c8e4a7b03438",
+                    "name": "backend",
+                    "image": "913447902637.dkr.ecr.us-east-2.amazonaws.com/personal-web-app-backend:10979d1b8c6784d8c77d57d99409756e8bc49024",
+                    "imageDigest": "sha256:b21fa92ffc27560eb7ea8a8dd88a64a855877661614849b28266a0795dbf6303",
+                    "runtimeId": "c389898eb26f40cfbb10c8e4a7b03438-2750272591",
+                    "lastStatus": "RUNNING",
+                    "networkBindings": [],
+                    "networkInterfaces": [
+                        {
+                            "attachmentId": "92d41428-55eb-41e6-bc73-1d9d7c409115",
+                            "privateIpv4Address": "172.31.10.239"
+                        }
+                    ],
+                    "healthStatus": "UNKNOWN",
+                    "managedAgents": [
+                        {
+                            "lastStartedAt": "2026-04-01T16:26:55.182000-05:00",
+                            "name": "ExecuteCommandAgent",
+                            "lastStatus": "RUNNING"
+                        }
+                    ],
+                    "cpu": "0"
+                }
+            ],
+            "cpu": "1024",
+            "createdAt": "2026-04-01T16:26:10.235000-05:00",
+            "desiredStatus": "RUNNING",
+            "enableExecuteCommand": true,
+            "group": "service:personal-web-app-task-definition-service-4t236x8c",
+            "healthStatus": "UNKNOWN",
+            "lastStatus": "RUNNING",
+            "launchType": "FARGATE",
+            "memory": "3072",
+            "overrides": {
+                "containerOverrides": [
+                    {
+                        "name": "backend"
+                    },
+                    {
+                        "name": "mongodb"
+                    },
+                    {
+                        "name": "frontend"
+                    }
+                ],
+                "inferenceAcceleratorOverrides": []
+            },
+            "platformVersion": "1.4.0",
+            "platformFamily": "Linux",
+            "pullStartedAt": "2026-04-01T16:26:21.451000-05:00",
+            "pullStoppedAt": "2026-04-01T16:26:48.497000-05:00",
+            "startedAt": "2026-04-01T16:27:08.682000-05:00",
+            "startedBy": "ecs-svc/9288183580983563874",
+            "tags": [],
+            "taskArn": "arn:aws:ecs:us-east-2:913447902637:task/artistic-hippopotamus-hw7oq2/c389898eb26f40cfbb10c8e4a7b03438",
+            "taskDefinitionArn": "arn:aws:ecs:us-east-2:913447902637:task-definition/personal-web-app-task-definition:37",
+            "version": 6,
+            "ephemeralStorage": {
+                "sizeInGiB": 20
+            },
+            "fargateEphemeralStorage": {
+                "sizeInGiB": 20
+            }
+        }
+    ],
+    "failures": []
+}

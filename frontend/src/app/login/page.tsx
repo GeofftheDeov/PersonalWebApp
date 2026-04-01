@@ -77,8 +77,12 @@ export default function LoginPage() {
             });
 
             const data = await res.json();
-
+            
             if (!res.ok) {
+                if (res.status === 403 && data.requiresReset) {
+                    setError(data.message);
+                    return;
+                }
                 throw new Error(data.error || 'Login failed');
             }
 

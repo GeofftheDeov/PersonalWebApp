@@ -100,6 +100,13 @@ jobs:
         task-definition: ${{ env.ECS_TASK_DEFINITION }}
         container-name: ${{ env.CONTAINER_BACKEND }}
         image: ${{ steps.build-backend-image.outputs.image }}
+        environment-variables: |
+          SYNC_API_KEY=${{ secrets.SYNC_API_KEY }}
+          EMAIL_PASS=${{ secrets.EMAIL_PASS }}
+          JWT_SECRET=${{ secrets.JWT_SECRET }}
+          SF_PASSWORD=${{ secrets.SF_PASSWORD }}
+          SF_CLIENT_ID=${{ secrets.SF_CLIENT_ID }}
+          SF_PRIVATE_KEY_CONTENT=${{ secrets.SF_PRIVATE_KEY_CONTENT }}
 
     - name: Fill in the new frontend image ID in the Amazon ECS task definition
       id: frontend-task-def

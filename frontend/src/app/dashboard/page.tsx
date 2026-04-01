@@ -15,6 +15,12 @@ export default function DashboardPage() {
     const [isEditingProfile, setIsEditingProfile] = useState(false);
     const [profileData, setProfileData] = useState<any>({});
 
+    const handleAuthError = () => {
+        localStorage.clear();
+        window.dispatchEvent(new Event('authChange'));
+        router.push('/login');
+    };
+
     useEffect(() => {
         const token = localStorage.getItem('token');
         const userData = localStorage.getItem('user');
@@ -36,11 +42,14 @@ export default function DashboardPage() {
                     'Authorization': `Bearer ${token}`
                 },
             });
+
+            if (response.status === 401) {
+                handleAuthError();
+                return;
+            }
+
             const data = await response.json();            
-            console.log(data);
             setTasks(data);
-            console.info(tasks);
-            
         };
         fetchTasks();
     }, [router]);
@@ -56,6 +65,12 @@ export default function DashboardPage() {
                 'Authorization': `Bearer ${localStorage.getItem('token')}`
             },
         });
+
+        if (response.status === 401) {
+            handleAuthError();
+            return;
+        }
+
         if (response.ok) {
             const updatedTasks = tasks.filter((task: any) => task._id !== taskId);
             setTasks(updatedTasks);
@@ -71,6 +86,12 @@ export default function DashboardPage() {
             },
             body: JSON.stringify(taskData)
         });
+
+        if (response.status === 401) {
+            handleAuthError();
+            return;
+        }
+
         if (response.ok) {
             const updatedTasks = tasks.map((task: any) => task._id === taskId ? taskData : task);
             setTasks(updatedTasks);
@@ -88,6 +109,12 @@ export default function DashboardPage() {
             },
             body: JSON.stringify(profileData)
         });
+
+        if (response.status === 401) {
+            handleAuthError();
+            return;
+        }
+
         if (response.ok) {
             const data = await response.json();
             const updatedUser = { ...user, ...data.user };
@@ -137,6 +164,11 @@ export default function DashboardPage() {
                                     body: JSON.stringify({ title, description, dueDate, status, ownerId, ownerName })
                                 });
                                 
+                                if (response.status === 401) {
+                                    handleAuthError();
+                                    return;
+                                }
+
                                 if (response.ok) {
                                     const data = await response.json();
                                     const newTask = data.task;

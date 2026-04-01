@@ -22,8 +22,21 @@ const authenticateJWT = (req: express.Request, res: express.Response, next: expr
     }
 };
 
+// Allow either JWT or API Key for server-to-server syncs
+const authenticateSync = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const apiKey = req.headers['x-api-key'];
+    const validApiKey = process.env.SYNC_API_KEY;
+
+    if (apiKey && validApiKey && apiKey === validApiKey) {
+        return next();
+    }
+
+    // Fallback to JWT authentication
+    return authenticateJWT(req, res, next);
+};
+
 // Bulk sync endpoint for Salesforce batch job
-router.post("/sync", authenticateJWT, async (req, res) => {
+router.post("/sync", authenticateSync, async (req, res) => {
     try {
         const accounts = req.body.accounts;
 

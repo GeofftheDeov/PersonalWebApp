@@ -58,7 +58,10 @@ app.use((req, res, next) => {
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 mongoose.connect(process.env.MONGO_URI || "mongodb://localhost:27017/personal_web_app")
-  .then(() => console.log("MongoDB Connected"))
+  .then(() => {
+    const uri = process.env.MONGO_URI || 'DEFAULT (localhost)';
+    console.log(`[BACKEND] MongoDB Connected! URI: ${uri.replace(/:([^@]+)@/, ':***@')}`);
+  })
   .catch((err) => console.error(err));
 app.use("/db", dbRoutes);
 app.use("/admin", adminRoutes);

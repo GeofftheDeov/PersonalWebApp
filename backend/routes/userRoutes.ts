@@ -16,19 +16,24 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 router.post("/register", async (req, res) => {
   try {
     const { name, email, password } = req.body;
-    const token = crypto.randomBytes(20).toString("hex");
+    const isDev = process.env.NODE_ENV === "development" || req.headers.host?.includes("localhost");
+    const token = isDev ? undefined : crypto.randomBytes(20).toString("hex");
+
     const user = new User({ 
       name, 
       email, 
       password: password,
-      isVerified: false,
+      isVerified: isDev,
       emailVerificationToken: token
     });
     
     await user.save();
-    await sendVerificationEmail(email, token);
+    if (!isDev && token) await sendVerificationEmail(email, token);
     
-    res.status(201).json({ message: "User registered successfully! Please check your email to verify your account." });
+    res.status(201).json({ 
+      message: isDev ? "User registered successfully!" : "User registered successfully! Please check your email to verify your account.",
+      isVerified: isDev 
+    });
   } catch (error: any) {
     console.error("Register Error:", error);
     res.status(500).json({ error: "Failed to register user" });

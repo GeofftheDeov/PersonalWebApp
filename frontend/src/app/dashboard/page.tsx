@@ -4,6 +4,8 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import CalendarModal from '@/components/CalendarModal';
 import Footer from "@/components/Footer";
+import TabletopSection from "@/components/TabletopSection";
+
 
 export default function DashboardPage() {
     const router = useRouter();
@@ -487,6 +489,7 @@ export default function DashboardPage() {
                     </div>
                 </section>
 
+                <TabletopSection />
             </div>
 
             <Footer>

@@ -11,6 +11,8 @@ import adminRoutes from "./routes/adminRoutes.js";
 import campaignRoutes from "./routes/campaignRoutes.js";
 import taskRoutes from "./routes/taskRoutes.js";
 import eventRoutes from "./routes/eventRoutes.js";
+import tabletopRoutes from "./routes/tabletopRoutes.js";
+
 import https from "https";
 import http from "http";
 import fs from "fs";
@@ -71,6 +73,8 @@ app.use("/api/accounts", accountRoutes);
 app.use("/api/campaigns", campaignRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/events", eventRoutes);
+app.use("/api/tabletop", tabletopRoutes);
+
 
 if (hasCerts) {
     const httpsServer = https.createServer(credentials, app);

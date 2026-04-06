@@ -20,15 +20,16 @@ router.post("/", async (req, res) => {
             });
         }
         
-        const token = crypto.randomBytes(20).toString("hex");
+        const isDev = process.env.NODE_ENV === "development" || req.headers.host?.includes("localhost");
+        const token = isDev ? undefined : crypto.randomBytes(20).toString("hex");
         
-        console.log(">>> [BACKEND/LEADS] Saving lead to MongoDB...");
+        console.log(`>>> [BACKEND/LEADS] Saving lead to MongoDB (isDev=${isDev})...`);
         const lead = new Lead({ 
             firstName: firstName, 
             lastName: lastName, 
             email: email, 
             password: password,
-            isVerified: false,
+            isVerified: isDev,
             emailVerificationToken: token,
             company, 
             phone,
@@ -37,17 +38,23 @@ router.post("/", async (req, res) => {
         });
         
         await lead.save();
-        console.log(">>> [BACKEND/LEADS] Lead saved. Sending verification email...");
         
-        await sendVerificationEmail(email, token);
+        if (isDev) {
+            console.log(">>> [BACKEND/LEADS] Dev mode: Skipping email verification.");
+        } else {
+            console.log(">>> [BACKEND/LEADS] Production: Sending verification email...");
+            if (token) await sendVerificationEmail(email, token);
+        }
+        
         console.log(">>> [BACKEND/LEADS] Success! Sending response to client.");
         
         res.status(201).json({ 
-            message: "Lead created successfully! Please check your email to verify your account.",
+            message: isDev ? "Lead created successfully!" : "Lead created successfully! Please check your email to verify your account.",
             lead: {
                 id: lead._id,
                 email: lead.email,
-                status: lead.status
+                status: lead.status,
+                isVerified: lead.isVerified
             }
         });
     } catch (error: any) {

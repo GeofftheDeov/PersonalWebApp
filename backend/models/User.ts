@@ -19,6 +19,7 @@ const userSchema = new mongoose.Schema({
     default: "user"
   },
   userNumber: String,
+  sfID: String,
   createdAt: {
     type: Date,
     default: Date.now

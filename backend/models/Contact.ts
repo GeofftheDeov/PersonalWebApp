@@ -13,6 +13,7 @@ const contactSchema = new mongoose.Schema({
     role: String,
     accountId: { type: mongoose.Schema.Types.ObjectId, ref: "Account" },
     notes: String,
+    sfID: String,
     createdAt: { type: Date, default: Date.now },
 });
 

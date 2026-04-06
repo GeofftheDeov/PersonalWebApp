@@ -12,6 +12,7 @@ import campaignRoutes from "./routes/campaignRoutes.js";
 import taskRoutes from "./routes/taskRoutes.js";
 import eventRoutes from "./routes/eventRoutes.js";
 import tabletopRoutes from "./routes/tabletopRoutes.js";
+import syncRoutes from "./routes/syncRoutes.js";
 
 import https from "https";
 import http from "http";
@@ -74,6 +75,7 @@ app.use("/api/campaigns", campaignRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/events", eventRoutes);
 app.use("/api/tabletop", tabletopRoutes);
+app.use("/api/sync", syncRoutes);
 
 
 if (hasCerts) {

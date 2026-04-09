@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 
 const contactSchema = new mongoose.Schema({
     name: { type: String, required: true },
-    email: { type: String, required: true },
+    email: { type: String, required: false },
     password: { type: String, required: false },
     isVerified: { type: Boolean, default: false },
     emailVerificationToken: String,

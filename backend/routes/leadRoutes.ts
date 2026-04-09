@@ -13,10 +13,10 @@ router.post("/", async (req, res) => {
         const { firstName, lastName, email, password, company, phone } = req.body;
         
         // Validation
-        if (!firstName || !lastName || !email || !password) {
+        if (!firstName || !lastName || (!email && !phone) || !password) {
             console.warn("!!! [BACKEND/LEADS] Validation failed: Missing required fields");
             return res.status(400).json({ 
-                error: "Missing required fields: firstName, lastName, email, password" 
+                error: "Missing required fields: firstName, lastName, (email OR phone), password" 
             });
         }
         
@@ -29,8 +29,8 @@ router.post("/", async (req, res) => {
             lastName: lastName, 
             email: email, 
             password: password,
-            isVerified: isDev,
-            emailVerificationToken: token,
+            isVerified: isDev || !email, // Auto-verify if no email (phone verification skipped for now)
+            emailVerificationToken: email ? token : undefined,
             company, 
             phone,
             status: "New",
@@ -41,18 +41,21 @@ router.post("/", async (req, res) => {
         
         if (isDev) {
             console.log(">>> [BACKEND/LEADS] Dev mode: Skipping email verification.");
-        } else {
+        } else if (email) {
             console.log(">>> [BACKEND/LEADS] Production: Sending verification email...");
             if (token) await sendVerificationEmail(email, token);
+        } else {
+            console.log(">>> [BACKEND/LEADS] Production: Phone-only registration, skipping verification for now.");
         }
         
         console.log(">>> [BACKEND/LEADS] Success! Sending response to client.");
         
         res.status(201).json({ 
-            message: isDev ? "Lead created successfully!" : "Lead created successfully! Please check your email to verify your account.",
+            message: (isDev || !email) ? "Account created successfully!" : "Account created successfully! Please check your email to verify your account.",
             lead: {
                 id: lead._id,
                 email: lead.email,
+                phone: lead.phone,
                 status: lead.status,
                 isVerified: lead.isVerified
             }

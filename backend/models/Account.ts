@@ -4,7 +4,7 @@ import { createLeadFromAccount } from "../services/salesforceService.js";
 
 const accountSchema = new mongoose.Schema({
     name: { type: String, required: true },
-    email: { type: String, required: true },
+    email: { type: String, required: false },
     password: { type: String, required: false },
     resetPasswordToken: String,
     resetPasswordExpires: Date,

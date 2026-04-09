@@ -22,7 +22,7 @@ interface Campaign {
     title: string;
 }
 
-export default function TabletopSection() {
+export default function GameNightPlannerSection() {
     const [sessions, setSessions] = useState<Session[]>([]);
     const [characters, setCharacters] = useState<Character[]>([]);
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -112,14 +112,14 @@ export default function TabletopSection() {
     );
 
     if (loading) {
-        return <div className="p-4 font-permanent text-xl text-teal-600 animate-pulse">LOADING TABLETOP DATA...</div>;
+        return <div className="p-4 font-permanent text-xl text-teal-600 animate-pulse">LOADING GAME NIGHT DATA...</div>;
     }
 
     return (
         <div className="mt-16 w-full">
             <div className="flex justify-between items-end mb-10 border-b-8 border-black pb-4">
-                <h2 className="text-4xl md:text-6xl font-permanent text-orange-600 uppercase relative w-fit">
-                    <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Tabletop Tracker</span>
+                <h2 className="text-4xl md:text-6xl font-permanent text-teal-600 uppercase relative w-fit">
+                    <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Game Night Planner</span>
                 </h2>
                 <button 
                     onClick={() => setIsShowPrepareForm(!isShowPrepareForm)}
@@ -132,15 +132,15 @@ export default function TabletopSection() {
             {isShowPrepareForm && (
                 <form 
                     onSubmit={handlePrepareSession}
-                    className="mb-12 p-8 border-4 border-black bg-slate-900 shadow-[10px_10px_0px_0px_rgba(234,88,12,1)]"
+                    className="mb-12 p-8 border-4 border-black bg-slate-900 shadow-[10px_10px_0px_0px_rgba(13,148,136,1)]"
                 >
                     <h3 className="text-3xl font-permanent text-white mb-6 uppercase flex items-center gap-2">
-                        <Plus className="w-8 h-8 text-orange-500" />
+                        <Plus className="w-8 h-8 text-teal-500" />
                         Plan New Session
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                         <div>
-                            <label className="block text-orange-500 font-permanent uppercase mb-2">Title</label>
+                            <label className="block text-teal-500 font-permanent uppercase mb-2">Title</label>
                             <input 
                                 required
                                 value={formData.title}
@@ -150,7 +150,7 @@ export default function TabletopSection() {
                             />
                         </div>
                         <div>
-                            <label className="block text-orange-500 font-permanent uppercase mb-2">Campaign</label>
+                            <label className="block text-teal-500 font-permanent uppercase mb-2">Campaign</label>
                             <select 
                                 required
                                 value={formData.campaignId}
@@ -164,7 +164,7 @@ export default function TabletopSection() {
                             </select>
                         </div>
                         <div>
-                            <label className="block text-orange-500 font-permanent uppercase mb-2">Session Date</label>
+                            <label className="block text-teal-500 font-permanent uppercase mb-2">Session Date</label>
                             <input 
                                 type="datetime-local"
                                 required
@@ -174,7 +174,7 @@ export default function TabletopSection() {
                             />
                         </div>
                         <div>
-                            <label className="block text-orange-500 font-permanent uppercase mb-2">Location</label>
+                            <label className="block text-teal-500 font-permanent uppercase mb-2">Location</label>
                             <input 
                                 value={formData.location}
                                 onChange={e => setFormData({...formData, location: e.target.value})}
@@ -184,7 +184,7 @@ export default function TabletopSection() {
                         </div>
                     </div>
                     <div className="mb-8">
-                        <label className="block text-orange-500 font-permanent uppercase mb-2">Agenda / Prep Notes</label>
+                        <label className="block text-teal-500 font-permanent uppercase mb-2">Agenda / Prep Notes</label>
                         <textarea 
                             value={formData.agenda}
                             onChange={e => setFormData({...formData, agenda: e.target.value})}
@@ -195,7 +195,7 @@ export default function TabletopSection() {
                     </div>
                     <button 
                         type="submit"
-                        className="w-full p-4 border-4 border-black bg-orange-600 text-white font-permanent text-2xl uppercase hover:bg-white hover:text-black transition-all shadow-[6px_6px_0px_0px_rgba(255,255,255,1)] flex items-center justify-center gap-3"
+                        className="w-full p-4 border-4 border-black bg-teal-600 text-white font-permanent text-2xl uppercase hover:bg-white hover:text-black transition-all shadow-[6px_6px_0px_0px_rgba(255,255,255,1)] flex items-center justify-center gap-3"
                     >
                         <Save className="w-8 h-8" />
                         INITIATE SESSION PREP
@@ -233,7 +233,7 @@ export default function TabletopSection() {
                         )) : (
                             <p className="font-permanent text-black dark:text-zinc-400 italic text-sm">NO CHARACTERS CREATED.</p>
                         )}
-                        <button className="w-full p-2 border-2 border-black bg-orange-500 text-white font-permanent uppercase hover:bg-orange-600 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] text-sm">
+                        <button className="w-full p-2 border-2 border-black bg-teal-500 text-white font-permanent uppercase hover:bg-teal-600 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] text-sm">
                             Manage Characters
                         </button>
                     </div>

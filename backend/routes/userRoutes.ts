@@ -427,6 +427,7 @@ router.post("/forgot-password", async (req, res) => {
 router.post("/reset-password", async (req, res) => {
     const { token, newPassword } = req.body;
     try {
+        console.log(`[RESET] Searching for token: ${token}`);
         let user: any = await User.findOne({
             resetPasswordToken: token,
             resetPasswordExpires: { $gt: new Date() },
@@ -458,8 +459,15 @@ router.post("/reset-password", async (req, res) => {
         }
 
         if (!user) {
+            console.log(`[RESET] FAILED: No user found for token ${token} or it has expired.`);
+            // Debug: Check if token exists AT ALL without expiration check
+            const debugUser = await User.findOne({ resetPasswordToken: token });
+            if (debugUser) {
+                console.log(`[RESET] DEBUG: Token exists but expiration check failed. DB Value: ${debugUser.resetPasswordExpires}, Type: ${typeof debugUser.resetPasswordExpires}`);
+            }
             return res.status(400).json({ error: "Invalid or expired token" });
         }
+        console.log(`[RESET] SUCCESS: Found ${userType} ${user.email}`);
 
         // We need to use the model specifically to trigger pre-save hooks if they exist
         let Model: any;

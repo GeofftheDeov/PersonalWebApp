@@ -418,12 +418,23 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
                     const sfID = r.Id;
                     const email = r.PersonEmail || r.Email;
                     
-                    const existing = await Account.findOne({
+                    // Check for existing Account or User with this email/sfID
+                    let existing = await Account.findOne({
                         $or: [
                             ...(sfID ? [{ sfID }] : []),
                             ...(email ? [{ email }] : []),
                         ]
                     }) as any;
+
+                    // Also check Users collection to prevent duplicates for converted leads/users
+                    if (!existing && email) {
+                        const existingUser = await User.findOne({ email });
+                        if (existingUser) {
+                            console.log(`[SYNC] Found existing User for email ${email}, skipping Account creation.`);
+                            results.skipped++;
+                            continue;
+                        }
+                    }
 
                     if (existing) {
                         existing.name = r.Name || existing.name;

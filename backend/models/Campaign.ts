@@ -10,6 +10,7 @@ const campaignSchema = new mongoose.Schema({
     },
     startDate: Date,
     endDate: Date,
+    sfID: String,
     // Polymorphic reference or just generic related fields? 
     // For simplicity now, let's keep it unlinked or manual until specific requirements allow
     createdAt: { type: Date, default: Date.now },

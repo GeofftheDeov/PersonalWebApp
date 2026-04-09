@@ -395,12 +395,285 @@ router.post("/dungeons", authenticateSync, async (req, res) => {
 // GET /api/sync/status
 // Health check for sync endpoint
 // ─────────────────────────────────────────────
-router.get("/status", authenticateSync, (req, res) => {
-    res.json({
-        status: "ok",
-        availableSyncs: ["users", "leads", "contacts", "sessions", "characters", "dungeons"],
-        timestamp: new Date().toISOString(),
-    });
+// ─────────────────────────────────────────────
+// POST /api/sync/salesforce
+// Payload: { object: "Account", records: [{ Id: "001...", Name: "...", ... }] }
+// Let the Web App handle Salesforce API field names mappings!
+// ─────────────────────────────────────────────
+import PlayerSession from "../models/PlayerSession.js";
+
+router.post("/salesforce", authenticateSync, async (req, res) => {
+    try {
+        const { object, records } = req.body;
+        if (!object || !Array.isArray(records)) {
+            return res.status(400).json({ error: "'object' must be provided and 'records' must be an array" });
+        }
+
+        const results = makeResults();
+
+        // Object routers
+        if (object === "Account") {
+            for (const r of records) {
+                try {
+                    const sfID = r.Id;
+                    const email = r.PersonEmail || r.Email;
+                    
+                    const existing = await Account.findOne({
+                        $or: [
+                            ...(sfID ? [{ sfID }] : []),
+                            ...(email ? [{ email }] : []),
+                        ]
+                    }) as any;
+
+                    if (existing) {
+                        existing.name = r.Name || existing.name;
+                        existing.phone = r.Phone || existing.phone;
+                        existing.email = email || existing.email;
+                        existing.industry = r.Industry || existing.industry;
+                        existing.website = r.Website || existing.website;
+                        if (sfID) existing.sfID = sfID;
+                        existing.updatedAt = new Date();
+                        await existing.save();
+                        results.updated++;
+                    } else {
+                        const tempPassword = `SF_IMPORT_${sfID || Date.now()}`;
+                        await Account.create({
+                            name: r.Name,
+                            email: email,
+                            phone: r.Phone,
+                            industry: r.Industry,
+                            website: r.Website,
+                            sfID: sfID,
+                            isVerified: true,
+                            password: tempPassword,
+                        });
+                        results.success++;
+                    }
+                } catch (err: any) {
+                    results.failed++;
+                    results.errors.push({ sfID: r.Id, error: err.message });
+                }
+            }
+        } else if (object === "Lead") {
+            for (const r of records) {
+                try {
+                    const sfID = r.Id;
+                    const email = r.Email;
+                    
+                    const existing = await Lead.findOne({
+                        $or: [
+                            ...(sfID ? [{ sfLeadId: sfID }] : []),
+                            ...(email ? [{ email }] : []),
+                        ]
+                    }) as any;
+
+                    if (existing) {
+                        existing.firstName = r.FirstName || existing.firstName;
+                        existing.lastName = r.LastName || existing.lastName;
+                        existing.phone = r.Phone || existing.phone;
+                        existing.company = r.Company || existing.company;
+                        existing.status = r.Status || existing.status;
+                        existing.email = email || existing.email;
+                        if (sfID) existing.sfLeadId = sfID;
+                        await existing.save();
+                        results.updated++;
+                    } else {
+                        const tempPassword = `SF_IMPORT_${sfID || Date.now()}`;
+                        await Lead.create({
+                            firstName: r.FirstName,
+                            lastName: r.LastName,
+                            email: email,
+                            phone: r.Phone,
+                            company: r.Company,
+                            status: r.Status || "New",
+                            source: "Salesforce",
+                            sfLeadId: sfID,
+                            isVerified: true,
+                            password: tempPassword,
+                        });
+                        results.success++;
+                    }
+                } catch (err: any) {
+                    results.failed++;
+                    results.errors.push({ sfID: r.Id, error: err.message });
+                }
+            }
+        } else if (object === "Contact") {
+            for (const r of records) {
+                try {
+                    const sfID = r.Id;
+                    const email = r.Email;
+                    let accountId = null;
+                    if (r.AccountId) {
+                        const account = await Account.findOne({ sfID: r.AccountId }) as any;
+                        if (account) accountId = account._id;
+                    }
+
+                    const existing = await Contact.findOne({
+                        $or: [
+                            ...(sfID ? [{ sfID }] : []),
+                            ...(email ? [{ email }] : []),
+                        ]
+                    }) as any;
+
+                    if (existing) {
+                        existing.name = r.Name || existing.name;
+                        existing.phone = r.Phone || existing.phone;
+                        existing.email = email || existing.email;
+                        if (accountId) existing.accountId = accountId;
+                        if (sfID) existing.sfID = sfID;
+                        await existing.save();
+                        results.updated++;
+                    } else {
+                        const tempPassword = `SF_IMPORT_${sfID || Date.now()}`;
+                        await Contact.create({
+                            name: r.Name,
+                            email: email,
+                            phone: r.Phone,
+                            accountId: accountId,
+                            sfID: sfID,
+                            isVerified: true,
+                            password: tempPassword,
+                        });
+                        results.success++;
+                    }
+                } catch (err: any) {
+                    results.failed++;
+                    results.errors.push({ sfID: r.Id, error: err.message });
+                }
+            }
+        } else if (object === "Campaign") {
+            for (const r of records) {
+                try {
+                    const sfID = r.Id;
+                    
+                    const existing = await Campaign.findOne({ sfID }) as any;
+
+                    if (existing) {
+                        existing.title = r.Name || existing.title;
+                        existing.description = r.Description || existing.description;
+                        existing.status = r.Status || existing.status;
+                        if (r.StartDate) existing.startDate = new Date(r.StartDate);
+                        if (r.EndDate) existing.endDate = new Date(r.EndDate);
+                        await existing.save();
+                        results.updated++;
+                    } else {
+                        const payload: any = {
+                            title: r.Name,
+                            description: r.Description,
+                            status: r.Status || "Not Started",
+                            sfID: sfID
+                        };
+                        if (r.StartDate) payload.startDate = new Date(r.StartDate);
+                        if (r.EndDate) payload.endDate = new Date(r.EndDate);
+                        
+                        await Campaign.create(payload);
+                        results.success++;
+                    }
+                } catch (err: any) {
+                    results.failed++;
+                    results.errors.push({ sfID: r.Id, error: err.message });
+                }
+            }
+        } else if (object === "Session__c") {
+            for (const r of records) {
+                try {
+                    const sfID = r.Id;
+                    
+                    let campaignId = null;
+                    if (r.Campaign__c) {
+                        const campaign = await Campaign.findOne({ sfID: r.Campaign__c }) as any;
+                        if (campaign) campaignId = campaign._id;
+                    }
+
+                    const existing = await Session.findOne({ sfID }) as any;
+
+                    if (existing) {
+                        existing.title = r.Name || existing.title;
+                        // Assuming Date__c is the date field in Salesforce session
+                        if (r.Date__c) existing.date = new Date(r.Date__c);
+                        if (r.Location__c) existing.location = r.Location__c;
+                        if (r.Agenda__c) existing.agenda = r.Agenda__c;
+                        if (r.Summary__c) existing.summary = r.Summary__c;
+                        if (r.VOD_URL__c) existing.vodUrl = r.VOD_URL__c;
+                        if (campaignId) existing.campaign = campaignId;
+                        await existing.save();
+                        results.updated++;
+                    } else {
+                        const payload: any = {
+                            title: r.Name,
+                            campaign: campaignId,
+                            location: r.Location__c,
+                            agenda: r.Agenda__c,
+                            summary: r.Summary__c,
+                            vodUrl: r.VOD_URL__c,
+                            sfID: sfID
+                        };
+                        if (r.Date__c) payload.date = new Date(r.Date__c);
+                        
+                        await Session.create(payload);
+                        results.success++;
+                    }
+                } catch (err: any) {
+                    results.failed++;
+                    results.errors.push({ sfID: r.Id, error: err.message });
+                }
+            }
+        } else if (object === "Player_Session__c") {
+            for (const r of records) {
+                try {
+                    const sfID = r.Id;
+                    
+                    let sessionId = null;
+                    if (r.Session__c) {
+                        const session = await Session.findOne({ sfID: r.Session__c }) as any;
+                        if (session) sessionId = session._id;
+                    }
+                    
+                    let playerId = null;
+                    if (r.Player__c) { // Note: Player__c is Account
+                        const account = await User.findOne({ sfID: r.Player__c }) as any;
+                        if (account) playerId = account._id;
+                    }
+                    
+                    let campaignId = null;
+                    if (r.Campaign__c) {
+                        const campaign = await Campaign.findOne({ sfID: r.Campaign__c }) as any;
+                        if (campaign) campaignId = campaign._id;
+                    }
+
+                    const existing = await PlayerSession.findOne({ sfID }) as any;
+
+                    if (existing) {
+                        existing.name = r.Name || existing.name;
+                        if (sessionId) existing.session = sessionId;
+                        if (playerId) existing.player = playerId;
+                        if (campaignId) existing.campaign = campaignId;
+                        await existing.save();
+                        results.updated++;
+                    } else {
+                        await PlayerSession.create({
+                            name: r.Name,
+                            session: sessionId,
+                            player: playerId,
+                            campaign: campaignId,
+                            sfID: sfID
+                        });
+                        results.success++;
+                    }
+                } catch (err: any) {
+                    results.failed++;
+                    results.errors.push({ sfID: r.Id, error: err.message });
+                }
+            }
+        } else {
+            return res.status(400).json({ error: `Unsupported object type: ${object}` });
+        }
+
+        res.json({ message: `${object} sync completed`, results });
+    } catch (err: any) {
+        res.status(500).json({ error: `Sync failed for ${req.body.object}`, details: err.message });
+    }
 });
 
 export default router;

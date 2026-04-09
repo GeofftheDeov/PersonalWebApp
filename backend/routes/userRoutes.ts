@@ -410,7 +410,7 @@ router.post("/forgot-password", async (req, res) => {
             { 
                 $set: { 
                     resetPasswordToken: token, 
-                    resetPasswordExpires: Date.now() + 3600000 // 1 hour
+                    resetPasswordExpires: new Date(Date.now() + 3600000) // 1 hour
                 } 
             }
         );
@@ -429,14 +429,14 @@ router.post("/reset-password", async (req, res) => {
     try {
         let user: any = await User.findOne({
             resetPasswordToken: token,
-            resetPasswordExpires: { $gt: Date.now() },
+            resetPasswordExpires: { $gt: new Date() },
         });
         let userType = "User";
 
         if (!user) {
             user = await Account.findOne({
                 resetPasswordToken: token,
-                resetPasswordExpires: { $gt: Date.now() },
+                resetPasswordExpires: { $gt: new Date() },
             });
             userType = "Account";
         }
@@ -444,7 +444,7 @@ router.post("/reset-password", async (req, res) => {
         if (!user) {
             user = await Contact.findOne({
                 resetPasswordToken: token,
-                resetPasswordExpires: { $gt: Date.now() },
+                resetPasswordExpires: { $gt: new Date() },
             });
             userType = "Contact";
         }
@@ -452,7 +452,7 @@ router.post("/reset-password", async (req, res) => {
         if (!user) {
             user = await Lead.findOne({
                 resetPasswordToken: token,
-                resetPasswordExpires: { $gt: Date.now() },
+                resetPasswordExpires: { $gt: new Date() },
             });
             userType = "Lead";
         }

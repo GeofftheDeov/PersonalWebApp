@@ -29,7 +29,7 @@ const authenticateSync = (req: express.Request, res: express.Response, next: exp
 // ─────────────────────────────────────────────
 // Helper: standard sync result tracker
 // ─────────────────────────────────────────────
-const makeResults = () => ({ success: 0, updated: 0, failed: 0, errors: [] as any[] });
+const makeResults = () => ({ success: 0, updated: 0, skipped: 0, failed: 0, errors: [] as any[] });
 
 // ─────────────────────────────────────────────
 // POST /api/sync/users

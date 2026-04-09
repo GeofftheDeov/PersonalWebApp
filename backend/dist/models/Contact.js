@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 const contactSchema = new mongoose.Schema({
     name: { type: String, required: true },
-    email: { type: String, required: true },
+    email: { type: String, required: false },
     password: { type: String, required: false },
     isVerified: { type: Boolean, default: false },
     emailVerificationToken: String,
@@ -12,6 +12,7 @@ const contactSchema = new mongoose.Schema({
     role: String,
     accountId: { type: mongoose.Schema.Types.ObjectId, ref: "Account" },
     notes: String,
+    sfID: String,
     createdAt: { type: Date, default: Date.now },
 });
 contactSchema.pre("save", async function () {

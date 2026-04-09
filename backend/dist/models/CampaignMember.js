@@ -1,5 +1,4 @@
 import mongoose from "mongoose";
-
 const campaignMemberSchema = new mongoose.Schema({
     campaign: { type: mongoose.Schema.Types.ObjectId, ref: "Campaign", required: true },
     lead: { type: mongoose.Schema.Types.ObjectId, ref: "Lead", required: false },
@@ -14,6 +13,5 @@ const campaignMemberSchema = new mongoose.Schema({
     sfID: String,
     createdAt: { type: Date, default: Date.now },
 });
-
 const CampaignMember = mongoose.model("CampaignMember", campaignMemberSchema);
 export default CampaignMember;

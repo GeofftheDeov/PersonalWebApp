@@ -1,6 +1,7 @@
 import express from "express";
 const router = express.Router();
 import Account from "../models/Account.js";
+import Lead from "../models/Lead.js";
 import jwt from "jsonwebtoken";
 // JWT Authentication Middleware
 const authenticateJWT = (req, res, next) => {
@@ -18,8 +19,18 @@ const authenticateJWT = (req, res, next) => {
         return res.status(403).json({ error: "Forbidden: Invalid token" });
     }
 };
+// Allow either JWT or API Key for server-to-server syncs
+const authenticateSync = (req, res, next) => {
+    const apiKey = req.headers['x-api-key'];
+    const validApiKey = process.env.SYNC_API_KEY;
+    if (apiKey && validApiKey && apiKey === validApiKey) {
+        return next();
+    }
+    // Fallback to JWT authentication
+    return authenticateJWT(req, res, next);
+};
 // Bulk sync endpoint for Salesforce batch job
-router.post("/sync", authenticateJWT, async (req, res) => {
+router.post("/sync", authenticateSync, async (req, res) => {
     try {
         const accounts = req.body.accounts;
         if (!Array.isArray(accounts)) {
@@ -32,17 +43,69 @@ router.post("/sync", authenticateJWT, async (req, res) => {
         };
         for (const accountData of accounts) {
             try {
-                // Upsert based on Salesforce ID
-                await Account.findOneAndUpdate({ sfID: accountData.sfID }, {
-                    name: accountData.name,
+                // Determine identifiers
+                const sfID = accountData.sfID;
+                const email = accountData.email || "";
+                const name = accountData.name || "";
+                // 1. Check if Account already exists (by Salesforce ID OR Email)
+                let existingAccount = null;
+                if (sfID) {
+                    existingAccount = await Account.findOne({ sfID: sfID });
+                }
+                if (!existingAccount && email) {
+                    existingAccount = await Account.findOne({ email: email });
+                }
+                if (existingAccount) {
+                    // Update existing account with latest Salesforce info (don't create new record)
+                    existingAccount.name = name;
+                    existingAccount.industry = accountData.industry;
+                    existingAccount.website = accountData.website;
+                    existingAccount.phone = accountData.phone;
+                    existingAccount.address = accountData.address;
+                    existingAccount.sfID = sfID;
+                    existingAccount.sfRecordTypeID = accountData.sfRecordTypeID;
+                    existingAccount.sfRecordTypeName = accountData.sfRecordTypeName;
+                    if (email && !existingAccount.email) {
+                        existingAccount.email = email;
+                    }
+                    await existingAccount.save();
+                    results.success++;
+                    continue;
+                }
+                // 2. If NO account exists, check for a matching Lead by first/last name and email
+                let parsedFirstName = accountData.firstName || "";
+                let parsedLastName = accountData.lastName || "";
+                if (!parsedFirstName && !parsedLastName && name) {
+                    const nameParts = name.trim().split(/\s+/);
+                    parsedFirstName = nameParts[0] || "";
+                    parsedLastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "";
+                }
+                const leadMatch = await Lead.findOne({
+                    email: email,
+                    firstName: parsedFirstName,
+                    lastName: parsedLastName
+                });
+                let migratedPassword = null;
+                if (leadMatch) {
+                    console.info(`Found matching Lead for ${email} (${parsedFirstName} ${parsedLastName}). Migrating password...`);
+                    migratedPassword = leadMatch.password;
+                    // Delete the old lead as it's now being converted
+                    await Lead.deleteOne({ _id: leadMatch._id });
+                }
+                // 3. Create the new Account
+                const newAccount = new Account({
+                    name: name,
+                    email: email,
+                    password: migratedPassword, // Inherits existing hashed password if Lead was found
                     industry: accountData.industry,
                     website: accountData.website,
                     phone: accountData.phone,
                     address: accountData.address,
-                    sfID: accountData.sfID,
+                    sfID: sfID,
                     sfRecordTypeID: accountData.sfRecordTypeID,
                     sfRecordTypeName: accountData.sfRecordTypeName
-                }, { upsert: true, new: true });
+                });
+                await newAccount.save();
                 results.success++;
             }
             catch (error) {

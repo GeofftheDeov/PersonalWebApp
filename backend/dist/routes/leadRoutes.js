@@ -9,36 +9,48 @@ router.post("/", async (req, res) => {
     try {
         const { firstName, lastName, email, password, company, phone } = req.body;
         // Validation
-        if (!firstName || !lastName || !email || !password) {
+        if (!firstName || !lastName || (!email && !phone) || !password) {
             console.warn("!!! [BACKEND/LEADS] Validation failed: Missing required fields");
             return res.status(400).json({
-                error: "Missing required fields: firstName, lastName, email, password"
+                error: "Missing required fields: firstName, lastName, (email OR phone), password"
             });
         }
-        const token = crypto.randomBytes(20).toString("hex");
-        console.log(">>> [BACKEND/LEADS] Saving lead to MongoDB...");
+        const isDev = process.env.NODE_ENV === "development" || req.headers.host?.includes("localhost");
+        const token = isDev ? undefined : crypto.randomBytes(20).toString("hex");
+        console.log(`>>> [BACKEND/LEADS] Saving lead to MongoDB (isDev=${isDev})...`);
         const lead = new Lead({
             firstName: firstName,
             lastName: lastName,
             email: email,
             password: password,
-            isVerified: false,
-            emailVerificationToken: token,
+            isVerified: isDev || !email, // Auto-verify if no email (phone verification skipped for now)
+            emailVerificationToken: email ? token : undefined,
             company,
             phone,
             status: "New",
             source: "Web App"
         });
         await lead.save();
-        console.log(">>> [BACKEND/LEADS] Lead saved. Sending verification email...");
-        await sendVerificationEmail(email, token);
+        if (isDev) {
+            console.log(">>> [BACKEND/LEADS] Dev mode: Skipping email verification.");
+        }
+        else if (email) {
+            console.log(">>> [BACKEND/LEADS] Production: Sending verification email...");
+            if (token)
+                await sendVerificationEmail(email, token);
+        }
+        else {
+            console.log(">>> [BACKEND/LEADS] Production: Phone-only registration, skipping verification for now.");
+        }
         console.log(">>> [BACKEND/LEADS] Success! Sending response to client.");
         res.status(201).json({
-            message: "Lead created successfully! Please check your email to verify your account.",
+            message: (isDev || !email) ? "Account created successfully!" : "Account created successfully! Please check your email to verify your account.",
             lead: {
                 id: lead._id,
                 email: lead.email,
-                status: lead.status
+                phone: lead.phone,
+                status: lead.status,
+                isVerified: lead.isVerified
             }
         });
     }

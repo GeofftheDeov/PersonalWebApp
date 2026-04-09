@@ -4,7 +4,7 @@ import { createLeadInSalesforce } from "../services/salesforceService.js";
 const leadSchema = new mongoose.Schema({
     firstName: { type: String, required: true },
     lastName: { type: String, required: true },
-    email: { type: String, required: true },
+    email: { type: String, required: false },
     password: { type: String, required: true },
     resetPasswordToken: String,
     resetPasswordExpires: Date,

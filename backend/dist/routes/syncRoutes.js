@@ -1,6 +1,5 @@
 import express from "express";
 const router = express.Router();
-
 import User from "../models/User.js";
 import Lead from "../models/Lead.js";
 import Contact from "../models/Contact.js";
@@ -10,14 +9,12 @@ import Session from "../models/Session.js";
 import Character from "../models/Character.js";
 import Dungeon from "../models/Dungeon.js";
 import CampaignMember from "../models/CampaignMember.js";
-
 // ─────────────────────────────────────────────
 // API Key Auth Middleware (server-to-server only)
 // ─────────────────────────────────────────────
-const authenticateSync = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+const authenticateSync = (req, res, next) => {
     const apiKey = req.headers["x-api-key"];
     const validApiKey = process.env.SYNC_API_KEY;
-
     if (!validApiKey) {
         return res.status(500).json({ error: "SYNC_API_KEY is not configured on the server." });
     }
@@ -26,12 +23,10 @@ const authenticateSync = (req: express.Request, res: express.Response, next: exp
     }
     return next();
 };
-
 // ─────────────────────────────────────────────
 // Helper: standard sync result tracker
 // ─────────────────────────────────────────────
-const makeResults = () => ({ success: 0, updated: 0, skipped: 0, failed: 0, errors: [] as any[] });
-
+const makeResults = () => ({ success: 0, updated: 0, skipped: 0, failed: 0, errors: [] });
 // ─────────────────────────────────────────────
 // POST /api/sync/users
 // Payload: { users: [{ sfID, name, email, phone, role, userNumber }] }
@@ -39,10 +34,9 @@ const makeResults = () => ({ success: 0, updated: 0, skipped: 0, failed: 0, erro
 router.post("/users", authenticateSync, async (req, res) => {
     try {
         const { users } = req.body;
-        if (!Array.isArray(users)) return res.status(400).json({ error: "'users' must be an array" });
-
+        if (!Array.isArray(users))
+            return res.status(400).json({ error: "'users' must be an array" });
         const results = makeResults();
-
         for (const u of users) {
             try {
                 const existing = await User.findOne({
@@ -50,19 +44,20 @@ router.post("/users", authenticateSync, async (req, res) => {
                         ...(u.sfID ? [{ sfID: u.sfID }] : []),
                         ...(u.email ? [{ email: u.email }] : []),
                     ]
-                }) as any;
-
+                });
                 if (existing) {
                     // Update non-auth fields only — never overwrite hashed password from SF
                     existing.name = u.name || existing.name;
                     existing.phone = u.phone || existing.phone;
                     existing.role = u.role || existing.role;
                     existing.userNumber = u.userNumber || existing.userNumber;
-                    if (u.sfID) existing.sfID = u.sfID;
+                    if (u.sfID)
+                        existing.sfID = u.sfID;
                     existing.updatedAt = new Date();
                     await existing.save();
                     results.updated++;
-                } else {
+                }
+                else {
                     // Create new user — password will be hashed by pre-save hook
                     const tempPassword = u.password || `SF_IMPORT_${u.sfID || Date.now()}`;
                     await User.create({
@@ -77,18 +72,18 @@ router.post("/users", authenticateSync, async (req, res) => {
                     });
                     results.success++;
                 }
-            } catch (err: any) {
+            }
+            catch (err) {
                 results.failed++;
                 results.errors.push({ sfID: u.sfID, email: u.email, error: err.message });
             }
         }
-
         res.json({ message: "User sync completed", results });
-    } catch (err: any) {
+    }
+    catch (err) {
         res.status(500).json({ error: "User sync failed", details: err.message });
     }
 });
-
 // ─────────────────────────────────────────────
 // POST /api/sync/leads
 // Payload: { leads: [{ sfLeadId, firstName, lastName, email, phone, company, status, source }] }
@@ -96,10 +91,9 @@ router.post("/users", authenticateSync, async (req, res) => {
 router.post("/leads", authenticateSync, async (req, res) => {
     try {
         const { leads } = req.body;
-        if (!Array.isArray(leads)) return res.status(400).json({ error: "'leads' must be an array" });
-
+        if (!Array.isArray(leads))
+            return res.status(400).json({ error: "'leads' must be an array" });
         const results = makeResults();
-
         for (const l of leads) {
             try {
                 const existing = await Lead.findOne({
@@ -107,8 +101,7 @@ router.post("/leads", authenticateSync, async (req, res) => {
                         ...(l.sfLeadId ? [{ sfLeadId: l.sfLeadId }] : []),
                         ...(l.email ? [{ email: l.email }] : []),
                     ]
-                }) as any;
-
+                });
                 if (existing) {
                     existing.firstName = l.firstName || existing.firstName;
                     existing.lastName = l.lastName || existing.lastName;
@@ -116,12 +109,16 @@ router.post("/leads", authenticateSync, async (req, res) => {
                     existing.company = l.company || existing.company;
                     existing.status = l.status || existing.status;
                     existing.source = l.source || existing.source;
-                    if (l.sfLeadId) existing.sfLeadId = l.sfLeadId;
-                    if (l.sfRecordTypeId) existing.sfRecordTypeId = l.sfRecordTypeId;
-                    if (l.sfRecordTypeName) existing.sfRecordTypeName = l.sfRecordTypeName;
+                    if (l.sfLeadId)
+                        existing.sfLeadId = l.sfLeadId;
+                    if (l.sfRecordTypeId)
+                        existing.sfRecordTypeId = l.sfRecordTypeId;
+                    if (l.sfRecordTypeName)
+                        existing.sfRecordTypeName = l.sfRecordTypeName;
                     await existing.save();
                     results.updated++;
-                } else {
+                }
+                else {
                     const tempPassword = l.password || `SF_IMPORT_${l.sfLeadId || Date.now()}`;
                     await Lead.create({
                         firstName: l.firstName,
@@ -139,18 +136,18 @@ router.post("/leads", authenticateSync, async (req, res) => {
                     });
                     results.success++;
                 }
-            } catch (err: any) {
+            }
+            catch (err) {
                 results.failed++;
                 results.errors.push({ sfLeadId: l.sfLeadId, email: l.email, error: err.message });
             }
         }
-
         res.json({ message: "Lead sync completed", results });
-    } catch (err: any) {
+    }
+    catch (err) {
         res.status(500).json({ error: "Lead sync failed", details: err.message });
     }
 });
-
 // ─────────────────────────────────────────────
 // POST /api/sync/contacts
 // Payload: { contacts: [{ sfID, name, email, phone, role, accountSfID, notes }] }
@@ -158,36 +155,37 @@ router.post("/leads", authenticateSync, async (req, res) => {
 router.post("/contacts", authenticateSync, async (req, res) => {
     try {
         const { contacts } = req.body;
-        if (!Array.isArray(contacts)) return res.status(400).json({ error: "'contacts' must be an array" });
-
+        if (!Array.isArray(contacts))
+            return res.status(400).json({ error: "'contacts' must be an array" });
         const results = makeResults();
-
         for (const c of contacts) {
             try {
                 // Resolve account reference from sfID if provided
                 let accountId = null;
                 if (c.accountSfID) {
-                    const account = await Account.findOne({ sfID: c.accountSfID }) as any;
-                    if (account) accountId = account._id;
+                    const account = await Account.findOne({ sfID: c.accountSfID });
+                    if (account)
+                        accountId = account._id;
                 }
-
                 const existing = await Contact.findOne({
                     $or: [
                         ...(c.sfID ? [{ sfID: c.sfID }] : []),
                         ...(c.email ? [{ email: c.email }] : []),
                     ]
-                }) as any;
-
+                });
                 if (existing) {
                     existing.name = c.name || existing.name;
                     existing.phone = c.phone || existing.phone;
                     existing.role = c.role || existing.role;
                     existing.notes = c.notes || existing.notes;
-                    if (accountId) existing.accountId = accountId;
-                    if (c.sfID) existing.sfID = c.sfID;
+                    if (accountId)
+                        existing.accountId = accountId;
+                    if (c.sfID)
+                        existing.sfID = c.sfID;
                     await existing.save();
                     results.updated++;
-                } else {
+                }
+                else {
                     await Contact.create({
                         name: c.name,
                         email: c.email,
@@ -201,18 +199,18 @@ router.post("/contacts", authenticateSync, async (req, res) => {
                     });
                     results.success++;
                 }
-            } catch (err: any) {
+            }
+            catch (err) {
                 results.failed++;
                 results.errors.push({ sfID: c.sfID, email: c.email, error: err.message });
             }
         }
-
         res.json({ message: "Contact sync completed", results });
-    } catch (err: any) {
+    }
+    catch (err) {
         res.status(500).json({ error: "Contact sync failed", details: err.message });
     }
 });
-
 // ─────────────────────────────────────────────
 // POST /api/sync/sessions
 // Payload: { sessions: [{ sfID, title, date, location, agenda, summary, vodUrl, campaignSfID }] }
@@ -220,28 +218,26 @@ router.post("/contacts", authenticateSync, async (req, res) => {
 router.post("/sessions", authenticateSync, async (req, res) => {
     try {
         const { sessions } = req.body;
-        if (!Array.isArray(sessions)) return res.status(400).json({ error: "'sessions' must be an array" });
-
+        if (!Array.isArray(sessions))
+            return res.status(400).json({ error: "'sessions' must be an array" });
         const results = makeResults();
-
         for (const s of sessions) {
             try {
                 // Resolve campaign reference
                 let campaignId = null;
                 if (s.campaignSfID) {
-                    const campaign = await Campaign.findOne({ sfID: s.campaignSfID }) as any;
-                    if (campaign) campaignId = campaign._id;
+                    const campaign = await Campaign.findOne({ sfID: s.campaignSfID });
+                    if (campaign)
+                        campaignId = campaign._id;
                 }
-                if (!campaignId && s.campaignId) campaignId = s.campaignId;
-
+                if (!campaignId && s.campaignId)
+                    campaignId = s.campaignId;
                 if (!campaignId) {
                     results.failed++;
                     results.errors.push({ sfID: s.sfID, error: "Could not resolve campaign reference" });
                     continue;
                 }
-
-                const existing = await Session.findOne({ sfID: s.sfID }) as any;
-
+                const existing = await Session.findOne({ sfID: s.sfID });
                 if (existing) {
                     existing.title = s.title || existing.title;
                     existing.date = s.date || existing.date;
@@ -251,7 +247,8 @@ router.post("/sessions", authenticateSync, async (req, res) => {
                     existing.vodUrl = s.vodUrl || existing.vodUrl;
                     await existing.save();
                     results.updated++;
-                } else {
+                }
+                else {
                     await Session.create({
                         title: s.title,
                         campaign: campaignId,
@@ -264,18 +261,18 @@ router.post("/sessions", authenticateSync, async (req, res) => {
                     });
                     results.success++;
                 }
-            } catch (err: any) {
+            }
+            catch (err) {
                 results.failed++;
                 results.errors.push({ sfID: s.sfID, error: err.message });
             }
         }
-
         res.json({ message: "Session sync completed", results });
-    } catch (err: any) {
+    }
+    catch (err) {
         res.status(500).json({ error: "Session sync failed", details: err.message });
     }
 });
-
 // ─────────────────────────────────────────────
 // POST /api/sync/characters
 // Payload: { characters: [{ sfID, name, gameType, class, level, isDead, playerSfID, campaignSfID, dungeonSfID }] }
@@ -283,45 +280,47 @@ router.post("/sessions", authenticateSync, async (req, res) => {
 router.post("/characters", authenticateSync, async (req, res) => {
     try {
         const { characters } = req.body;
-        if (!Array.isArray(characters)) return res.status(400).json({ error: "'characters' must be an array" });
-
+        if (!Array.isArray(characters))
+            return res.status(400).json({ error: "'characters' must be an array" });
         const results = makeResults();
-
         for (const c of characters) {
             try {
                 // Resolve player Account reference
                 let playerId = null;
                 if (c.playerSfID) {
-                    const account = await Account.findOne({ sfID: c.playerSfID }) as any;
-                    if (account) playerId = account._id;
+                    const account = await Account.findOne({ sfID: c.playerSfID });
+                    if (account)
+                        playerId = account._id;
                 }
-
                 let campaignId = null;
                 if (c.campaignSfID) {
-                    const campaign = await Campaign.findOne({ sfID: c.campaignSfID }) as any;
-                    if (campaign) campaignId = campaign._id;
+                    const campaign = await Campaign.findOne({ sfID: c.campaignSfID });
+                    if (campaign)
+                        campaignId = campaign._id;
                 }
-
                 let dungeonId = null;
                 if (c.dungeonSfID) {
-                    const dungeon = await Dungeon.findOne({ sfID: c.dungeonSfID }) as any;
-                    if (dungeon) dungeonId = dungeon._id;
+                    const dungeon = await Dungeon.findOne({ sfID: c.dungeonSfID });
+                    if (dungeon)
+                        dungeonId = dungeon._id;
                 }
-
-                const existing = await Character.findOne({ sfID: c.sfID }) as any;
-
+                const existing = await Character.findOne({ sfID: c.sfID });
                 if (existing) {
                     existing.name = c.name || existing.name;
                     existing.gameType = c.gameType || existing.gameType;
                     existing.class = c.class || existing.class;
                     existing.level = c.level ?? existing.level;
                     existing.isDead = c.isDead ?? existing.isDead;
-                    if (playerId) existing.player = playerId;
-                    if (campaignId) existing.campaign = campaignId;
-                    if (dungeonId) existing.dungeon = dungeonId;
+                    if (playerId)
+                        existing.player = playerId;
+                    if (campaignId)
+                        existing.campaign = campaignId;
+                    if (dungeonId)
+                        existing.dungeon = dungeonId;
                     await existing.save();
                     results.updated++;
-                } else {
+                }
+                else {
                     if (!playerId) {
                         results.failed++;
                         results.errors.push({ sfID: c.sfID, error: "Could not resolve player Account reference" });
@@ -340,18 +339,18 @@ router.post("/characters", authenticateSync, async (req, res) => {
                     });
                     results.success++;
                 }
-            } catch (err: any) {
+            }
+            catch (err) {
                 results.failed++;
                 results.errors.push({ sfID: c.sfID, error: err.message });
             }
         }
-
         res.json({ message: "Character sync completed", results });
-    } catch (err: any) {
+    }
+    catch (err) {
         res.status(500).json({ error: "Character sync failed", details: err.message });
     }
 });
-
 // ─────────────────────────────────────────────
 // POST /api/sync/dungeons
 // Payload: { dungeons: [{ sfID, name, description }] }
@@ -359,20 +358,19 @@ router.post("/characters", authenticateSync, async (req, res) => {
 router.post("/dungeons", authenticateSync, async (req, res) => {
     try {
         const { dungeons } = req.body;
-        if (!Array.isArray(dungeons)) return res.status(400).json({ error: "'dungeons' must be an array" });
-
+        if (!Array.isArray(dungeons))
+            return res.status(400).json({ error: "'dungeons' must be an array" });
         const results = makeResults();
-
         for (const d of dungeons) {
             try {
-                const existing = await Dungeon.findOne({ sfID: d.sfID }) as any;
-
+                const existing = await Dungeon.findOne({ sfID: d.sfID });
                 if (existing) {
                     existing.name = d.name || existing.name;
                     existing.description = d.description || existing.description;
                     await existing.save();
                     results.updated++;
-                } else {
+                }
+                else {
                     await Dungeon.create({
                         name: d.name,
                         description: d.description,
@@ -380,18 +378,18 @@ router.post("/dungeons", authenticateSync, async (req, res) => {
                     });
                     results.success++;
                 }
-            } catch (err: any) {
+            }
+            catch (err) {
                 results.failed++;
                 results.errors.push({ sfID: d.sfID, error: err.message });
             }
         }
-
         res.json({ message: "Dungeon sync completed", results });
-    } catch (err: any) {
+    }
+    catch (err) {
         res.status(500).json({ error: "Dungeon sync failed", details: err.message });
     }
 });
-
 // ─────────────────────────────────────────────
 // GET /api/sync/status
 // Health check for sync endpoint
@@ -402,31 +400,26 @@ router.post("/dungeons", authenticateSync, async (req, res) => {
 // Let the Web App handle Salesforce API field names mappings!
 // ─────────────────────────────────────────────
 import PlayerSession from "../models/PlayerSession.js";
-
 router.post("/salesforce", authenticateSync, async (req, res) => {
     try {
         const { object, records } = req.body;
         if (!object || !Array.isArray(records)) {
             return res.status(400).json({ error: "'object' must be provided and 'records' must be an array" });
         }
-
         const results = makeResults();
-
         // Object routers
         if (object === "Account") {
             for (const r of records) {
                 try {
                     const sfID = r.Id;
                     const email = r.PersonEmail || r.Email;
-                    
                     // Check for existing Account or User with this email/sfID
                     let existing = await Account.findOne({
                         $or: [
                             ...(sfID ? [{ sfID }] : []),
                             ...(email ? [{ email }] : []),
                         ]
-                    }) as any;
-
+                    });
                     // Also check Users collection to prevent duplicates for converted leads/users
                     if (!existing && email) {
                         const existingUser = await User.findOne({ email });
@@ -436,18 +429,19 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
                             continue;
                         }
                     }
-
                     if (existing) {
                         existing.name = r.Name || existing.name;
                         existing.phone = r.Phone || existing.phone;
                         existing.email = email || existing.email;
                         existing.industry = r.Industry || existing.industry;
                         existing.website = r.Website || existing.website;
-                        if (sfID) existing.sfID = sfID;
+                        if (sfID)
+                            existing.sfID = sfID;
                         existing.updatedAt = new Date();
                         await existing.save();
                         results.updated++;
-                    } else {
+                    }
+                    else {
                         const tempPassword = `SF_IMPORT_${sfID || Date.now()}`;
                         await Account.create({
                             name: r.Name,
@@ -461,24 +455,24 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
                         });
                         results.success++;
                     }
-                } catch (err: any) {
+                }
+                catch (err) {
                     results.failed++;
                     results.errors.push({ sfID: r.Id, error: err.message });
                 }
             }
-        } else if (object === "Lead") {
+        }
+        else if (object === "Lead") {
             for (const r of records) {
                 try {
                     const sfID = r.Id;
                     const email = r.Email;
-                    
                     const existing = await Lead.findOne({
                         $or: [
                             ...(sfID ? [{ sfLeadId: sfID }] : []),
                             ...(email ? [{ email }] : []),
                         ]
-                    }) as any;
-
+                    });
                     if (existing) {
                         existing.firstName = r.FirstName || existing.firstName;
                         existing.lastName = r.LastName || existing.lastName;
@@ -486,10 +480,12 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
                         existing.company = r.Company || existing.company;
                         existing.status = r.Status || existing.status;
                         existing.email = email || existing.email;
-                        if (sfID) existing.sfLeadId = sfID;
+                        if (sfID)
+                            existing.sfLeadId = sfID;
                         await existing.save();
                         results.updated++;
-                    } else {
+                    }
+                    else {
                         const tempPassword = `SF_IMPORT_${sfID || Date.now()}`;
                         await Lead.create({
                             firstName: r.FirstName,
@@ -505,38 +501,42 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
                         });
                         results.success++;
                     }
-                } catch (err: any) {
+                }
+                catch (err) {
                     results.failed++;
                     results.errors.push({ sfID: r.Id, error: err.message });
                 }
             }
-        } else if (object === "Contact") {
+        }
+        else if (object === "Contact") {
             for (const r of records) {
                 try {
                     const sfID = r.Id;
                     const email = r.Email;
                     let accountId = null;
                     if (r.AccountId) {
-                        const account = await Account.findOne({ sfID: r.AccountId }) as any;
-                        if (account) accountId = account._id;
+                        const account = await Account.findOne({ sfID: r.AccountId });
+                        if (account)
+                            accountId = account._id;
                     }
-
                     const existing = await Contact.findOne({
                         $or: [
                             ...(sfID ? [{ sfID }] : []),
                             ...(email ? [{ email }] : []),
                         ]
-                    }) as any;
-
+                    });
                     if (existing) {
                         existing.name = r.Name || existing.name;
                         existing.phone = r.Phone || existing.phone;
                         existing.email = email || existing.email;
-                        if (accountId) existing.accountId = accountId;
-                        if (sfID) existing.sfID = sfID;
+                        if (accountId)
+                            existing.accountId = accountId;
+                        if (sfID)
+                            existing.sfID = sfID;
                         await existing.save();
                         results.updated++;
-                    } else {
+                    }
+                    else {
                         const tempPassword = `SF_IMPORT_${sfID || Date.now()}`;
                         await Contact.create({
                             name: r.Name,
@@ -549,70 +549,81 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
                         });
                         results.success++;
                     }
-                } catch (err: any) {
+                }
+                catch (err) {
                     results.failed++;
                     results.errors.push({ sfID: r.Id, error: err.message });
                 }
             }
-        } else if (object === "Campaign") {
+        }
+        else if (object === "Campaign") {
             for (const r of records) {
                 try {
                     const sfID = r.Id;
-                    
-                    const existing = await Campaign.findOne({ sfID }) as any;
-
+                    const existing = await Campaign.findOne({ sfID });
                     if (existing) {
                         existing.title = r.Name || existing.title;
                         existing.description = r.Description || existing.description;
                         existing.status = r.Status || existing.status;
-                        if (r.StartDate) existing.startDate = new Date(r.StartDate);
-                        if (r.EndDate) existing.endDate = new Date(r.EndDate);
+                        if (r.StartDate)
+                            existing.startDate = new Date(r.StartDate);
+                        if (r.EndDate)
+                            existing.endDate = new Date(r.EndDate);
                         await existing.save();
                         results.updated++;
-                    } else {
-                        const payload: any = {
+                    }
+                    else {
+                        const payload = {
                             title: r.Name,
                             description: r.Description,
                             status: r.Status || "Not Started",
                             sfID: sfID
                         };
-                        if (r.StartDate) payload.startDate = new Date(r.StartDate);
-                        if (r.EndDate) payload.endDate = new Date(r.EndDate);
-                        
+                        if (r.StartDate)
+                            payload.startDate = new Date(r.StartDate);
+                        if (r.EndDate)
+                            payload.endDate = new Date(r.EndDate);
                         await Campaign.create(payload);
                         results.success++;
                     }
-                } catch (err: any) {
+                }
+                catch (err) {
                     results.failed++;
                     results.errors.push({ sfID: r.Id, error: err.message });
                 }
             }
-        } else if (object === "Session__c") {
+        }
+        else if (object === "Session__c") {
             for (const r of records) {
                 try {
                     const sfID = r.Id;
-                    
                     let campaignId = null;
                     if (r.Campaign__c) {
-                        const campaign = await Campaign.findOne({ sfID: r.Campaign__c }) as any;
-                        if (campaign) campaignId = campaign._id;
+                        const campaign = await Campaign.findOne({ sfID: r.Campaign__c });
+                        if (campaign)
+                            campaignId = campaign._id;
                     }
-
-                    const existing = await Session.findOne({ sfID }) as any;
-
+                    const existing = await Session.findOne({ sfID });
                     if (existing) {
                         existing.title = r.Name || existing.title;
                         // Assuming Date__c is the date field in Salesforce session
-                        if (r.Date__c) existing.date = new Date(r.Date__c);
-                        if (r.Location__c) existing.location = r.Location__c;
-                        if (r.Agenda__c) existing.agenda = r.Agenda__c;
-                        if (r.Summary__c) existing.summary = r.Summary__c;
-                        if (r.VOD_URL__c) existing.vodUrl = r.VOD_URL__c;
-                        if (campaignId) existing.campaign = campaignId;
+                        if (r.Date__c)
+                            existing.date = new Date(r.Date__c);
+                        if (r.Location__c)
+                            existing.location = r.Location__c;
+                        if (r.Agenda__c)
+                            existing.agenda = r.Agenda__c;
+                        if (r.Summary__c)
+                            existing.summary = r.Summary__c;
+                        if (r.VOD_URL__c)
+                            existing.vodUrl = r.VOD_URL__c;
+                        if (campaignId)
+                            existing.campaign = campaignId;
                         await existing.save();
                         results.updated++;
-                    } else {
-                        const payload: any = {
+                    }
+                    else {
+                        const payload = {
                             title: r.Name,
                             campaign: campaignId,
                             location: r.Location__c,
@@ -621,49 +632,53 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
                             vodUrl: r.VOD_URL__c,
                             sfID: sfID
                         };
-                        if (r.Date__c) payload.date = new Date(r.Date__c);
-                        
+                        if (r.Date__c)
+                            payload.date = new Date(r.Date__c);
                         await Session.create(payload);
                         results.success++;
                     }
-                } catch (err: any) {
+                }
+                catch (err) {
                     results.failed++;
                     results.errors.push({ sfID: r.Id, error: err.message });
                 }
             }
-        } else if (object === "Player_Session__c") {
+        }
+        else if (object === "Player_Session__c") {
             for (const r of records) {
                 try {
                     const sfID = r.Id;
-                    
                     let sessionId = null;
                     if (r.Session__c) {
-                        const session = await Session.findOne({ sfID: r.Session__c }) as any;
-                        if (session) sessionId = session._id;
+                        const session = await Session.findOne({ sfID: r.Session__c });
+                        if (session)
+                            sessionId = session._id;
                     }
-                    
                     let playerId = null;
                     if (r.Player__c) { // Note: Player__c is Account
-                        const account = await User.findOne({ sfID: r.Player__c }) as any;
-                        if (account) playerId = account._id;
+                        const account = await User.findOne({ sfID: r.Player__c });
+                        if (account)
+                            playerId = account._id;
                     }
-                    
                     let campaignId = null;
                     if (r.Campaign__c) {
-                        const campaign = await Campaign.findOne({ sfID: r.Campaign__c }) as any;
-                        if (campaign) campaignId = campaign._id;
+                        const campaign = await Campaign.findOne({ sfID: r.Campaign__c });
+                        if (campaign)
+                            campaignId = campaign._id;
                     }
-
-                    const existing = await PlayerSession.findOne({ sfID }) as any;
-
+                    const existing = await PlayerSession.findOne({ sfID });
                     if (existing) {
                         existing.name = r.Name || existing.name;
-                        if (sessionId) existing.session = sessionId;
-                        if (playerId) existing.player = playerId;
-                        if (campaignId) existing.campaign = campaignId;
+                        if (sessionId)
+                            existing.session = sessionId;
+                        if (playerId)
+                            existing.player = playerId;
+                        if (campaignId)
+                            existing.campaign = campaignId;
                         await existing.save();
                         results.updated++;
-                    } else {
+                    }
+                    else {
                         await PlayerSession.create({
                             name: r.Name,
                             session: sessionId,
@@ -673,67 +688,67 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
                         });
                         results.success++;
                     }
-                } catch (err: any) {
+                }
+                catch (err) {
                     results.failed++;
                     results.errors.push({ sfID: r.Id, error: err.message });
                 }
             }
-        } else if (object === "CampaignMember") {
+        }
+        else if (object === "CampaignMember") {
             for (const r of records) {
                 try {
                     const sfID = r.Id;
-                    
                     let campaignId = null;
                     if (r.CampaignId) {
-                        const campaign = await Campaign.findOne({ sfID: r.CampaignId }) as any;
-                        if (campaign) campaignId = campaign._id;
+                        const campaign = await Campaign.findOne({ sfID: r.CampaignId });
+                        if (campaign)
+                            campaignId = campaign._id;
                     }
-                    
                     if (!campaignId) {
                         console.log(`[SYNC] CampaignMember ${sfID} skipped: Campaign ${r.CampaignId} not found.`);
                         results.skipped++;
                         continue;
                     }
-
                     let leadId = null;
                     if (r.LeadId) {
-                        const leadDoc = await Lead.findOne({ sfLeadId: r.LeadId }) as any;
-                        if (leadDoc) leadId = leadDoc._id;
+                        const leadDoc = await Lead.findOne({ sfLeadId: r.LeadId });
+                        if (leadDoc)
+                            leadId = leadDoc._id;
                     }
-
                     let contactId = null;
                     if (r.ContactId) {
-                        const contactDoc = await Contact.findOne({ sfID: r.ContactId }) as any;
-                        if (contactDoc) contactId = contactDoc._id;
+                        const contactDoc = await Contact.findOne({ sfID: r.ContactId });
+                        if (contactDoc)
+                            contactId = contactDoc._id;
                     }
-
                     // Account ref is derived from Contact in Salesforce
-                    let accountId = null; 
+                    let accountId = null;
                     if (contactId) {
-                        const contactDoc = await Contact.findById(contactId) as any;
-                        if (contactDoc) accountId = contactDoc.accountId;
+                        const contactDoc = await Contact.findById(contactId);
+                        if (contactDoc)
+                            accountId = contactDoc.accountId;
                     }
-
                     // Skip if neither lead nor contact is found
                     if (!leadId && !contactId) {
                         console.log(`[SYNC] CampaignMember ${sfID} skipped: No related Lead or Contact found.`);
                         results.skipped++;
                         continue;
                     }
-
-                    const existing = await CampaignMember.findOne({ sfID }) as any;
-
+                    const existing = await CampaignMember.findOne({ sfID });
                     if (existing) {
                         existing.campaign = campaignId;
                         existing.lead = leadId || existing.lead;
                         existing.contact = contactId || existing.contact;
                         existing.account = accountId || existing.account;
                         existing.status = r.Status || existing.status;
-                        if (r.FirstRespondedDate) existing.joinedAt = new Date(r.FirstRespondedDate);
+                        if (r.FirstRespondedDate)
+                            existing.joinedAt = new Date(r.FirstRespondedDate);
                         await existing.save();
                         results.updated++;
-                    } else {
-                        const payload: any = {
+                    }
+                    else {
+                        const payload = {
                             campaign: campaignId,
                             lead: leadId,
                             contact: contactId,
@@ -741,24 +756,25 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
                             status: r.Status,
                             sfID: sfID
                         };
-                        if (r.FirstRespondedDate) payload.joinedAt = new Date(r.FirstRespondedDate);
-                        
+                        if (r.FirstRespondedDate)
+                            payload.joinedAt = new Date(r.FirstRespondedDate);
                         await CampaignMember.create(payload);
                         results.success++;
                     }
-                } catch (err: any) {
+                }
+                catch (err) {
                     results.failed++;
                     results.errors.push({ sfID: r.Id, error: err.message });
                 }
             }
-        } else {
+        }
+        else {
             return res.status(400).json({ error: `Unsupported object type: ${object}` });
         }
-
         res.json({ message: `${object} sync completed`, results });
-    } catch (err: any) {
+    }
+    catch (err) {
         res.status(500).json({ error: `Sync failed for ${req.body.object}`, details: err.message });
     }
 });
-
 export default router;

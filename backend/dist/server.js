@@ -11,6 +11,9 @@ import adminRoutes from "./routes/adminRoutes.js";
 import campaignRoutes from "./routes/campaignRoutes.js";
 import taskRoutes from "./routes/taskRoutes.js";
 import eventRoutes from "./routes/eventRoutes.js";
+import tabletopRoutes from "./routes/tabletopRoutes.js";
+import syncRoutes from "./routes/syncRoutes.js";
+import campaignMemberRoutes from "./routes/campaignMemberRoutes.js";
 import https from "https";
 import http from "http";
 import fs from "fs";
@@ -52,7 +55,10 @@ app.use((req, res, next) => {
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 mongoose.connect(process.env.MONGO_URI || "mongodb://localhost:27017/personal_web_app")
-    .then(() => console.log("MongoDB Connected"))
+    .then(() => {
+    const uri = process.env.MONGO_URI || 'DEFAULT (localhost)';
+    console.log(`[BACKEND] MongoDB Connected! URI: ${uri.replace(/:([^@]+)@/, ':***@')}`);
+})
     .catch((err) => console.error(err));
 app.use("/db", dbRoutes);
 app.use("/admin", adminRoutes);
@@ -62,6 +68,9 @@ app.use("/api/accounts", accountRoutes);
 app.use("/api/campaigns", campaignRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/events", eventRoutes);
+app.use("/api/tabletop", tabletopRoutes);
+app.use("/api/sync", syncRoutes);
+app.use("/api/campaign-members", campaignMemberRoutes);
 if (hasCerts) {
     const httpsServer = https.createServer(credentials, app);
     httpsServer.listen(httpsPort, () => {

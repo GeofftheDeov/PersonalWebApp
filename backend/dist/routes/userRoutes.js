@@ -8,22 +8,28 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { sendResetPasswordEmail, sendVerificationEmail } from "../services/emailService.js";
+import { auth } from "../middleware/auth.js";
 import { OAuth2Client } from "google-auth-library";
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 router.post("/register", async (req, res) => {
     try {
         const { name, email, password } = req.body;
-        const token = crypto.randomBytes(20).toString("hex");
+        const isDev = process.env.NODE_ENV === "development" || req.headers.host?.includes("localhost");
+        const token = isDev ? undefined : crypto.randomBytes(20).toString("hex");
         const user = new User({
             name,
             email,
             password: password,
-            isVerified: false,
+            isVerified: isDev,
             emailVerificationToken: token
         });
         await user.save();
-        await sendVerificationEmail(email, token);
-        res.status(201).json({ message: "User registered successfully! Please check your email to verify your account." });
+        if (!isDev && token)
+            await sendVerificationEmail(email, token);
+        res.status(201).json({
+            message: isDev ? "User registered successfully!" : "User registered successfully! Please check your email to verify your account.",
+            isVerified: isDev
+        });
     }
     catch (error) {
         console.error("Register Error:", error);
@@ -96,8 +102,17 @@ router.post("/login", async (req, res) => {
         console.log(`[AUTH/DEBUG] User found in ${userType}. ID: ${user._id}`);
         console.log(`[AUTH/DEBUG] Stored Email: "${user.email}"`);
         // Verify password
+        console.log(`[AUTH/DEBUG] Checking if password is set...`);
+        if (!user.password) {
+            console.log(`[AUTH/DEBUG] No password set for: "${email}". Prompting for reset.`);
+            return res.status(403).json({
+                error: "Password not set",
+                message: "Professional accounts synced from Salesforce must set a password for first-time login. Please use 'Forgot Password'.",
+                requiresReset: true
+            });
+        }
         console.log(`[AUTH/DEBUG] Comparing passwords...`);
-        const isMatch = await bcrypt.compare(password, user.password || "");
+        const isMatch = await bcrypt.compare(password, user.password);
         console.log(`[AUTH/DEBUG] Password match result: ${isMatch}`);
         if (!isMatch) {
             console.log(`[AUTH/DEBUG] Authentication FAILED for: "${email}"`);
@@ -251,6 +266,63 @@ router.post("/google-login", async (req, res) => {
         res.status(500).json({ error: "Google login failed" });
     }
 });
+router.get("/profile", auth, async (req, res) => {
+    try {
+        const { id, type } = req.user;
+        let Model;
+        if (type === "User")
+            Model = User;
+        else if (type === "Account")
+            Model = Account;
+        else if (type === "Contact")
+            Model = Contact;
+        else
+            Model = Lead;
+        const user = await Model.findById(id).select("-password -resetPasswordToken -resetPasswordExpires -emailVerificationToken");
+        if (!user)
+            return res.status(404).json({ error: "User not found" });
+        res.json(user);
+    }
+    catch (err) {
+        res.status(500).json({ error: "Failed to fetch profile" });
+    }
+});
+router.put("/profile", auth, async (req, res) => {
+    try {
+        const { id, type } = req.user;
+        const updateData = req.body;
+        // Prevent sensitive field updates
+        delete updateData._id;
+        delete updateData.password;
+        delete updateData.email;
+        delete updateData.role;
+        delete updateData.isVerified;
+        let Model;
+        if (type === "User")
+            Model = User;
+        else if (type === "Account")
+            Model = Account;
+        else if (type === "Contact")
+            Model = Contact;
+        else
+            Model = Lead;
+        // Special handling for Lead model which uses firstName/lastName
+        if (type === "Lead" && updateData.name) {
+            const parts = updateData.name.split(' ');
+            updateData.firstName = parts[0];
+            updateData.lastName = parts.slice(1).join(' ') || 'N/A';
+            delete updateData.name;
+        }
+        const updatedUser = await Model.findByIdAndUpdate(id, { $set: updateData }, { new: true }).select("-password");
+        if (!updatedUser)
+            return res.status(404).json({ error: "User not found" });
+        res.json({ message: "Profile updated successfully", user: updatedUser });
+    }
+    catch (err) {
+        console.error("Profile update error:", err);
+        res.status(500).json({ error: "Failed to update profile" });
+    }
+});
 router.post("/forgot-password", async (req, res) => {
     const { email } = req.body;
     try {
@@ -284,7 +356,7 @@ router.post("/forgot-password", async (req, res) => {
         await Model.updateOne({ _id: user._id }, {
             $set: {
                 resetPasswordToken: token,
-                resetPasswordExpires: Date.now() + 3600000 // 1 hour
+                resetPasswordExpires: new Date(Date.now() + 3600000) // 1 hour
             }
         });
         await sendResetPasswordEmail(user.email, token);
@@ -298,35 +370,43 @@ router.post("/forgot-password", async (req, res) => {
 router.post("/reset-password", async (req, res) => {
     const { token, newPassword } = req.body;
     try {
+        console.log(`[RESET] Searching for token: ${token}`);
         let user = await User.findOne({
             resetPasswordToken: token,
-            resetPasswordExpires: { $gt: Date.now() },
+            resetPasswordExpires: { $gt: new Date() },
         });
         let userType = "User";
         if (!user) {
             user = await Account.findOne({
                 resetPasswordToken: token,
-                resetPasswordExpires: { $gt: Date.now() },
+                resetPasswordExpires: { $gt: new Date() },
             });
             userType = "Account";
         }
         if (!user) {
             user = await Contact.findOne({
                 resetPasswordToken: token,
-                resetPasswordExpires: { $gt: Date.now() },
+                resetPasswordExpires: { $gt: new Date() },
             });
             userType = "Contact";
         }
         if (!user) {
             user = await Lead.findOne({
                 resetPasswordToken: token,
-                resetPasswordExpires: { $gt: Date.now() },
+                resetPasswordExpires: { $gt: new Date() },
             });
             userType = "Lead";
         }
         if (!user) {
+            console.log(`[RESET] FAILED: No user found for token ${token} or it has expired.`);
+            // Debug: Check if token exists AT ALL without expiration check
+            const debugUser = await User.findOne({ resetPasswordToken: token });
+            if (debugUser) {
+                console.log(`[RESET] DEBUG: Token exists but expiration check failed. DB Value: ${debugUser.resetPasswordExpires}, Type: ${typeof debugUser.resetPasswordExpires}`);
+            }
             return res.status(400).json({ error: "Invalid or expired token" });
         }
+        console.log(`[RESET] SUCCESS: Found ${userType} ${user.email}`);
         // We need to use the model specifically to trigger pre-save hooks if they exist
         let Model;
         if (userType === "User")

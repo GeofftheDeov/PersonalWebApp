@@ -27,7 +27,8 @@ async function recreateUser() {
             password: hashed,
             role: "admin",
             isVerified: true,
-            userNumber: "ADM-" + Date.now(),
+            userNumber: Math.floor(1000 + Math.random() * 9000).toString(),
+            userDigit: "ADM-" + Date.now(),
             createdAt: new Date(),
             updatedAt: new Date()
         };

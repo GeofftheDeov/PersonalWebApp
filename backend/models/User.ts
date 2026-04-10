@@ -5,6 +5,7 @@ const userSchema = new mongoose.Schema({
   name: String,
   email: String,
   phone: String,
+  handle: String,
   password: {
     type: String,
     required: true
@@ -19,6 +20,7 @@ const userSchema = new mongoose.Schema({
     default: "user"
   },
   userNumber: String,
+  userDigit: String,
   sfID: String,
   createdAt: {
     type: Date,
@@ -31,6 +33,14 @@ const userSchema = new mongoose.Schema({
 });
 
 userSchema.pre("save", async function() {
+  // Generate IDs if missing
+  if (!this.userNumber) {
+    this.userNumber = Math.floor(1000 + Math.random() * 9000).toString();
+  }
+  if (!this.userDigit) {
+    this.userDigit = "ADM-" + Date.now();
+  }
+
   if (!this.isModified("password")) return;
   try {
     const salt = await bcrypt.genSalt(10);

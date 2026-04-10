@@ -5,3 +5,4 @@ frontend/node_modules/
 certs/
 .gemini/
 changes.diff
+/backend/dist/

@@ -13,8 +13,11 @@ const accountSchema = new mongoose.Schema({
     industry: String,
     company: String,
     website: String,
+    handle: String,
     phone: String,
     address: String,
+    userNumber: String,
+    userDigit: String,
     sfID: String,
     sfRecordTypeID: String,
     sfRecordTypeName: String,
@@ -22,6 +25,14 @@ const accountSchema = new mongoose.Schema({
 });
 
 accountSchema.pre("save", async function() {
+    // Generate IDs if missing
+    if (!this.userNumber) {
+        this.userNumber = Math.floor(1000 + Math.random() * 9000).toString();
+    }
+    if (!this.userDigit) {
+        this.userDigit = "ACC-" + Date.now();
+    }
+
     if (!this.isModified("password") || !this.password) return;
     
     // Don't re-hash if it looks like an existing bcrypt hash

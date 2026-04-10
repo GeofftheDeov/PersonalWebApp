@@ -160,11 +160,13 @@ router.post("/login", async (req, res) => {
                 email: user.email, 
                 name: user.name || user.firstName || user.title,
                 userNumber: user.userNumber,
+                userDigit: user.userDigit,
                 phone: user.phone,
                 role: user.role,
                 company: user.company,
                 industry: user.industry,
-                website: user.website
+                website: user.website,
+                handle: user.handle
             } 
         });
 
@@ -299,11 +301,13 @@ router.post("/google-login", async (req, res) => {
                 email: user.email,
                 name: user.name || user.firstName || user.lastName || "User",
                 userNumber: user.userNumber,
+                userDigit: user.userDigit,
                 phone: user.phone,
                 role: user.role,
                 company: user.company,
                 industry: user.industry,
-                website: user.website
+                website: user.website,
+                handle: user.handle
             }
         });
 

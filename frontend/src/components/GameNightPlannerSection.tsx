@@ -179,7 +179,7 @@ export default function GameNightPlannerSection() {
                                 value={formData.location}
                                 onChange={e => setFormData({...formData, location: e.target.value})}
                                 className="w-full p-3 border-4 border-black bg-white text-black font-permanent text-xl uppercase focus:border-yellow-400 outline-none"
-                                placeholder="GEOF'S BASEMENT / ONLINE"
+                                placeholder="GEOFF'S BASEMENT / ONLINE"
                             />
                         </div>
                     </div>

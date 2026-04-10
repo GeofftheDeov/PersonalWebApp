@@ -10,19 +10,29 @@ const contactSchema = new mongoose.Schema({
     resetPasswordToken: String,
     resetPasswordExpires: Date,
     phone: String,
+    handle: String,
     role: String,
     accountId: { type: mongoose.Schema.Types.ObjectId, ref: "Account" },
+    userNumber: String,
+    userDigit: String,
     notes: String,
     sfID: String,
     createdAt: { type: Date, default: Date.now },
 });
 
 contactSchema.pre("save", async function() {
-    const self = this as any;
-    if (!self.isModified("password") || !self.password) return;
+    // Generate IDs if missing
+    if (!this.userNumber) {
+        this.userNumber = Math.floor(1000 + Math.random() * 9000).toString();
+    }
+    if (!this.userDigit) {
+        this.userDigit = "CON-" + Date.now();
+    }
+
+    if (!this.isModified("password") || !this.password) return;
     try {
         const salt = await bcrypt.genSalt(10);
-        self.password = await bcrypt.hash(self.password, salt);
+        this.password = await bcrypt.hash(this.password, salt);
     } catch (err: any) {
         throw err;
     }

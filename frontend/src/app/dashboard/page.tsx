@@ -422,6 +422,19 @@ export default function DashboardPage() {
                                     />
                                 </div>
                                 <div className="flex flex-col">
+                                    <label className="text-teal dark:text-orange-400 uppercase text-sm mb-1">HANDLE:</label>
+                                    <div className="relative flex items-center">
+                                        <span className="absolute left-3 text-yellow-400 font-permanent text-xl pointer-events-none">@</span>
+                                        <input 
+                                            type="text" 
+                                            value={profileData.handle || ''} 
+                                            onChange={(e) => setProfileData({...profileData, handle: e.target.value.replace(/^@/, '')})}
+                                            className="bg-black border-2 border-yellow-400 p-2 pl-8 text-white outline-none focus:border-teal-500 w-full"
+                                            placeholder="yourhandle"
+                                        />
+                                    </div>
+                                </div>
+                                <div className="flex flex-col">
                                     <label className="text-teal dark:text-orange-400 uppercase text-sm mb-1">PHONE:</label>
                                     <input 
                                         type="text" 
@@ -431,29 +444,11 @@ export default function DashboardPage() {
                                     />
                                 </div>
                                 <div className="flex flex-col">
-                                    <label className="text-teal dark:text-orange-400 uppercase text-sm mb-1">COMPANY:</label>
+                                    <label className="text-teal dark:text-orange-400 uppercase text-sm mb-1">EMAIL:</label>
                                     <input 
                                         type="text" 
-                                        value={profileData.company || ''} 
-                                        onChange={(e) => setProfileData({...profileData, company: e.target.value})}
-                                        className="bg-black border-2 border-yellow-400 p-2 text-white outline-none focus:border-teal-500"
-                                    />
-                                </div>
-                                <div className="flex flex-col">
-                                    <label className="text-teal dark:text-orange-400 uppercase text-sm mb-1">INDUSTRY:</label>
-                                    <input 
-                                        type="text" 
-                                        value={profileData.industry || ''} 
-                                        onChange={(e) => setProfileData({...profileData, industry: e.target.value})}
-                                        className="bg-black border-2 border-yellow-400 p-2 text-white outline-none focus:border-teal-500"
-                                    />
-                                </div>
-                                <div className="flex flex-col">
-                                    <label className="text-teal dark:text-orange-400 uppercase text-sm mb-1">WEBSITE:</label>
-                                    <input 
-                                        type="text" 
-                                        value={profileData.website || ''} 
-                                        onChange={(e) => setProfileData({...profileData, website: e.target.value})}
+                                        value={profileData.email || ''} 
+                                        onChange={(e) => setProfileData({...profileData, email: e.target.value})}
                                         className="bg-black border-2 border-yellow-400 p-2 text-white outline-none focus:border-teal-500"
                                     />
                                 </div>
@@ -476,14 +471,14 @@ export default function DashboardPage() {
                         ) : (
                             <div className="text-xl md:text-2xl font-permanent leading-tight text-yellow-400 drop-shadow-[3px_3px_0px_rgba(0,0,0,1)] tracking-tight space-y-3">
                                 <p><span className="text-teal dark:text-orange-400">NAME:</span> {user.name?.toUpperCase() || 'N/A'}</p>
-                                <p><span className="text-teal dark:text-orange-400">USER NUMBER:</span> {user.userNumber || 'N/A'}</p>
+                                {user.type === 'User' && (
+                                    <p><span className="text-teal dark:text-orange-400">INTERNAL ID:</span> {user.userDigit || 'N/A'}</p>
+                                )}
+                                <p><span className="text-teal dark:text-orange-400">HANDLE:</span> {user.handle ? `@${user.handle.toUpperCase()}` : 'N/A'}</p>
+                                <p><span className="text-teal dark:text-orange-400">UNIQUE ID:</span> {user.handle && user.userNumber ? `@${user.handle.toUpperCase()}#${user.userNumber}` : 'N/A'}</p>
                                 <p><span className="text-teal dark:text-orange-400">EMAIL:</span> {user.email?.toUpperCase() || 'N/A'}</p>
                                 <p><span className="text-teal dark:text-orange-400">TYPE:</span> {user.type?.toUpperCase() || 'N/A'}</p>
                                 <p><span className="text-teal dark:text-orange-400">PHONE:</span> {user.phone?.toUpperCase() || 'N/A'}</p>
-                                
-                                <p><span className="text-teal dark:text-orange-400">COMPANY:</span> {user.company?.toUpperCase() || 'N/A'}</p>
-                                <p><span className="text-teal dark:text-orange-400">INDUSTRY:</span> {user.industry?.toUpperCase() || 'N/A'}</p>
-                                <p><span className="text-teal dark:text-orange-400">WEBSITE:</span> {user.website?.toUpperCase() || 'N/A'}</p>
                             </div>
                         )}
                     </div>

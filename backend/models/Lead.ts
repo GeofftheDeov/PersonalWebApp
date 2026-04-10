@@ -12,6 +12,7 @@ const leadSchema = new mongoose.Schema({
     isVerified: { type: Boolean, default: false },
     emailVerificationToken: String,
     company: { type: String, required: false },
+    handle: String,
     phone: String,
     status: {
         type: String,
@@ -19,6 +20,8 @@ const leadSchema = new mongoose.Schema({
         default: "New"
     },
     source: { type: String, default: "Web App" },
+    userNumber: String,
+    userDigit: String,
     sfLeadId: String,
     sfRecordTypeId: String,
     sfRecordTypeName: String,
@@ -26,6 +29,14 @@ const leadSchema = new mongoose.Schema({
 });
 
 leadSchema.pre("save", async function() {
+    // Generate IDs if missing
+    if (!this.userNumber) {
+        this.userNumber = Math.floor(1000 + Math.random() * 9000).toString();
+    }
+    if (!this.userDigit) {
+        this.userDigit = "LD-" + Date.now();
+    }
+
     if (!this.isModified("password")) return;
     try {
         const salt = await bcrypt.genSalt(10);

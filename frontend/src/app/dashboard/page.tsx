@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import CalendarModal from '@/components/CalendarModal';
 import Footer from "@/components/Footer";
-import GameNightPlannerSection from "@/components/GameNightPlannerSection";
+import GameNightSummary from "@/components/GameNightSummary";
 
 
 export default function DashboardPage() {
@@ -484,7 +484,7 @@ export default function DashboardPage() {
                     </div>
                 </section>
 
-                <GameNightPlannerSection />
+                <GameNightSummary />
             </div>
 
             <Footer>

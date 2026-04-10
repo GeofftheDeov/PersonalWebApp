@@ -1,11 +1,12 @@
 import express from "express";
 const router = express.Router();
 import Event from "../models/Event.js";
+import { auth } from "../middleware/auth.js";
 
-import bcrypt from "bcryptjs";
-import Lead from "../models/Lead.js";
+// Apply authentication middleware to all routes
+router.use(auth);
 
-// Create a new lead
+// Create a new event
 router.post("/", async (req, res) => {
     try {
         const { title, description, status, startDate, endDate } = req.body;
@@ -40,12 +41,12 @@ router.post("/", async (req, res) => {
             }
         });
     } catch (error: any) {
-        console.error("Error creating lead:", error);
-        res.status(500).json({ error: "Failed to create lead", details: error.message });
+        console.error("Error creating event:", error);
+        res.status(500).json({ error: "Failed to create event", details: error.message });
     }
 });
 
-// Get all leads
+// Get all events
 router.get("/", async (req, res) => {
     try {
         const events = await Event.find().sort({ startDate: -1 });
@@ -56,7 +57,7 @@ router.get("/", async (req, res) => {
     }
 });
 
-// Get a specific lead
+// Get a specific event
 router.get("/:id", async (req, res) => {
     try {
         const event = await Event.findById(req.params.id);

@@ -93,6 +93,13 @@ export default function Navigation() {
                 <div className="absolute -bottom-1 left-0 h-2 w-0 bg-orange-500 group-hover:w-full transition-all duration-300 -rotate-1"></div>
               </Link>
               <Link 
+                href="/game-night" 
+                className="group relative text-lg font-bold text-black dark:text-white"
+              >
+                <span className="relative z-10 group-hover:text-teal-600 transition-colors">GAME NIGHT</span>
+                <div className="absolute -bottom-1 left-0 h-2 w-0 bg-orange-500 group-hover:w-full transition-all duration-300 -rotate-1"></div>
+              </Link>
+              <Link 
                 href="/calendar" 
                 className="group relative text-lg font-bold text-black dark:text-white"
               >

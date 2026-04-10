@@ -46,7 +46,6 @@ export default function GameNightPlannerSection() {
                 fetch('/api/tabletop/characters', { headers: { 'Authorization': `Bearer ${token}` } }),
                 fetch('/api/campaigns', { headers: { 'Authorization': `Bearer ${token}` } })
             ]);
-            
             if (sessRes.ok) setSessions(await sessRes.json());
             if (charRes.ok) setCharacters(await charRes.json());
             if (campRes.ok) setCampaigns(await campRes.json());

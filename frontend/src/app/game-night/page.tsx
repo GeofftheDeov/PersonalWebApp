@@ -461,7 +461,7 @@ export default function GameNightPage() {
             )}
 
             <Footer>
-                <div className="inline-block border-8 border-black px-12 py-8 mb-12 bg-teal-600 shadow-[12px_12px_0px_0px_rgba(250,204,21,1)]">
+                <div className="inline-block border-8 border-black px-12 py-8 mb-12 bg-teal-600 shadow-[12px_12px_0px_0px_rgba(249,115,22,1)]">
                     <p className="text-3xl md:text-4xl font-permanent text-white uppercase leading-tight">
                         Roll for<br />Initiative.
                     </p>

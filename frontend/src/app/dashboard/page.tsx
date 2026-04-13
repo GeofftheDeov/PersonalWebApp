@@ -140,7 +140,120 @@ export default function DashboardPage() {
                     </h1>
                 </header>
 
-                <section className="grid grid-cols-1 md:grid-cols-2 gap-8 text-left">
+                <div className="flex flex-col md:grid md:grid-cols-2 gap-8 text-left">
+                    <div className="relative order-first md:order-none">
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-4xl md:text-5xl font-permanent text-yellow-400 uppercase relative w-fit">
+                                <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Profile</span>
+                            </h2>
+                            {!isEditingProfile && (
+                                <button 
+                                    onClick={() => {
+                                        setProfileData(user);
+                                        setIsEditingProfile(true);
+                                    }}
+                                    className="px-6 py-2 bg-yellow-400 text-black dark:bg-teal-600 dark:text-white font-permanent text-xl uppercase hover:bg-yellow-500 dark:hover:bg-teal-700 transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]"
+                                >
+                                    EDIT
+                                </button>
+                            )}
+                        </div>
+
+                        {isEditingProfile ? (
+                            <form onSubmit={updateProfile} className="space-y-4 font-permanent text-xl text-yellow-400">
+                                <div className="flex flex-col">
+                                    <label className="text-teal dark:text-orange-400 uppercase text-sm mb-1">NAME:</label>
+                                    <input 
+                                        type="text" 
+                                        value={profileData.name || ''} 
+                                        onChange={(e) => setProfileData({...profileData, name: e.target.value})}
+                                        className="bg-black border-2 border-yellow-400 p-2 text-white outline-none focus:border-teal-500"
+                                    />
+                                </div>
+                                <div className="flex flex-col">
+                                    <label className="text-teal dark:text-orange-400 uppercase text-sm mb-1">HANDLE:</label>
+                                    <div className="relative flex items-center">
+                                        <span className="absolute left-3 text-yellow-400 font-permanent text-xl pointer-events-none">@</span>
+                                        <input 
+                                            type="text" 
+                                            value={profileData.handle || ''} 
+                                            onChange={(e) => setProfileData({...profileData, handle: e.target.value.replace(/^@/, '')})}
+                                            className="bg-black border-2 border-yellow-400 p-2 pl-8 text-white outline-none focus:border-teal-500 w-full"
+                                            placeholder="yourhandle"
+                                        />
+                                    </div>
+                                </div>
+                                <div className="flex flex-col">
+                                    <label className="text-teal dark:text-orange-400 uppercase text-sm mb-1">PHONE:</label>
+                                    <input 
+                                        type="text" 
+                                        value={profileData.phone || ''} 
+                                        onChange={(e) => setProfileData({...profileData, phone: e.target.value})}
+                                        className="bg-black border-2 border-yellow-400 p-2 text-white outline-none focus:border-teal-500"
+                                    />
+                                </div>
+                                <div className="flex flex-col">
+                                    <label className="text-teal dark:text-orange-400 uppercase text-sm mb-1">EMAIL:</label>
+                                    <input 
+                                        type="text" 
+                                        value={profileData.email || ''} 
+                                        onChange={(e) => setProfileData({...profileData, email: e.target.value})}
+                                        className="bg-black border-2 border-yellow-400 p-2 text-white outline-none focus:border-teal-500"
+                                    />
+                                </div>
+                                <div className="flex flex-col">
+                                    <label className="text-teal dark:text-orange-400 uppercase text-sm mb-1">DISCORD HANDLE:</label>
+                                    <input 
+                                        type="text" 
+                                        value={profileData.discordHandle || ''} 
+                                        onChange={(e) => setProfileData({...profileData, discordHandle: e.target.value})}
+                                        className="bg-black border-2 border-yellow-400 p-2 text-white outline-none focus:border-teal-500"
+                                        placeholder="username#0000"
+                                    />
+                                </div>
+                                <div className="flex flex-col">
+                                    <label className="text-teal dark:text-orange-400 uppercase text-sm mb-1">DISCORD USER ID:</label>
+                                    <input 
+                                        type="text" 
+                                        value={profileData.discordId || ''} 
+                                        onChange={(e) => setProfileData({...profileData, discordId: e.target.value})}
+                                        className="bg-black border-2 border-yellow-400 p-2 text-white outline-none focus:border-teal-500"
+                                        placeholder="123456789012345678"
+                                    />
+                                    <p className="text-[10px] text-zinc-500 mt-1 italic">Settings > Advanced > Developer Mode (ON) > Right-click profile > Copy User ID</p>
+                                </div>
+                                <div className="flex gap-4 pt-4">
+                                    <button 
+                                        type="submit"
+                                        className="flex-1 p-3 bg-yellow-400 text-black dark:bg-teal-600 dark:text-white font-permanent font-black uppercase hover:bg-yellow-500 dark:hover:bg-teal-700 transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]"
+                                    >
+                                        SAVE CHANGES
+                                    </button>
+                                    <button 
+                                        type="button"
+                                        onClick={() => setIsEditingProfile(false)}
+                                        className="flex-1 p-3 bg-zinc-600 text-white font-permanent font-black uppercase hover:bg-zinc-700 transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]"
+                                    >
+                                        CANCEL
+                                    </button>
+                                </div>
+                            </form>
+                        ) : (
+                            <div className="text-xl md:text-2xl font-permanent leading-tight text-yellow-400 drop-shadow-[3px_3px_0px_rgba(0,0,0,1)] tracking-tight space-y-3">
+                                <p><span className="text-teal dark:text-orange-400">NAME:</span> {user.name?.toUpperCase() || 'N/A'}</p>
+                                {user.type === 'User' && (
+                                    <p><span className="text-teal dark:text-orange-400">INTERNAL ID:</span> {user.userDigit || 'N/A'}</p>
+                                )}
+                                <p><span className="text-teal dark:text-orange-400">HANDLE:</span> {user.handle ? `@${user.handle.toUpperCase()}` : 'N/A'}</p>
+                                <p><span className="text-teal dark:text-orange-400">UNIQUE ID:</span> {user.handle && user.userNumber ? `@${user.handle.toUpperCase()}#${user.userNumber}` : 'N/A'}</p>
+                                <p><span className="text-teal dark:text-orange-400">EMAIL:</span> {user.email?.toUpperCase() || 'N/A'}</p>
+                                <p><span className="text-teal dark:text-orange-400">TYPE:</span> {user.type?.toUpperCase() || 'N/A'}</p>
+                                <p><span className="text-teal dark:text-orange-400">PHONE:</span> {user.phone?.toUpperCase() || 'N/A'}</p>
+                                <p><span className="text-teal dark:text-orange-400">DISCORD:</span> {user.discordHandle ? user.discordHandle.toUpperCase() : 'NOT LINKED'}</p>
+                            </div>
+                        )}
+                    </div>
+
                     <div className="relative">
                         <h2 className="text-4xl md:text-5xl font-permanent mb-6 text-teal-600 uppercase relative w-fit">
                             <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Your Tasks</span>
@@ -224,7 +337,7 @@ export default function DashboardPage() {
 
                             <button 
                                 type="submit" 
-                                className="w-full p-3 border-4 border-black bg-yellow-400 text-black font-permanent text-xl uppercase hover:bg-yellow-500 transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]"
+                                className="w-full p-3 bg-yellow-400 text-black dark:bg-teal-600 dark:text-white font-permanent text-xl uppercase hover:bg-yellow-500 dark:hover:bg-teal-700 transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] border-4 border-black dark:border-white"
                             >
                                 ADD TASK
                             </button>
@@ -370,7 +483,7 @@ export default function DashboardPage() {
                                         </button>
                                         <button
                                             type="submit"
-                                            className="w-full ml-2 mr-2 p-3 border-4 border-black bg-teal-500 dark:bg-yellow-400 text-white dark:text-black font-permanent text-xl uppercase hover:bg-teal-600 dark:hover:bg-yellow-500 transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]"
+                                            className="w-full ml-2 mr-2 p-3 bg-yellow-400 text-black dark:bg-teal-600 dark:text-white font-permanent text-xl uppercase hover:bg-yellow-500 dark:hover:bg-teal-700 transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] border-4 border-black dark:border-white"
                                         >
                                             Save
                                         </button>
@@ -391,105 +504,14 @@ export default function DashboardPage() {
                         </div>
 
                     </div>
-
-                    <div className="relative">
-                        <div className="flex justify-between items-center mb-6">
-                            <h2 className="text-4xl md:text-5xl font-permanent text-yellow-400 uppercase relative w-fit">
-                                <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Profile</span>
-                            </h2>
-                            {!isEditingProfile && (
-                                <button 
-                                    onClick={() => {
-                                        setProfileData(user);
-                                        setIsEditingProfile(true);
-                                    }}
-                                    className="text-xl font-permanent text-yellow-400 uppercase hover:text-white transition-colors drop-shadow-[2px_2px_0px_rgba(0,0,0,1)]"
-                                >
-                                    [ EDIT ]
-                                </button>
-                            )}
-                        </div>
-
-                        {isEditingProfile ? (
-                            <form onSubmit={updateProfile} className="space-y-4 font-permanent text-xl text-yellow-400">
-                                <div className="flex flex-col">
-                                    <label className="text-teal dark:text-orange-400 uppercase text-sm mb-1">NAME:</label>
-                                    <input 
-                                        type="text" 
-                                        value={profileData.name || ''} 
-                                        onChange={(e) => setProfileData({...profileData, name: e.target.value})}
-                                        className="bg-black border-2 border-yellow-400 p-2 text-white outline-none focus:border-teal-500"
-                                    />
-                                </div>
-                                <div className="flex flex-col">
-                                    <label className="text-teal dark:text-orange-400 uppercase text-sm mb-1">HANDLE:</label>
-                                    <div className="relative flex items-center">
-                                        <span className="absolute left-3 text-yellow-400 font-permanent text-xl pointer-events-none">@</span>
-                                        <input 
-                                            type="text" 
-                                            value={profileData.handle || ''} 
-                                            onChange={(e) => setProfileData({...profileData, handle: e.target.value.replace(/^@/, '')})}
-                                            className="bg-black border-2 border-yellow-400 p-2 pl-8 text-white outline-none focus:border-teal-500 w-full"
-                                            placeholder="yourhandle"
-                                        />
-                                    </div>
-                                </div>
-                                <div className="flex flex-col">
-                                    <label className="text-teal dark:text-orange-400 uppercase text-sm mb-1">PHONE:</label>
-                                    <input 
-                                        type="text" 
-                                        value={profileData.phone || ''} 
-                                        onChange={(e) => setProfileData({...profileData, phone: e.target.value})}
-                                        className="bg-black border-2 border-yellow-400 p-2 text-white outline-none focus:border-teal-500"
-                                    />
-                                </div>
-                                <div className="flex flex-col">
-                                    <label className="text-teal dark:text-orange-400 uppercase text-sm mb-1">EMAIL:</label>
-                                    <input 
-                                        type="text" 
-                                        value={profileData.email || ''} 
-                                        onChange={(e) => setProfileData({...profileData, email: e.target.value})}
-                                        className="bg-black border-2 border-yellow-400 p-2 text-white outline-none focus:border-teal-500"
-                                    />
-                                </div>
-                                <div className="flex gap-4 pt-4">
-                                    <button 
-                                        type="submit"
-                                        className="flex-1 p-3 bg-yellow-400 text-black font-black uppercase hover:bg-white transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]"
-                                    >
-                                        SAVE CHANGES
-                                    </button>
-                                    <button 
-                                        type="button"
-                                        onClick={() => setIsEditingProfile(false)}
-                                        className="flex-1 p-3 bg-zinc-600 text-white font-black uppercase hover:bg-zinc-700 transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]"
-                                    >
-                                        CANCEL
-                                    </button>
-                                </div>
-                            </form>
-                        ) : (
-                            <div className="text-xl md:text-2xl font-permanent leading-tight text-yellow-400 drop-shadow-[3px_3px_0px_rgba(0,0,0,1)] tracking-tight space-y-3">
-                                <p><span className="text-teal dark:text-orange-400">NAME:</span> {user.name?.toUpperCase() || 'N/A'}</p>
-                                {user.type === 'User' && (
-                                    <p><span className="text-teal dark:text-orange-400">INTERNAL ID:</span> {user.userDigit || 'N/A'}</p>
-                                )}
-                                <p><span className="text-teal dark:text-orange-400">HANDLE:</span> {user.handle ? `@${user.handle.toUpperCase()}` : 'N/A'}</p>
-                                <p><span className="text-teal dark:text-orange-400">UNIQUE ID:</span> {user.handle && user.userNumber ? `@${user.handle.toUpperCase()}#${user.userNumber}` : 'N/A'}</p>
-                                <p><span className="text-teal dark:text-orange-400">EMAIL:</span> {user.email?.toUpperCase() || 'N/A'}</p>
-                                <p><span className="text-teal dark:text-orange-400">TYPE:</span> {user.type?.toUpperCase() || 'N/A'}</p>
-                                <p><span className="text-teal dark:text-orange-400">PHONE:</span> {user.phone?.toUpperCase() || 'N/A'}</p>
-                            </div>
-                        )}
-                    </div>
-                </section>
+                </div>
 
                 <GameNightSummary />
             </div>
 
             <Footer>
-                <div className="inline-block border-8 border-black dark:border-black px-12 py-8 mb-12 bg-orange-500 shadow-[12px_12px_0px_0px_rgba(250,204,21,1)]">
-                    <p className="text-3xl md:text-4xl font-permanent text-black uppercase leading-tight">
+                <div className="inline-block border-8 border-black dark:border-black px-12 py-8 mb-12 bg-teal-600 shadow-[12px_12px_0px_0px_rgba(249,115,22,1)]">
+                    <p className="text-3xl md:text-4xl font-permanent text-white uppercase leading-tight">
                         Authenticated.<br/>Secure.<br/>Ready to Build.
                     </p>
                 </div>

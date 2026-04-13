@@ -66,7 +66,7 @@ export default function SessionDetailPage() {
             <div className="flex-grow w-full max-w-3xl mx-auto p-6 md:p-12">
 
                 <div className="mb-8">
-                    <Link href="/game-night" className="flex items-center gap-1 font-permanent text-sm text-teal-600 uppercase hover:text-yellow-500 transition-colors w-fit">
+                    <Link href="/game-night" className="inline-flex items-center gap-2 px-4 py-2 bg-yellow-400 text-black border-4 border-black font-permanent text-sm shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:bg-white transition-colors uppercase w-fit">
                         <ArrowLeft className="w-4 h-4" /> BACK TO GAME NIGHT
                     </Link>
                 </div>

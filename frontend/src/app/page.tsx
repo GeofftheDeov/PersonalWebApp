@@ -81,9 +81,9 @@ export default function Home() {
             <div className="mb-6 inline-flex h-16 w-16 items-center justify-center border-4 border-black bg-orange-500 text-3xl font-permanent text-black dark:border-white">
               01
             </div>
-            <h3 className="mb-4 text-3xl font-permanent uppercase">Salesforce Sync</h3>
+            <h3 className="mb-4 text-3xl font-permanent uppercase">Salesforce Engine</h3>
             <p className="border-t-4 border-black pt-4 text-xl font-permanent text-zinc-600 dark:border-white dark:text-zinc-400">
-              Bi-directional data pipeline. seamless integration with your CRM infrastructure.
+              Advanced bi-directional data pipelines. Sync Leads, Campaigns, and Members with custom-built Salesforce handlers.
             </p>
           </div>
 
@@ -92,9 +92,9 @@ export default function Home() {
             <div className="mb-6 inline-flex h-16 w-16 items-center justify-center border-4 border-black bg-teal-600 text-3xl font-permanent text-white dark:border-white dark:text-black">
               02
             </div>
-            <h3 className="mb-4 text-3xl font-permanent uppercase">Lead Flow</h3>
+            <h3 className="mb-4 text-3xl font-permanent uppercase">Game Night Planner</h3>
             <p className="border-t-4 border-black pt-4 text-xl font-permanent text-zinc-600 dark:border-white dark:text-zinc-400">
-              Automated lead capture and processing. Never miss a potential opportunity again.
+              The ultimate hub for tabletop adventures. Manage Campaigns, track individual Sessions, and evolve your Characters.
             </p>
           </div>
 
@@ -103,9 +103,9 @@ export default function Home() {
             <div className="mb-6 inline-flex h-16 w-16 items-center justify-center border-4 border-black bg-purple-600 text-3xl font-permanent text-white dark:border-white dark:text-black">
               03
             </div>
-            <h3 className="mb-4 text-3xl font-permanent uppercase">Secure Auth</h3>
+            <h3 className="mb-4 text-3xl font-permanent uppercase">Social Nexus</h3>
             <p className="border-t-4 border-black pt-4 text-xl font-permanent text-zinc-600 dark:border-white dark:text-zinc-400">
-              Fortified access control. Protecting your data with industry-standard security.
+              Real-time social engagement. Find and connect with users, manage friend requests, and maintain messaging threads.
             </p>
           </div>
         </div>

@@ -85,7 +85,7 @@ export default function TaskDetailPage() {
 
                 {/* Breadcrumb */}
                 <div className="mb-8">
-                    <Link href="/calendar" className="flex items-center gap-1 font-permanent text-sm text-teal-600 uppercase hover:text-yellow-500 transition-colors w-fit">
+                    <Link href="/calendar" className="inline-flex items-center gap-2 px-4 py-2 bg-yellow-400 text-black border-4 border-black font-permanent text-sm shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:bg-white transition-colors uppercase w-fit">
                         <ArrowLeft className="w-4 h-4" /> BACK TO CALENDAR
                     </Link>
                 </div>

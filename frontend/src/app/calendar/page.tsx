@@ -339,8 +339,8 @@ export default function CalendarPage() {
             </div>
 
             <Footer>
-                <div className="inline-block border-8 border-black dark:border-black px-12 py-8 mb-12 bg-orange-500 shadow-[12px_12px_0px_0px_rgba(250,204,21,1)]">
-                    <p className="text-3xl md:text-4xl font-permanent text-black uppercase leading-tight">
+                <div className="inline-block border-8 border-black dark:border-black px-12 py-8 mb-12 bg-teal-600 shadow-[12px_12px_0px_0px_rgba(249,115,22,1)]">
+                    <p className="text-3xl md:text-4xl font-permanent text-white uppercase leading-tight">
                         HAVE A<br />GOOD DAY
                     </p>
                 </div>

@@ -81,7 +81,10 @@ jobs:
         # push it to ECR so that it can
         # be deployed to ECS.
         cd backend
-        docker buildx build --platform linux/arm64 -t $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:$IMAGE_TAG --push .
+        docker buildx build --platform linux/arm64 \
+          -t $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:$IMAGE_TAG \
+          -t $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:prod \
+          --push .
         echo "image=$ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
         
     - name: Build, tag, and push frontend image to Amazon ECR
@@ -96,6 +99,7 @@ jobs:
         cd frontend
         docker buildx build --platform linux/arm64 \
           -t $ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:$IMAGE_TAG \
+          -t $ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:prod \
           --build-arg NEXT_PUBLIC_GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }} \
           --build-arg NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }} \
           --push .

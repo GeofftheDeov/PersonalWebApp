@@ -135,3 +135,65 @@ jobs:
         service: ${{ env.ECS_SERVICE }}
         cluster: ${{ env.ECS_CLUSTER }}
         wait-for-service-stability: true
+
+  rebase-and-refresh:
+    name: Rebase Dev and Refresh Data
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Rebase Dev Branch
+      run: |
+        git config user.name "GitHub Actions"
+        git config user.email "actions@github.com"
+        git checkout dev
+        git rebase main
+        git push origin dev --force
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-2
+
+    - name: Trigger Data Refresh Task
+      run: |
+        # Get Prod Task IP
+        PROD_TASK_ARN=$(aws ecs list-tasks --cluster artistic-hippopotamus-hw7oq2 --service-name personal-web-app-task-definition-service-4t236x8c --query 'taskArns[0]' --output text)
+        PROD_IP=$(aws ecs describe-tasks --cluster artistic-hippopotamus-hw7oq2 --tasks $PROD_TASK_ARN --query 'tasks[0].attachments[0].details[?name==`privateIPv4Address`].value' --output text)
+        
+        # Get Dev Task IP
+        DEV_TASK_ARN=$(aws ecs list-tasks --cluster dev-cluster --service-name personal-web-app-dev-service --query 'taskArns[0]' --output text)
+        DEV_IP=$(aws ecs describe-tasks --cluster dev-cluster --tasks $DEV_TASK_ARN --query 'tasks[0].attachments[0].details[?name==`privateIPv4Address`].value' --output text)
+        
+        echo "Prod IP: $PROD_IP"
+        echo "Dev IP: $DEV_IP"
+        
+        # Run one-off task using the backend service's task definition but overriding command
+        # Using the backend service's task def ensures it has the right roles and VPC config
+        TASK_DEF_ARN=$(aws ecs describe-services --cluster dev-cluster --services personal-web-app-dev-service --query 'services[0].taskDefinition' --output text)
+        
+        aws ecs run-task \
+          --cluster dev-cluster \
+          --task-definition $TASK_DEF_ARN \
+          --launch-type FARGATE \
+          --network-configuration "awsvpcConfiguration={subnets=[subnet-0c33b8b801beec11a,subnet-007a79d52272fe680,subnet-0bbcf124b53fd8f43],securityGroups=[sg-018f4b475a22317f4],assignPublicIp=ENABLED}" \
+          --overrides "{
+            \"containerOverrides\": [
+              {
+                \"name\": \"backend\",
+                \"command\": [\"node\", \"scripts/db-refresh.js\"],
+                \"environment\": [
+                  {\"name\": \"PROD_MONGO_URI\", \"value\": \"mongodb://$PROD_IP:27017/personal_web_app\"},
+                  {\"name\": \"DEV_MONGO_URI\", \"value\": \"mongodb://$DEV_IP:27017/personal_web_app\"},
+                  {\"name\": \"DEFAULT_DEV_PASSWORD\", \"value\": \"DevPassword123!\"}
+                ]
+              }
+            ]
+          }"

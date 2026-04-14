@@ -10,7 +10,7 @@ env:
   ECR_FRONTEND_REPOSITORY: personal-web-app-frontend
   ECS_SERVICE: personal-web-app-dev-service
   ECS_CLUSTER: dev-cluster
-  ECS_TASK_DEFINITION: .aws/backend-task-definition.json
+  ECS_TASK_DEFINITION: .aws/dev-task-definition.json
   CONTAINER_BACKEND: backend
   CONTAINER_FRONTEND: frontend
 

@@ -1,0 +1,8 @@
+{
+  "containerOverrides": [
+    {
+      "name": "mongodb",
+      "command": ["sh", "-c", "echo 'Wiping corrupted WiredTiger data from dev EFS...' && find /data/db/v7-data -type f -delete && find /data/db/v7-data -mindepth 1 -type d -empty -delete && echo 'DONE - dev directory cleared'"]
+    }
+  ]
+}

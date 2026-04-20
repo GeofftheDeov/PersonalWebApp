@@ -2,7 +2,7 @@ name: Deploy Dev to Amazon ECS
 
 on:
   push:
-    branches: [ "dev" ]
+    branches: ["dev"]
 
 env:
   AWS_REGION: us-east-2
@@ -15,7 +15,7 @@ env:
   CONTAINER_FRONTEND: frontend
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   deploy:
@@ -24,82 +24,82 @@ jobs:
     environment: development
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@v3
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-    - name: Login to Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v2
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-    - name: Build, tag, and push backend image to Amazon ECR
-      id: build-backend-image
-      env:
-        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        IMAGE_TAG: ${{ github.sha }}
-      run: |
-        cd backend
-        docker buildx build --platform linux/arm64 \
-          -t $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:$IMAGE_TAG \
-          -t $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:dev \
-          --push .
-        echo "image=$ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
-        
-    - name: Build, tag, and push frontend image to Amazon ECR
-      id: build-frontend-image
-      env:
-        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        IMAGE_TAG: ${{ github.sha }}
-      run: |
-        cd frontend
-        docker buildx build --platform linux/arm64 \
-          -t $ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:$IMAGE_TAG \
-          -t $ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:dev \
-          --build-arg NEXT_PUBLIC_GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }} \
-          --build-arg NEXT_PUBLIC_API_URL=https://deov.geoffthedeov.net/api \
-          --push .
-        echo "image=$ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+      - name: Build, tag, and push backend image to Amazon ECR
+        id: build-backend-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          cd backend
+          docker buildx build --platform linux/arm64 \
+            -t $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:dev \
+            --push .
+          echo "image=$ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
-    - name: Fill in the new backend image ID in the Amazon ECS task definition
-      id: backend-task-def
-      uses: aws-actions/amazon-ecs-render-task-definition@v1
-      with:
-        task-definition: ${{ env.ECS_TASK_DEFINITION }}
-        container-name: ${{ env.CONTAINER_BACKEND }}
-        image: ${{ steps.build-backend-image.outputs.image }}
-        environment-variables: |
-          SYNC_API_KEY=${{ secrets.SYNC_API_KEY }}
-          EMAIL_PASS=${{ secrets.EMAIL_PASS }}
-          JWT_SECRET=${{ secrets.JWT_SECRET }}
-          SF_PASSWORD=${{ secrets.SF_PASSWORD }}
-          SF_CLIENT_ID=${{ secrets.SF_CLIENT_ID }}
-          SF_PRIVATE_KEY_CONTENT=${{ secrets.SF_PRIVATE_KEY_CONTENT }}
-          FRONTEND_URL=https://deov.geoffthedeov.net
+      - name: Build, tag, and push frontend image to Amazon ECR
+        id: build-frontend-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          cd frontend
+          docker buildx build --platform linux/arm64 \
+            -t $ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:dev \
+            --build-arg NEXT_PUBLIC_GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }} \
+            --build-arg NEXT_PUBLIC_API_URL=https://deov.geoffthedeov.net/api \
+            --push .
+          echo "image=$ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
-    - name: Fill in the new frontend image ID in the Amazon ECS task definition
-      id: frontend-task-def
-      uses: aws-actions/amazon-ecs-render-task-definition@v1
-      with:
-        task-definition: ${{ steps.backend-task-def.outputs.task-definition }}
-        container-name: ${{ env.CONTAINER_FRONTEND }}
-        image: ${{ steps.build-frontend-image.outputs.image }}        
+      - name: Fill in the new backend image ID in the Amazon ECS task definition
+        id: backend-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ env.ECS_TASK_DEFINITION }}
+          container-name: ${{ env.CONTAINER_BACKEND }}
+          image: ${{ steps.build-backend-image.outputs.image }}
+          environment-variables: |
+            SYNC_API_KEY=${{ secrets.SYNC_API_KEY }}
+            EMAIL_PASS=${{ secrets.EMAIL_PASS }}
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            SF_PASSWORD=${{ secrets.SF_PASSWORD }}
+            SF_CLIENT_ID=${{ secrets.SF_CLIENT_ID }}
+            SF_PRIVATE_KEY_CONTENT=${{ secrets.SF_PRIVATE_KEY_CONTENT }}
+            FRONTEND_URL=https://deov.geoffthedeov.net
 
-    - name: Deploy Amazon ECS task definition
-      uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-      with:
-        task-definition: ${{ steps.frontend-task-def.outputs.task-definition }}
-        service: ${{ env.ECS_SERVICE }}
-        cluster: ${{ env.ECS_CLUSTER }}
-        wait-for-service-stability: true
+      - name: Fill in the new frontend image ID in the Amazon ECS task definition
+        id: frontend-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ steps.backend-task-def.outputs.task-definition }}
+          container-name: ${{ env.CONTAINER_FRONTEND }}
+          image: ${{ steps.build-frontend-image.outputs.image }}
+
+      - name: Deploy Amazon ECS task definition
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.frontend-task-def.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true

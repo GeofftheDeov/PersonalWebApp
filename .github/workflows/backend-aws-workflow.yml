@@ -41,14 +41,13 @@ env:
   CONTAINER_BACKEND: backend                   # set this to the backend container name
   CONTAINER_FRONTEND: frontend                 # set this to the frontend container name
 
-permissions:
-  contents: read
-
 jobs:
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
     environment: production
+    permissions:
+      contents: read
 
     steps:
     - name: Checkout

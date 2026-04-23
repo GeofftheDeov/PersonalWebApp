@@ -167,11 +167,21 @@ jobs:
       run: |
         # Get Prod Task IP
         PROD_TASK_ARN=$(aws ecs list-tasks --cluster artistic-hippopotamus-hw7oq2 --service-name personal-web-app-task-definition-service-4t236x8c --query 'taskArns[0]' --output text)
-        PROD_IP=$(aws ecs describe-tasks --cluster artistic-hippopotamus-hw7oq2 --tasks $PROD_TASK_ARN --query 'tasks[0].attachments[0].details[?name==`privateIPv4Address`].value' --output text)
-        
+        if [ -z "$PROD_TASK_ARN" ] || [ "$PROD_TASK_ARN" = "None" ]; then
+          echo "Error: No running tasks found in prod cluster"
+          exit 1
+        fi
+        PROD_TASK_ID=$(echo "$PROD_TASK_ARN" | awk -F'/' '{print $NF}')
+        PROD_IP=$(aws ecs describe-tasks --cluster artistic-hippopotamus-hw7oq2 --tasks "$PROD_TASK_ID" --query 'tasks[0].attachments[0].details[?name==`privateIPv4Address`].value' --output text)
+
         # Get Dev Task IP
         DEV_TASK_ARN=$(aws ecs list-tasks --cluster dev-cluster --service-name personal-web-app-dev-service --query 'taskArns[0]' --output text)
-        DEV_IP=$(aws ecs describe-tasks --cluster dev-cluster --tasks $DEV_TASK_ARN --query 'tasks[0].attachments[0].details[?name==`privateIPv4Address`].value' --output text)
+        if [ -z "$DEV_TASK_ARN" ] || [ "$DEV_TASK_ARN" = "None" ]; then
+          echo "Error: No running tasks found in dev cluster"
+          exit 1
+        fi
+        DEV_TASK_ID=$(echo "$DEV_TASK_ARN" | awk -F'/' '{print $NF}')
+        DEV_IP=$(aws ecs describe-tasks --cluster dev-cluster --tasks "$DEV_TASK_ID" --query 'tasks[0].attachments[0].details[?name==`privateIPv4Address`].value' --output text)
         
         echo "Prod IP: $PROD_IP"
         echo "Dev IP: $DEV_IP"

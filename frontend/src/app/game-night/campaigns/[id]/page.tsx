@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
-import { Map, ArrowLeft, Calendar, Book, Users, Shield, ChevronRight, Crown, Save, X, Pencil } from 'lucide-react';
+import { Map, ArrowLeft, Calendar, Book, Users, Shield, ChevronRight, Crown, Save, X, Pencil, UserPlus, Check } from 'lucide-react';
 
 interface Session {
     _id: string;
@@ -19,6 +19,9 @@ interface Member {
     firstName?: string;
     lastName?: string;
     status?: string;
+    contact?: { name?: string };
+    lead?: { firstName?: string; lastName?: string };
+    account?: { name?: string };
 }
 
 const INPUT_CLS = "w-full p-3 border-4 border-black bg-white text-black font-permanent text-base uppercase focus:border-yellow-400 outline-none";
@@ -32,6 +35,9 @@ const statusColor = (status: string) => {
 
 const memberName = (m: Member) => {
     if (m.firstName || m.lastName) return `${m.firstName || ''} ${m.lastName || ''}`.trim();
+    if (m.contact?.name) return m.contact.name;
+    if (m.lead?.firstName || m.lead?.lastName) return `${m.lead.firstName || ''} ${m.lead.lastName || ''}`.trim();
+    if (m.account?.name) return m.account.name;
     return m.email || 'Unknown Player';
 };
 
@@ -48,6 +54,7 @@ export default function CampaignDetailPage() {
     const [loading, setLoading] = useState(true);
     const [editing, setEditing] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [copied, setCopied] = useState(false);
     const [form, setForm] = useState<any>({});
 
     const token = () => localStorage.getItem('token');
@@ -82,6 +89,12 @@ export default function CampaignDetailPage() {
         });
         if (res.ok) { setCampaign(await res.json()); setEditing(false); }
         setSaving(false);
+    };
+
+    const handleInvite = () => {
+        navigator.clipboard.writeText(`${window.location.origin}/game-night/join/${id}`);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
     };
 
     if (loading) return <div className="min-h-screen flex items-center justify-center"><span className="text-3xl font-permanent text-teal-600 animate-pulse">LOADING CAMPAIGN...</span></div>;
@@ -218,9 +231,18 @@ export default function CampaignDetailPage() {
 
                     {/* Players */}
                     <div>
-                        <h2 className="text-2xl font-permanent text-black dark:text-white uppercase flex items-center gap-2 mb-4">
-                            <Users className="w-5 h-5 text-yellow-500" /> Players <span className="ml-1 text-sm text-zinc-400">({members.length})</span>
-                        </h2>
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-2xl font-permanent text-black dark:text-white uppercase flex items-center gap-2">
+                                <Users className="w-5 h-5 text-yellow-500" /> Players <span className="ml-1 text-sm text-zinc-400">({members.length})</span>
+                            </h2>
+                            <button
+                                onClick={handleInvite}
+                                className={`flex items-center gap-2 px-3 py-1.5 border-2 border-black font-permanent uppercase text-xs transition-colors shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] ${copied ? 'bg-teal-500 text-white' : 'bg-white text-black hover:bg-zinc-100'}`}
+                            >
+                                {copied ? <Check className="w-3 h-3" /> : <UserPlus className="w-3 h-3" />}
+                                {copied ? 'COPIED' : 'INVITE'}
+                            </button>
+                        </div>
                         {members.length === 0 ? (
                             <div className="py-10 border-4 border-dashed border-zinc-300 dark:border-zinc-700 text-center">
                                 <Users className="w-10 h-10 text-zinc-300 dark:text-zinc-600 mx-auto mb-2" />

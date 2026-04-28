@@ -128,7 +128,11 @@ router.get("/:id/members", auth, async (req: any, res) => {
         if (campaignIds && !campaignIds.some((cid: any) => cid.toString() === req.params.id)) {
             return res.status(403).json({ error: "Unauthorized" });
         }
-        const members = await CampaignMember.find({ campaign: req.params.id }).sort({ joinedAt: 1 });
+        const members = await CampaignMember.find({ campaign: req.params.id })
+            .populate("lead")
+            .populate("contact")
+            .populate("account")
+            .sort({ joinedAt: 1 });
         res.json(members);
     } catch (error: any) {
         console.error("Error fetching campaign members:", error);

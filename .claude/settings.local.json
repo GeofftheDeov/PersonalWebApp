@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell -Command \"Get-Process 'Docker Desktop' -ErrorAction SilentlyContinue; Get-WmiObject Win32_Processor | Select-Object Name, Caption\")",
+      "Bash(docker compose *)"
+    ]
+  }
+}

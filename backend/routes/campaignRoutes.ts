@@ -3,6 +3,10 @@ const router = express.Router();
 import Campaign from "../models/Campaign.js";
 import CampaignMember from "../models/CampaignMember.js";
 import Session from "../models/Session.js";
+import Lead from "../models/Lead.js";
+import Contact from "../models/Contact.js";
+import Account from "../models/Account.js";
+import User from "../models/User.js";
 import { auth } from "../middleware/auth.js";
 import { getAuthorizedCampaignIds } from "../utils/gameNightPlannerUtils.js";
 
@@ -34,9 +38,26 @@ router.post("/", auth, async (req: any, res) => {
             status: "Game Master",
             joinedAt: new Date(),
         };
-        if (req.user.type === "Lead") memberFields.lead = req.user.id;
-        else if (req.user.type === "Contact") memberFields.contact = req.user.id;
-        else if (req.user.type === "Account") memberFields.account = req.user.id;
+        if (req.user.type === "Lead") {
+            memberFields.lead = req.user.id;
+            const u = await Lead.findById(req.user.id).select("firstName lastName");
+            if (u) { memberFields.firstName = u.firstName; memberFields.lastName = u.lastName; }
+        } else if (req.user.type === "Contact") {
+            memberFields.contact = req.user.id;
+            const u = await Contact.findById(req.user.id).select("name");
+            if (u?.name) {
+                const [first, ...rest] = u.name.split(" ");
+                memberFields.firstName = first;
+                if (rest.length) memberFields.lastName = rest.join(" ");
+            }
+        } else if (req.user.type === "Account") {
+            memberFields.account = req.user.id;
+            const u = await Account.findById(req.user.id).select("name");
+            if (u?.name) memberFields.firstName = u.name;
+        } else {
+            const u = await User.findById(req.user.id).select("name");
+            if (u?.name) memberFields.firstName = u.name;
+        }
         await new CampaignMember(memberFields).save();
         
         res.status(201).json({ 
@@ -121,6 +142,50 @@ router.get("/:id/sessions", auth, async (req: any, res) => {
     }
 });
 
+// Join a campaign via invite link
+router.post("/:id/join", auth, async (req: any, res) => {
+    try {
+        const campaign = await Campaign.findById(req.params.id);
+        if (!campaign) return res.status(404).json({ error: "Campaign not found" });
+
+        const existing = await CampaignMember.findOne({ campaign: req.params.id, email: req.user.email });
+        if (existing) return res.status(409).json({ error: "Already a member of this campaign" });
+
+        const memberFields: any = {
+            campaign: req.params.id,
+            email: req.user.email,
+            status: "Player",
+            joinedAt: new Date(),
+        };
+        if (req.user.type === "Lead") {
+            memberFields.lead = req.user.id;
+            const u = await Lead.findById(req.user.id).select("firstName lastName");
+            if (u) { memberFields.firstName = u.firstName; memberFields.lastName = u.lastName; }
+        } else if (req.user.type === "Contact") {
+            memberFields.contact = req.user.id;
+            const u = await Contact.findById(req.user.id).select("name");
+            if (u?.name) {
+                const [first, ...rest] = u.name.split(" ");
+                memberFields.firstName = first;
+                if (rest.length) memberFields.lastName = rest.join(" ");
+            }
+        } else if (req.user.type === "Account") {
+            memberFields.account = req.user.id;
+            const u = await Account.findById(req.user.id).select("name");
+            if (u?.name) memberFields.firstName = u.name;
+        } else {
+            const u = await User.findById(req.user.id).select("name");
+            if (u?.name) memberFields.firstName = u.name;
+        }
+
+        const member = await new CampaignMember(memberFields).save();
+        res.status(201).json({ message: "Joined campaign successfully!", member });
+    } catch (error: any) {
+        console.error("Error joining campaign:", error);
+        res.status(500).json({ error: "Failed to join campaign", details: error.message });
+    }
+});
+
 // Get members (players) for a specific campaign
 router.get("/:id/members", auth, async (req: any, res) => {
     try {
@@ -128,7 +193,11 @@ router.get("/:id/members", auth, async (req: any, res) => {
         if (campaignIds && !campaignIds.some((cid: any) => cid.toString() === req.params.id)) {
             return res.status(403).json({ error: "Unauthorized" });
         }
-        const members = await CampaignMember.find({ campaign: req.params.id }).sort({ joinedAt: 1 });
+        const members = await CampaignMember.find({ campaign: req.params.id })
+            .populate("lead")
+            .populate("contact")
+            .populate("account")
+            .sort({ joinedAt: 1 });
         res.json(members);
     } catch (error: any) {
         console.error("Error fetching campaign members:", error);

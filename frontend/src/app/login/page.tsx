@@ -16,6 +16,12 @@ export default function LoginPage() {
     const [loading, setLoading] = React.useState(false);
     const router = useRouter();
 
+    const getRedirectTarget = () => {
+        if (typeof window === 'undefined') return '/dashboard';
+        const params = new URLSearchParams(window.location.search);
+        return params.get('redirect') || '/dashboard';
+    };
+
     const handleGoogleLogin = async (response: any) => {
         setLoading(true);
         setError('');
@@ -32,7 +38,7 @@ export default function LoginPage() {
             localStorage.setItem('token', data.token);
             localStorage.setItem('user', JSON.stringify(data.user));
             window.dispatchEvent(new Event('authChange'));
-            router.push('/dashboard');
+            router.push(getRedirectTarget());
         } catch (err: any) {
             setError(err.message);
         } finally {
@@ -93,7 +99,7 @@ export default function LoginPage() {
             // Notify navigation of auth state change
             window.dispatchEvent(new Event('authChange'));
 
-            router.push('/dashboard');
+            router.push(getRedirectTarget());
         } catch (err: any) {
             setError(err.message);
         } finally {

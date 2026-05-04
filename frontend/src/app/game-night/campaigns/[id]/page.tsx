@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
-import { Map, ArrowLeft, Calendar, Book, Users, Shield, ChevronRight, Crown, Save, X, Pencil, UserPlus, Check } from 'lucide-react';
+import { Map, ArrowLeft, Calendar, Book, Users, Shield, ChevronRight, Crown, Save, X, Pencil, UserPlus, Check, Copy, Link2 } from 'lucide-react';
 
 interface Session {
     _id: string;
@@ -54,6 +54,7 @@ export default function CampaignDetailPage() {
     const [loading, setLoading] = useState(true);
     const [editing, setEditing] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [showInviteModal, setShowInviteModal] = useState(false);
     const [copied, setCopied] = useState(false);
     const [form, setForm] = useState<any>({});
 
@@ -91,8 +92,10 @@ export default function CampaignDetailPage() {
         setSaving(false);
     };
 
-    const handleInvite = () => {
-        navigator.clipboard.writeText(`${window.location.origin}/game-night/join/${id}`);
+    const inviteUrl = typeof window !== 'undefined' ? `${window.location.origin}/game-night/join/${id}` : '';
+
+    const handleCopyInvite = () => {
+        navigator.clipboard.writeText(inviteUrl);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
     };
@@ -236,11 +239,10 @@ export default function CampaignDetailPage() {
                                 <Users className="w-5 h-5 text-yellow-500" /> Players <span className="ml-1 text-sm text-zinc-400">({members.length})</span>
                             </h2>
                             <button
-                                onClick={handleInvite}
-                                className={`flex items-center gap-2 px-3 py-1.5 border-2 border-black font-permanent uppercase text-xs transition-colors shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] ${copied ? 'bg-teal-500 text-white' : 'bg-white text-black hover:bg-zinc-100'}`}
+                                onClick={() => setShowInviteModal(true)}
+                                className="flex items-center gap-2 px-3 py-1.5 border-2 border-black bg-white text-black font-permanent uppercase text-xs hover:bg-zinc-100 transition-colors shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
                             >
-                                {copied ? <Check className="w-3 h-3" /> : <UserPlus className="w-3 h-3" />}
-                                {copied ? 'COPIED' : 'INVITE'}
+                                <UserPlus className="w-3 h-3" /> INVITE
                             </button>
                         </div>
                         {members.length === 0 ? (
@@ -266,6 +268,41 @@ export default function CampaignDetailPage() {
                     </div>
                 </div>
             </div>
+
+            {/* Invite Modal */}
+            {showInviteModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => { setShowInviteModal(false); setCopied(false); }}>
+                    <div className="w-full max-w-md bg-slate-900 border-4 border-black shadow-[8px_8px_0px_0px_rgba(13,148,136,1)] p-6 space-y-5" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between">
+                            <h2 className="font-permanent text-lg text-white uppercase flex items-center gap-2">
+                                <UserPlus className="w-5 h-5 text-teal-400" /> Invite Players
+                            </h2>
+                            <button onClick={() => { setShowInviteModal(false); setCopied(false); }} className="text-zinc-400 hover:text-white transition-colors">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <p className="font-permanent text-xs text-zinc-400 uppercase">Share this link to invite friends to join the campaign.</p>
+                        <div className="flex items-center gap-0 border-4 border-black">
+                            <div className="p-3 bg-teal-500 border-r-4 border-black shrink-0">
+                                <Link2 className="w-4 h-4 text-white" />
+                            </div>
+                            <input
+                                readOnly
+                                value={inviteUrl}
+                                className="flex-1 p-3 bg-white text-black font-permanent text-xs uppercase outline-none truncate"
+                                onFocus={e => e.target.select()}
+                            />
+                        </div>
+                        <button
+                            onClick={handleCopyInvite}
+                            className={`w-full flex items-center justify-center gap-2 p-3 border-4 border-black font-permanent uppercase text-sm transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] ${copied ? 'bg-teal-500 text-white' : 'bg-yellow-400 text-black hover:bg-white'}`}
+                        >
+                            {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                            {copied ? 'LINK COPIED!' : 'COPY INVITE LINK'}
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

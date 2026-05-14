@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import Footer from '@/components/Footer';
 
 export default function ProfilePage() {
@@ -11,6 +12,7 @@ export default function ProfilePage() {
     const [profileData, setProfileData] = useState<any>({});
     const [uploadError, setUploadError] = useState<string | null>(null);
     const [isUploading, setIsUploading] = useState(false);
+    const [sessions, setSessions] = useState<any[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const handleAuthError = () => {
@@ -31,6 +33,13 @@ export default function ProfilePage() {
         const parsedUser = JSON.parse(userData);
         setUser(parsedUser);
         setProfileData(parsedUser);
+
+        fetch('/api/users/profile/sessions', {
+            headers: { 'Authorization': `Bearer ${token}` },
+        })
+            .then(r => r.ok ? r.json() : [])
+            .then(setSessions)
+            .catch(() => setSessions([]));
     }, [router]);
 
     if (!user) {
@@ -294,6 +303,38 @@ export default function ProfilePage() {
                             </div>
                         )}
                     </div>
+                </div>
+                {/* Sessions attended */}
+                <div className="mt-16">
+                    <h2 className="text-4xl md:text-5xl font-permanent text-teal-600 uppercase relative w-fit mb-8">
+                        <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Sessions Attended</span>
+                    </h2>
+
+                    {sessions.length === 0 ? (
+                        <p className="font-permanent text-xl text-zinc-500 uppercase">No sessions on record.</p>
+                    ) : (
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            {sessions.map((s) => (
+                                <Link
+                                    key={s.playerSessionId}
+                                    href={`/game-night/sessions/${s.sessionId}`}
+                                    className="block p-5 border-4 border-black dark:border-white bg-zinc-200 dark:bg-slate-800 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] transition-shadow"
+                                >
+                                    <p className="font-permanent text-xl text-teal-600 dark:text-yellow-400 uppercase tracking-tight leading-tight">
+                                        {s.title}
+                                    </p>
+                                    {s.campaign && (
+                                        <p className="font-permanent text-sm text-zinc-500 dark:text-zinc-400 uppercase mt-1">
+                                            {s.campaign.title}
+                                        </p>
+                                    )}
+                                    <p className="font-permanent text-sm text-zinc-500 dark:text-zinc-400 uppercase mt-1">
+                                        {new Date(s.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+                                    </p>
+                                </Link>
+                            ))}
+                        </div>
+                    )}
                 </div>
             </div>
 

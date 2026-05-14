@@ -5,7 +5,18 @@
       "Bash(docker compose *)",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(xargs grep *)"
+      "Bash(xargs grep *)",
+      "Bash(git --version)",
+      "Bash(git worktree *)",
+      "Bash(findstr \"\\\\\"dev\\\\\"\\\\|\\\\\"start\\\\\"\\\\|\\\\\"build\\\\\"\")",
+      "Bash(cat \"/mnt/c/Users/Geoffrey/Documents/GitHub/PersonalWebApp/.claude/worktrees/profile-pictures/frontend/package.json\" | grep -E '\"dev\"|\"start\"|\"build\"')",
+      "Bash(cat \"/mnt/c/Users/Geoffrey/Documents/GitHub/PersonalWebApp/.claude/worktrees/profile-pictures/backend/package.json\" | grep -E '\"dev\"|\"start\"|\"build\"')",
+      "PowerShell(Copy-Item \"C:\\\\Users\\\\Geoffrey\\\\Documents\\\\GitHub\\\\PersonalWebApp\\\\backend\\\\.env\" \"C:\\\\Users\\\\Geoffrey\\\\Documents\\\\GitHub\\\\PersonalWebApp\\\\.claude\\\\worktrees\\\\profile-pictures\\\\backend\\\\.env\")",
+      "Bash(git -C .claude/worktrees/profile-pictures status)",
+      "Bash(git -C .claude/worktrees/profile-pictures add backend/models/Account.ts backend/models/Contact.ts backend/models/Lead.ts backend/models/User.ts backend/package-lock.json backend/routes/userRoutes.ts backend/server.ts frontend/next.config.js frontend/src/app/dashboard/page.tsx frontend/src/components/Navigation.tsx frontend/src/app/profile/)",
+      "Bash(git -C .claude/worktrees/profile-pictures commit -m ' *)",
+      "Bash(git merge profile-pictures --no-ff -m ' *)",
+      "Bash(git push *)"
     ]
   }
 }

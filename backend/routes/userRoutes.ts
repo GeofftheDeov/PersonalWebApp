@@ -4,6 +4,7 @@ import User from "../models/User.js";
 import Lead from "../models/Lead.js";
 import Contact from "../models/Contact.js";
 import Account from "../models/Account.js";
+import PlayerSession from "../models/PlayerSession.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
@@ -398,6 +399,32 @@ router.put("/profile", auth, async (req: any, res) => {
     } catch (err) {
         console.error("Profile update error:", err);
         res.status(500).json({ error: "Failed to update profile" });
+    }
+});
+
+router.get("/profile/sessions", auth, async (req: any, res) => {
+    try {
+        const records = await PlayerSession.find({ player: req.user.id })
+            .populate("session", "title date summary vodUrl")
+            .populate("campaign", "title")
+            .sort({ createdAt: -1 });
+
+        const sessions = records
+            .filter((r: any) => r.session)
+            .map((r: any) => ({
+                playerSessionId: r._id,
+                sessionId: r.session._id,
+                title: r.session.title,
+                date: r.session.date,
+                summary: r.session.summary,
+                vodUrl: r.session.vodUrl,
+                campaign: r.campaign ? { id: r.campaign._id, title: r.campaign.title } : null,
+            }));
+
+        res.json(sessions);
+    } catch (err) {
+        console.error("Profile sessions error:", err);
+        res.status(500).json({ error: "Failed to fetch sessions" });
     }
 });
 

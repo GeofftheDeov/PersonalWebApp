@@ -18,6 +18,7 @@ const contactSchema = new mongoose.Schema({
     notes: String,
     sfID: String,
     profilePicture: String,
+    favoriteGames: [String],
     createdAt: { type: Date, default: Date.now },
 });
 

@@ -17,6 +17,7 @@ const contactSchema = new mongoose.Schema({
     userDigit: String,
     notes: String,
     sfID: String,
+    profilePicture: String,
     createdAt: { type: Date, default: Date.now },
 });
 

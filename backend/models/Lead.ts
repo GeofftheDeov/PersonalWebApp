@@ -25,6 +25,7 @@ const leadSchema = new mongoose.Schema({
     sfLeadId: String,
     sfRecordTypeId: String,
     sfRecordTypeName: String,
+    profilePicture: String,
     createdAt: { type: Date, default: Date.now },
 });
 

@@ -89,13 +89,21 @@ export default function Navigation() {
                 <div className={`${decorationCls} -rotate-1`}></div>
               </a>
             )}
-            <Link 
-              href="/dashboard" 
+            <Link
+              href="/dashboard"
               onClick={() => setIsMenuOpen(false)}
               className={linkCls}
             >
               <span className="relative z-10 group-hover:text-teal-600 transition-colors uppercase">DASHBOARD</span>
               <div className={`${decorationCls} -rotate-1`}></div>
+            </Link>
+            <Link
+              href="/profile"
+              onClick={() => setIsMenuOpen(false)}
+              className={linkCls}
+            >
+              <span className="relative z-10 group-hover:text-teal-600 transition-colors uppercase">PROFILE</span>
+              <div className={`${decorationCls} rotate-1`}></div>
             </Link>
             <Link 
               href="/game-night" 

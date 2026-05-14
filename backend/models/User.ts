@@ -25,6 +25,7 @@ const userSchema = new mongoose.Schema({
   discordId: String,
   discordHandle: String,
   profilePicture: String,
+  favoriteGames: [String],
   friends: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
   createdAt: {
     type: Date,

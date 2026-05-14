@@ -13,6 +13,9 @@ export default function ProfilePage() {
     const [uploadError, setUploadError] = useState<string | null>(null);
     const [isUploading, setIsUploading] = useState(false);
     const [sessions, setSessions] = useState<any[]>([]);
+    const [games, setGames] = useState<string[]>([]);
+    const [gameInput, setGameInput] = useState('');
+    const [savingGames, setSavingGames] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const handleAuthError = () => {
@@ -33,6 +36,7 @@ export default function ProfilePage() {
         const parsedUser = JSON.parse(userData);
         setUser(parsedUser);
         setProfileData(parsedUser);
+        setGames(parsedUser.favoriteGames || []);
 
         fetch('/api/users/profile/sessions', {
             headers: { 'Authorization': `Bearer ${token}` },
@@ -113,6 +117,42 @@ export default function ProfilePage() {
             setUser(updatedUser);
             localStorage.setItem('user', JSON.stringify(updatedUser));
             setIsEditing(false);
+        }
+    };
+
+    const addGame = async () => {
+        const name = gameInput.trim();
+        if (!name || games.includes(name)) { setGameInput(''); return; }
+        const next = [...games, name];
+        setGames(next);
+        setGameInput('');
+        await persistGames(next);
+    };
+
+    const removeGame = async (game: string) => {
+        const next = games.filter(g => g !== game);
+        setGames(next);
+        await persistGames(next);
+    };
+
+    const persistGames = async (list: string[]) => {
+        setSavingGames(true);
+        try {
+            const token = localStorage.getItem('token');
+            const response = await fetch('/api/users/profile', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ favoriteGames: list }),
+            });
+            if (response.status === 401) { handleAuthError(); return; }
+            if (response.ok) {
+                const data = await response.json();
+                const updatedUser = { ...user, ...data.user };
+                setUser(updatedUser);
+                localStorage.setItem('user', JSON.stringify(updatedUser));
+            }
+        } finally {
+            setSavingGames(false);
         }
     };
 
@@ -304,6 +344,53 @@ export default function ProfilePage() {
                         )}
                     </div>
                 </div>
+                {/* Favorite games */}
+                <div className="mt-16">
+                    <h2 className="text-4xl md:text-5xl font-permanent text-yellow-400 uppercase relative w-fit mb-8">
+                        <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Favorite Games</span>
+                    </h2>
+
+                    <div className="flex gap-3 mb-6">
+                        <input
+                            type="text"
+                            value={gameInput}
+                            onChange={(e) => setGameInput(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addGame())}
+                            placeholder="ADD A GAME..."
+                            className="flex-1 bg-black border-2 border-yellow-400 p-3 text-white font-permanent text-lg uppercase outline-none focus:border-teal-500 placeholder-zinc-600"
+                        />
+                        <button
+                            onClick={addGame}
+                            disabled={!gameInput.trim() || savingGames}
+                            className="px-6 py-3 bg-yellow-400 text-black dark:bg-teal-600 dark:text-white font-permanent text-lg uppercase hover:bg-yellow-500 dark:hover:bg-teal-700 transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] disabled:opacity-40"
+                        >
+                            ADD
+                        </button>
+                    </div>
+
+                    {games.length === 0 ? (
+                        <p className="font-permanent text-xl text-zinc-500 uppercase">No games added yet.</p>
+                    ) : (
+                        <div className="flex flex-wrap gap-3">
+                            {games.map((game) => (
+                                <div
+                                    key={game}
+                                    className="flex items-center gap-2 px-4 py-2 border-4 border-black dark:border-white bg-zinc-200 dark:bg-slate-800 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]"
+                                >
+                                    <span className="font-permanent text-lg text-teal-600 dark:text-yellow-400 uppercase tracking-tight">{game}</span>
+                                    <button
+                                        onClick={() => removeGame(game)}
+                                        className="font-permanent text-xl text-zinc-400 hover:text-red-500 transition-colors leading-none"
+                                        aria-label={`Remove ${game}`}
+                                    >
+                                        ×
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
                 {/* Sessions attended */}
                 <div className="mt-16">
                     <h2 className="text-4xl md:text-5xl font-permanent text-teal-600 uppercase relative w-fit mb-8">

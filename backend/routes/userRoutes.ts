@@ -7,9 +7,32 @@ import Account from "../models/Account.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
 import { sendResetPasswordEmail, sendVerificationEmail } from "../services/emailService.js";
 import { auth } from "../middleware/auth.js";
 import { OAuth2Client } from "google-auth-library";
+
+const uploadDir = path.join(process.cwd(), "uploads", "profile-pictures");
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
+const storage = multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, uploadDir),
+    filename: (req: any, file, cb) => {
+        const ext = path.extname(file.originalname).toLowerCase();
+        cb(null, `${req.user.id}-${Date.now()}${ext}`);
+    }
+});
+
+const upload = multer({
+    storage,
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+        if (file.mimetype.startsWith("image/")) cb(null, true);
+        else cb(new Error("Only image files are allowed"));
+    }
+});
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -152,12 +175,12 @@ router.post("/login", async (req, res) => {
             { expiresIn: "1h" }
         );
 
-        res.json({ 
-            token, 
-            user: { 
-                id: user._id, 
-                type: userType, 
-                email: user.email, 
+        res.json({
+            token,
+            user: {
+                id: user._id,
+                type: userType,
+                email: user.email,
                 name: user.name || user.firstName || user.title,
                 userNumber: user.userNumber,
                 userDigit: user.userDigit,
@@ -166,8 +189,9 @@ router.post("/login", async (req, res) => {
                 company: user.company,
                 industry: user.industry,
                 website: user.website,
-                handle: user.handle
-            } 
+                handle: user.handle,
+                profilePicture: user.profilePicture
+            }
         });
 
     } catch (error: any) {
@@ -307,7 +331,8 @@ router.post("/google-login", async (req, res) => {
                 company: user.company,
                 industry: user.industry,
                 website: user.website,
-                handle: user.handle
+                handle: user.handle,
+                profilePicture: user.profilePicture
             }
         });
 
@@ -373,6 +398,34 @@ router.put("/profile", auth, async (req: any, res) => {
     } catch (err) {
         console.error("Profile update error:", err);
         res.status(500).json({ error: "Failed to update profile" });
+    }
+});
+
+router.post("/profile/picture", auth, upload.single("profilePicture"), async (req: any, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
+        const { id, type } = req.user;
+        const pictureUrl = `/uploads/profile-pictures/${req.file.filename}`;
+
+        let Model: any;
+        if (type === "User") Model = User;
+        else if (type === "Account") Model = Account;
+        else if (type === "Contact") Model = Contact;
+        else Model = Lead;
+
+        const existing = await Model.findById(id).select("profilePicture");
+        if (existing?.profilePicture) {
+            const oldPath = path.join(process.cwd(), existing.profilePicture);
+            if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+        }
+
+        await Model.findByIdAndUpdate(id, { $set: { profilePicture: pictureUrl } });
+
+        res.json({ profilePicture: pictureUrl });
+    } catch (err: any) {
+        console.error("Profile picture upload error:", err);
+        res.status(500).json({ error: err.message || "Upload failed" });
     }
 });
 

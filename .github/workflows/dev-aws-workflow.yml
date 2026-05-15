@@ -92,6 +92,7 @@ jobs:
             SF_CLIENT_ID=${{ secrets.SF_CLIENT_ID }}
             SF_PRIVATE_KEY_CONTENT=${{ secrets.SF_PRIVATE_KEY_CONTENT }}
             FRONTEND_URL=https://deov.geoffthedeov.net
+            GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
 
       - name: Fill in the new frontend image ID in the Amazon ECS task definition
         id: frontend-task-def

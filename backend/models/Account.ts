@@ -21,6 +21,8 @@ const accountSchema = new mongoose.Schema({
     sfID: String,
     sfRecordTypeID: String,
     sfRecordTypeName: String,
+    profilePicture: String,
+    favoriteGames: [String],
     createdAt: { type: Date, default: Date.now },
 });
 

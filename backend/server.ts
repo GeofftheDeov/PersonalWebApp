@@ -19,6 +19,7 @@ import friendRoutes from "./routes/friendRoutes.js";
 import https from "https";
 import http from "http";
 import fs from "fs";
+import path from "path";
 
 const app = express();
 const httpsPort = Number(process.env.HTTPS_PORT) || 5001;
@@ -41,6 +42,7 @@ if (hasCerts) {
 
 
 app.use(cors());
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 app.get("/", (req, res) => {
     res.json({ message: "Personal Web App Backend API is Running", version: "1.2.0" });
 });

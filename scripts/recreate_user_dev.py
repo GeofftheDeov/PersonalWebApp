@@ -1,5 +1,5 @@
 import subprocess
-import os
+import base64
 
 # Dev Environment Config
 cluster = 'dev-cluster'
@@ -76,20 +76,20 @@ if taskId:
     }}
     """
     
+    b64_script = base64.b64encode(recreate_script.encode()).decode()
+    command = f'echo {b64_script} | base64 -d | mongosh personal_web_app'
+
     args = [
         'aws', 'ecs', 'execute-command',
         '--cluster', cluster,
         '--task', taskId,
         '--container', 'mongodb',
         '--interactive',
-        '--command', f'mongosh personal_web_app --eval "{recreate_script}"'
+        '--region', 'us-east-2',
+        '--command', command,
     ]
-    
+
     print('Running AWS SSM on Dev MongoDB container...')
-    result = subprocess.run(args, capture_output=True, text=True)
-    print('STDOUT:')
-    print(result.stdout)
-    print('STDERR:')
-    print(result.stderr)
+    subprocess.run(args)
 else:
     print("Failed to identify a running dev task.")

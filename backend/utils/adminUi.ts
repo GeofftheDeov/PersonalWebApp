@@ -1,7 +1,7 @@
 export interface AdminPageOptions {
     token: string;
     title: string;
-    activePage: 'admin' | 'db' | 'frontend';
+    activePage: 'admin' | 'db' | 'frontend' | 'cloud-claw';
     content: string;
     extraStyles?: string;
 }
@@ -128,6 +128,7 @@ export const renderPage = ({ token, title, activePage, content, extraStyles = ''
                     <div class="nav-links">
                         <a href="/admin?token=${token}" class="nav-link ${activePage === 'admin' ? 'active' : ''}">DASHBOARD</a>
                         <a href="/db?token=${token}" class="nav-link ${activePage === 'db' ? 'active' : ''}">THE SHOP</a>
+                        <a href="/admin/cloud-claw?token=${token}" class="nav-link ${activePage === 'cloud-claw' ? 'active' : ''}">CLOUD-CLAW</a>
                         <a href="/" class="nav-link ${activePage === 'frontend' ? 'active' : ''}">BACK TO FRONTEND</a>
 
                     </div>

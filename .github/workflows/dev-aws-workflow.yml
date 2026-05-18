@@ -93,6 +93,9 @@ jobs:
             SF_PRIVATE_KEY_CONTENT=${{ secrets.SF_PRIVATE_KEY_CONTENT }}
             FRONTEND_URL=https://deov.geoffthedeov.net
             GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
+            ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+            ALPACA_API_KEY=${{ secrets.ALPACA_API_KEY }}
+            ALPACA_SECRET_KEY=${{ secrets.ALPACA_SECRET_KEY }}
 
       - name: Fill in the new frontend image ID in the Amazon ECS task definition
         id: frontend-task-def

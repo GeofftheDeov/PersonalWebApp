@@ -56,7 +56,7 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           cd backend
-          docker buildx build --platform linux/arm64 \
+          docker buildx build --platform linux/amd64 \
             -t $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:$IMAGE_TAG \
             -t $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:dev \
             --push .
@@ -69,7 +69,7 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           cd frontend
-          docker buildx build --platform linux/arm64 \
+          docker buildx build --platform linux/amd64 \
             -t $ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:$IMAGE_TAG \
             -t $ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:dev \
             --build-arg NEXT_PUBLIC_GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }} \

@@ -14,6 +14,8 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+RUN apk add --no-cache git
+
 COPY package*.json ./
 RUN npm install --only=production
 
@@ -22,9 +24,12 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/key.pem ./key.pem
 COPY --from=builder /app/cert.pem ./cert.pem
 
+COPY entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
+
 EXPOSE 5000
 EXPOSE 5001
 
 ENV NODE_ENV=production
 
-CMD ["npm", "start"]
+ENTRYPOINT ["./entrypoint.sh"]

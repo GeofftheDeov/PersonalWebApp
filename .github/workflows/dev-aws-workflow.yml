@@ -96,6 +96,9 @@ jobs:
             ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
             ALPACA_API_KEY=${{ secrets.ALPACA_API_KEY }}
             ALPACA_SECRET_KEY=${{ secrets.ALPACA_SECRET_KEY }}
+            GITHUB_VAULT_TOKEN=${{ secrets.GITHUB_VAULT_TOKEN }}
+            GITHUB_VAULT_REPO=GeofftheDeov/obsidian-vault
+            OBSIDIAN_VAULT_PATH=/obsidian-vault
 
       - name: Fill in the new frontend image ID in the Amazon ECS task definition
         id: frontend-task-def

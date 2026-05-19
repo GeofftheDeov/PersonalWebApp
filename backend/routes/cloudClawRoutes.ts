@@ -1,5 +1,7 @@
 import express, { Response } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
+import fs from 'fs';
+import path from 'path';
 import { auth } from '../middleware/auth.js';
 import CloudClawSession from '../models/CloudClawSession.js';
 import mongoose from 'mongoose';
@@ -14,7 +16,61 @@ const MAX_HISTORY = 40; // stored message entries (user + assistant pairs = 20 e
 const SYSTEM_PROMPT =
   'You are Cloud-Claw, an autonomous trading agent connected to an Alpaca paper trading account. ' +
   'You can check account details, inspect open positions, look up stock quotes, and submit market orders. ' +
+  'You also have access to an Obsidian personal knowledge vault — use readNote and searchVault to look up notes, research, and context from the vault when relevant. ' +
   'Be concise and factual. Always confirm trade details before executing.';
+
+// ── Obsidian vault helpers ────────────────────────────────────────────────────
+
+const VAULT_PATH = process.env.OBSIDIAN_VAULT_PATH || '';
+const VAULT_EXCLUDED = new Set(['.git', 'private', 'node_modules']);
+
+function safeVaultPath(relativePath: string): string | null {
+  if (!VAULT_PATH) return null;
+  const full = path.resolve(VAULT_PATH, relativePath);
+  return full.startsWith(path.resolve(VAULT_PATH)) ? full : null;
+}
+
+function readVaultNote(relativePath: string): unknown {
+  if (!VAULT_PATH) return { error: 'OBSIDIAN_VAULT_PATH not configured' };
+  const full = safeVaultPath(relativePath);
+  if (!full) return { error: 'Invalid path' };
+  try {
+    return { path: relativePath, content: fs.readFileSync(full, 'utf-8') };
+  } catch (err: any) {
+    return { error: err.message };
+  }
+}
+
+function searchVaultNotes(query: string): unknown {
+  if (!VAULT_PATH) return { error: 'OBSIDIAN_VAULT_PATH not configured' };
+  const q = query.toLowerCase();
+  const results: { path: string; excerpt: string }[] = [];
+
+  function walk(dir: string, base: string) {
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (e.name.startsWith('.') || VAULT_EXCLUDED.has(e.name)) continue;
+      const full = path.join(dir, e.name);
+      const rel = path.join(base, e.name).replace(/\\/g, '/');
+      if (e.isDirectory()) { walk(full, rel); }
+      else if (e.name.endsWith('.md')) {
+        try {
+          const text = fs.readFileSync(full, 'utf-8');
+          if (text.toLowerCase().includes(q) || e.name.toLowerCase().includes(q)) {
+            const idx = text.toLowerCase().indexOf(q);
+            const excerpt = idx >= 0 ? text.slice(Math.max(0, idx - 50), idx + 150) : text.slice(0, 200);
+            results.push({ path: rel, excerpt: '...' + excerpt.trim() + '...' });
+            if (results.length >= 10) return;
+          }
+        } catch { /* skip */ }
+      }
+    }
+  }
+
+  walk(VAULT_PATH, '');
+  return { results };
+}
 
 // ── Alpaca helpers ────────────────────────────────────────────────────────────
 
@@ -48,6 +104,8 @@ async function handleToolCall(name: string, input: Record<string, unknown>): Pro
         if (!res.ok) throw new Error(await res.text());
         return res.json();
       }
+      case 'readNote':    return readVaultNote(input.path as string);
+      case 'searchVault': return searchVaultNotes(input.query as string);
       default: return { error: `Unknown tool: ${name}` };
     }
   } catch (err: any) {
@@ -74,6 +132,24 @@ const tools: Anthropic.Tool[] = [
         side:   { type: 'string', enum: ['buy', 'sell'] },
       },
       required: ['symbol', 'qty', 'side'],
+    },
+  },
+  {
+    name: 'readNote',
+    description: 'Read a specific note from the Obsidian vault by its relative file path (e.g. "projects/alpaca-trading-bot/index.md").',
+    input_schema: {
+      type: 'object',
+      properties: { path: { type: 'string', description: 'Relative path within the vault' } },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'searchVault',
+    description: 'Search the Obsidian vault for notes matching a keyword query. Returns up to 10 matching excerpts.',
+    input_schema: {
+      type: 'object',
+      properties: { query: { type: 'string', description: 'Search term' } },
+      required: ['query'],
     },
   },
 ];

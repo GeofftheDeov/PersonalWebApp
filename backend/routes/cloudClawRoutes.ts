@@ -173,6 +173,41 @@ async function runAgentLoop(messages: Anthropic.MessageParam[]): Promise<string>
   return response.content.find((b): b is Anthropic.TextBlock => b.type === 'text')?.text ?? "I couldn't generate a response.";
 }
 
+// Short, human-readable summary of a tool result for the activity feed.
+function summarizeToolResult(name: string, result: unknown): string {
+  const r = result as any;
+  if (r?.error) return `error: ${r.error}`;
+  switch (name) {
+    case 'getAccount':
+      return r?.buying_power ? `buying power $${parseFloat(r.buying_power).toFixed(2)}, equity $${parseFloat(r.equity ?? '0').toFixed(2)}` : 'account info';
+    case 'getPositions':
+      return Array.isArray(r) ? `${r.length} open position${r.length === 1 ? '' : 's'}` : 'positions';
+    case 'getMarketData':
+      return r?.quote ? `bid ${r.quote.bp}, ask ${r.quote.ap}` : 'quote';
+    case 'submitOrder':
+      return r?.id ? `order ${r.id} submitted (${r.symbol} ${r.qty} ${r.side})` : 'order submitted';
+    case 'readNote':
+      return r?.content ? `read ${r.path} (${r.content.length} chars)` : 'read note';
+    case 'searchVault':
+      return Array.isArray(r?.results) ? `${r.results.length} match${r.results.length === 1 ? '' : 'es'}` : 'searched vault';
+    default:
+      return 'done';
+  }
+}
+
+// Human-readable description of an outbound tool call (shown before it runs).
+function describeToolCall(name: string, input: Record<string, unknown>): string {
+  switch (name) {
+    case 'getAccount':    return 'Checking Alpaca account…';
+    case 'getPositions':  return 'Fetching open positions…';
+    case 'getMarketData': return `Looking up quote for ${input.symbol}…`;
+    case 'submitOrder':   return `Submitting ${input.side} order: ${input.qty} ${input.symbol}…`;
+    case 'readNote':      return `Reading vault note: ${input.path}`;
+    case 'searchVault':   return `Searching vault for "${input.query}"…`;
+    default:              return `Calling ${name}…`;
+  }
+}
+
 // ── Routes ───────────────────────────────────────────────────────────────────
 
 // POST /api/cloud-claw/chat  — send a message, get a reply
@@ -205,6 +240,87 @@ router.post('/chat', auth, async (req: any, res: Response) => {
   } catch (err: any) {
     console.error('[cloud-claw] chat error:', err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/cloud-claw/chat/stream  — same as /chat, but streams progress + text over SSE
+router.post('/chat/stream', auth, async (req: any, res: Response) => {
+  const { message } = req.body as { message: string };
+  if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  (res as any).flushHeaders?.();
+
+  const send = (event: string, data: unknown) => {
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  const heartbeat = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* socket closed */ } }, 15_000);
+  let aborted = false;
+  req.on('close', () => { aborted = true; });
+
+  try {
+    const userId = new mongoose.Types.ObjectId(req.user.id);
+    let session = await CloudClawSession.findOne({ userId });
+    if (!session) session = new CloudClawSession({ userId, messages: [] });
+
+    const history: Anthropic.MessageParam[] = session.messages.map(m => ({ role: m.role, content: m.content }));
+    history.push({ role: 'user', content: message });
+
+    let assistantText = '';
+    let turn = 0;
+
+    while (!aborted) {
+      turn++;
+      send('status', { text: turn === 1 ? 'Thinking…' : 'Continuing…' });
+
+      const stream = anthropic.messages.stream({
+        model: MODEL, max_tokens: 1024, system: SYSTEM_PROMPT, messages: history, tools,
+      });
+
+      stream.on('text', (delta: string) => {
+        assistantText += delta;
+        send('text', { delta });
+      });
+
+      const finalMessage = await stream.finalMessage();
+      if (aborted) break;
+
+      if (finalMessage.stop_reason !== 'tool_use') break;
+
+      // Run requested tools, narrating each step.
+      history.push({ role: 'assistant', content: finalMessage.content });
+      const toolResults: Anthropic.ToolResultBlockParam[] = [];
+      for (const block of finalMessage.content) {
+        if (block.type !== 'tool_use') continue;
+        const input = block.input as Record<string, unknown>;
+        send('tool_use', { name: block.name, description: describeToolCall(block.name, input) });
+        const result = await handleToolCall(block.name, input);
+        send('tool_result', { name: block.name, summary: summarizeToolResult(block.name, result) });
+        toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(result) });
+      }
+      history.push({ role: 'user', content: toolResults });
+    }
+
+    if (!aborted) {
+      const finalReply = assistantText || "I couldn't generate a response.";
+      session.messages.push({ role: 'user', content: message });
+      session.messages.push({ role: 'assistant', content: finalReply });
+      while (session.messages.length > MAX_HISTORY) session.messages.shift();
+      await session.save();
+      send('done', { reply: finalReply });
+    }
+    res.end();
+  } catch (err: any) {
+    console.error('[cloud-claw] stream error:', err);
+    try { send('error', { message: err.message }); } catch { /* socket already closed */ }
+    res.end();
+  } finally {
+    clearInterval(heartbeat);
   }
 });
 

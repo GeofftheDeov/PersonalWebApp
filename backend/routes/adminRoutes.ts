@@ -195,6 +195,31 @@ router.get('/cloud-claw', (req, res) => {
                 div.textContent = text;
                 box.appendChild(div);
                 box.scrollTop = box.scrollHeight;
+                return div;
+            }
+
+            function createStreamingAssistant() {
+                const box = document.getElementById('messages');
+                const wrap = document.createElement('div');
+                wrap.className = 'message assistant streaming';
+                const activity = document.createElement('div');
+                activity.className = 'activity';
+                const text = document.createElement('div');
+                text.className = 'text';
+                wrap.appendChild(activity);
+                wrap.appendChild(text);
+                box.appendChild(wrap);
+                box.scrollTop = box.scrollHeight;
+                return { wrap, activity, text };
+            }
+
+            function addActivityLine(activity, kind, content) {
+                const line = document.createElement('div');
+                line.className = 'activity-line ' + kind;
+                line.textContent = content;
+                activity.appendChild(line);
+                document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+                return line;
             }
 
             async function sendMessage() {
@@ -203,20 +228,71 @@ router.get('/cloud-claw', (req, res) => {
                 if (!text) return;
                 input.value = '';
                 appendMessage('user', text);
-                appendMessage('assistant', '...');
 
-                const res = await fetch('/api/cloud-claw/chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + TOKEN },
-                    body: JSON.stringify({ message: text })
-                });
-                const box = document.getElementById('messages');
-                box.removeChild(box.lastChild);
-                if (res.ok) {
-                    const { reply } = await res.json();
-                    appendMessage('assistant', reply);
-                } else {
-                    appendMessage('assistant', '[Error: ' + res.status + ']');
+                const bubble = createStreamingAssistant();
+                let statusLine = addActivityLine(bubble.activity, 'status', 'Thinking…');
+                let pendingToolLine = null;
+
+                try {
+                    const res = await fetch('/api/cloud-claw/chat/stream', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + TOKEN },
+                        body: JSON.stringify({ message: text })
+                    });
+                    if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
+
+                    const reader = res.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buf = '';
+
+                    while (true) {
+                        const { value, done } = await reader.read();
+                        if (done) break;
+                        buf += decoder.decode(value, { stream: true });
+                        const events = buf.split('\\n\\n');
+                        buf = events.pop() || '';
+                        for (const block of events) {
+                            const lines = block.split('\\n');
+                            let evt = 'message', data = '';
+                            for (const ln of lines) {
+                                if (ln.startsWith('event: ')) evt = ln.slice(7).trim();
+                                else if (ln.startsWith('data: ')) data += ln.slice(6);
+                                else if (ln.startsWith(':')) { /* heartbeat */ }
+                            }
+                            if (!data) continue;
+                            let payload;
+                            try { payload = JSON.parse(data); } catch { continue; }
+
+                            if (evt === 'status') {
+                                if (statusLine) statusLine.textContent = payload.text;
+                                else statusLine = addActivityLine(bubble.activity, 'status', payload.text);
+                            } else if (evt === 'tool_use') {
+                                if (statusLine) { statusLine.remove(); statusLine = null; }
+                                pendingToolLine = addActivityLine(bubble.activity, 'tool', '→ ' + payload.description);
+                            } else if (evt === 'tool_result') {
+                                if (pendingToolLine) {
+                                    pendingToolLine.textContent += '  ' + payload.summary;
+                                    pendingToolLine.classList.add('tool-done');
+                                    pendingToolLine = null;
+                                } else {
+                                    addActivityLine(bubble.activity, 'tool tool-done', payload.summary);
+                                }
+                            } else if (evt === 'text') {
+                                if (statusLine) { statusLine.remove(); statusLine = null; }
+                                bubble.text.textContent += payload.delta;
+                                document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+                            } else if (evt === 'error') {
+                                if (statusLine) { statusLine.remove(); statusLine = null; }
+                                addActivityLine(bubble.activity, 'error', '[Error: ' + payload.message + ']');
+                            } else if (evt === 'done') {
+                                if (statusLine) { statusLine.remove(); statusLine = null; }
+                                bubble.wrap.classList.remove('streaming');
+                            }
+                        }
+                    }
+                } catch (e) {
+                    if (statusLine) { statusLine.remove(); statusLine = null; }
+                    addActivityLine(bubble.activity, 'error', '[Stream failed: ' + e.message + ']');
                 }
             }
 
@@ -310,6 +386,26 @@ router.get('/cloud-claw', (req, res) => {
             border: 1px solid #444;
             color: #e0e0e0;
         }
+        .message.assistant.streaming { border-color: #0d9488; }
+        .message.assistant .activity {
+            display: flex;
+            flex-direction: column;
+            gap: 0.2rem;
+            margin-bottom: 0.4rem;
+        }
+        .message.assistant .activity:empty { display: none; }
+        .message.assistant .activity-line {
+            font-size: 0.75rem;
+            color: #888;
+            font-style: italic;
+            padding: 0.1rem 0;
+            line-height: 1.3;
+        }
+        .message.assistant .activity-line.tool { color: #fbbf24; font-style: normal; }
+        .message.assistant .activity-line.tool.tool-done { color: #10b981; }
+        .message.assistant .activity-line.error { color: #ef4444; font-style: normal; }
+        .message.assistant .text { white-space: pre-wrap; }
+        .message.assistant .text:empty { display: none; }
 
         .input-row {
             display: flex;

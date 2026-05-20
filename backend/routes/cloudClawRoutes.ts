@@ -259,9 +259,13 @@ router.post('/chat/stream', auth, async (req: any, res: Response) => {
     res.write(`data: ${JSON.stringify(data)}\n\n`);
   };
 
+  console.log('[cloud-claw] stream: opened');
+  // Send an immediate event so the client can prove the SSE pipe is live before any model call.
+  send('status', { text: 'Connected — thinking…' });
+
   const heartbeat = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* socket closed */ } }, 15_000);
   let aborted = false;
-  req.on('close', () => { aborted = true; });
+  req.on('close', () => { aborted = true; console.log('[cloud-claw] stream: client closed'); });
 
   try {
     const userId = new mongoose.Types.ObjectId(req.user.id);
@@ -276,28 +280,70 @@ router.post('/chat/stream', auth, async (req: any, res: Response) => {
 
     while (!aborted) {
       turn++;
-      send('status', { text: turn === 1 ? 'Thinking…' : 'Continuing…' });
+      if (turn > 1) send('status', { text: 'Continuing…' });
+      console.log(`[cloud-claw] stream: turn ${turn} starting (history=${history.length})`);
 
-      const stream = anthropic.messages.stream({
+      // Use the low-level streaming API: returns AsyncIterable<RawMessageStreamEvent>.
+      // Avoids any race conditions with high-level event emitters.
+      const rawStream = await anthropic.messages.create({
         model: MODEL, max_tokens: 1024, system: SYSTEM_PROMPT, messages: history, tools,
+        stream: true,
       });
 
-      stream.on('text', (delta: string) => {
-        assistantText += delta;
-        send('text', { delta });
-      });
+      // Assemble content blocks ourselves so we can both stream text and handle tool_use.
+      const blocks: any[] = [];
+      let stopReason: string | null = null;
+      let textChunks = 0;
 
-      const finalMessage = await stream.finalMessage();
-      if (aborted) break;
+      for await (const event of rawStream as AsyncIterable<any>) {
+        if (aborted) break;
+        switch (event.type) {
+          case 'content_block_start': {
+            const cb = event.content_block;
+            const slot: any = { ...cb };
+            if (cb.type === 'text') slot.text = '';
+            else if (cb.type === 'tool_use') slot._json = '';
+            blocks[event.index] = slot;
+            break;
+          }
+          case 'content_block_delta': {
+            const slot = blocks[event.index];
+            if (event.delta.type === 'text_delta') {
+              const piece: string = event.delta.text;
+              assistantText += piece;
+              if (slot) slot.text += piece;
+              send('text', { delta: piece });
+              textChunks++;
+            } else if (event.delta.type === 'input_json_delta') {
+              if (slot) slot._json += event.delta.partial_json;
+            }
+            break;
+          }
+          case 'content_block_stop': {
+            const slot = blocks[event.index];
+            if (slot?.type === 'tool_use') {
+              try { slot.input = JSON.parse(slot._json || '{}'); } catch { slot.input = {}; }
+              delete slot._json;
+            }
+            break;
+          }
+          case 'message_delta':
+            stopReason = event.delta?.stop_reason ?? stopReason;
+            break;
+        }
+      }
 
-      if (finalMessage.stop_reason !== 'tool_use') break;
+      console.log(`[cloud-claw] stream: turn ${turn} ended (stop_reason=${stopReason}, blocks=${blocks.length}, text_chunks=${textChunks})`);
+
+      if (stopReason !== 'tool_use') break;
 
       // Run requested tools, narrating each step.
-      history.push({ role: 'assistant', content: finalMessage.content });
+      history.push({ role: 'assistant', content: blocks });
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
-      for (const block of finalMessage.content) {
-        if (block.type !== 'tool_use') continue;
+      for (const block of blocks) {
+        if (block?.type !== 'tool_use') continue;
         const input = block.input as Record<string, unknown>;
+        console.log(`[cloud-claw] stream: tool ${block.name}(${JSON.stringify(input)})`);
         send('tool_use', { name: block.name, description: describeToolCall(block.name, input) });
         const result = await handleToolCall(block.name, input);
         send('tool_result', { name: block.name, summary: summarizeToolResult(block.name, result) });
@@ -313,10 +359,11 @@ router.post('/chat/stream', auth, async (req: any, res: Response) => {
       while (session.messages.length > MAX_HISTORY) session.messages.shift();
       await session.save();
       send('done', { reply: finalReply });
+      console.log(`[cloud-claw] stream: done (${finalReply.length} chars, ${turn} turn${turn === 1 ? '' : 's'})`);
     }
     res.end();
   } catch (err: any) {
-    console.error('[cloud-claw] stream error:', err);
+    console.error('[cloud-claw] stream error:', err?.message, err?.stack);
     try { send('error', { message: err.message }); } catch { /* socket already closed */ }
     res.end();
   } finally {

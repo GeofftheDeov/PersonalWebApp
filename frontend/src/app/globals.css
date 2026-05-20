@@ -58,21 +58,21 @@ select.appearance-none {
    Pairs with a soft offset shadow that matches the neo-brutalist style. */
 .text-zinc-400 {
   color: #52525b; /* zinc-600 */
-  text-shadow: 1px 1px 0 rgba(255, 255, 255, 0.6);
+  text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.45);
 }
 .text-zinc-500 {
   color: #3f3f46; /* zinc-700 */
-  text-shadow: 1px 1px 0 rgba(255, 255, 255, 0.6);
+  text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.45);
 }
 .dark .text-zinc-400,
 .dark .dark\:text-zinc-400 {
   color: #e4e4e7; /* zinc-200 */
-  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.85);
+  text-shadow: 2px 2px 0 rgba(0, 0, 0, 1);
 }
 .dark .text-zinc-500,
 .dark .dark\:text-zinc-500 {
   color: #d4d4d8; /* zinc-300 */
-  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.85);
+  text-shadow: 2px 2px 0 rgba(0, 0, 0, 1);
 }
 
 @layer utilities {

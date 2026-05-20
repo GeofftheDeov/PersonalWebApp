@@ -39,7 +39,7 @@ export default function Home() {
             fill
             priority
             sizes="100vw"
-            className="object-cover"
+            className="object-cover object-top"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-black/20" />
           <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center">

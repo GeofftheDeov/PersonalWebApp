@@ -13,6 +13,8 @@ export default function ProfilePage() {
     const [uploadError, setUploadError] = useState<string | null>(null);
     const [isUploading, setIsUploading] = useState(false);
     const [sessions, setSessions] = useState<any[]>([]);
+    const [campaigns, setCampaigns] = useState<any[]>([]);
+    const [characters, setCharacters] = useState<any[]>([]);
     const [games, setGames] = useState<string[]>([]);
     const [gameInput, setGameInput] = useState('');
     const [savingGames, setSavingGames] = useState(false);
@@ -44,6 +46,29 @@ export default function ProfilePage() {
             .then(r => r.ok ? r.json() : [])
             .then(setSessions)
             .catch(() => setSessions([]));
+
+        fetch('/api/campaigns', {
+            headers: { 'Authorization': `Bearer ${token}` },
+        })
+            .then(r => r.ok ? r.json() : [])
+            .then(setCampaigns)
+            .catch(() => setCampaigns([]));
+
+        fetch('/api/tabletop/characters', {
+            headers: { 'Authorization': `Bearer ${token}` },
+        })
+            .then(r => r.ok ? r.json() : [])
+            .then((chars: any[]) => {
+                const playerId = parsedUser.id || parsedUser._id;
+                const mine = chars.filter((c) => {
+                    const p = c.player;
+                    if (!p) return false;
+                    const pid = typeof p === 'string' ? p : (p._id || p.id);
+                    return pid === playerId;
+                });
+                setCharacters(mine);
+            })
+            .catch(() => setCharacters([]));
     }, [router]);
 
     if (!user) {
@@ -386,6 +411,84 @@ export default function ProfilePage() {
                                         ×
                                     </button>
                                 </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                {/* Campaigns */}
+                <div className="mt-16">
+                    <h2 className="text-4xl md:text-5xl font-permanent text-teal-600 uppercase relative w-fit mb-8">
+                        <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Campaigns</span>
+                    </h2>
+
+                    {campaigns.length === 0 ? (
+                        <p className="font-permanent text-xl text-zinc-500 uppercase">Not in any campaigns yet.</p>
+                    ) : (
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            {campaigns.map((c) => {
+                                const statusCls =
+                                    c.status === 'In Progress' ? 'bg-teal-500 text-white' :
+                                    c.status === 'Completed' ? 'bg-zinc-500 text-white' :
+                                    'bg-yellow-400 text-black';
+                                return (
+                                    <Link
+                                        key={c._id}
+                                        href={`/game-night/campaigns/${c._id}`}
+                                        className="block p-5 border-4 border-black dark:border-white bg-zinc-200 dark:bg-slate-800 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] transition-shadow"
+                                    >
+                                        <p className="font-permanent text-xl text-teal-600 dark:text-yellow-400 uppercase tracking-tight leading-tight">
+                                            {c.title}
+                                        </p>
+                                        {c.status && (
+                                            <span className={`inline-block mt-2 px-2 py-0.5 text-xs font-permanent uppercase border-2 border-black ${statusCls}`}>
+                                                {c.status}
+                                            </span>
+                                        )}
+                                    </Link>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+
+                {/* Characters */}
+                <div className="mt-16">
+                    <h2 className="text-4xl md:text-5xl font-permanent text-yellow-400 uppercase relative w-fit mb-8">
+                        <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Characters</span>
+                    </h2>
+
+                    {characters.length === 0 ? (
+                        <p className="font-permanent text-xl text-zinc-500 uppercase">No characters yet.</p>
+                    ) : (
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            {characters.map((c) => (
+                                <Link
+                                    key={c._id}
+                                    href={`/game-night/characters/${c._id}`}
+                                    className="block p-5 border-4 border-black dark:border-white bg-zinc-200 dark:bg-slate-800 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] transition-shadow"
+                                >
+                                    <div className="flex justify-between items-start gap-3">
+                                        <div className="min-w-0">
+                                            <p className="font-permanent text-xl text-teal-600 dark:text-yellow-400 uppercase tracking-tight leading-tight">
+                                                {c.name}
+                                            </p>
+                                            <p className="font-permanent text-sm text-zinc-500 dark:text-zinc-400 uppercase mt-1">
+                                                {c.class || 'Class N/A'} · Lv {c.level ?? 1}
+                                            </p>
+                                            {c.campaign?.title && (
+                                                <p className="font-permanent text-xs text-zinc-500 dark:text-zinc-400 uppercase mt-1">
+                                                    {c.campaign.title}
+                                                </p>
+                                            )}
+                                        </div>
+                                        {c.isDead && (
+                                            <span className="px-2 py-0.5 text-xs font-permanent uppercase border-2 border-black bg-red-600 text-white shrink-0">
+                                                Dead
+                                            </span>
+                                        )}
+                                    </div>
+                                </Link>
                             ))}
                         </div>
                     )}

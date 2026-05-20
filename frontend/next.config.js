@@ -3,6 +3,7 @@ const nextConfig = {
     eslint: { ignoreDuringBuilds: true },
     typescript: { ignoreBuildErrors: true },
     // output: 'standalone',
+    experimental: { proxyTimeout: 300_000 },
     async rewrites() {
         const backendUrl = process.env.BACKEND_URL || 'http://localhost:5000';
         return {

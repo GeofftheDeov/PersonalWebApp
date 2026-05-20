@@ -139,10 +139,9 @@ export default function DashboardPage() {
                                         {user.handle ? `@${user.handle}` : user.email}
                                     </p>
                                 </div>
-                                <span className="text-2xl font-permanent text-black dark:text-white group-hover:translate-x-1 transition-transform">→</span>
                             </div>
                             <p className="mt-4 font-permanent text-sm uppercase text-zinc-500 dark:text-zinc-400">
-                                VIEW &amp; EDIT PROFILE →
+                                VIEW &amp; EDIT PROFILE
                             </p>
                         </Link>
                     </div>

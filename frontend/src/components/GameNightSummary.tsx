@@ -112,7 +112,7 @@ export default function GameNightSummary() {
                     id="game-night-full-planner-link"
                     className="p-3 border-4 border-black bg-yellow-400 text-black font-permanent text-sm uppercase hover:bg-white transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]"
                 >
-                    Full Planner →
+                    Full Planner
                 </Link>
             </div>
 

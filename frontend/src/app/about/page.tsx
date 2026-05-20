@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 import Footer from "@/components/Footer";
 
 export default function AboutPage() {
@@ -44,9 +45,49 @@ export default function AboutPage() {
               <span className="drop-shadow-[6px_6px_0px_rgba(0,0,0,1)]">Goal</span>
             </h2>
             <p className="text-4xl md:text-6xl font-permanent leading-tight text-yellow-400 drop-shadow-[4px_4px_0px_rgba(0,0,0,1)] tracking-tight">
-              TO PROVIDE SEAMLESS ACCESS TO MY PERSONAL PROJECTS, SHOWCASING TECHNOLOGY STACKS 
+              TO PROVIDE SEAMLESS ACCESS TO MY PERSONAL PROJECTS, SHOWCASING TECHNOLOGY STACKS
               FROM FRONTEND TO BACKEND, AND EVERYTHING IN BETWEEN.
             </p>
+          </div>
+
+          {/* About Me */}
+          <div className="relative max-w-6xl mx-auto w-full">
+            <h2 className="text-7xl md:text-9xl font-permanent mb-12 text-teal-600 uppercase relative w-fit transform rotate-1">
+              <span className="drop-shadow-[6px_6px_0px_rgba(0,0,0,1)]">About Me</span>
+            </h2>
+
+            <div className="grid md:grid-cols-5 gap-10 md:gap-16 items-start">
+              <div className="md:col-span-2">
+                <div className="relative w-full aspect-[3/4] border-8 border-black bg-zinc-200 shadow-[12px_12px_0px_0px_rgba(13,148,136,1)] overflow-hidden transform -rotate-2 hover:rotate-0 transition-transform duration-500">
+                  <Image
+                    src="/images/Geoffrey-Portrait.jpg"
+                    alt="Geoffrey Murray"
+                    fill
+                    sizes="(max-width: 768px) 100vw, 40vw"
+                    className="object-cover"
+                  />
+                </div>
+                <p className="mt-6 font-permanent text-xl uppercase text-orange-500 drop-shadow-[3px_3px_0px_rgba(0,0,0,1)] tracking-tight">
+                  Geoffrey Murray<br />
+                  <span className="text-base text-yellow-400">Salesforce Developer · St. Louis, MO</span>
+                </p>
+              </div>
+
+              <div className="md:col-span-3 space-y-6 font-permanent text-yellow-400 drop-shadow-[3px_3px_0px_rgba(0,0,0,1)] tracking-tight">
+                <p className="text-2xl md:text-3xl leading-tight">
+                  I'm a Salesforce developer based in Saint Louis, building CRM platforms by day and shipping personal projects by night.
+                </p>
+                <p className="text-xl md:text-2xl leading-snug">
+                  My day-to-day is Apex, LWC, Aura, and Visualforce — extending Salesforce with custom logic, integrations, and the QA discipline (regression, unit, and sanity testing) it takes to keep production calm.
+                </p>
+                <p className="text-xl md:text-2xl leading-snug">
+                  Off the platform, I build full-stack apps on the MERN stack and deploy them to AWS — this site runs on ECS Fargate behind an ALB, with GitHub Actions handling CI/CD. I also run Cloud-Claw, an autonomous trading agent stitched together from Anthropic's API and Alpaca.
+                </p>
+                <p className="text-xl md:text-2xl leading-snug">
+                  When I'm not at a keyboard I'm usually at a tabletop — running long-form D&amp;D campaigns, which is exactly the itch the Game Night Planner on this site was built to scratch.
+                </p>
+              </div>
+            </div>
           </div>
         </section>
       </div>

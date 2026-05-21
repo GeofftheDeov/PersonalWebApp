@@ -264,8 +264,12 @@ router.post('/chat/stream', auth, async (req: any, res: Response) => {
   send('status', { text: 'Connected — thinking…' });
 
   const heartbeat = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* socket closed */ } }, 15_000);
-  let aborted = false;
-  req.on('close', () => { aborted = true; console.log('[cloud-claw] stream: client closed'); });
+  // Log if the client really disconnects, but don't treat 'close' as a hard abort —
+  // Express/Node fires 'close' on the IncomingMessage as soon as the request body is fully
+  // read, which for a small POST happens within a millisecond of the handler running.
+  // If the client truly went away, res.write() in send() will throw and the outer catch
+  // will clean up.
+  req.on('close', () => { console.log('[cloud-claw] stream: req close event (may be benign body-end)'); });
 
   try {
     const userId = new mongoose.Types.ObjectId(req.user.id);
@@ -278,7 +282,7 @@ router.post('/chat/stream', auth, async (req: any, res: Response) => {
     let assistantText = '';
     let turn = 0;
 
-    while (!aborted) {
+    while (true) {
       turn++;
       if (turn > 1) send('status', { text: 'Continuing…' });
       console.log(`[cloud-claw] stream: turn ${turn} starting (history=${history.length})`);
@@ -296,7 +300,6 @@ router.post('/chat/stream', auth, async (req: any, res: Response) => {
       let textChunks = 0;
 
       for await (const event of rawStream as AsyncIterable<any>) {
-        if (aborted) break;
         switch (event.type) {
           case 'content_block_start': {
             const cb = event.content_block;
@@ -352,15 +355,13 @@ router.post('/chat/stream', auth, async (req: any, res: Response) => {
       history.push({ role: 'user', content: toolResults });
     }
 
-    if (!aborted) {
-      const finalReply = assistantText || "I couldn't generate a response.";
-      session.messages.push({ role: 'user', content: message });
-      session.messages.push({ role: 'assistant', content: finalReply });
-      while (session.messages.length > MAX_HISTORY) session.messages.shift();
-      await session.save();
-      send('done', { reply: finalReply });
-      console.log(`[cloud-claw] stream: done (${finalReply.length} chars, ${turn} turn${turn === 1 ? '' : 's'})`);
-    }
+    const finalReply = assistantText || "I couldn't generate a response.";
+    session.messages.push({ role: 'user', content: message });
+    session.messages.push({ role: 'assistant', content: finalReply });
+    while (session.messages.length > MAX_HISTORY) session.messages.shift();
+    await session.save();
+    send('done', { reply: finalReply });
+    console.log(`[cloud-claw] stream: done (${finalReply.length} chars, ${turn} turn${turn === 1 ? '' : 's'})`);
     res.end();
   } catch (err: any) {
     console.error('[cloud-claw] stream error:', err?.message, err?.stack);

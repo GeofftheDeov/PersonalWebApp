@@ -185,14 +185,14 @@ export default function ProfilePage() {
 
     return (
         <div className="min-h-[calc(100vh-76px)] flex flex-col overflow-hidden relative w-full">
-            <div className="flex-grow w-full max-w-4xl mx-auto p-8 md:p-16 relative z-10">
+            <div className="flex-grow w-full max-w-4xl mx-auto p-4 sm:p-8 md:p-16 relative z-10">
 
-                <header className="mb-16 relative">
-                    <h1 className="text-5xl md:text-7xl font-permanent text-black dark:text-black leading-none tracking-tight uppercase">
+                <header className="mb-10 md:mb-16 relative">
+                    <h1 className="text-4xl sm:text-5xl md:text-7xl font-permanent text-black dark:text-black leading-none tracking-tight uppercase break-words">
                         <span className="relative inline-block">
                             <span className="drop-shadow-[6px_6px_0px_rgba(250,204,21,1)]">YOUR</span>
                         </span>
-                        <span className="text-yellow-400 ml-4">
+                        <span className="text-yellow-400 ml-2 sm:ml-4">
                             <span className="drop-shadow-[6px_6px_0px_rgba(0,0,0,1)]">PROFILE</span>
                         </span>
                     </h1>
@@ -371,7 +371,7 @@ export default function ProfilePage() {
                 </div>
                 {/* Favorite games */}
                 <div className="mt-16">
-                    <h2 className="text-4xl md:text-5xl font-permanent text-yellow-400 uppercase relative w-fit mb-8">
+                    <h2 className="text-3xl sm:text-4xl md:text-5xl font-permanent text-yellow-400 uppercase relative w-fit mb-8">
                         <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Favorite Games</span>
                     </h2>
 
@@ -418,7 +418,7 @@ export default function ProfilePage() {
 
                 {/* Campaigns */}
                 <div className="mt-16">
-                    <h2 className="text-4xl md:text-5xl font-permanent text-teal-600 uppercase relative w-fit mb-8">
+                    <h2 className="text-3xl sm:text-4xl md:text-5xl font-permanent text-teal-600 uppercase relative w-fit mb-8">
                         <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Campaigns</span>
                     </h2>
 
@@ -454,7 +454,7 @@ export default function ProfilePage() {
 
                 {/* Characters */}
                 <div className="mt-16">
-                    <h2 className="text-4xl md:text-5xl font-permanent text-yellow-400 uppercase relative w-fit mb-8">
+                    <h2 className="text-3xl sm:text-4xl md:text-5xl font-permanent text-yellow-400 uppercase relative w-fit mb-8">
                         <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Characters</span>
                     </h2>
 
@@ -496,7 +496,7 @@ export default function ProfilePage() {
 
                 {/* Sessions attended */}
                 <div className="mt-16">
-                    <h2 className="text-4xl md:text-5xl font-permanent text-teal-600 uppercase relative w-fit mb-8">
+                    <h2 className="text-3xl sm:text-4xl md:text-5xl font-permanent text-teal-600 uppercase relative w-fit mb-8">
                         <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Sessions Attended</span>
                     </h2>
 
@@ -529,8 +529,8 @@ export default function ProfilePage() {
             </div>
 
             <Footer>
-                <div className="inline-block border-8 border-black dark:border-black px-12 py-8 mb-12 bg-teal-600 shadow-[12px_12px_0px_0px_rgba(249,115,22,1)]">
-                    <p className="text-3xl md:text-4xl font-permanent text-white uppercase leading-tight">
+                <div className="inline-block border-4 sm:border-8 border-black dark:border-black px-6 sm:px-12 py-6 sm:py-8 mb-12 mx-3 bg-teal-600 shadow-[6px_6px_0px_0px_rgba(249,115,22,1)] sm:shadow-[12px_12px_0px_0px_rgba(249,115,22,1)]">
+                    <p className="text-2xl sm:text-3xl md:text-4xl font-permanent text-white uppercase leading-tight">
                         Authenticated.<br />Secure.<br />Ready to Build.
                     </p>
                 </div>

@@ -67,7 +67,7 @@ export default function CharacterDetailPage() {
 
     return (
         <div className="min-h-[calc(100vh-76px)] flex flex-col">
-            <div className="flex-grow w-full max-w-3xl mx-auto p-6 md:p-12">
+            <div className="flex-grow w-full max-w-3xl mx-auto p-4 sm:p-6 md:p-12">
 
                 <div className="mb-8">
                     <Link href="/game-night" className="inline-flex items-center gap-2 px-4 py-2 bg-yellow-400 text-black border-4 border-black font-permanent text-sm shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:bg-white transition-colors uppercase w-fit">
@@ -76,14 +76,14 @@ export default function CharacterDetailPage() {
                 </div>
 
                 {/* Header */}
-                <div className="mb-8 pb-6 border-b-8 border-black flex items-start justify-between gap-4">
-                    <div className="flex items-start gap-4">
+                <div className="mb-8 pb-6 border-b-8 border-black flex flex-wrap items-start justify-between gap-4">
+                    <div className="flex items-start gap-3 sm:gap-4 min-w-0 flex-1">
                         <div className={`p-3 border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] shrink-0 ${character.isDead ? 'bg-zinc-600' : 'bg-yellow-400'}`}>
-                            {character.isDead ? <Skull className="w-8 h-8 text-white" /> : <Sword className="w-8 h-8 text-black" />}
+                            {character.isDead ? <Skull className="w-6 h-6 sm:w-8 sm:h-8 text-white" /> : <Sword className="w-6 h-6 sm:w-8 sm:h-8 text-black" />}
                         </div>
-                        <div>
+                        <div className="min-w-0">
                             <p className="font-permanent text-xs text-zinc-400 uppercase mb-1">Character</p>
-                            <h1 className={`text-3xl md:text-4xl font-permanent uppercase leading-tight ${character.isDead ? 'text-zinc-400 dark:text-zinc-500 line-through' : 'text-black dark:text-white'}`}>
+                            <h1 className={`text-2xl sm:text-3xl md:text-4xl font-permanent uppercase leading-tight break-words ${character.isDead ? 'text-zinc-400 dark:text-zinc-500 line-through' : 'text-black dark:text-white'}`}>
                                 {character.name}
                             </h1>
                             <div className="flex flex-wrap items-center gap-3 mt-2">

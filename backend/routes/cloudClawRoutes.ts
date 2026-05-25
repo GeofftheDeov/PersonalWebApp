@@ -5,6 +5,7 @@ import path from 'path';
 import { auth } from '../middleware/auth.js';
 import CloudClawSession from '../models/CloudClawSession.js';
 import mongoose from 'mongoose';
+import { renderMarkdown } from '../utils/markdown.js';
 
 const router = express.Router();
 
@@ -236,7 +237,7 @@ router.post('/chat', auth, async (req: any, res: Response) => {
     while (session.messages.length > MAX_HISTORY) session.messages.shift();
     await session.save();
 
-    res.json({ reply });
+    res.json({ reply, html: renderMarkdown(reply) });
   } catch (err: any) {
     console.error('[cloud-claw] chat error:', err);
     res.status(500).json({ error: err.message });
@@ -360,7 +361,7 @@ router.post('/chat/stream', auth, async (req: any, res: Response) => {
     session.messages.push({ role: 'assistant', content: finalReply });
     while (session.messages.length > MAX_HISTORY) session.messages.shift();
     await session.save();
-    send('done', { reply: finalReply });
+    send('done', { reply: finalReply, html: renderMarkdown(finalReply) });
     console.log(`[cloud-claw] stream: done (${finalReply.length} chars, ${turn} turn${turn === 1 ? '' : 's'})`);
     res.end();
   } catch (err: any) {
@@ -388,7 +389,12 @@ router.get('/history', auth, async (req: any, res: Response) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.user.id);
     const session = await CloudClawSession.findOne({ userId });
-    res.json({ messages: session?.messages ?? [] });
+    const messages = (session?.messages ?? []).map(m => ({
+      role: m.role,
+      content: m.content,
+      html: m.role === 'assistant' && typeof m.content === 'string' ? renderMarkdown(m.content) : undefined,
+    }));
+    res.json({ messages });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

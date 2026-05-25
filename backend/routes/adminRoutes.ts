@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import fs from 'fs';
 import path from 'path';
 import { renderPage } from '../utils/adminUi.js';
+import { renderMarkdown } from '../utils/markdown.js';
 
 const router = express.Router();
 
@@ -185,14 +186,19 @@ router.get('/cloud-claw', (req, res) => {
                 const { messages } = await res.json();
                 const box = document.getElementById('messages');
                 box.innerHTML = '';
-                messages.forEach(m => appendMessage(m.role, m.content));
+                messages.forEach(m => appendMessage(m.role, m.content, m.html));
             }
 
-            function appendMessage(role, text) {
+            function appendMessage(role, text, html) {
                 const box = document.getElementById('messages');
                 const div = document.createElement('div');
                 div.className = 'message ' + role;
-                div.textContent = text;
+                if (role === 'assistant' && html) {
+                    div.classList.add('markdown-body');
+                    div.innerHTML = html;
+                } else {
+                    div.textContent = text;
+                }
                 box.appendChild(div);
                 box.scrollTop = box.scrollHeight;
                 return div;
@@ -287,6 +293,10 @@ router.get('/cloud-claw', (req, res) => {
                             } else if (evt === 'done') {
                                 if (statusLine) { statusLine.remove(); statusLine = null; }
                                 bubble.wrap.classList.remove('streaming');
+                                if (payload.html) {
+                                    bubble.text.classList.add('markdown-body');
+                                    bubble.text.innerHTML = payload.html;
+                                }
                             }
                         }
                     }
@@ -406,6 +416,56 @@ router.get('/cloud-claw', (req, res) => {
         .message.assistant .activity-line.error { color: #ef4444; font-style: normal; }
         .message.assistant .text { white-space: pre-wrap; }
         .message.assistant .text:empty { display: none; }
+        .message.assistant .text.markdown-body { white-space: normal; }
+
+        .message.assistant.markdown-body { white-space: normal; }
+        .markdown-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; }
+        .markdown-body > *:first-child { margin-top: 0; }
+        .markdown-body > *:last-child { margin-bottom: 0; }
+        .markdown-body h1, .markdown-body h2, .markdown-body h3,
+        .markdown-body h4, .markdown-body h5, .markdown-body h6 {
+            color: #0d9488;
+            font-weight: 600;
+            margin: 1em 0 0.4em;
+            line-height: 1.25;
+        }
+        .markdown-body h1 { font-size: 1.35rem; }
+        .markdown-body h2 { font-size: 1.2rem; }
+        .markdown-body h3 { font-size: 1.05rem; }
+        .markdown-body p { margin: 0.4em 0; }
+        .markdown-body a { color: #7c6fe0; text-decoration: none; }
+        .markdown-body a:hover { color: #a78bfa; text-decoration: underline; }
+        .markdown-body strong { color: #f4f4f4; }
+        .markdown-body ul, .markdown-body ol { margin: 0.4em 0 0.6em; padding-left: 1.4em; }
+        .markdown-body li { margin: 0.15em 0; }
+        .markdown-body blockquote {
+            border-left: 3px solid #0d9488;
+            margin: 0.6em 0;
+            padding: 0.1em 0.8em;
+            color: #b8b8b8;
+            background: #1b1b1b;
+        }
+        .markdown-body code {
+            font-family: 'Courier New', monospace;
+            background: #1b1b1b;
+            color: #fbbf24;
+            padding: 0.1em 0.3em;
+            border-radius: 3px;
+            font-size: 0.88em;
+        }
+        .markdown-body pre {
+            background: #1b1b1b;
+            border: 1px solid #333;
+            padding: 0.7em 0.9em;
+            overflow-x: auto;
+            border-radius: 4px;
+            margin: 0.5em 0;
+        }
+        .markdown-body pre code { background: transparent; color: #d8d8d8; padding: 0; font-size: 0.85rem; }
+        .markdown-body table { border-collapse: collapse; margin: 0.5em 0; font-size: 0.88rem; }
+        .markdown-body th, .markdown-body td { border: 1px solid #333; padding: 0.3em 0.6em; text-align: left; }
+        .markdown-body th { background: #1e1e1e; color: #0d9488; }
+        .markdown-body hr { border: none; border-top: 1px solid #333; margin: 1em 0; }
 
         .input-row {
             display: flex;
@@ -461,7 +521,8 @@ router.get('/obsidian/api/file', (req, res) => {
     if (!filePath) return res.status(400).json({ error: 'path is required' });
     const content = safeVaultRead(vaultPath, filePath);
     if (content === null) return res.status(400).json({ error: 'File not found or access denied' });
-    res.json({ path: filePath, content });
+    const html = filePath.endsWith('.md') ? renderMarkdown(content) : '';
+    res.json({ path: filePath, content, html });
 });
 
 // ── Obsidian vault browser page ───────────────────────────────────────────────
@@ -559,7 +620,11 @@ router.get('/obsidian', (req, res) => {
                 const r = await fetch('/admin/obsidian/api/file?path=' + encodeURIComponent(p) + '&token=' + TOKEN);
                 const data = await r.json();
                 if (data.error) { content.innerHTML = '<div class="vault-welcome"><p class="err">' + escHtml(data.error) + '</p></div>'; return; }
-                content.innerHTML = '<div class="vault-file-header">' + escHtml(p) + '</div><pre class="vault-pre">' + escHtml(data.content) + '</pre>';
+                if (data.html) {
+                    content.innerHTML = '<div class="vault-file-header">' + escHtml(p) + '</div><div class="vault-md markdown-body">' + data.html + '</div>';
+                } else {
+                    content.innerHTML = '<div class="vault-file-header">' + escHtml(p) + '</div><pre class="vault-pre">' + escHtml(data.content) + '</pre>';
+                }
             } catch(e) {
                 content.innerHTML = '<div class="vault-welcome"><p class="err">Failed to load file.</p></div>';
             }
@@ -688,6 +753,75 @@ router.get('/obsidian', (req, res) => {
             line-height: 1.6;
             flex: 1;
         }
+
+        .markdown-body {
+            padding: 1.5rem 2rem;
+            color: #d8d8d8;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-size: 0.95rem;
+            line-height: 1.65;
+            max-width: 860px;
+            box-sizing: border-box;
+        }
+        .markdown-body h1, .markdown-body h2, .markdown-body h3,
+        .markdown-body h4, .markdown-body h5, .markdown-body h6 {
+            color: #0d9488;
+            font-weight: 600;
+            margin: 1.6em 0 0.6em;
+            line-height: 1.25;
+        }
+        .markdown-body h1 { font-size: 1.7rem; border-bottom: 1px solid #333; padding-bottom: 0.3em; }
+        .markdown-body h2 { font-size: 1.35rem; border-bottom: 1px solid #2a2a2a; padding-bottom: 0.25em; }
+        .markdown-body h3 { font-size: 1.15rem; }
+        .markdown-body p { margin: 0.6em 0; }
+        .markdown-body a { color: #7c6fe0; text-decoration: none; }
+        .markdown-body a:hover { color: #a78bfa; text-decoration: underline; }
+        .markdown-body strong { color: #f4f4f4; }
+        .markdown-body em { color: #ddd; }
+        .markdown-body ul, .markdown-body ol { margin: 0.5em 0 0.8em; padding-left: 1.5em; }
+        .markdown-body li { margin: 0.2em 0; }
+        .markdown-body blockquote {
+            border-left: 3px solid #0d9488;
+            margin: 0.8em 0;
+            padding: 0.2em 1em;
+            color: #b8b8b8;
+            background: #1b1b1b;
+        }
+        .markdown-body code {
+            font-family: 'Courier New', monospace;
+            background: #2b2b2b;
+            color: #fbbf24;
+            padding: 0.1em 0.35em;
+            border-radius: 3px;
+            font-size: 0.88em;
+        }
+        .markdown-body pre {
+            background: #1b1b1b;
+            border: 1px solid #2a2a2a;
+            padding: 0.9em 1em;
+            overflow-x: auto;
+            border-radius: 4px;
+        }
+        .markdown-body pre code {
+            background: transparent;
+            color: #d8d8d8;
+            padding: 0;
+            font-size: 0.85rem;
+        }
+        .markdown-body hr { border: none; border-top: 1px solid #333; margin: 1.5em 0; }
+        .markdown-body table {
+            border-collapse: collapse;
+            margin: 0.8em 0;
+            font-size: 0.88rem;
+        }
+        .markdown-body th, .markdown-body td {
+            border: 1px solid #333;
+            padding: 0.4em 0.8em;
+            text-align: left;
+        }
+        .markdown-body th { background: #1e1e1e; color: #0d9488; }
+        .markdown-body img { max-width: 100%; }
+        .markdown-body input[type="checkbox"] { margin-right: 0.4em; }
     `;
 
     res.send(renderPage({

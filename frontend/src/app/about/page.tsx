@@ -1,16 +1,17 @@
 "use client";
+import Image from "next/image";
 import Footer from "@/components/Footer";
 
 export default function AboutPage() {
   return (
     <div className="min-h-[calc(100vh-76px)] flex flex-col overflow-hidden relative w-full">
-      <div className="flex-grow w-full max-w-6xl mx-auto p-8 md:p-16 relative z-10">
-        <header className="mb-48 relative group">
-          <h1 className="text-7xl md:text-9xl font-permanent text-black dark:text-black leading-none tracking-tight uppercase transform -rotate-3 relative">
+      <div className="flex-grow w-full max-w-6xl mx-auto p-4 sm:p-8 md:p-16 relative z-10">
+        <header className="mb-24 md:mb-48 relative group">
+          <h1 className="text-5xl sm:text-7xl md:text-9xl font-permanent text-black dark:text-black leading-none tracking-tight uppercase transform -rotate-3 relative">
             <span className="relative inline-block">
               <span className="drop-shadow-[8px_8px_0px_rgba(250,204,21,1)]">ABOUT</span>
             </span>
-            <span className="text-yellow-400 block ml-4 md:ml-12 translate-y-[-20px] relative w-fit">
+            <span className="text-yellow-400 block ml-2 sm:ml-4 md:ml-12 translate-y-[-10px] sm:translate-y-[-20px] relative w-fit">
               <span className="drop-shadow-[8px_8px_0px_rgba(0,0,0,1)]">THE SITE</span>
             </span>
           </h1>
@@ -28,31 +29,71 @@ export default function AboutPage() {
           </div>
         </header>
 
-        <section className="flex flex-col gap-56 text-left">
+        <section className="flex flex-col gap-24 md:gap-56 text-left">
           <div className="transform rotate-2 hover:rotate-0 transition-transform duration-500 max-w-5xl relative">
-            <h2 className="text-7xl md:text-9xl font-permanent mb-12 text-teal-600 uppercase relative w-fit">
+            <h2 className="text-5xl sm:text-7xl md:text-9xl font-permanent mb-8 md:mb-12 text-teal-600 uppercase relative w-fit">
               <span className="drop-shadow-[6px_6px_0px_rgba(0,0,0,1)]">Purpose</span>
             </h2>
-            <p className="text-4xl md:text-6xl font-permanent leading-tight text-teal-600 drop-shadow-[4px_4px_0px_rgba(0,0,0,1)] tracking-tight">
-              THIS PLATFORM IS THE CENTRAL HUB FOR ALL MY EXPERIMENTS, BUILDS, AND DIGITAL ADVENTURES. 
+            <p className="text-2xl sm:text-4xl md:text-6xl font-permanent leading-tight text-teal-600 drop-shadow-[4px_4px_0px_rgba(0,0,0,1)] tracking-tight">
+              THIS PLATFORM IS THE CENTRAL HUB FOR ALL MY EXPERIMENTS, BUILDS, AND DIGITAL ADVENTURES.
               IT'S WHERE CODE MEETS CREATIVITY, SERVING AS A LIVING PORTFOLIO OF WHAT I'M CAPABLE OF.
             </p>
           </div>
 
           <div className="transform -rotate-2 hover:rotate-0 transition-transform duration-500 max-w-5xl self-end text-right relative">
-            <h2 className="text-7xl md:text-9xl font-permanent mb-12 text-yellow-400 uppercase relative w-fit ml-auto">
+            <h2 className="text-5xl sm:text-7xl md:text-9xl font-permanent mb-8 md:mb-12 text-yellow-400 uppercase relative w-fit ml-auto">
               <span className="drop-shadow-[6px_6px_0px_rgba(0,0,0,1)]">Goal</span>
             </h2>
-            <p className="text-4xl md:text-6xl font-permanent leading-tight text-yellow-400 drop-shadow-[4px_4px_0px_rgba(0,0,0,1)] tracking-tight">
-              TO PROVIDE SEAMLESS ACCESS TO MY PERSONAL PROJECTS, SHOWCASING TECHNOLOGY STACKS 
+            <p className="text-2xl sm:text-4xl md:text-6xl font-permanent leading-tight text-yellow-400 drop-shadow-[4px_4px_0px_rgba(0,0,0,1)] tracking-tight">
+              TO PROVIDE SEAMLESS ACCESS TO MY PERSONAL PROJECTS, SHOWCASING TECHNOLOGY STACKS
               FROM FRONTEND TO BACKEND, AND EVERYTHING IN BETWEEN.
             </p>
+          </div>
+
+          {/* About Me */}
+          <div className="relative max-w-6xl mx-auto w-full">
+            <h2 className="text-5xl sm:text-7xl md:text-9xl font-permanent mb-8 md:mb-12 text-teal-600 uppercase relative w-fit transform rotate-1">
+              <span className="drop-shadow-[6px_6px_0px_rgba(0,0,0,1)]">About Me</span>
+            </h2>
+
+            <div className="grid md:grid-cols-5 gap-10 md:gap-16 items-start">
+              <div className="md:col-span-2">
+                <div className="relative w-full aspect-[3/4] border-8 border-black bg-zinc-200 shadow-[12px_12px_0px_0px_rgba(13,148,136,1)] overflow-hidden transform -rotate-2 hover:rotate-0 transition-transform duration-500">
+                  <Image
+                    src="/images/Geoffrey-Portrait.jpg"
+                    alt="Geoffrey Murray"
+                    fill
+                    sizes="(max-width: 768px) 100vw, 40vw"
+                    className="object-cover"
+                  />
+                </div>
+                <p className="mt-6 font-permanent text-xl uppercase text-orange-500 drop-shadow-[3px_3px_0px_rgba(0,0,0,1)] tracking-tight">
+                  Geoffrey Murray<br />
+                  <span className="text-base text-yellow-400">Salesforce Developer · St. Louis, MO</span>
+                </p>
+              </div>
+
+              <div className="md:col-span-3 space-y-6 font-permanent text-yellow-400 drop-shadow-[3px_3px_0px_rgba(0,0,0,1)] tracking-tight">
+                <p className="text-2xl md:text-3xl leading-tight">
+                  I'm a Salesforce developer based in Saint Louis, building CRM platforms by day and shipping personal projects by night.
+                </p>
+                <p className="text-xl md:text-2xl leading-snug">
+                  My day-to-day is Apex, LWC, Aura, and Visualforce — extending Salesforce with custom logic, integrations, and the QA discipline (regression, unit, and sanity testing) it takes to keep production calm.
+                </p>
+                <p className="text-xl md:text-2xl leading-snug">
+                  Off the platform, I build full-stack apps on the MERN stack and deploy them to AWS — this site runs on ECS Fargate behind an ALB, with GitHub Actions handling CI/CD. I also run Cloud-Claw, an autonomous trading agent stitched together from Anthropic's API and Alpaca.
+                </p>
+                <p className="text-xl md:text-2xl leading-snug">
+                  When I'm not at a keyboard I'm usually at a tabletop — running long-form D&amp;D campaigns, which is exactly the itch the Game Night Planner on this site was built to scratch.
+                </p>
+              </div>
+            </div>
           </div>
         </section>
       </div>
       <Footer>
-        <div className="inline-block border-8 border-black dark:border-black px-12 py-8 mb-12 bg-teal-600 shadow-[12px_12px_0px_0px_rgba(249,115,22,1)]">
-          <p className="text-3xl md:text-4xl font-permanent text-white uppercase leading-tight">
+        <div className="inline-block border-4 sm:border-8 border-black dark:border-black px-6 sm:px-12 py-6 sm:py-8 mb-12 mx-3 bg-teal-600 shadow-[6px_6px_0px_0px_rgba(249,115,22,1)] sm:shadow-[12px_12px_0px_0px_rgba(249,115,22,1)]">
+          <p className="text-2xl sm:text-3xl md:text-4xl font-permanent text-white uppercase leading-tight">
             Bold Innovations.<br/>Creative Solutions.<br/>Common Sense Implementations.
           </p>
         </div>

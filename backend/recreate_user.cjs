@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
+// For local dev only. For the ECS dev environment use scripts/recreate_user_dev.py instead.
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/personal_web_app';
 
 async function recreateUser() {

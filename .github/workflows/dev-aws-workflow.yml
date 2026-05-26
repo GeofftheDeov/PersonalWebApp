@@ -56,7 +56,7 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           cd backend
-          docker buildx build --platform linux/arm64 \
+          docker buildx build --platform linux/amd64 \
             -t $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:$IMAGE_TAG \
             -t $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:dev \
             --push .
@@ -69,7 +69,7 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           cd frontend
-          docker buildx build --platform linux/arm64 \
+          docker buildx build --platform linux/amd64 \
             -t $ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:$IMAGE_TAG \
             -t $ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:dev \
             --build-arg NEXT_PUBLIC_GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }} \
@@ -93,6 +93,12 @@ jobs:
             SF_PRIVATE_KEY_CONTENT=${{ secrets.SF_PRIVATE_KEY_CONTENT }}
             FRONTEND_URL=https://deov.geoffthedeov.net
             GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
+            ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+            ALPACA_API_KEY=${{ secrets.ALPACA_API_KEY }}
+            ALPACA_SECRET_KEY=${{ secrets.ALPACA_SECRET_KEY }}
+            VAULT_TOKEN=${{ secrets.VAULT_TOKEN }}
+            GITHUB_VAULT_REPO=GeofftheDeov/obsidian-vault
+            OBSIDIAN_VAULT_PATH=/obsidian-vault
 
       - name: Fill in the new frontend image ID in the Amazon ECS task definition
         id: frontend-task-def

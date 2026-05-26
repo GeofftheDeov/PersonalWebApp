@@ -170,9 +170,9 @@ export default function GameNightPage() {
         <button
             id={id}
             onClick={onClick}
-            className="flex items-center gap-2 px-6 py-3 border-4 border-black bg-yellow-400 text-black font-permanent text-xl uppercase hover:bg-white transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]"
+            className="flex items-center justify-center gap-2 px-4 py-3 sm:px-6 border-4 border-black bg-yellow-400 text-black font-permanent text-base sm:text-xl uppercase hover:bg-white transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] w-full sm:w-auto"
         >
-            <Plus className="w-5 h-5" /> {label}
+            <Plus className="w-5 h-5 shrink-0" /> {label}
         </button>
     );
 
@@ -186,15 +186,15 @@ export default function GameNightPage() {
 
     return (
         <div className="min-h-[calc(100vh-76px)] flex flex-col">
-            <div className="flex-grow w-full max-w-6xl mx-auto p-6 md:p-12">
+            <div className="flex-grow w-full max-w-6xl mx-auto p-4 sm:p-6 md:p-12">
 
                 {/* Header */}
-                <header className="mb-10 flex flex-col md:flex-row md:items-end justify-between gap-6 border-b-8 border-black pb-6">
-                    <div>
+                <header className="mb-8 md:mb-10 flex flex-col md:flex-row md:items-end justify-between gap-4 md:gap-6 border-b-8 border-black pb-6">
+                    <div className="min-w-0">
                         <p className="text-teal-600 font-permanent uppercase text-sm tracking-widest mb-1">
                             <Link href="/dashboard" className="hover:text-yellow-400 transition-colors">← DASHBOARD</Link>
                         </p>
-                        <h1 className="text-5xl md:text-7xl font-permanent text-black dark:text-white uppercase leading-none">
+                        <h1 className="text-4xl sm:text-5xl md:text-7xl font-permanent text-black dark:text-white uppercase leading-none break-words">
                             <span className="drop-shadow-[4px_4px_0px_rgba(13,148,136,1)]">GAME</span>{' '}
                             <span className="text-teal-600 drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">NIGHT</span>
                         </h1>
@@ -208,18 +208,19 @@ export default function GameNightPage() {
                 </header>
 
                 {/* Tabs */}
-                <div className="flex gap-2 mb-8 border-b-4 border-black">
+                <div className="flex gap-1 sm:gap-2 mb-8 border-b-4 border-black">
                     {tabs.map(t => (
                         <button
                             key={t.id}
                             onClick={() => setTab(t.id)}
-                            className={`flex items-center gap-2 px-5 py-3 font-permanent uppercase text-sm border-4 border-b-0 border-black transition-all ${
+                            className={`flex-1 sm:flex-none flex items-center justify-center gap-1 sm:gap-2 min-w-0 px-1 sm:px-5 py-3 font-permanent uppercase text-xs sm:text-sm border-4 border-b-0 border-black transition-all ${
                                 tab === t.id
                                     ? 'bg-black text-white -mb-[4px] pb-[16px]'
                                     : 'bg-white dark:bg-zinc-800 text-black dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-700'
                             }`}
                         >
-                            {t.icon} {t.label}
+                            <span className="hidden sm:inline-flex shrink-0">{t.icon}</span>
+                            <span>{t.label}</span>
                         </button>
                     ))}
                 </div>
@@ -237,9 +238,9 @@ export default function GameNightPage() {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 {campaigns.map(c => (
                                     <Link key={c._id} href={`/game-night/campaigns/${c._id}`} className="relative p-6 border-4 border-black bg-white dark:bg-slate-800 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] hover:-translate-y-1 transition-transform group block">
-                                        <div className="flex justify-between items-start mb-3">
-                                            <h3 className="font-permanent text-xl text-black dark:text-white uppercase leading-tight group-hover:text-teal-600 transition-colors">{c.title}</h3>
-                                            <span className={`px-2 py-1 text-xs font-permanent uppercase border-2 border-black ${statusColor(c.status)}`}>
+                                        <div className="flex justify-between items-start gap-2 mb-3">
+                                            <h3 className="font-permanent text-xl text-black dark:text-white uppercase leading-tight group-hover:text-teal-600 transition-colors break-words min-w-0">{c.title}</h3>
+                                            <span className={`px-2 py-1 text-xs font-permanent uppercase border-2 border-black whitespace-nowrap shrink-0 ${statusColor(c.status)}`}>
                                                 {c.status}
                                             </span>
                                         </div>
@@ -291,7 +292,7 @@ export default function GameNightPage() {
                 {tab === 'characters' && (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {characters.length === 0 ? (
-                            <div className="col-span-3 text-center py-20 border-4 border-dashed border-zinc-300 dark:border-zinc-700">
+                            <div className="md:col-span-2 lg:col-span-3 text-center py-20 border-4 border-dashed border-zinc-300 dark:border-zinc-700">
                                 <Sword className="w-16 h-16 text-zinc-300 dark:text-zinc-600 mx-auto mb-4" />
                                 <p className="font-permanent text-xl text-zinc-500 dark:text-zinc-400 uppercase">No characters yet.</p>
                             </div>
@@ -461,8 +462,8 @@ export default function GameNightPage() {
             )}
 
             <Footer>
-                <div className="inline-block border-8 border-black px-12 py-8 mb-12 bg-teal-600 shadow-[12px_12px_0px_0px_rgba(249,115,22,1)]">
-                    <p className="text-3xl md:text-4xl font-permanent text-white uppercase leading-tight">
+                <div className="inline-block border-4 sm:border-8 border-black px-6 sm:px-12 py-6 sm:py-8 mb-12 mx-3 bg-teal-600 shadow-[6px_6px_0px_0px_rgba(249,115,22,1)] sm:shadow-[12px_12px_0px_0px_rgba(249,115,22,1)]">
+                    <p className="text-2xl sm:text-3xl md:text-4xl font-permanent text-white uppercase leading-tight">
                         Roll for<br />Initiative.
                     </p>
                 </div>

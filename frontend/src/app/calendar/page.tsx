@@ -166,13 +166,13 @@ export default function CalendarPage() {
 
     return (
         <div className="min-h-[calc(100vh-76px)] flex flex-col">
-            <div className="flex-grow w-full max-w-6xl mx-auto p-6 md:p-12">
+            <div className="flex-grow w-full max-w-6xl mx-auto p-4 sm:p-6 md:p-12">
 
                 {/* Header */}
-                <header className="mb-10 border-b-8 border-black pb-6">
-                    <h1 className="text-5xl md:text-7xl font-permanent text-black dark:text-black leading-none tracking-tight uppercase">
+                <header className="mb-8 md:mb-10 border-b-8 border-black pb-6">
+                    <h1 className="text-4xl sm:text-5xl md:text-7xl font-permanent text-black dark:text-black leading-none tracking-tight uppercase break-words">
                         <span className="drop-shadow-[6px_6px_0px_rgba(250,204,21,1)]">YOUR</span>
-                        <span className="text-yellow-400 ml-4 drop-shadow-[6px_6px_0px_rgba(0,0,0,1)]">CALENDAR</span>
+                        <span className="text-yellow-400 ml-2 sm:ml-4 drop-shadow-[6px_6px_0px_rgba(0,0,0,1)]">CALENDAR</span>
                     </h1>
                     <p className="font-permanent text-zinc-500 uppercase text-sm mt-3">
                         {tasks.length} Task{tasks.length !== 1 ? 's' : ''} &middot; {events.length} Event{events.length !== 1 ? 's' : ''}
@@ -228,19 +228,19 @@ export default function CalendarPage() {
                                 </button>
                             </div>
                             {/* Day Header */}
-                            <div className="grid grid-cols-7 border-4 border-b-0 border-black">
+                            <div className="grid grid-cols-7 border-2 sm:border-4 border-b-0 border-black">
                                 {DAYS.map(d => (
-                                    <div key={d} className="text-center py-2 font-permanent text-xs uppercase text-zinc-500 dark:text-zinc-400 border-b-4 border-black bg-zinc-100 dark:bg-zinc-800">
+                                    <div key={d} className="text-center py-2 font-permanent text-[10px] sm:text-xs uppercase text-zinc-500 dark:text-zinc-400 border-b-2 sm:border-b-4 border-black bg-zinc-100 dark:bg-zinc-800">
                                         {d}
                                     </div>
                                 ))}
                             </div>
                             {/* Grid Cells */}
-                            <div className="grid grid-cols-7 border-l-4 border-black">
+                            <div className="grid grid-cols-7 border-l-2 sm:border-l-4 border-black">
                                 {/* Leading ghost days from prev month */}
                                 {Array.from({ length: firstDay }).map((_, i) => (
-                                    <div key={`prev-${i}`} className="min-h-[80px] border-r-4 border-b-4 border-black p-1 bg-zinc-50 dark:bg-zinc-900">
-                                        <span className="text-xs font-permanent text-zinc-300 dark:text-zinc-700">{prevMonthDays - firstDay + i + 1}</span>
+                                    <div key={`prev-${i}`} className="min-h-[60px] sm:min-h-[80px] border-r-2 sm:border-r-4 border-b-2 sm:border-b-4 border-black p-1 bg-zinc-50 dark:bg-zinc-900">
+                                        <span className="text-[10px] sm:text-xs font-permanent text-zinc-300 dark:text-zinc-700">{prevMonthDays - firstDay + i + 1}</span>
                                     </div>
                                 ))}
                                 {/* Current month days */}
@@ -254,13 +254,13 @@ export default function CalendarPage() {
                                         <div
                                             key={day}
                                             onClick={() => setSelectedDay(isSelected ? null : dayDate)}
-                                            className={`min-h-[80px] border-r-4 border-b-4 border-black p-1 cursor-pointer transition-colors ${
+                                            className={`min-h-[60px] sm:min-h-[80px] border-r-2 sm:border-r-4 border-b-2 sm:border-b-4 border-black p-1 cursor-pointer transition-colors overflow-hidden ${
                                                 isSelected ? 'bg-yellow-50 dark:bg-yellow-950' :
                                                 isToday ? 'bg-teal-50 dark:bg-teal-950' :
                                                 'bg-white dark:bg-slate-800 hover:bg-zinc-50 dark:hover:bg-zinc-700'
                                             }`}
                                         >
-                                            <div className={`inline-flex items-center justify-center w-6 h-6 text-xs font-permanent mb-1 ${isToday ? 'bg-black text-yellow-400' : 'text-zinc-600 dark:text-zinc-300'}`}>
+                                            <div className={`inline-flex items-center justify-center w-5 h-5 sm:w-6 sm:h-6 text-[10px] sm:text-xs font-permanent mb-1 ${isToday ? 'bg-black text-yellow-400' : 'text-zinc-600 dark:text-zinc-300'}`}>
                                                 {day}
                                             </div>
                                             <div className="space-y-0.5 overflow-hidden">
@@ -278,8 +278,8 @@ export default function CalendarPage() {
                                 })}
                                 {/* Trailing ghost days */}
                                 {Array.from({ length: (7 - (firstDay + daysInMonth) % 7) % 7 }).map((_, i) => (
-                                    <div key={`next-${i}`} className="min-h-[80px] border-r-4 border-b-4 border-black p-1 bg-zinc-50 dark:bg-zinc-900">
-                                        <span className="text-xs font-permanent text-zinc-300 dark:text-zinc-700">{i + 1}</span>
+                                    <div key={`next-${i}`} className="min-h-[60px] sm:min-h-[80px] border-r-2 sm:border-r-4 border-b-2 sm:border-b-4 border-black p-1 bg-zinc-50 dark:bg-zinc-900">
+                                        <span className="text-[10px] sm:text-xs font-permanent text-zinc-300 dark:text-zinc-700">{i + 1}</span>
                                     </div>
                                 ))}
                             </div>
@@ -339,8 +339,8 @@ export default function CalendarPage() {
             </div>
 
             <Footer>
-                <div className="inline-block border-8 border-black dark:border-black px-12 py-8 mb-12 bg-teal-600 shadow-[12px_12px_0px_0px_rgba(249,115,22,1)]">
-                    <p className="text-3xl md:text-4xl font-permanent text-white uppercase leading-tight">
+                <div className="inline-block border-4 sm:border-8 border-black dark:border-black px-6 sm:px-12 py-6 sm:py-8 mb-12 mx-3 bg-teal-600 shadow-[6px_6px_0px_0px_rgba(249,115,22,1)] sm:shadow-[12px_12px_0px_0px_rgba(249,115,22,1)]">
+                    <p className="text-2xl sm:text-3xl md:text-4xl font-permanent text-white uppercase leading-tight">
                         HAVE A<br />GOOD DAY
                     </p>
                 </div>

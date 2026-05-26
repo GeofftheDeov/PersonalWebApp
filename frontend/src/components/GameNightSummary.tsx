@@ -103,8 +103,8 @@ export default function GameNightSummary() {
 
     return (
         <div className="mt-16 w-full">
-            <div className="flex justify-between items-end mb-10 border-b-8 border-black pb-4">
-                <h2 className="text-4xl md:text-5xl font-permanent text-teal-600 uppercase relative w-fit">
+            <div className="flex flex-wrap gap-3 justify-between items-end mb-10 border-b-8 border-black pb-4">
+                <h2 className="text-3xl sm:text-4xl md:text-5xl font-permanent text-teal-600 uppercase relative w-fit">
                     <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Game Night</span>
                 </h2>
                 <Link
@@ -112,7 +112,7 @@ export default function GameNightSummary() {
                     id="game-night-full-planner-link"
                     className="p-3 border-4 border-black bg-yellow-400 text-black font-permanent text-sm uppercase hover:bg-white transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]"
                 >
-                    Full Planner →
+                    Full Planner
                 </Link>
             </div>
 

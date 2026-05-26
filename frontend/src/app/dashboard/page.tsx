@@ -100,14 +100,14 @@ export default function DashboardPage() {
     
     return (
         <div className="min-h-[calc(100vh-76px)] flex flex-col overflow-hidden relative w-full">
-            <div className="flex-grow w-full max-w-6xl mx-auto p-8 md:p-16 relative z-10">
+            <div className="flex-grow w-full max-w-6xl mx-auto p-4 sm:p-8 md:p-16 relative z-10">
 
-                <header className="mb-16 relative">
-                    <h1 className="text-5xl md:text-7xl font-permanent text-black dark:text-black leading-none tracking-tight uppercase">
+                <header className="mb-10 md:mb-16 relative">
+                    <h1 className="text-4xl sm:text-5xl md:text-7xl font-permanent text-black dark:text-black leading-none tracking-tight uppercase break-words">
                         <span className="relative inline-block">
                             <span className="drop-shadow-[6px_6px_0px_rgba(250,204,21,1)]">YOUR</span>
                         </span>
-                        <span className="text-yellow-400 ml-4">
+                        <span className="text-yellow-400 ml-2 sm:ml-4">
                             <span className="drop-shadow-[6px_6px_0px_rgba(0,0,0,1)]">DASHBOARD</span>
                         </span>
                     </h1>
@@ -115,7 +115,7 @@ export default function DashboardPage() {
 
                 <div className="flex flex-col md:grid md:grid-cols-2 gap-8 text-left">
                     <div className="relative order-first md:order-none">
-                        <h2 className="text-4xl md:text-5xl font-permanent text-yellow-400 uppercase relative w-fit mb-6">
+                        <h2 className="text-3xl sm:text-4xl md:text-5xl font-permanent text-yellow-400 uppercase relative w-fit mb-6">
                             <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Profile</span>
                         </h2>
                         <Link href="/profile" className="block p-6 border-4 border-black dark:border-white bg-zinc-200 dark:bg-slate-800 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] hover:shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] transition-shadow group">
@@ -135,20 +135,19 @@ export default function DashboardPage() {
                                     <p className="text-2xl font-permanent text-teal-600 dark:text-yellow-400 uppercase tracking-tight truncate">
                                         {user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'USER'}
                                     </p>
-                                    <p className="text-lg font-permanent text-zinc-500 dark:text-zinc-400 uppercase">
+                                    <p className="text-base font-medium tracking-wider text-zinc-500 dark:text-zinc-400 uppercase">
                                         {user.handle ? `@${user.handle}` : user.email}
                                     </p>
                                 </div>
-                                <span className="text-2xl font-permanent text-black dark:text-white group-hover:translate-x-1 transition-transform">→</span>
                             </div>
-                            <p className="mt-4 font-permanent text-sm uppercase text-zinc-500 dark:text-zinc-400">
-                                VIEW &amp; EDIT PROFILE →
+                            <p className="mt-4 text-sm font-medium tracking-wider uppercase text-zinc-500 dark:text-zinc-400">
+                                VIEW &amp; EDIT PROFILE
                             </p>
                         </Link>
                     </div>
 
                     <div className="relative">
-                        <h2 className="text-4xl md:text-5xl font-permanent mb-6 text-teal-600 uppercase relative w-fit">
+                        <h2 className="text-3xl sm:text-4xl md:text-5xl font-permanent mb-6 text-teal-600 uppercase relative w-fit">
                             <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Your Tasks</span>
                         </h2>
                         <form 
@@ -403,8 +402,8 @@ export default function DashboardPage() {
             </div>
 
             <Footer>
-                <div className="inline-block border-8 border-black dark:border-black px-12 py-8 mb-12 bg-teal-600 shadow-[12px_12px_0px_0px_rgba(249,115,22,1)]">
-                    <p className="text-3xl md:text-4xl font-permanent text-white uppercase leading-tight">
+                <div className="inline-block border-4 sm:border-8 border-black dark:border-black px-6 sm:px-12 py-6 sm:py-8 mb-12 mx-3 bg-teal-600 shadow-[6px_6px_0px_0px_rgba(249,115,22,1)] sm:shadow-[12px_12px_0px_0px_rgba(249,115,22,1)]">
+                    <p className="text-2xl sm:text-3xl md:text-4xl font-permanent text-white uppercase leading-tight">
                         Authenticated.<br/>Secure.<br/>Ready to Build.
                     </p>
                 </div>

@@ -15,6 +15,7 @@ import tabletopRoutes from "./routes/tabletopRoutes.js";
 import syncRoutes from "./routes/syncRoutes.js";
 import campaignMemberRoutes from "./routes/campaignMemberRoutes.js";
 import friendRoutes from "./routes/friendRoutes.js";
+import cloudClawRoutes from "./routes/cloudClawRoutes.js";
 
 import https from "https";
 import http from "http";
@@ -82,6 +83,7 @@ app.use("/api/tabletop", tabletopRoutes);
 app.use("/api/sync", syncRoutes);
 app.use("/api/campaign-members", campaignMemberRoutes);
 app.use("/api/friends", friendRoutes);
+app.use("/api/cloud-claw", cloudClawRoutes);
 
 
 if (hasCerts) {

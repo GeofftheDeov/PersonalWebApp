@@ -105,7 +105,7 @@ export default function CampaignDetailPage() {
 
     return (
         <div className="min-h-[calc(100vh-76px)] flex flex-col">
-            <div className="flex-grow w-full max-w-4xl mx-auto p-6 md:p-12">
+            <div className="flex-grow w-full max-w-4xl mx-auto p-4 sm:p-6 md:p-12">
 
                 <div className="mb-8">
                     <Link href="/game-night" className="inline-flex items-center gap-2 px-4 py-2 bg-yellow-400 text-black border-4 border-black font-permanent text-sm shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:bg-white transition-colors uppercase w-fit">
@@ -114,14 +114,14 @@ export default function CampaignDetailPage() {
                 </div>
 
                 {/* Header */}
-                <div className="mb-8 pb-6 border-b-8 border-black flex items-start justify-between gap-4">
-                    <div className="flex items-start gap-4">
+                <div className="mb-8 pb-6 border-b-8 border-black flex flex-wrap items-start justify-between gap-4">
+                    <div className="flex items-start gap-3 sm:gap-4 min-w-0 flex-1">
                         <div className="p-3 bg-teal-500 border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] shrink-0">
-                            <Map className="w-8 h-8 text-white" />
+                            <Map className="w-6 h-6 sm:w-8 sm:h-8 text-white" />
                         </div>
-                        <div>
+                        <div className="min-w-0">
                             <p className="font-permanent text-xs text-zinc-400 uppercase mb-1">Campaign</p>
-                            <h1 className="text-3xl md:text-4xl font-permanent text-black dark:text-white uppercase leading-tight">{campaign.title}</h1>
+                            <h1 className="text-2xl sm:text-3xl md:text-4xl font-permanent text-black dark:text-white uppercase leading-tight break-words">{campaign.title}</h1>
                             <div className="mt-2">
                                 <span className={`px-3 py-1 text-sm font-permanent uppercase border-2 border-black ${statusColor(campaign.status)}`}>{campaign.status}</span>
                             </div>

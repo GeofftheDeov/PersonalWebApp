@@ -938,6 +938,7 @@ router.get('/alpaca', (req, res) => {
 
     const content = `
         <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
         <div class="alpaca-layout">
             <div class="alpaca-header">
                 <div class="alpaca-title">CLOUD-CLAW // ALPACA PAPER TRADING</div>
@@ -981,15 +982,15 @@ router.get('/alpaca', (req, res) => {
                 <div class="charts-grid">
                     <div class="chart-card">
                         <div class="chart-label">EQUITY</div>
-                        <canvas id="chart-equity"></canvas>
+                        <div class="chart-canvas-wrap"><canvas id="chart-equity"></canvas></div>
                     </div>
                     <div class="chart-card">
                         <div class="chart-label">CUMULATIVE P&amp;L</div>
-                        <canvas id="chart-pl"></canvas>
+                        <div class="chart-canvas-wrap"><canvas id="chart-pl"></canvas></div>
                     </div>
                     <div class="chart-card chart-wide">
                         <div class="chart-label">POSITION VALUES (SNAPSHOTTED)</div>
-                        <canvas id="chart-positions"></canvas>
+                        <div class="chart-canvas-wrap chart-canvas-wrap-tall"><canvas id="chart-positions"></canvas></div>
                     </div>
                 </div>
             </div>
@@ -1116,17 +1117,34 @@ router.get('/alpaca', (req, res) => {
         // ── Charts ───────────────────────────────────────────────────────────
         let currentRange = '1D';
         const RANGE_TIMEFRAME = { '1D': '15Min', '1W': '1H', '1M': '1D', '3M': '1D', 'ALL': '1D' };
+        // Window (ms) bounding what the chart will display in each range.
+        const RANGE_MS = {
+            '1D': 24 * 60 * 60 * 1000,
+            '1W': 7  * 24 * 60 * 60 * 1000,
+            '1M': 30 * 24 * 60 * 60 * 1000,
+            '3M': 90 * 24 * 60 * 60 * 1000,
+        };
+        // Time scale "unit" per range (drives how Chart.js spaces / formats ticks).
+        const RANGE_UNIT = { '1D': 'hour', '1W': 'day', '1M': 'day', '3M': 'week', 'ALL': 'month' };
         const charts = { equity: null, pl: null, positions: null };
 
         const chartFontFamily = "'Courier New', monospace";
         const gridColor = '#222';
         const tickColor = '#666';
 
+        function rangeBounds() {
+            const max = Date.now();
+            const span = RANGE_MS[currentRange];
+            return { min: span ? max - span : undefined, max: max };
+        }
+
         function baseChartOpts(yFmt) {
+            const { min, max } = rangeBounds();
             return {
                 responsive: true,
                 maintainAspectRatio: false,
                 animation: false,
+                resizeDelay: 100,
                 interaction: { mode: 'index', intersect: false },
                 plugins: {
                     legend: { display: false },
@@ -1146,6 +1164,19 @@ router.get('/alpaca', (req, res) => {
                 },
                 scales: {
                     x: {
+                        type: 'time',
+                        min: min,
+                        max: max,
+                        time: {
+                            unit: RANGE_UNIT[currentRange] || 'day',
+                            tooltipFormat: currentRange === '1D' ? 'MMM d, h:mm a' : 'MMM d, yyyy',
+                            displayFormats: {
+                                hour: 'h a',
+                                day:  'MMM d',
+                                week: 'MMM d',
+                                month: 'MMM yyyy',
+                            },
+                        },
                         grid: { color: gridColor, drawBorder: false },
                         ticks: { color: tickColor, font: { family: chartFontFamily, size: 9 }, maxRotation: 0, autoSkipPadding: 20 },
                     },
@@ -1170,16 +1201,6 @@ router.get('/alpaca', (req, res) => {
             return '$' + n.toFixed(0);
         }
 
-        function tsLabels(timestamps) {
-            return timestamps.map(function(t) {
-                const d = new Date(t * 1000);
-                if (currentRange === '1D') {
-                    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-                }
-                return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-            });
-        }
-
         async function loadHistoryChart() {
             const tf = RANGE_TIMEFRAME[currentRange] || '1D';
             const period = currentRange === 'ALL' ? 'all' : currentRange;
@@ -1187,16 +1208,22 @@ router.get('/alpaca', (req, res) => {
             const h = await r.json();
             if (!h || h.error || !Array.isArray(h.timestamp)) return;
 
-            const labels = tsLabels(h.timestamp);
-            const equity = h.equity || [];
-            const pl = h.profit_loss || [];
+            const bounds = rangeBounds();
+            const equityPts = [];
+            const plPts = [];
+            for (let i = 0; i < h.timestamp.length; i++) {
+                const t = h.timestamp[i] * 1000;
+                if (bounds.min !== undefined && t < bounds.min) continue;
+                if (t > bounds.max) continue;
+                if (h.equity && h.equity[i] != null)         equityPts.push({ x: t, y: h.equity[i] });
+                if (h.profit_loss && h.profit_loss[i] != null) plPts.push({ x: t, y: h.profit_loss[i] });
+            }
 
             // Equity line
             const equityData = {
-                labels: labels,
                 datasets: [{
                     label: 'Equity',
-                    data: equity,
+                    data: equityPts,
                     borderColor: '#0d9488',
                     backgroundColor: 'rgba(13, 148, 136, 0.1)',
                     fill: true,
@@ -1207,21 +1234,21 @@ router.get('/alpaca', (req, res) => {
             };
             if (charts.equity) {
                 charts.equity.data = equityData;
+                charts.equity.options = baseChartOpts(fmtCompact);
                 charts.equity.update();
             } else {
                 charts.equity = new Chart(document.getElementById('chart-equity').getContext('2d'),
                     { type: 'line', data: equityData, options: baseChartOpts(fmtCompact) });
             }
 
-            // Cumulative P&L line (color-shaded based on last value)
-            const finalPl = pl.length ? pl[pl.length - 1] : 0;
+            // Cumulative P&L line (color based on last value within window)
+            const finalPl = plPts.length ? plPts[plPts.length - 1].y : 0;
             const plColor = finalPl >= 0 ? '#10b981' : '#ef4444';
             const plBg = finalPl >= 0 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)';
             const plData = {
-                labels: labels,
                 datasets: [{
                     label: 'P&L',
-                    data: pl,
+                    data: plPts,
                     borderColor: plColor,
                     backgroundColor: plBg,
                     fill: 'origin',
@@ -1232,6 +1259,7 @@ router.get('/alpaca', (req, res) => {
             };
             if (charts.pl) {
                 charts.pl.data = plData;
+                charts.pl.options = baseChartOpts(fmtCompact);
                 charts.pl.update();
             } else {
                 charts.pl = new Chart(document.getElementById('chart-pl').getContext('2d'),
@@ -1265,21 +1293,13 @@ router.get('/alpaca', (req, res) => {
                 });
             });
 
-            const labels = snaps.map(function(s) {
-                const d = new Date(s.ts);
-                if (currentRange === '1D') {
-                    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-                }
-                return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-            });
-
             const datasets = symbols.map(function(sym, i) {
                 const color = POSITION_COLORS[i % POSITION_COLORS.length];
                 return {
                     label: sym,
                     data: snaps.map(function(s) {
                         const p = (s.positions || []).find(function(x) { return x.symbol === sym; });
-                        return p ? p.market_value : 0;
+                        return { x: new Date(s.ts).getTime(), y: p ? p.market_value : 0 };
                     }),
                     borderColor: color,
                     backgroundColor: color + '55',
@@ -1290,7 +1310,7 @@ router.get('/alpaca', (req, res) => {
                 };
             });
 
-            const data = { labels: labels, datasets: datasets };
+            const data = { datasets: datasets };
             const opts = baseChartOpts(fmtCompact);
             opts.plugins.legend = {
                 display: true,
@@ -1483,15 +1503,26 @@ router.get('/alpaca', (req, res) => {
             display: flex;
             flex-direction: column;
             gap: 0.5rem;
-            min-height: 220px;
         }
-        .chart-card.chart-wide { grid-column: 1 / -1; min-height: 280px; }
+        .chart-card.chart-wide { grid-column: 1 / -1; }
         .chart-label {
             font-size: 0.65rem;
             color: #555;
             letter-spacing: 2px;
         }
-        .chart-card canvas { width: 100% !important; flex: 1; }
+        .chart-canvas-wrap {
+            position: relative;
+            width: 100%;
+            height: 200px;
+        }
+        .chart-canvas-wrap-tall { height: 260px; }
+        .chart-canvas-wrap canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100% !important;
+            height: 100% !important;
+        }
     `;
 
     res.send(renderPage({

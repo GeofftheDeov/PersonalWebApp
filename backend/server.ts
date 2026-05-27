@@ -16,6 +16,7 @@ import syncRoutes from "./routes/syncRoutes.js";
 import campaignMemberRoutes from "./routes/campaignMemberRoutes.js";
 import friendRoutes from "./routes/friendRoutes.js";
 import cloudClawRoutes from "./routes/cloudClawRoutes.js";
+import { snapshotAlpacaNow } from "./routes/adminRoutes.js";
 
 import https from "https";
 import http from "http";
@@ -97,6 +98,15 @@ const httpServer = http.createServer(app);
 httpServer.listen(httpPort, hostname, () => {
     console.log(`[BACKEND] HTTP server listening on http://${hostname}:${httpPort}`);
 });
+
+// Alpaca snapshots: capture account + positions every 5 minutes so the dashboard
+// can chart per-symbol position values over time. Only runs when keys are set.
+if (process.env.ALPACA_API_KEY && process.env.ALPACA_SECRET_KEY) {
+    const FIVE_MIN = 5 * 60 * 1000;
+    setTimeout(() => snapshotAlpacaNow(), 30_000); // first one shortly after boot
+    setInterval(() => snapshotAlpacaNow(), FIVE_MIN);
+    console.log('[BACKEND] Alpaca snapshot loop scheduled (every 5 min).');
+}
 
 // Global Error Handler
 app.use((err: any, req: any, res: any, next: any) => {

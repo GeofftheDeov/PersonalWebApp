@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { renderPage } from '../utils/adminUi.js';
 import { renderMarkdown } from '../utils/markdown.js';
+import AlpacaSnapshot from '../models/AlpacaSnapshot.js';
 
 const router = express.Router();
 
@@ -866,12 +867,77 @@ router.get('/alpaca/api/orders', async (_req, res) => {
     catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+// Portfolio history (equity + P&L timeseries) — proxied straight from Alpaca.
+// Defaults match the dashboard's "1D" range with 15-min resolution.
+router.get('/alpaca/api/history', async (req, res) => {
+    try {
+        const period    = (req.query.period as string)    || '1D';
+        const timeframe = (req.query.timeframe as string) || '15Min';
+        const qs = new URLSearchParams({ period, timeframe, intraday_reporting: 'market_hours' });
+        res.json(await alpacaGet(`/account/portfolio/history?${qs.toString()}`));
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// Per-position value timeseries from our own snapshot collection.
+// period accepted as 1D / 1W / 1M / 3M / ALL.
+router.get('/alpaca/api/snapshots', async (req, res) => {
+    try {
+        const period = ((req.query.period as string) || '1D').toUpperCase();
+        const since = new Date();
+        switch (period) {
+            case '1D': since.setUTCDate(since.getUTCDate() - 1); break;
+            case '1W': since.setUTCDate(since.getUTCDate() - 7); break;
+            case '1M': since.setUTCMonth(since.getUTCMonth() - 1); break;
+            case '3M': since.setUTCMonth(since.getUTCMonth() - 3); break;
+            case 'ALL': since.setTime(0); break;
+            default: since.setUTCDate(since.getUTCDate() - 1);
+        }
+        const docs = await AlpacaSnapshot
+            .find({ ts: { $gte: since } })
+            .sort({ ts: 1 })
+            .lean();
+        res.json(docs);
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// Capture a single snapshot of account + positions to Mongo.
+// Exported so server.ts can call it on an interval. Errors are swallowed
+// (Alpaca outages / API key issues shouldn't crash the snapshot loop).
+export async function snapshotAlpacaNow(): Promise<void> {
+    try {
+        const [acct, positions] = await Promise.all([
+            alpacaGet('/account') as Promise<any>,
+            alpacaGet('/positions') as Promise<any[]>,
+        ]);
+        const equity      = parseFloat(acct.equity);
+        const last_equity = parseFloat(acct.last_equity);
+        await AlpacaSnapshot.create({
+            ts: new Date(),
+            equity,
+            last_equity,
+            cash:         parseFloat(acct.cash),
+            buying_power: parseFloat(acct.buying_power),
+            day_pl:       isFinite(equity) && isFinite(last_equity) ? equity - last_equity : 0,
+            positions: (Array.isArray(positions) ? positions : []).map((p: any) => ({
+                symbol:        p.symbol,
+                qty:           parseFloat(p.qty),
+                market_value:  parseFloat(p.market_value),
+                unrealized_pl: parseFloat(p.unrealized_pl),
+                current_price: parseFloat(p.current_price),
+            })),
+        });
+    } catch (err: any) {
+        console.error('[ALPACA SNAPSHOT] failed:', err.message);
+    }
+}
+
 // ── Alpaca dashboard page ─────────────────────────────────────────────────────
 
 router.get('/alpaca', (req, res) => {
     const token = req.query.token as string;
 
     const content = `
+        <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
         <div class="alpaca-layout">
             <div class="alpaca-header">
                 <div class="alpaca-title">CLOUD-CLAW // ALPACA PAPER TRADING</div>
@@ -898,6 +964,33 @@ router.get('/alpaca', (req, res) => {
                 <div class="stat-box">
                     <div class="stat-label">CASH</div>
                     <div class="stat-value" id="stat-cash">—</div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title-row">
+                    <div class="section-title">&#9632; KPI TRENDS</div>
+                    <div class="range-buttons">
+                        <button class="range-btn active" data-range="1D">1D</button>
+                        <button class="range-btn" data-range="1W">1W</button>
+                        <button class="range-btn" data-range="1M">1M</button>
+                        <button class="range-btn" data-range="3M">3M</button>
+                        <button class="range-btn" data-range="ALL">ALL</button>
+                    </div>
+                </div>
+                <div class="charts-grid">
+                    <div class="chart-card">
+                        <div class="chart-label">EQUITY</div>
+                        <canvas id="chart-equity"></canvas>
+                    </div>
+                    <div class="chart-card">
+                        <div class="chart-label">CUMULATIVE P&amp;L</div>
+                        <canvas id="chart-pl"></canvas>
+                    </div>
+                    <div class="chart-card chart-wide">
+                        <div class="chart-label">POSITION VALUES (SNAPSHOTTED)</div>
+                        <canvas id="chart-positions"></canvas>
+                    </div>
                 </div>
             </div>
 
@@ -1020,14 +1113,227 @@ router.get('/alpaca', (req, res) => {
             }).join('');
         }
 
+        // ── Charts ───────────────────────────────────────────────────────────
+        let currentRange = '1D';
+        const RANGE_TIMEFRAME = { '1D': '15Min', '1W': '1H', '1M': '1D', '3M': '1D', 'ALL': '1D' };
+        const charts = { equity: null, pl: null, positions: null };
+
+        const chartFontFamily = "'Courier New', monospace";
+        const gridColor = '#222';
+        const tickColor = '#666';
+
+        function baseChartOpts(yFmt) {
+            return {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: '#000',
+                        borderColor: '#0d9488',
+                        borderWidth: 1,
+                        titleColor: '#0d9488',
+                        bodyColor: '#e0e0e0',
+                        titleFont: { family: chartFontFamily, size: 11 },
+                        bodyFont: { family: chartFontFamily, size: 11 },
+                        callbacks: yFmt ? { label: function(ctx) {
+                            const lbl = ctx.dataset.label ? ctx.dataset.label + ': ' : '';
+                            return lbl + yFmt(ctx.parsed.y);
+                        } } : undefined,
+                    },
+                },
+                scales: {
+                    x: {
+                        grid: { color: gridColor, drawBorder: false },
+                        ticks: { color: tickColor, font: { family: chartFontFamily, size: 9 }, maxRotation: 0, autoSkipPadding: 20 },
+                    },
+                    y: {
+                        grid: { color: gridColor, drawBorder: false },
+                        ticks: {
+                            color: tickColor,
+                            font: { family: chartFontFamily, size: 9 },
+                            callback: function(v) { return yFmt ? yFmt(v) : v; },
+                        },
+                    },
+                },
+            };
+        }
+
+        function fmtCompact(v) {
+            const n = Number(v);
+            if (!isFinite(n)) return '—';
+            const a = Math.abs(n);
+            if (a >= 1e6) return '$' + (n / 1e6).toFixed(2) + 'M';
+            if (a >= 1e3) return '$' + (n / 1e3).toFixed(1) + 'k';
+            return '$' + n.toFixed(0);
+        }
+
+        function tsLabels(timestamps) {
+            return timestamps.map(function(t) {
+                const d = new Date(t * 1000);
+                if (currentRange === '1D') {
+                    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                }
+                return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            });
+        }
+
+        async function loadHistoryChart() {
+            const tf = RANGE_TIMEFRAME[currentRange] || '1D';
+            const period = currentRange === 'ALL' ? 'all' : currentRange;
+            const r = await fetch('/admin/alpaca/api/history?period=' + period + '&timeframe=' + tf + '&token=' + TOKEN);
+            const h = await r.json();
+            if (!h || h.error || !Array.isArray(h.timestamp)) return;
+
+            const labels = tsLabels(h.timestamp);
+            const equity = h.equity || [];
+            const pl = h.profit_loss || [];
+
+            // Equity line
+            const equityData = {
+                labels: labels,
+                datasets: [{
+                    label: 'Equity',
+                    data: equity,
+                    borderColor: '#0d9488',
+                    backgroundColor: 'rgba(13, 148, 136, 0.1)',
+                    fill: true,
+                    pointRadius: 0,
+                    borderWidth: 1.5,
+                    tension: 0.2,
+                }],
+            };
+            if (charts.equity) {
+                charts.equity.data = equityData;
+                charts.equity.update();
+            } else {
+                charts.equity = new Chart(document.getElementById('chart-equity').getContext('2d'),
+                    { type: 'line', data: equityData, options: baseChartOpts(fmtCompact) });
+            }
+
+            // Cumulative P&L line (color-shaded based on last value)
+            const finalPl = pl.length ? pl[pl.length - 1] : 0;
+            const plColor = finalPl >= 0 ? '#10b981' : '#ef4444';
+            const plBg = finalPl >= 0 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)';
+            const plData = {
+                labels: labels,
+                datasets: [{
+                    label: 'P&L',
+                    data: pl,
+                    borderColor: plColor,
+                    backgroundColor: plBg,
+                    fill: 'origin',
+                    pointRadius: 0,
+                    borderWidth: 1.5,
+                    tension: 0.2,
+                }],
+            };
+            if (charts.pl) {
+                charts.pl.data = plData;
+                charts.pl.update();
+            } else {
+                charts.pl = new Chart(document.getElementById('chart-pl').getContext('2d'),
+                    { type: 'line', data: plData, options: baseChartOpts(fmtCompact) });
+            }
+        }
+
+        const POSITION_COLORS = ['#0d9488','#f97316','#fbbf24','#10b981','#3b82f6','#a855f7','#ec4899','#06b6d4','#eab308','#f43f5e'];
+
+        async function loadPositionsChart() {
+            const r = await fetch('/admin/alpaca/api/snapshots?period=' + currentRange + '&token=' + TOKEN);
+            const snaps = await r.json();
+            const canvasEl = document.getElementById('chart-positions');
+            if (!Array.isArray(snaps) || snaps.length === 0) {
+                if (charts.positions) { charts.positions.destroy(); charts.positions = null; }
+                const ctx = canvasEl.getContext('2d');
+                ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+                ctx.fillStyle = '#444';
+                ctx.font = '11px ' + chartFontFamily;
+                ctx.textAlign = 'center';
+                ctx.fillText('No snapshots yet — first sample arrives within 5 min.', canvasEl.width / 2, canvasEl.height / 2);
+                return;
+            }
+
+            // Collect all symbols seen across snapshots
+            const symbols = [];
+            const seen = new Set();
+            snaps.forEach(function(s) {
+                (s.positions || []).forEach(function(p) {
+                    if (!seen.has(p.symbol)) { seen.add(p.symbol); symbols.push(p.symbol); }
+                });
+            });
+
+            const labels = snaps.map(function(s) {
+                const d = new Date(s.ts);
+                if (currentRange === '1D') {
+                    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                }
+                return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            });
+
+            const datasets = symbols.map(function(sym, i) {
+                const color = POSITION_COLORS[i % POSITION_COLORS.length];
+                return {
+                    label: sym,
+                    data: snaps.map(function(s) {
+                        const p = (s.positions || []).find(function(x) { return x.symbol === sym; });
+                        return p ? p.market_value : 0;
+                    }),
+                    borderColor: color,
+                    backgroundColor: color + '55',
+                    fill: true,
+                    pointRadius: 0,
+                    borderWidth: 1,
+                    tension: 0.2,
+                };
+            });
+
+            const data = { labels: labels, datasets: datasets };
+            const opts = baseChartOpts(fmtCompact);
+            opts.plugins.legend = {
+                display: true,
+                position: 'bottom',
+                labels: { color: '#888', font: { family: chartFontFamily, size: 10 }, boxWidth: 10 },
+            };
+            opts.scales.y.stacked = true;
+
+            if (charts.positions) {
+                charts.positions.data = data;
+                charts.positions.options = opts;
+                charts.positions.update();
+            } else {
+                charts.positions = new Chart(canvasEl.getContext('2d'),
+                    { type: 'line', data: data, options: opts });
+            }
+        }
+
+        function bindRangeButtons() {
+            document.querySelectorAll('.range-btn').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    document.querySelectorAll('.range-btn').forEach(function(b) { b.classList.remove('active'); });
+                    btn.classList.add('active');
+                    currentRange = btn.dataset.range;
+                    loadCharts();
+                });
+            });
+        }
+
+        async function loadCharts() {
+            await Promise.all([loadHistoryChart(), loadPositionsChart()]);
+        }
+
         async function loadAll() {
             document.getElementById('last-updated').textContent = 'Refreshing...';
-            await Promise.all([loadAccount(), loadPositions(), loadOrders()]);
+            await Promise.all([loadAccount(), loadPositions(), loadOrders(), loadCharts()]);
             document.getElementById('last-updated').textContent =
                 'Updated: ' + new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         }
 
+        bindRangeButtons();
         loadAll();
+        setInterval(loadAll, 30_000);
         </script>
     `;
 
@@ -1139,6 +1445,53 @@ router.get('/alpaca', (req, res) => {
         .status-canceled, .status-cancelled { color: #555; }
         .status-pending_new, .status-new { color: #f97316; }
         .status-partially_filled { color: #fbbf24; }
+
+        .section-title-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .range-buttons { display: flex; gap: 0.4rem; }
+        .range-btn {
+            background: transparent;
+            border: 1px solid #333;
+            color: #666;
+            padding: 0.25rem 0.6rem;
+            font-family: inherit;
+            font-size: 0.65rem;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .range-btn:hover { color: #aaa; border-color: #555; }
+        .range-btn.active {
+            background: #0d9488;
+            color: #000;
+            border-color: #0d9488;
+            font-weight: bold;
+        }
+
+        .charts-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+        .chart-card {
+            background: #1e1e1e;
+            border: 1px solid #333;
+            padding: 0.75rem 1rem 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            min-height: 220px;
+        }
+        .chart-card.chart-wide { grid-column: 1 / -1; min-height: 280px; }
+        .chart-label {
+            font-size: 0.65rem;
+            color: #555;
+            letter-spacing: 2px;
+        }
+        .chart-card canvas { width: 100% !important; flex: 1; }
     `;
 
     res.send(renderPage({

@@ -56,7 +56,7 @@ export default function GameNightPage() {
         title: '', description: '', status: 'Not Started', startDate: '', endDate: ''
     });
     const [sessionForm, setSessionForm] = useState({
-        title: '', campaignId: '', date: '', location: '', agenda: '', summary: ''
+        title: '', campaignId: '', date: '', location: '', isOnline: false, agenda: '', summary: ''
     });
     const [characterForm, setCharacterForm] = useState({
         name: '', class: '', level: 1, campaignId: '', gameType: ''
@@ -117,6 +117,7 @@ export default function GameNightPage() {
                 campaignId: sessionForm.campaignId,
                 date: sessionForm.date,
                 location: sessionForm.location,
+                isOnline: sessionForm.isOnline,
                 agenda: sessionForm.agenda,
                 summary: sessionForm.summary,
                 ownerId: user.id || user._id,
@@ -125,7 +126,7 @@ export default function GameNightPage() {
         });
         if (res.ok) {
             setShowCreateSession(false);
-            setSessionForm({ title: '', campaignId: '', date: '', location: '', agenda: '', summary: '' });
+            setSessionForm({ title: '', campaignId: '', date: '', location: '', isOnline: false, agenda: '', summary: '' });
             fetchAll();
         }
     };
@@ -399,6 +400,18 @@ export default function GameNightPage() {
                                     <input className={INPUT_CLS} placeholder="GEOFF'S BASEMENT" value={sessionForm.location} onChange={e => setSessionForm({ ...sessionForm, location: e.target.value })} />
                                 </div>
                             </div>
+                            <button
+                                type="button"
+                                role="switch"
+                                aria-checked={sessionForm.isOnline}
+                                onClick={() => setSessionForm({ ...sessionForm, isOnline: !sessionForm.isOnline })}
+                                className="flex items-center gap-3 w-fit"
+                            >
+                                <span className={`relative inline-block w-12 h-6 border-2 border-black transition-colors ${sessionForm.isOnline ? 'bg-teal-500' : 'bg-zinc-600'}`}>
+                                    <span className={`absolute top-0 h-full w-6 bg-white border-r-2 border-l-2 border-black transition-all ${sessionForm.isOnline ? 'left-6' : 'left-0'}`} />
+                                </span>
+                                <span className="font-permanent text-xs text-white uppercase">Online Session</span>
+                            </button>
                             <div>
                                 <label className={LABEL_CLS}>Agenda / Prep Notes</label>
                                 <textarea className={INPUT_CLS} rows={2} placeholder="WHAT'S PLANNED FOR THIS SESSION..." value={sessionForm.agenda} onChange={e => setSessionForm({ ...sessionForm, agenda: e.target.value })} />

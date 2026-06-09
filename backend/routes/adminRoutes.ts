@@ -2,14 +2,18 @@ import express from 'express';
 import jwt from 'jsonwebtoken';
 import fs from 'fs';
 import path from 'path';
+import mongoose from 'mongoose';
 import { renderPage } from '../utils/adminUi.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import AlpacaSnapshot from '../models/AlpacaSnapshot.js';
+import { getDecryptedKeys } from './apiKeyRoutes.js';
 
 const router = express.Router();
 
 // Middleware to verify token in query param - consistent with dbRoutes
-const verifyToken = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+// Also attaches decoded userId to req.adminUser so personal-key routes can
+// look up vault entries for the requesting admin.
+const verifyToken = (req: any, res: express.Response, next: express.NextFunction) => {
     const token = req.query.token as string;
     const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login`;
 
@@ -19,7 +23,8 @@ const verifyToken = (req: express.Request, res: express.Response, next: express.
     }
 
     try {
-        jwt.verify(token, process.env.JWT_SECRET || "your-secret-key-change-this");
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || "your-secret-key-change-this") as any;
+        req.adminUser = { id: decoded.id, email: decoded.email };
         next();
     } catch (err: any) {
         console.log(`[AUTH] 401: Invalid token for ${req.originalUrl}. Error: ${err.message}`);
@@ -71,7 +76,6 @@ router.get('/', (req, res) => {
                 <a href="/db?token=${token}" class="nav-btn">
                     Manage Database
                 </a>
-                <!-- Placeholder for future admin tools -->
                 <a href="/admin/cloud-claw?token=${token}" class="nav-btn">
                     Cloud-Claw Trading Agent
                 </a>
@@ -81,14 +85,114 @@ router.get('/', (req, res) => {
                 <a href="/admin/alpaca?token=${token}" class="nav-btn">
                     Alpaca Dashboard
                 </a>
-                <a href="#" class="nav-btn" style="opacity: 0.5; pointer-events: none; border-style: dashed;">
-                    User Management (Coming Soon)
+                <a href="/admin/profile?token=${token}" class="nav-btn">
+                    Profile &amp; API Keys
                 </a>
+                <button class="nav-btn nav-btn-action" onclick="openNewProfileModal()">
+                    + Add API Key Profile
+                </button>
             </div>
             <div class="status">
                 SYSTEM STATUS: ONLINE // AUTH: SECURE
             </div>
         </div>
+
+        <!-- Add Profile Modal -->
+        <div id="new-profile-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:200; align-items:center; justify-content:center;">
+            <div style="background:#1e1e1e; border:2px solid #444; width:90%; max-width:480px; font-family:'Courier New',monospace;">
+                <div style="display:flex; justify-content:space-between; align-items:center; padding:1rem 1.25rem; border-bottom:1px solid #333; color:#0d9488; font-size:0.85rem; font-weight:bold; letter-spacing:2px;">
+                    <span>ADD API KEY PROFILE</span>
+                    <button onclick="closeNewProfileModal()" style="background:transparent;border:none;color:#666;font-size:1.1rem;cursor:pointer;">&#10005;</button>
+                </div>
+                <div style="padding:1.25rem; display:flex; flex-direction:column; gap:1rem;">
+                    <div style="display:flex;flex-direction:column;gap:0.35rem;">
+                        <label style="font-size:0.65rem;letter-spacing:2px;color:#555;">PROVIDER</label>
+                        <select id="np-provider" style="background:#2b2b2b;border:1px solid #444;color:#e0e0e0;padding:0.5rem 0.75rem;font-family:inherit;font-size:0.85rem;outline:none;">
+                            <option value="alpaca_live">Alpaca — Live Account</option>
+                            <option value="alpaca_paper">Alpaca — Paper Account</option>
+                            <option value="google">Google OAuth</option>
+                            <option value="discord">Discord OAuth</option>
+                        </select>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:0.35rem;">
+                        <label style="font-size:0.65rem;letter-spacing:2px;color:#555;">LABEL (optional)</label>
+                        <input id="np-label" type="text" placeholder="e.g. My Live Alpaca" autocomplete="off"
+                            style="background:#2b2b2b;border:1px solid #444;color:#e0e0e0;padding:0.5rem 0.75rem;font-family:inherit;font-size:0.85rem;outline:none;" />
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:0.35rem;">
+                        <label style="font-size:0.65rem;letter-spacing:2px;color:#555;">KEY ID / CLIENT ID</label>
+                        <input id="np-keyid" type="text" placeholder="Paste key ID here" autocomplete="off"
+                            style="background:#2b2b2b;border:1px solid #444;color:#e0e0e0;padding:0.5rem 0.75rem;font-family:inherit;font-size:0.85rem;outline:none;" />
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:0.35rem;">
+                        <label style="font-size:0.65rem;letter-spacing:2px;color:#555;">SECRET KEY</label>
+                        <input id="np-secret" type="password" placeholder="Paste secret here" autocomplete="off"
+                            style="background:#2b2b2b;border:1px solid #444;color:#e0e0e0;padding:0.5rem 0.75rem;font-family:inherit;font-size:0.85rem;outline:none;" />
+                    </div>
+                    <div id="np-status" style="font-size:0.8rem;min-height:1.2em;"></div>
+                </div>
+                <div style="display:flex;justify-content:flex-end;gap:0.75rem;padding:0.75rem 1.25rem;border-top:1px solid #333;">
+                    <button onclick="closeNewProfileModal()" style="background:transparent;border:1px solid #444;color:#888;padding:0.5rem 1.25rem;font-family:inherit;font-size:0.75rem;letter-spacing:1px;cursor:pointer;">CANCEL</button>
+                    <button onclick="saveNewProfile()" style="background:#0d9488;border:none;color:#000;padding:0.5rem 1.5rem;font-family:inherit;font-size:0.75rem;font-weight:bold;letter-spacing:1px;cursor:pointer;">SAVE</button>
+                </div>
+            </div>
+        </div>
+
+        <script>
+        const TOKEN = '${token}';
+
+        function openNewProfileModal() {
+            const m = document.getElementById('new-profile-modal');
+            m.style.display = 'flex';
+            document.getElementById('np-keyid').value = '';
+            document.getElementById('np-secret').value = '';
+            document.getElementById('np-label').value = '';
+            document.getElementById('np-status').textContent = '';
+            document.getElementById('np-status').style.color = '';
+        }
+
+        function closeNewProfileModal() {
+            document.getElementById('new-profile-modal').style.display = 'none';
+        }
+
+        async function saveNewProfile() {
+            const provider = document.getElementById('np-provider').value;
+            const label    = document.getElementById('np-label').value.trim();
+            const keyId    = document.getElementById('np-keyid').value.trim();
+            const secret   = document.getElementById('np-secret').value.trim();
+            const statusEl = document.getElementById('np-status');
+
+            if (!keyId || !secret) {
+                statusEl.textContent = 'Key ID and Secret are required.';
+                statusEl.style.color = '#ef4444';
+                return;
+            }
+
+            statusEl.textContent = 'Saving...';
+            statusEl.style.color = '#888';
+
+            const r = await fetch('/api/api-keys/' + encodeURIComponent(provider), {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + TOKEN },
+                body: JSON.stringify({ keyId, secret, label }),
+            });
+
+            if (r.ok) {
+                statusEl.textContent = 'Saved successfully.';
+                statusEl.style.color = '#10b981';
+                setTimeout(closeNewProfileModal, 1200);
+            } else {
+                const d = await r.json().catch(() => ({}));
+                statusEl.textContent = 'Error: ' + (d.error || r.status);
+                statusEl.style.color = '#ef4444';
+            }
+        }
+
+        // Close modal on backdrop click
+        document.getElementById('new-profile-modal').addEventListener('click', function(e) {
+            if (e.target === this) closeNewProfileModal();
+        });
+        </script>
     `;
 
     const extraStyles = `
@@ -135,10 +239,29 @@ router.get('/', (req, res) => {
             letter-spacing: 2px;
         }
         
-        a.nav-btn:hover { 
+        a.nav-btn:hover {
             background-color: #f97316; /* Orange-500 */
             color: #000;
             border-color: #f97316;
+            transform: translateY(-4px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.5);
+        }
+
+        button.nav-btn {
+            font-family: 'Courier New', monospace;
+            width: 100%;
+            text-align: center;
+        }
+
+        button.nav-btn-action {
+            border-color: #0d9488;
+            color: #0d9488;
+        }
+
+        button.nav-btn-action:hover {
+            background-color: #0d9488;
+            border-color: #0d9488;
+            color: #000;
             transform: translateY(-4px);
             box-shadow: 0 6px 12px rgba(0,0,0,0.5);
         }
@@ -900,6 +1023,95 @@ router.get('/alpaca/api/snapshots', async (req, res) => {
     } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Personal (live) Alpaca proxy ─────────────────────────────────────────────
+// These routes use the requesting admin's vault keys (provider: 'alpaca_live')
+// rather than the shared env-var paper keys.
+
+async function personalAlpacaFetch(userId: mongoose.Types.ObjectId, urlPath: string, opts?: RequestInit): Promise<unknown> {
+    const keys = await getDecryptedKeys(userId, 'alpaca_live');
+    if (!keys) throw new Error('No personal Alpaca keys found. Add them on the Profile page.');
+    const base = 'https://api.alpaca.markets/v2';
+    const headers: Record<string, string> = {
+        'APCA-API-KEY-ID': keys.keyId,
+        'APCA-API-SECRET-KEY': keys.secret,
+        'Content-Type': 'application/json',
+    };
+    const r = await fetch(`${base}${urlPath}`, { ...opts, headers });
+    if (!r.ok) throw new Error(`Alpaca personal error (${urlPath}): ${await r.text()}`);
+    return r.json();
+}
+
+router.get('/alpaca/api/personal/account', async (req: any, res) => {
+    try {
+        const userId = new mongoose.Types.ObjectId(req.adminUser.id);
+        res.json(await personalAlpacaFetch(userId, '/account'));
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.get('/alpaca/api/personal/positions', async (req: any, res) => {
+    try {
+        const userId = new mongoose.Types.ObjectId(req.adminUser.id);
+        res.json(await personalAlpacaFetch(userId, '/positions'));
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.get('/alpaca/api/personal/orders', async (req: any, res) => {
+    try {
+        const userId = new mongoose.Types.ObjectId(req.adminUser.id);
+        res.json(await personalAlpacaFetch(userId, '/orders?limit=20&status=all'));
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /admin/alpaca/api/apply-to-personal
+// Mirrors current paper positions as market orders on the live account.
+// Body: { orders: [{ symbol, notional }] }  (confirmed by the client modal).
+router.post('/alpaca/api/apply-to-personal', async (req: any, res) => {
+    const { orders } = req.body as { orders?: { symbol: string; notional: number }[] };
+    if (!Array.isArray(orders) || orders.length === 0) {
+        return res.status(400).json({ error: 'orders array is required' });
+    }
+    try {
+        const userId = new mongoose.Types.ObjectId(req.adminUser.id);
+        const keys = await getDecryptedKeys(userId, 'alpaca_live');
+        if (!keys) return res.status(400).json({ error: 'No personal Alpaca keys found. Add them on the Profile page.' });
+
+        const base = 'https://api.alpaca.markets/v2';
+        const headers: Record<string, string> = {
+            'APCA-API-KEY-ID': keys.keyId,
+            'APCA-API-SECRET-KEY': keys.secret,
+            'Content-Type': 'application/json',
+        };
+
+        const results: { symbol: string; ok: boolean; orderId?: string; error?: string }[] = [];
+        for (const o of orders) {
+            try {
+                const r = await fetch(`${base}/orders`, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({
+                        symbol: o.symbol,
+                        notional: o.notional.toFixed(2),
+                        side: 'buy',
+                        type: 'market',
+                        time_in_force: 'day',
+                    }),
+                });
+                if (!r.ok) {
+                    results.push({ symbol: o.symbol, ok: false, error: await r.text() });
+                } else {
+                    const data: any = await r.json();
+                    results.push({ symbol: o.symbol, ok: true, orderId: data.id });
+                }
+            } catch (err: any) {
+                results.push({ symbol: o.symbol, ok: false, error: err.message });
+            }
+        }
+        res.json({ results });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Capture a single snapshot of account + positions to Mongo.
 // Exported so server.ts can call it on an interval. Errors are swallowed
 // (Alpaca outages / API key issues shouldn't crash the snapshot loop).
@@ -941,10 +1153,15 @@ router.get('/alpaca', (req, res) => {
         <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
         <div class="alpaca-layout">
             <div class="alpaca-header">
-                <div class="alpaca-title">CLOUD-CLAW // ALPACA PAPER TRADING</div>
+                <div class="alpaca-title" id="alpaca-title">CLOUD-CLAW // ALPACA PAPER TRADING</div>
                 <div class="alpaca-controls">
+                    <div class="profile-toggle">
+                        <button id="btn-paper"   class="profile-btn active" onclick="switchProfile('paper')">PAPER</button>
+                        <button id="btn-personal" class="profile-btn"        onclick="switchProfile('personal')">PERSONAL</button>
+                    </div>
                     <span id="last-updated" class="last-updated">Loading...</span>
                     <button class="refresh-btn" onclick="loadAll()">&#8635; REFRESH</button>
+                    <button id="apply-btn" class="apply-btn" onclick="openApplyModal()" style="display:none;">&#9654; APPLY TO PERSONAL</button>
                 </div>
             </div>
 
@@ -1026,8 +1243,159 @@ router.get('/alpaca', (req, res) => {
             </div>
         </div>
 
+        <!-- Apply to Personal modal -->
+        <div id="apply-modal" class="modal-overlay" style="display:none;">
+            <div class="modal-box">
+                <div class="modal-header">
+                    <span>APPLY PAPER STRATEGY TO PERSONAL ACCOUNT</span>
+                    <button class="modal-close" onclick="closeApplyModal()">&#10005;</button>
+                </div>
+                <div class="modal-warning">
+                    &#9888; THIS WILL PLACE REAL ORDERS ON YOUR LIVE ALPACA ACCOUNT.
+                    Review carefully before confirming.
+                </div>
+                <div id="modal-paper-summary" class="modal-section">
+                    <div class="modal-section-title">PAPER POSITIONS (SOURCE)</div>
+                    <div id="modal-paper-rows"></div>
+                </div>
+                <div id="modal-personal-summary" class="modal-section">
+                    <div class="modal-section-title">PERSONAL ACCOUNT BALANCE</div>
+                    <div id="modal-personal-balance"></div>
+                </div>
+                <div class="modal-section">
+                    <div class="modal-section-title">PROPOSED ORDERS (market buy, notional = paper market value)</div>
+                    <div id="modal-orders-rows"></div>
+                </div>
+                <div class="modal-footer">
+                    <button class="modal-cancel-btn" onclick="closeApplyModal()">CANCEL</button>
+                    <button class="modal-confirm-btn" id="modal-confirm-btn" onclick="confirmApply()">CONFIRM — PLACE ORDERS</button>
+                </div>
+                <div id="modal-result" class="modal-result" style="display:none;"></div>
+            </div>
+        </div>
+
         <script>
         const TOKEN = '${token}';
+
+        // ── Profile switcher ──────────────────────────────────────────────────
+        let currentProfile = 'paper'; // 'paper' | 'personal'
+
+        function switchProfile(profile) {
+            currentProfile = profile;
+            document.getElementById('btn-paper').classList.toggle('active', profile === 'paper');
+            document.getElementById('btn-personal').classList.toggle('active', profile === 'personal');
+            document.getElementById('alpaca-title').textContent =
+                profile === 'paper' ? 'CLOUD-CLAW // ALPACA PAPER TRADING' : 'PERSONAL // ALPACA LIVE TRADING';
+            document.getElementById('apply-btn').style.display = profile === 'paper' ? 'inline-block' : 'none';
+            loadAll();
+        }
+
+        function profileApiUrl(path) {
+            if (currentProfile === 'personal') {
+                return '/admin/alpaca/api/personal' + path + '?token=' + TOKEN;
+            }
+            return '/admin/alpaca/api' + path + '?token=' + TOKEN;
+        }
+
+        // ── Apply to personal modal ───────────────────────────────────────────
+        let pendingOrders = [];
+
+        async function openApplyModal() {
+            document.getElementById('apply-modal').style.display = 'flex';
+            document.getElementById('modal-result').style.display = 'none';
+            document.getElementById('modal-confirm-btn').disabled = false;
+            document.getElementById('modal-confirm-btn').textContent = 'CONFIRM — PLACE ORDERS';
+            document.getElementById('modal-paper-rows').innerHTML = 'Loading...';
+            document.getElementById('modal-personal-balance').innerHTML = 'Loading...';
+            document.getElementById('modal-orders-rows').innerHTML = '';
+            pendingOrders = [];
+
+            const [posRes, personalAccRes] = await Promise.all([
+                fetch('/admin/alpaca/api/positions?token=' + TOKEN),
+                fetch('/admin/alpaca/api/personal/account?token=' + TOKEN),
+            ]);
+
+            const positions = posRes.ok ? await posRes.json() : [];
+            const personalAcct = personalAccRes.ok ? await personalAccRes.json() : null;
+
+            if (!Array.isArray(positions) || positions.length === 0) {
+                document.getElementById('modal-paper-rows').innerHTML = '<span class="modal-none">No open paper positions.</span>';
+                document.getElementById('modal-orders-rows').innerHTML = '<span class="modal-none">Nothing to apply.</span>';
+                document.getElementById('modal-confirm-btn').disabled = true;
+                return;
+            }
+
+            // Paper positions table
+            document.getElementById('modal-paper-rows').innerHTML = \`
+                <table>
+                    <thead><tr><th>SYMBOL</th><th>QTY</th><th>MKT VALUE</th><th>UNREAL P&L</th></tr></thead>
+                    <tbody>\${positions.map(p => \`<tr>
+                        <td class="sym">\${p.symbol}</td>
+                        <td>\${p.qty}</td>
+                        <td>\${fmt$(p.market_value)}</td>
+                        <td class="\${parseFloat(p.unrealized_pl) >= 0 ? 'pos' : 'neg'}">\${fmt$(p.unrealized_pl)}</td>
+                    </tr>\`).join('')}</tbody>
+                </table>\`;
+
+            // Personal account balance
+            if (personalAcct && !personalAcct.error) {
+                document.getElementById('modal-personal-balance').innerHTML =
+                    \`Equity: <strong>\${fmt$(personalAcct.equity)}</strong> &nbsp;|&nbsp; Buying Power: <strong>\${fmt$(personalAcct.buying_power)}</strong>\`;
+            } else {
+                document.getElementById('modal-personal-balance').innerHTML =
+                    \`<span class="modal-err">\${personalAcct?.error || 'Could not load personal account. Check your API keys on the Profile page.'}</span>\`;
+            }
+
+            // Build proposed orders (market buy, notional = paper market value)
+            pendingOrders = positions.map(p => ({
+                symbol: p.symbol,
+                notional: Math.abs(parseFloat(p.market_value)),
+            }));
+
+            document.getElementById('modal-orders-rows').innerHTML = \`
+                <table>
+                    <thead><tr><th>SYMBOL</th><th>SIDE</th><th>NOTIONAL</th></tr></thead>
+                    <tbody>\${pendingOrders.map(o => \`<tr>
+                        <td class="sym">\${o.symbol}</td>
+                        <td class="side-buy">BUY</td>
+                        <td>\${fmt$(o.notional)}</td>
+                    </tr>\`).join('')}</tbody>
+                </table>\`;
+        }
+
+        function closeApplyModal() {
+            document.getElementById('apply-modal').style.display = 'none';
+        }
+
+        async function confirmApply() {
+            if (!pendingOrders.length) return;
+            const btn = document.getElementById('modal-confirm-btn');
+            btn.disabled = true;
+            btn.textContent = 'Placing orders...';
+
+            const r = await fetch('/admin/alpaca/api/apply-to-personal?token=' + TOKEN, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ orders: pendingOrders }),
+            });
+            const data = await r.json();
+
+            const resultEl = document.getElementById('modal-result');
+            resultEl.style.display = 'block';
+
+            if (!r.ok || data.error) {
+                resultEl.innerHTML = \`<span class="modal-err">Error: \${data.error || r.status}</span>\`;
+                return;
+            }
+
+            const rows = data.results.map(res =>
+                \`<div class="\${res.ok ? 'modal-ok' : 'modal-err'}">\${res.ok ? '✓' : '✗'} \${res.symbol} — \${res.ok ? 'Order ' + res.orderId : res.error}</div>\`
+            ).join('');
+            resultEl.innerHTML = rows;
+            btn.textContent = 'Done';
+        }
+
+        // ── Formatting helpers ────────────────────────────────────────────────
 
         function fmt$(v) {
             const n = parseFloat(v);
@@ -1056,7 +1424,7 @@ router.get('/alpaca', (req, res) => {
         }
 
         async function loadAccount() {
-            const r = await fetch('/admin/alpaca/api/account?token=' + TOKEN);
+            const r = await fetch(profileApiUrl('/account'));
             const a = await r.json();
             if (a.error) return;
             document.getElementById('stat-equity').textContent = fmt$(a.equity);
@@ -1071,7 +1439,7 @@ router.get('/alpaca', (req, res) => {
         }
 
         async function loadPositions() {
-            const r = await fetch('/admin/alpaca/api/positions?token=' + TOKEN);
+            const r = await fetch(profileApiUrl('/positions'));
             const data = await r.json();
             const tbody = document.getElementById('positions-body');
             if (!Array.isArray(data) || data.length === 0) {
@@ -1093,7 +1461,7 @@ router.get('/alpaca', (req, res) => {
         }
 
         async function loadOrders() {
-            const r = await fetch('/admin/alpaca/api/orders?token=' + TOKEN);
+            const r = await fetch(profileApiUrl('/orders'));
             const data = await r.json();
             const tbody = document.getElementById('orders-body');
             if (!Array.isArray(data) || data.length === 0) {
@@ -1204,6 +1572,9 @@ router.get('/alpaca', (req, res) => {
         async function loadHistoryChart() {
             const tf = RANGE_TIMEFRAME[currentRange] || '1D';
             const period = currentRange === 'ALL' ? 'all' : currentRange;
+            // Portfolio history is only available for the paper account (Alpaca personal API
+            // also supports it, but we skip chart loading for personal to keep things simple).
+            if (currentProfile === 'personal') return;
             const r = await fetch('/admin/alpaca/api/history?period=' + period + '&timeframe=' + tf + '&token=' + TOKEN);
             const h = await r.json();
             if (!h || h.error || !Array.isArray(h.timestamp)) return;
@@ -1523,6 +1894,135 @@ router.get('/alpaca', (req, res) => {
             width: 100% !important;
             height: 100% !important;
         }
+
+        /* Profile toggle */
+        .profile-toggle {
+            display: flex;
+            border: 1px solid #444;
+            overflow: hidden;
+        }
+        .profile-btn {
+            background: transparent;
+            border: none;
+            color: #666;
+            padding: 0.3rem 0.75rem;
+            font-family: inherit;
+            font-size: 0.7rem;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .profile-btn:hover { color: #aaa; }
+        .profile-btn.active { background: #0d9488; color: #000; font-weight: bold; }
+
+        /* Apply button */
+        .apply-btn {
+            background: #f97316;
+            border: none;
+            color: #000;
+            padding: 0.3rem 0.9rem;
+            font-family: inherit;
+            font-size: 0.75rem;
+            font-weight: bold;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .apply-btn:hover { background: #fb923c; }
+
+        /* Apply modal */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.8);
+            z-index: 200;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+        }
+        .modal-box {
+            background: #1e1e1e;
+            border: 2px solid #444;
+            width: 100%;
+            max-width: 700px;
+            max-height: 85vh;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+        }
+        .modal-box::-webkit-scrollbar { width: 4px; }
+        .modal-box::-webkit-scrollbar-thumb { background: #333; }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 1.25rem;
+            border-bottom: 1px solid #333;
+            font-size: 0.8rem;
+            font-weight: bold;
+            letter-spacing: 2px;
+            color: #0d9488;
+        }
+        .modal-close {
+            background: transparent;
+            border: none;
+            color: #666;
+            font-size: 1rem;
+            cursor: pointer;
+            line-height: 1;
+        }
+        .modal-close:hover { color: #ef4444; }
+        .modal-warning {
+            background: #2d1a00;
+            border-bottom: 1px solid #5a3a00;
+            padding: 0.75rem 1.25rem;
+            font-size: 0.75rem;
+            color: #f97316;
+            font-weight: bold;
+        }
+        .modal-section { padding: 0.75rem 1.25rem; border-bottom: 1px solid #1a1a1a; }
+        .modal-section-title { font-size: 0.6rem; letter-spacing: 2px; color: #555; margin-bottom: 0.6rem; }
+        .modal-none { font-size: 0.8rem; color: #555; }
+        .modal-err { font-size: 0.8rem; color: #ef4444; }
+        .modal-ok  { font-size: 0.8rem; color: #10b981; }
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.75rem;
+            padding: 1rem 1.25rem;
+        }
+        .modal-cancel-btn {
+            background: transparent;
+            border: 1px solid #444;
+            color: #888;
+            padding: 0.5rem 1.25rem;
+            font-family: inherit;
+            font-size: 0.75rem;
+            letter-spacing: 1px;
+            cursor: pointer;
+        }
+        .modal-cancel-btn:hover { border-color: #666; color: #aaa; }
+        .modal-confirm-btn {
+            background: #f97316;
+            border: none;
+            color: #000;
+            padding: 0.5rem 1.5rem;
+            font-family: inherit;
+            font-size: 0.75rem;
+            font-weight: bold;
+            letter-spacing: 1px;
+            cursor: pointer;
+        }
+        .modal-confirm-btn:hover:not(:disabled) { background: #fb923c; }
+        .modal-confirm-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .modal-result {
+            padding: 0.75rem 1.25rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.3rem;
+        }
     `;
 
     res.send(renderPage({
@@ -1532,6 +2032,182 @@ router.get('/alpaca', (req, res) => {
         content,
         extraStyles
     }));
+});
+
+// ── Profile / API Key Vault page ──────────────────────────────────────────────
+
+router.get('/profile', (req: any, res) => {
+    const token = req.query.token as string;
+
+    const PROVIDER_LABELS: Record<string, string> = {
+        alpaca_live:  'Alpaca Live',
+        alpaca_paper: 'Alpaca Paper',
+        google:       'Google OAuth',
+        discord:      'Discord OAuth',
+    };
+
+    const content = `
+        <div class="profile-layout">
+            <div class="profile-header">
+                <div class="profile-title">PROFILE // API KEY VAULT</div>
+                <div class="profile-sub">Keys are encrypted at rest with AES-256-GCM. Secrets are never returned after storage.</div>
+            </div>
+            <div class="section">
+                <div class="section-title">&#9632; STORED KEYS</div>
+                <div id="keys-list"><span class="loading-row">Loading...</span></div>
+            </div>
+            <div class="section">
+                <div class="section-title">&#9632; ADD / UPDATE KEY</div>
+                <div class="key-form">
+                    <div class="form-row">
+                        <label>PROVIDER</label>
+                        <select id="provider-select">
+                            <option value="alpaca_live">Alpaca - Live Account</option>
+                            <option value="alpaca_paper">Alpaca - Paper Account</option>
+                            <option value="google">Google OAuth</option>
+                            <option value="discord">Discord OAuth</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <label>LABEL (optional)</label>
+                        <input id="key-label" type="text" placeholder="e.g. My Alpaca Live Account" autocomplete="off" />
+                    </div>
+                    <div class="form-row">
+                        <label>KEY ID / CLIENT ID</label>
+                        <input id="key-id" type="text" placeholder="Paste your key ID here" autocomplete="off" />
+                    </div>
+                    <div class="form-row">
+                        <label>SECRET KEY / CLIENT SECRET</label>
+                        <input id="key-secret" type="password" placeholder="Paste your secret here" autocomplete="off" />
+                    </div>
+                    <div class="form-actions">
+                        <button onclick="saveKey()">SAVE KEY</button>
+                        <span id="save-status" class="save-status"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+        const TOKEN = '${token}';
+        const LABELS = ${JSON.stringify(PROVIDER_LABELS)};
+
+        async function loadKeys() {
+            var r = await fetch('/api/api-keys', { headers: { 'Authorization': 'Bearer ' + TOKEN } });
+            if (!r.ok) { document.getElementById('keys-list').innerHTML = '<span class="err">Failed to load keys.</span>'; return; }
+            var data = await r.json();
+            if (!data.length) {
+                document.getElementById('keys-list').innerHTML = '<span class="loading-row">No keys stored yet.</span>';
+                return;
+            }
+            var rows = '';
+            data.forEach(function(k) {
+                rows += '<tr>' +
+                    '<td class="sym">' + escHtml(LABELS[k.provider] || k.provider) + '</td>' +
+                    '<td>' + escHtml(k.label || '\\u2014') + '</td>' +
+                    '<td class="mono-sm">' + escHtml(k.keyIdPreview) + '</td>' +
+                    '<td class="mono-sm">' + fmtDate(k.updatedAt) + '</td>' +
+                    '<td><button class="delete-btn" onclick="deleteKey(' + "'" + escHtml(k.provider) + "'" + ')">DELETE</button></td>' +
+                    '</tr>';
+            });
+            document.getElementById('keys-list').innerHTML =
+                '<table><thead><tr><th>PROVIDER</th><th>LABEL</th><th>KEY ID (PREVIEW)</th><th>UPDATED</th><th></th></tr></thead>' +
+                '<tbody>' + rows + '</tbody></table>';
+        }
+
+        async function saveKey() {
+            var provider = document.getElementById('provider-select').value;
+            var label    = document.getElementById('key-label').value.trim();
+            var keyId    = document.getElementById('key-id').value.trim();
+            var secret   = document.getElementById('key-secret').value.trim();
+            var status   = document.getElementById('save-status');
+            if (!keyId || !secret) { status.textContent = 'KEY ID and SECRET are required.'; status.className = 'save-status err'; return; }
+            status.textContent = 'Saving...'; status.className = 'save-status';
+            var r = await fetch('/api/api-keys/' + encodeURIComponent(provider), {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + TOKEN },
+                body: JSON.stringify({ keyId: keyId, secret: secret, label: label }),
+            });
+            if (r.ok) {
+                status.textContent = 'Saved.'; status.className = 'save-status ok';
+                document.getElementById('key-id').value = '';
+                document.getElementById('key-secret').value = '';
+                loadKeys();
+            } else {
+                var d = await r.json().catch(function() { return {}; });
+                status.textContent = 'Error: ' + (d.error || r.status); status.className = 'save-status err';
+            }
+        }
+
+        async function deleteKey(provider) {
+            if (!confirm('Delete ' + provider + ' keys? This cannot be undone.')) return;
+            var r = await fetch('/api/api-keys/' + encodeURIComponent(provider), {
+                method: 'DELETE',
+                headers: { 'Authorization': 'Bearer ' + TOKEN },
+            });
+            if (r.ok) loadKeys();
+        }
+
+        function fmtDate(s) {
+            if (!s) return '\\u2014';
+            var d = new Date(s);
+            return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        }
+        function escHtml(s) { var d = document.createElement('div'); d.textContent = String(s || ''); return d.innerHTML; }
+
+        loadKeys();
+        </script>
+    `;
+
+    const extraStyles = `
+        body { align-items: stretch; padding-top: 60px; }
+        .profile-layout {
+            width: 100%; max-width: 800px; margin: 0 auto; padding: 2rem;
+            box-sizing: border-box; position: relative; z-index: 95;
+            display: flex; flex-direction: column; gap: 2rem;
+        }
+        .profile-header { display: flex; flex-direction: column; gap: 0.4rem; border-bottom: 2px solid #333; padding-bottom: 1rem; }
+        .profile-title { font-size: 1rem; font-weight: bold; letter-spacing: 3px; color: #0d9488; }
+        .profile-sub { font-size: 0.75rem; color: #555; }
+        .section { display: flex; flex-direction: column; gap: 0.75rem; }
+        .section-title { font-size: 0.7rem; letter-spacing: 2px; color: #0d9488; font-weight: bold; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+        thead tr { border-bottom: 1px solid #333; }
+        th { text-align: left; padding: 0.4rem 0.75rem; font-size: 0.65rem; color: #555; letter-spacing: 1px; white-space: nowrap; }
+        td { padding: 0.45rem 0.75rem; color: #ccc; border-bottom: 1px solid #1a1a1a; white-space: nowrap; }
+        tr:hover td { background: #1e1e1e; }
+        .sym { color: #e0e0e0; font-weight: bold; }
+        .mono-sm { font-size: 0.72rem; color: #888; }
+        .loading-row { color: #444; }
+        .err { color: #ef4444; }
+        .key-form { background: #1e1e1e; border: 1px solid #333; padding: 1.5rem; display: flex; flex-direction: column; gap: 1rem; }
+        .form-row { display: flex; flex-direction: column; gap: 0.35rem; }
+        .form-row label { font-size: 0.65rem; letter-spacing: 2px; color: #555; }
+        .form-row input, .form-row select {
+            background: #2b2b2b; border: 1px solid #444; color: #e0e0e0;
+            padding: 0.5rem 0.75rem; font-family: 'Courier New', monospace;
+            font-size: 0.85rem; outline: none; width: 100%; box-sizing: border-box;
+        }
+        .form-row input:focus, .form-row select:focus { border-color: #0d9488; }
+        .form-row select option { background: #2b2b2b; }
+        .form-actions { display: flex; align-items: center; gap: 1rem; margin-top: 0.25rem; }
+        .form-actions button {
+            background: #0d9488; border: none; color: #000; padding: 0.6rem 1.5rem;
+            font-family: 'Courier New', monospace; font-weight: bold; letter-spacing: 2px; cursor: pointer;
+        }
+        .form-actions button:hover { background: #f97316; }
+        .save-status { font-size: 0.8rem; color: #888; }
+        .save-status.ok  { color: #10b981; }
+        .save-status.err { color: #ef4444; }
+        .delete-btn {
+            background: transparent; border: 1px solid #444; color: #666;
+            padding: 0.2rem 0.5rem; font-family: 'Courier New', monospace;
+            font-size: 0.7rem; letter-spacing: 1px; cursor: pointer;
+        }
+        .delete-btn:hover { border-color: #ef4444; color: #ef4444; }
+    `;
+
+    res.send(renderPage({ token, title: 'Profile', activePage: 'profile', content, extraStyles }));
 });
 
 export default router;

@@ -20,6 +20,49 @@ export default function ProfilePage() {
     const [savingGames, setSavingGames] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
+    const EMPTY_KEY_FORM = { provider: '', label: '', keyId: '', secret: '' };
+    const [apiKeys, setApiKeys] = useState<any[]>([]);
+    const [showKeyForm, setShowKeyForm] = useState(false);
+    const [keyForm, setKeyForm] = useState(EMPTY_KEY_FORM);
+    const [savingKey, setSavingKey] = useState(false);
+    const [keyError, setKeyError] = useState<string | null>(null);
+    const [deletingProvider, setDeletingProvider] = useState<string | null>(null);
+
+    const loadApiKeys = (token: string) => {
+        fetch('/api/api-keys', { headers: { 'Authorization': `Bearer ${token}` } })
+            .then(r => r.ok ? r.json() : [])
+            .then(setApiKeys)
+            .catch(() => setApiKeys([]));
+    };
+
+    const [gcal, setGcal] = useState<{ connected: boolean; configured: boolean } | null>(null);
+    const [gcalNotice, setGcalNotice] = useState<string | null>(null);
+
+    const loadGcalStatus = (token: string) => {
+        fetch('/api/google-calendar/status', { headers: { 'Authorization': `Bearer ${token}` } })
+            .then(r => r.ok ? r.json() : null)
+            .then(setGcal)
+            .catch(() => setGcal(null));
+    };
+
+    const connectGcal = async () => {
+        const token = localStorage.getItem('token');
+        const res = await fetch('/api/google-calendar/auth-url', { headers: { 'Authorization': `Bearer ${token}` } });
+        if (res.ok) {
+            const { url } = await res.json();
+            window.location.href = url;
+        } else {
+            const err = await res.json().catch(() => ({}));
+            setGcalNotice(err.error || 'Google Calendar is not configured on the server.');
+        }
+    };
+
+    const disconnectGcal = async () => {
+        const token = localStorage.getItem('token');
+        const res = await fetch('/api/google-calendar', { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+        if (res.ok) loadGcalStatus(token!);
+    };
+
     const handleAuthError = () => {
         localStorage.clear();
         window.dispatchEvent(new Event('authChange'));
@@ -46,6 +89,22 @@ export default function ProfilePage() {
             .then(r => r.ok ? r.json() : [])
             .then(setSessions)
             .catch(() => setSessions([]));
+
+        loadApiKeys(token);
+        loadGcalStatus(token);
+
+        // Feedback from the Google OAuth redirect (?gcal=connected|denied|error|noRefreshToken)
+        const gcalParam = new URLSearchParams(window.location.search).get('gcal');
+        if (gcalParam) {
+            const messages: Record<string, string> = {
+                connected: 'Google Calendar connected!',
+                denied: 'Google Calendar connection was cancelled.',
+                error: 'Google Calendar connection failed. Try again.',
+                noRefreshToken: 'Google did not return a refresh token. Remove the app at myaccount.google.com/permissions and reconnect.',
+            };
+            setGcalNotice(messages[gcalParam] || null);
+            window.history.replaceState({}, '', '/profile');
+        }
 
         fetch('/api/campaigns', {
             headers: { 'Authorization': `Bearer ${token}` },
@@ -178,6 +237,51 @@ export default function ProfilePage() {
             }
         } finally {
             setSavingGames(false);
+        }
+    };
+
+    const saveApiKey = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const provider = keyForm.provider.trim().toLowerCase().replace(/\s+/g, '_');
+        if (!provider || !keyForm.keyId.trim() || !keyForm.secret.trim()) return;
+        setSavingKey(true);
+        setKeyError(null);
+        try {
+            const token = localStorage.getItem('token');
+            const response = await fetch(`/api/api-keys/${encodeURIComponent(provider)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ keyId: keyForm.keyId, secret: keyForm.secret, label: keyForm.label }),
+            });
+            if (response.status === 401) { handleAuthError(); return; }
+            if (response.ok) {
+                setKeyForm(EMPTY_KEY_FORM);
+                setShowKeyForm(false);
+                loadApiKeys(token!);
+            } else {
+                const err = await response.json().catch(() => ({}));
+                setKeyError(err.error || 'Failed to save key');
+            }
+        } catch {
+            setKeyError('Failed to save key');
+        } finally {
+            setSavingKey(false);
+        }
+    };
+
+    const deleteApiKey = async (provider: string) => {
+        if (!window.confirm(`Delete the stored key for "${provider}"? This cannot be undone.`)) return;
+        setDeletingProvider(provider);
+        try {
+            const token = localStorage.getItem('token');
+            const response = await fetch(`/api/api-keys/${encodeURIComponent(provider)}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
+            if (response.status === 401) { handleAuthError(); return; }
+            if (response.ok) setApiKeys(prev => prev.filter(k => k.provider !== provider));
+        } finally {
+            setDeletingProvider(null);
         }
     };
 
@@ -522,6 +626,171 @@ export default function ProfilePage() {
                                         {new Date(s.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
                                     </p>
                                 </Link>
+                            ))}
+                        </div>
+                    )}
+                </div>
+                {/* API Key Vault */}
+                <div className="mt-16">
+                    <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+                        <h2 className="text-3xl sm:text-4xl md:text-5xl font-permanent text-yellow-400 uppercase relative w-fit">
+                            <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">API Key Vault</span>
+                        </h2>
+                        {!showKeyForm && (
+                            <button
+                                onClick={() => { setKeyForm(EMPTY_KEY_FORM); setKeyError(null); setShowKeyForm(true); }}
+                                className="px-6 py-2 bg-yellow-400 text-black dark:bg-teal-600 dark:text-white font-permanent text-lg uppercase hover:bg-yellow-500 dark:hover:bg-teal-700 transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] border-2 border-black dark:border-white"
+                            >
+                                ADD KEY
+                            </button>
+                        )}
+                    </div>
+                    <p className="font-permanent text-xs text-zinc-500 uppercase mb-6">
+                        Keys are encrypted at rest. Secrets are never displayed after saving.
+                    </p>
+
+                    {/* Google Calendar connection */}
+                    <div className="mb-8 p-5 border-4 border-black dark:border-white bg-zinc-200 dark:bg-slate-800 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
+                        <div className="flex flex-wrap items-center justify-between gap-4">
+                            <div>
+                                <p className="font-permanent text-xl text-teal-600 dark:text-yellow-400 uppercase tracking-tight">Google Calendar</p>
+                                <p className="font-permanent text-xs text-zinc-500 dark:text-zinc-400 uppercase mt-1">
+                                    {gcal?.connected
+                                        ? 'Connected — session events can be added to your calendar automatically.'
+                                        : 'Connect to add session events to your calendar automatically.'}
+                                </p>
+                            </div>
+                            {gcal?.connected ? (
+                                <button
+                                    onClick={disconnectGcal}
+                                    className="px-4 py-2 text-xs font-permanent uppercase border-2 border-black bg-red-600 text-white hover:bg-red-700 transition-colors"
+                                >
+                                    Disconnect
+                                </button>
+                            ) : (
+                                <button
+                                    onClick={connectGcal}
+                                    className="px-4 py-2 text-xs font-permanent uppercase border-2 border-black bg-yellow-400 text-black hover:bg-yellow-500 transition-colors shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
+                                >
+                                    Connect
+                                </button>
+                            )}
+                        </div>
+                        {gcalNotice && (
+                            <p className="font-permanent text-xs uppercase mt-3 text-teal-600 dark:text-yellow-400">{gcalNotice}</p>
+                        )}
+                    </div>
+
+                    {showKeyForm && (
+                        <form onSubmit={saveApiKey} className="mb-8 p-6 border-4 border-black bg-slate-900 shadow-[8px_8px_0px_0px_rgba(13,148,136,1)] space-y-4">
+                            <div className="flex justify-between items-center">
+                                <h3 className="font-permanent text-lg text-white uppercase">Add / Update Key</h3>
+                                <button type="button" onClick={() => setShowKeyForm(false)} className="font-permanent text-xl text-zinc-400 hover:text-white transition-colors leading-none">×</button>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div className="flex flex-col">
+                                    <label className="text-teal-400 font-permanent uppercase text-xs mb-1">Provider *</label>
+                                    <input
+                                        required
+                                        value={keyForm.provider}
+                                        onChange={(e) => setKeyForm({ ...keyForm, provider: e.target.value })}
+                                        placeholder="ALPACA_PAPER"
+                                        className="bg-black border-2 border-yellow-400 p-2 text-white font-permanent outline-none focus:border-teal-500 placeholder-zinc-600 uppercase"
+                                    />
+                                    <p className="text-[10px] text-zinc-500 mt-1 italic">Existing provider name overwrites that entry.</p>
+                                </div>
+                                <div className="flex flex-col">
+                                    <label className="text-teal-400 font-permanent uppercase text-xs mb-1">Label</label>
+                                    <input
+                                        value={keyForm.label}
+                                        onChange={(e) => setKeyForm({ ...keyForm, label: e.target.value })}
+                                        placeholder="PAPER TRADING"
+                                        className="bg-black border-2 border-yellow-400 p-2 text-white font-permanent outline-none focus:border-teal-500 placeholder-zinc-600 uppercase"
+                                    />
+                                </div>
+                            </div>
+                            <div className="flex flex-col">
+                                <label className="text-teal-400 font-permanent uppercase text-xs mb-1">Key ID *</label>
+                                <input
+                                    required
+                                    value={keyForm.keyId}
+                                    onChange={(e) => setKeyForm({ ...keyForm, keyId: e.target.value })}
+                                    autoComplete="off"
+                                    className="bg-black border-2 border-yellow-400 p-2 text-white font-mono outline-none focus:border-teal-500"
+                                />
+                            </div>
+                            <div className="flex flex-col">
+                                <label className="text-teal-400 font-permanent uppercase text-xs mb-1">Secret *</label>
+                                <input
+                                    required
+                                    type="password"
+                                    value={keyForm.secret}
+                                    onChange={(e) => setKeyForm({ ...keyForm, secret: e.target.value })}
+                                    autoComplete="new-password"
+                                    className="bg-black border-2 border-yellow-400 p-2 text-white font-mono outline-none focus:border-teal-500"
+                                />
+                            </div>
+                            {keyError && <p className="font-permanent text-xs text-red-400 uppercase">{keyError}</p>}
+                            <div className="flex gap-4 pt-2">
+                                <button
+                                    type="submit"
+                                    disabled={savingKey}
+                                    className="flex-1 p-3 bg-yellow-400 text-black dark:bg-teal-600 dark:text-white font-permanent font-black uppercase hover:bg-yellow-500 dark:hover:bg-teal-700 transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] disabled:opacity-50"
+                                >
+                                    {savingKey ? 'SAVING...' : 'SAVE KEY'}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowKeyForm(false)}
+                                    className="flex-1 p-3 bg-zinc-600 text-white font-permanent font-black uppercase hover:bg-zinc-700 transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]"
+                                >
+                                    CANCEL
+                                </button>
+                            </div>
+                        </form>
+                    )}
+
+                    {apiKeys.length === 0 ? (
+                        <p className="font-permanent text-xl text-zinc-500 uppercase">No API keys stored.</p>
+                    ) : (
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            {apiKeys.map((k) => (
+                                <div
+                                    key={k.provider}
+                                    className="p-5 border-4 border-black dark:border-white bg-zinc-200 dark:bg-slate-800 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]"
+                                >
+                                    <div className="flex justify-between items-start gap-3">
+                                        <div className="min-w-0">
+                                            <p className="font-permanent text-xl text-teal-600 dark:text-yellow-400 uppercase tracking-tight leading-tight truncate">
+                                                {k.provider}
+                                            </p>
+                                            {k.label && (
+                                                <p className="font-permanent text-sm text-zinc-500 dark:text-zinc-400 uppercase mt-1 truncate">{k.label}</p>
+                                            )}
+                                            <p className="font-mono text-sm text-black dark:text-white mt-2">
+                                                KEY: {k.keyIdPreview} <span className="text-zinc-400">/ SECRET: ••••••••</span>
+                                            </p>
+                                            <p className="font-permanent text-xs text-zinc-500 dark:text-zinc-400 uppercase mt-2">
+                                                Updated {new Date(k.updatedAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+                                            </p>
+                                        </div>
+                                        <div className="flex flex-col gap-2 shrink-0">
+                                            <button
+                                                onClick={() => { setKeyForm({ provider: k.provider, label: k.label || '', keyId: '', secret: '' }); setKeyError(null); setShowKeyForm(true); }}
+                                                className="px-3 py-1 text-xs font-permanent uppercase border-2 border-black bg-yellow-400 text-black hover:bg-yellow-500 transition-colors"
+                                            >
+                                                Rotate
+                                            </button>
+                                            <button
+                                                onClick={() => deleteApiKey(k.provider)}
+                                                disabled={deletingProvider === k.provider}
+                                                className="px-3 py-1 text-xs font-permanent uppercase border-2 border-black bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50"
+                                            >
+                                                {deletingProvider === k.provider ? '...' : 'Delete'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
                             ))}
                         </div>
                     )}

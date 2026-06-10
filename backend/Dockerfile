@@ -25,7 +25,8 @@ COPY --from=builder /app/key.pem ./key.pem
 COPY --from=builder /app/cert.pem ./cert.pem
 
 COPY entrypoint.sh ./entrypoint.sh
-RUN chmod +x ./entrypoint.sh
+# Strip Windows CRLF line endings (a CRLF shebang makes exec fail with "no such file or directory")
+RUN sed -i 's/\r$//' ./entrypoint.sh && chmod +x ./entrypoint.sh
 
 EXPOSE 5000
 EXPOSE 5001

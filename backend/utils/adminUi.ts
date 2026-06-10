@@ -1,7 +1,7 @@
 export interface AdminPageOptions {
     token: string;
     title: string;
-    activePage: 'admin' | 'db' | 'frontend' | 'cloud-claw' | 'obsidian' | 'alpaca';
+    activePage: 'admin' | 'db' | 'frontend' | 'cloud-claw' | 'obsidian' | 'alpaca' | 'profile';
     content: string;
     extraStyles?: string;
 }
@@ -131,6 +131,7 @@ export const renderPage = ({ token, title, activePage, content, extraStyles = ''
                         <a href="/admin/cloud-claw?token=${token}" class="nav-link ${activePage === 'cloud-claw' ? 'active' : ''}">CLOUD-CLAW</a>
                         <a href="/admin/obsidian?token=${token}" class="nav-link ${activePage === 'obsidian' ? 'active' : ''}">OBSIDIAN</a>
                         <a href="/admin/alpaca?token=${token}" class="nav-link ${activePage === 'alpaca' ? 'active' : ''}">ALPACA</a>
+                        <a href="/admin/profile?token=${token}" class="nav-link ${activePage === 'profile' ? 'active' : ''}">PROFILE</a>
                         <a href="/" class="nav-link ${activePage === 'frontend' ? 'active' : ''}">BACK TO FRONTEND</a>
 
                     </div>

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
-import { Book, ArrowLeft, Calendar, MapPin, FileText, Map, Save, X, Pencil } from 'lucide-react';
+import { Book, ArrowLeft, Calendar, MapPin, FileText, Map, Save, X, Pencil, Wifi } from 'lucide-react';
 
 const INPUT_CLS = "w-full p-3 border-4 border-black bg-white text-black font-permanent text-base uppercase focus:border-yellow-400 outline-none";
 const LABEL_CLS = "block text-teal-400 font-permanent uppercase text-xs mb-1";
@@ -37,7 +37,7 @@ export default function SessionDetailPage() {
                 if (res.ok) {
                     const s = await res.json();
                     setSession(s);
-                    setForm({ title: s.title, date: toDatetimeInput(s.date), location: s.location || '', agenda: s.agenda || '', summary: s.summary || '', vodUrl: s.vodUrl || '' });
+                    setForm({ title: s.title, date: toDatetimeInput(s.date), endDate: toDatetimeInput(s.endDate), location: s.location || '', isOnline: !!s.isOnline, agenda: s.agenda || '', summary: s.summary || '', vodUrl: s.vodUrl || '' });
                 } else router.push('/game-night');
             })
             .catch(() => router.push('/game-night'))
@@ -103,9 +103,24 @@ export default function SessionDetailPage() {
                         </div>
                         <div><label className={LABEL_CLS}>Title *</label><input required className={INPUT_CLS} value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} /></div>
                         <div className="grid grid-cols-2 gap-4">
-                            <div><label className={LABEL_CLS}>Date & Time</label><input type="datetime-local" className={INPUT_CLS} value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} /></div>
-                            <div><label className={LABEL_CLS}>Location</label><input className={INPUT_CLS} placeholder="GEOFF'S BASEMENT" value={form.location} onChange={e => setForm({ ...form, location: e.target.value })} /></div>
+                            <div><label className={LABEL_CLS}>Starts</label><input type="datetime-local" className={INPUT_CLS} value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} /></div>
+                            <div><label className={LABEL_CLS}>Ends</label><input type="datetime-local" className={INPUT_CLS} value={form.endDate} onChange={e => setForm({ ...form, endDate: e.target.value })} /></div>
                         </div>
+                        <div><label className={LABEL_CLS}>Location</label><input className={INPUT_CLS} placeholder="GEOFF'S BASEMENT" value={form.location} onChange={e => setForm({ ...form, location: e.target.value })} /></div>
+                        <button
+                            type="button"
+                            role="switch"
+                            aria-checked={form.isOnline}
+                            onClick={() => setForm({ ...form, isOnline: !form.isOnline })}
+                            className="flex items-center gap-3 w-fit"
+                        >
+                            <span className={`relative inline-block w-12 h-6 border-2 border-black transition-colors ${form.isOnline ? 'bg-teal-500' : 'bg-zinc-600'}`}>
+                                <span className={`absolute top-0 h-full w-6 bg-white border-r-2 border-l-2 border-black transition-all ${form.isOnline ? 'left-6' : 'left-0'}`} />
+                            </span>
+                            <span className="font-permanent text-xs text-white uppercase flex items-center gap-1">
+                                <Wifi className={`w-3 h-3 ${form.isOnline ? 'text-teal-400' : 'text-zinc-500'}`} /> Online Session
+                            </span>
+                        </button>
                         <div><label className={LABEL_CLS}>Agenda / Prep Notes</label><textarea className={INPUT_CLS} rows={3} value={form.agenda} onChange={e => setForm({ ...form, agenda: e.target.value })} /></div>
                         <div><label className={LABEL_CLS}>Summary</label><textarea className={INPUT_CLS} rows={3} value={form.summary} onChange={e => setForm({ ...form, summary: e.target.value })} /></div>
                         <div><label className={LABEL_CLS}>VOD / Recording URL</label><input className={INPUT_CLS} placeholder="HTTPS://..." value={form.vodUrl} onChange={e => setForm({ ...form, vodUrl: e.target.value })} /></div>
@@ -128,16 +143,26 @@ export default function SessionDetailPage() {
                                     <div>
                                         <p className="font-permanent text-xs text-zinc-400 uppercase">Date</p>
                                         <p className="font-permanent text-black dark:text-white uppercase text-sm">{sessionDate.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }).toUpperCase()}</p>
-                                        <p className="font-permanent text-teal-600 dark:text-yellow-400 uppercase text-xs mt-0.5">{sessionDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</p>
+                                        <p className="font-permanent text-teal-600 dark:text-yellow-400 uppercase text-xs mt-0.5">
+                                            {sessionDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                                            {session.endDate && ` — ${new Date(session.endDate).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`}
+                                        </p>
                                     </div>
                                 </div>
                             )}
-                            {session.location && (
+                            {(session.location || session.isOnline) && (
                                 <div className="flex items-start gap-2">
-                                    <MapPin className="w-4 h-4 text-yellow-500 mt-0.5 shrink-0" />
+                                    {session.isOnline
+                                        ? <Wifi className="w-4 h-4 text-teal-500 mt-0.5 shrink-0" />
+                                        : <MapPin className="w-4 h-4 text-yellow-500 mt-0.5 shrink-0" />}
                                     <div>
                                         <p className="font-permanent text-xs text-zinc-400 uppercase">Location</p>
-                                        <p className="font-permanent text-black dark:text-white uppercase text-sm">{session.location}</p>
+                                        <p className="font-permanent text-black dark:text-white uppercase text-sm">{session.location || 'REMOTE'}</p>
+                                        {session.isOnline && (
+                                            <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 text-xs font-permanent uppercase border-2 border-black bg-teal-500 text-white">
+                                                <Wifi className="w-3 h-3" /> ONLINE
+                                            </span>
+                                        )}
                                     </div>
                                 </div>
                             )}
@@ -155,6 +180,33 @@ export default function SessionDetailPage() {
                                 <div className="flex items-center gap-2 mb-2"><FileText className="w-4 h-4 text-yellow-500" /><p className="font-permanent text-xs text-zinc-400 uppercase">Session Summary</p></div>
                                 <div className="p-3 border-2 border-black/20 dark:border-white/20 bg-zinc-50 dark:bg-zinc-900">
                                     <p className="font-permanent text-black dark:text-white uppercase text-sm leading-relaxed">{session.summary}</p>
+                                </div>
+                            </div>
+                        )}
+                        {(session.googleCalendarLink || session.discordEventId) && (
+                            <div>
+                                <p className="font-permanent text-xs text-zinc-400 uppercase mb-2">External Events</p>
+                                <div className="flex flex-wrap gap-3">
+                                    {session.googleCalendarLink && (
+                                        <a
+                                            href={session.googleCalendarLink}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex items-center gap-2 px-3 py-1.5 border-2 border-black bg-yellow-400 text-black font-permanent uppercase text-xs hover:bg-white transition-colors shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
+                                        >
+                                            <Calendar className="w-3 h-3" /> Add to Google Calendar
+                                        </a>
+                                    )}
+                                    {session.discordEventId && (
+                                        <span className="inline-flex items-center gap-2 px-3 py-1.5 border-2 border-black bg-teal-500 text-white font-permanent uppercase text-xs">
+                                            Discord Event Created
+                                        </span>
+                                    )}
+                                    {session.googleEventId && (
+                                        <span className="inline-flex items-center gap-2 px-3 py-1.5 border-2 border-black bg-teal-500 text-white font-permanent uppercase text-xs">
+                                            On Your Google Calendar
+                                        </span>
+                                    )}
                                 </div>
                             </div>
                         )}

@@ -4,6 +4,7 @@ import User from "../models/User.js";
 import FriendRequest from "../models/FriendRequest.js";
 import { auth } from "../middleware/auth.js";
 import mongoose from "mongoose";
+import { notify, resolveNotifications } from "../utils/notify.js";
 
 // Search for users by handle#number
 router.get("/search", auth, async (req: any, res) => {
@@ -61,6 +62,14 @@ router.post("/request", auth, async (req: any, res) => {
         const request = new FriendRequest({ from: fromUserId, to: toUserId });
         await request.save();
 
+        const senderName = fromUser?.handle || fromUser?.name || "Someone";
+        notify(toUserId, {
+            type: "friend_request",
+            title: `@${senderName} sent you a friend request`,
+            sourceKey: `fr:${request._id}`,
+            meta: { requestId: String(request._id) },
+        }).catch(() => { /* logged inside */ });
+
         res.status(201).json({ message: "Friend request sent successfully" });
     } catch (error) {
         console.error("Request error:", error);
@@ -114,6 +123,17 @@ router.put("/request/:id", auth, async (req: any, res) => {
 
         await session.commitTransaction();
         session.endSession();
+
+        // Clear the recipient's bell entry; tell the sender if accepted.
+        resolveNotifications(userId, `fr:${request._id}`).catch(() => { /* logged inside */ });
+        if (action === "accept") {
+            const accepter = await User.findById(userId).select("name handle");
+            const accepterName = accepter?.handle || accepter?.name || "Someone";
+            notify(request.from, {
+                type: "system",
+                title: `@${accepterName} accepted your friend request`,
+            }).catch(() => { /* logged inside */ });
+        }
 
         res.json({ message: `Request ${action}ed successfully` });
     } catch (error) {

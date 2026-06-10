@@ -18,11 +18,7 @@ import friendRoutes from "./routes/friendRoutes.js";
 import cloudClawRoutes from "./routes/cloudClawRoutes.js";
 import apiKeyRoutes from "./routes/apiKeyRoutes.js";
 import googleCalendarRoutes from "./routes/googleCalendarRoutes.js";
-import messageRoutes from "./routes/messageRoutes.js";
-import notificationRoutes from "./routes/notificationRoutes.js";
-import inviteRoutes from "./routes/inviteRoutes.js";
 import { snapshotAlpacaNow } from "./routes/adminRoutes.js";
-import { startEventBus, stopEventBus } from "./events/index.js";
 
 import https from "https";
 import http from "http";
@@ -93,19 +89,6 @@ app.use("/api/friends", friendRoutes);
 app.use("/api/cloud-claw", cloudClawRoutes);
 app.use("/api/api-keys", apiKeyRoutes);
 app.use("/api/google-calendar", googleCalendarRoutes);
-app.use("/api/messages", messageRoutes);
-app.use("/api/notifications", notificationRoutes);
-app.use("/api/campaign-invites", inviteRoutes);
-
-// Event bus (Redis Streams when REDIS_URL is set; in-memory otherwise).
-// Started after routes are imported so module-level subscriptions are registered.
-startEventBus()
-    .then(() => console.log("[BACKEND] Event bus started."))
-    .catch((err) => console.error("[BACKEND] Event bus failed to start:", err));
-
-process.on("SIGTERM", () => {
-    stopEventBus().finally(() => process.exit(0));
-});
 
 
 if (hasCerts) {
@@ -129,7 +112,7 @@ if (process.env.ALPACA_API_KEY && process.env.ALPACA_SECRET_KEY) {
     console.log('[BACKEND] Alpaca snapshot loop scheduled (every 5 min).');
 }
 
-// Global Error Handler.
+// Global Error Handler
 app.use((err: any, req: any, res: any, next: any) => {
     console.error("!!! [BACKEND] UNHANDLED EXCEPTION:", err);
     console.error("!!! Error stack:", err.stack);

@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, UserPlus, MessageCircle, X, Search, Check, Trash2, ExternalLink, Bell } from 'lucide-react';
+import { Users, UserPlus, MessageCircle, X, Search, Check, Trash2, ExternalLink, ArrowLeft, Map, MessageSquare } from 'lucide-react';
+import ChatThread, { ChatChannel } from './ChatThread';
 
 interface Friend {
   _id: string;
@@ -20,11 +21,24 @@ interface Request {
   status: string;
 }
 
+interface CampaignSummary {
+  _id: string;
+  title: string;
+  status: string;
+}
+
+interface ActiveChat {
+  channel: ChatChannel;
+  title: string;
+}
+
 export default function SocialDock() {
   const [isOpen, setIsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'friends' | 'requests' | 'add'>('friends');
+  const [activeTab, setActiveTab] = useState<'chats' | 'friends' | 'requests' | 'add'>('chats');
   const [friends, setFriends] = useState<Friend[]>([]);
+  const [campaigns, setCampaigns] = useState<CampaignSummary[]>([]);
   const [incomingRequests, setIncomingRequests] = useState<Request[]>([]);
+  const [activeChat, setActiveChat] = useState<ActiveChat | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResult, setSearchResult] = useState<Friend | null>(null);
   const [searchError, setSearchError] = useState('');
@@ -47,9 +61,10 @@ export default function SocialDock() {
     if (!token) return;
 
     try {
-      const [friendsRes, requestsRes] = await Promise.all([
+      const [friendsRes, requestsRes, campaignsRes] = await Promise.all([
         fetch('/api/friends/list', { headers: { 'Authorization': `Bearer ${token}` } }),
-        fetch('/api/friends/requests', { headers: { 'Authorization': `Bearer ${token}` } })
+        fetch('/api/friends/requests', { headers: { 'Authorization': `Bearer ${token}` } }),
+        fetch('/api/campaigns', { headers: { 'Authorization': `Bearer ${token}` } })
       ]);
 
       if (friendsRes.ok) {
@@ -62,9 +77,18 @@ export default function SocialDock() {
         setIncomingRequests(requestsData.incoming);
         setNotificationCount(requestsData.incoming.length);
       }
+
+      if (campaignsRes.ok) {
+        setCampaigns(await campaignsRes.json());
+      }
     } catch (err) {
       console.error("Failed to fetch social data", err);
     }
+  };
+
+  const openChat = (chat: ActiveChat) => {
+    setActiveChat(chat);
+    setActiveTab('chats');
   };
 
   const handleSearch = async (e: React.FormEvent) => {
@@ -204,13 +228,13 @@ export default function SocialDock() {
 
               {/* Tabs */}
               <div className="flex border-b-4 border-black bg-zinc-800">
-                {(['friends', 'requests', 'add'] as const).map((tab) => (
+                {(['chats', 'friends', 'requests', 'add'] as const).map((tab) => (
                   <button
                     key={tab}
-                    onClick={() => setActiveTab(tab)}
-                    className={`flex-1 py-4 font-black text-sm uppercase tracking-widest transition-all ${
-                      activeTab === tab 
-                        ? 'bg-yellow-400 text-black' 
+                    onClick={() => { setActiveTab(tab); if (tab !== 'chats') setActiveChat(null); }}
+                    className={`flex-1 py-4 font-black text-xs uppercase tracking-widest transition-all ${
+                      activeTab === tab
+                        ? 'bg-yellow-400 text-black'
                         : 'text-zinc-400 hover:text-white hover:bg-zinc-700'
                     }`}
                   >
@@ -221,8 +245,98 @@ export default function SocialDock() {
               </div>
 
               {/* Content */}
-              <div className="flex-grow overflow-y-auto p-6 space-y-4 custom-scrollbar">
-                
+              <div className={`flex-grow min-h-0 ${activeTab === 'chats' && activeChat ? 'flex flex-col p-4' : 'overflow-y-auto p-6 space-y-4 custom-scrollbar'}`}>
+
+                {/* CHATS TAB */}
+                {activeTab === 'chats' && (
+                  activeChat ? (
+                    <>
+                      <div className="flex items-center gap-3 mb-3 shrink-0">
+                        <button
+                          onClick={() => setActiveChat(null)}
+                          className="p-2 bg-black border-2 border-white text-white hover:bg-yellow-400 hover:text-black hover:border-black transition-colors"
+                          aria-label="Back to chat list"
+                        >
+                          <ArrowLeft size={16} />
+                        </button>
+                        <div className="min-w-0">
+                          <h3 className="font-black text-lg text-white truncate">{activeChat.title}</h3>
+                          <p className="text-[10px] text-zinc-500 font-bold uppercase">
+                            {activeChat.channel.kind === 'campaign' ? 'Campaign · Table Talk' : 'Direct Message'}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex-grow min-h-0 flex flex-col">
+                        <ChatThread
+                          channel={activeChat.channel}
+                          placeholder={activeChat.channel.kind === 'campaign' ? 'MESSAGE THE PARTY…' : `MESSAGE ${activeChat.title.toUpperCase()}…`}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="space-y-6">
+                      <div>
+                        <p className="text-xs font-black text-zinc-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                          <Map size={14} /> Campaigns
+                        </p>
+                        {campaigns.length === 0 ? (
+                          <div className="text-center py-6 text-zinc-500 border-4 border-dashed border-zinc-700 font-bold uppercase text-xs">
+                            No campaigns yet.
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {campaigns.map((c) => (
+                              <button
+                                key={c._id}
+                                onClick={() => openChat({ channel: { kind: 'campaign', id: c._id }, title: c.title })}
+                                className="w-full flex items-center gap-3 p-3 bg-zinc-800 border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-1 hover:translate-y-1 hover:shadow-none transition-all text-left"
+                              >
+                                <div className="p-1.5 bg-teal-500 border-2 border-black shrink-0">
+                                  <Map size={14} className="text-white" />
+                                </div>
+                                <div className="min-w-0 flex-grow">
+                                  <p className="font-black text-sm text-white truncate uppercase">{c.title}</p>
+                                  <p className="text-[10px] text-zinc-500 font-bold uppercase">{c.status}</p>
+                                </div>
+                                <MessageSquare size={16} className="text-zinc-600 shrink-0" />
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        <p className="text-xs font-black text-zinc-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                          <MessageCircle size={14} /> Direct Messages
+                        </p>
+                        {friends.length === 0 ? (
+                          <div className="text-center py-6 text-zinc-500 border-4 border-dashed border-zinc-700 font-bold uppercase text-xs">
+                            Add friends to start chatting.
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {friends.map((f) => (
+                              <button
+                                key={f._id}
+                                onClick={() => openChat({ channel: { kind: 'dm', id: f._id }, title: `@${f.handle}` })}
+                                className="w-full flex items-center gap-3 p-3 bg-zinc-800 border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-1 hover:translate-y-1 hover:shadow-none transition-all text-left"
+                              >
+                                <div className="p-1.5 bg-yellow-400 border-2 border-black shrink-0">
+                                  <Users size={14} className="text-black" />
+                                </div>
+                                <div className="min-w-0 flex-grow">
+                                  <p className="font-black text-sm text-white truncate">@{f.handle?.toUpperCase()}</p>
+                                  <p className="text-[10px] text-zinc-500 font-bold">#{f.userNumber}</p>
+                                </div>
+                                <MessageSquare size={16} className="text-zinc-600 shrink-0" />
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                )}
+
                 {/* FRIENDS TAB */}
                 {activeTab === 'friends' && (
                   <div className="space-y-4">
@@ -247,18 +361,21 @@ export default function SocialDock() {
                           </div>
                           
                           <div className="flex gap-2">
-                            {friend.discordId ? (
+                            <button
+                              onClick={() => openChat({ channel: { kind: 'dm', id: friend._id }, title: `@${friend.handle}` })}
+                              className="flex-grow flex items-center justify-center gap-2 py-2 bg-teal-500 border-2 border-black text-black font-black text-xs uppercase hover:bg-teal-400 transition-colors"
+                            >
+                              <MessageSquare size={14} />
+                              MESSAGE
+                            </button>
+                            {friend.discordId && (
                               <button
                                 onClick={() => openDiscordDM(friend.discordId!)}
                                 className="flex-grow flex items-center justify-center gap-2 py-2 bg-[#5865F2] border-2 border-black text-white font-black text-xs uppercase hover:bg-[#4752c4] transition-colors"
                               >
                                 <ExternalLink size={14} />
-                                CHAT ON DISCORD
+                                DISCORD
                               </button>
-                            ) : (
-                                <div className="flex-grow py-2 bg-zinc-700 border-2 border-black text-zinc-400 font-black text-[10px] text-center uppercase">
-                                  Discord not linked
-                                </div>
                             )}
                           </div>
                         </div>
@@ -349,8 +466,8 @@ export default function SocialDock() {
               {/* Footer */}
               <div className="p-6 bg-black border-t-4 border-zinc-800">
                 <p className="text-[10px] text-zinc-600 font-black uppercase tracking-[0.2em] leading-relaxed">
-                  Connect by handle. Chat on Discord.<br/>
-                  The Personal Web App Social Layer v1.0
+                  Connect by handle. Chat right here.<br/>
+                  The Personal Web App Social Layer v2.0
                 </p>
               </div>
             </motion.div>

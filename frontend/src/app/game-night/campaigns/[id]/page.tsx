@@ -68,6 +68,8 @@ export default function CampaignDetailPage() {
     const [showInviteModal, setShowInviteModal] = useState(false);
     const [copied, setCopied] = useState(false);
     const [form, setForm] = useState<any>({});
+    const [friends, setFriends] = useState<any[]>([]);
+    const [inviteStatus, setInviteStatus] = useState<Record<string, string>>({});
 
     const EMPTY_SESSION = { title: '', date: '', endDate: '', location: '', isOnline: false, agenda: '', createDiscordEvent: false, createGoogleEvent: false };
     const [showSessionModal, setShowSessionModal] = useState(false);
@@ -161,6 +163,34 @@ export default function CampaignDetailPage() {
         navigator.clipboard.writeText(inviteUrl);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
+    };
+
+    // Load friends when the invite modal opens (for direct invites).
+    useEffect(() => {
+        if (!showInviteModal) return;
+        fetch('/api/friends/list', { headers: { Authorization: `Bearer ${token()}` } })
+            .then(res => res.ok ? res.json() : [])
+            .then(setFriends)
+            .catch(() => setFriends([]));
+    }, [showInviteModal]);
+
+    const handleInviteFriend = async (friendId: string) => {
+        setInviteStatus(prev => ({ ...prev, [friendId]: 'sending' }));
+        try {
+            const res = await fetch('/api/campaign-invites', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+                body: JSON.stringify({ campaignId: id, toUserId: friendId }),
+            });
+            if (res.ok) {
+                setInviteStatus(prev => ({ ...prev, [friendId]: 'sent' }));
+            } else {
+                const err = await res.json().catch(() => ({}));
+                setInviteStatus(prev => ({ ...prev, [friendId]: err.error || 'failed' }));
+            }
+        } catch {
+            setInviteStatus(prev => ({ ...prev, [friendId]: 'failed' }));
+        }
     };
 
     if (loading) return <div className="min-h-screen flex items-center justify-center"><span className="text-3xl font-permanent text-teal-600 animate-pulse">LOADING CAMPAIGN...</span></div>;
@@ -445,7 +475,7 @@ export default function CampaignDetailPage() {
             {/* Invite Modal */}
             {showInviteModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => { setShowInviteModal(false); setCopied(false); }}>
-                    <div className="w-full max-w-md bg-slate-900 border-4 border-black shadow-[8px_8px_0px_0px_rgba(13,148,136,1)] p-6 space-y-5" onClick={e => e.stopPropagation()}>
+                    <div className="w-full max-w-md bg-slate-900 border-4 border-black shadow-[8px_8px_0px_0px_rgba(13,148,136,1)] p-6 space-y-5 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center justify-between">
                             <h2 className="font-permanent text-lg text-white uppercase flex items-center gap-2">
                                 <UserPlus className="w-5 h-5 text-teal-400" /> Invite Players
@@ -473,6 +503,43 @@ export default function CampaignDetailPage() {
                             {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                             {copied ? 'LINK COPIED!' : 'COPY INVITE LINK'}
                         </button>
+
+                        <div className="pt-4 border-t-2 border-white/10">
+                            <p className="font-permanent text-xs text-teal-400 uppercase mb-3">Or invite a friend directly</p>
+                            {friends.length === 0 ? (
+                                <p className="font-permanent text-xs text-zinc-500 uppercase">No friends yet — add some from the Social Hub.</p>
+                            ) : (
+                                <div className="space-y-2 max-h-48 overflow-y-auto">
+                                    {friends.map((f: any) => {
+                                        const status = inviteStatus[f._id];
+                                        return (
+                                            <div key={f._id} className="flex items-center gap-3 p-2 border-2 border-black bg-zinc-800">
+                                                <div className="min-w-0 flex-grow">
+                                                    <p className="font-permanent text-xs text-white uppercase truncate">@{f.handle}</p>
+                                                    <p className="font-permanent text-[10px] text-zinc-500">#{f.userNumber}</p>
+                                                </div>
+                                                <button
+                                                    onClick={() => handleInviteFriend(f._id)}
+                                                    disabled={status === 'sending' || status === 'sent'}
+                                                    className={`px-3 py-1.5 border-2 border-black font-permanent text-[10px] uppercase transition-colors shrink-0 ${
+                                                        status === 'sent'
+                                                            ? 'bg-teal-500 text-white'
+                                                            : 'bg-yellow-400 text-black hover:bg-white disabled:opacity-50'
+                                                    }`}
+                                                >
+                                                    {status === 'sent' ? 'INVITED!' : status === 'sending' ? '...' : 'INVITE'}
+                                                </button>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                            {Object.values(inviteStatus).some(s => s !== 'sent' && s !== 'sending') && (
+                                <p className="mt-2 font-permanent text-[10px] text-red-400 uppercase">
+                                    {Object.entries(inviteStatus).find(([, s]) => s !== 'sent' && s !== 'sending')?.[1]}
+                                </p>
+                            )}
+                        </div>
                     </div>
                 </div>
             )}

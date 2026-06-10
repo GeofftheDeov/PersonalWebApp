@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { Menu, X } from 'lucide-react';
 import SocialDock from './SocialDock';
+import NotificationsBell from './NotificationsBell';
 
 export default function Navigation() {
   const router = useRouter();
@@ -121,6 +122,7 @@ export default function Navigation() {
               <span className="relative z-10 group-hover:text-teal-600 transition-colors uppercase">CALENDAR</span>
               <div className={`${decorationCls} -rotate-1`}></div>
             </Link>
+            {!mobile && <NotificationsBell />}
             {!mobile && <SocialDock />}
             <button
               onClick={handleLogout}
@@ -170,7 +172,8 @@ export default function Navigation() {
       {isMenuOpen && (
         <div className="fixed inset-0 top-[76px] z-40 bg-white dark:bg-black p-8 md:hidden flex flex-col items-center justify-center gap-8 overflow-y-auto border-t-4 border-black dark:border-white">
           {navLinks(true)}
-          <div className="mt-8">
+          <div className="mt-8 flex items-center gap-4">
+            <NotificationsBell />
             <SocialDock />
           </div>
         </div>

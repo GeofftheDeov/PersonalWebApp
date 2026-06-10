@@ -45,6 +45,9 @@ function FooterContent() {
       <p className="text-xl font-permanent uppercase tracking-wider text-zinc-500">
         © 2026 Geoff The Dev. All Rights Reserved.
       </p>
+      <a href="/patch-notes" className="mt-3 text-sm font-permanent uppercase tracking-widest text-teal-600 hover:text-yellow-400 transition-colors">
+        Patch Notes
+      </a>
     </>
   );
 }

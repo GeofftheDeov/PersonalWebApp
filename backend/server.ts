@@ -19,6 +19,8 @@ import cloudClawRoutes from "./routes/cloudClawRoutes.js";
 import apiKeyRoutes from "./routes/apiKeyRoutes.js";
 import googleCalendarRoutes from "./routes/googleCalendarRoutes.js";
 import messageRoutes from "./routes/messageRoutes.js";
+import notificationRoutes from "./routes/notificationRoutes.js";
+import inviteRoutes from "./routes/inviteRoutes.js";
 import { snapshotAlpacaNow } from "./routes/adminRoutes.js";
 import { startEventBus, stopEventBus } from "./events/index.js";
 
@@ -92,6 +94,8 @@ app.use("/api/cloud-claw", cloudClawRoutes);
 app.use("/api/api-keys", apiKeyRoutes);
 app.use("/api/google-calendar", googleCalendarRoutes);
 app.use("/api/messages", messageRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/campaign-invites", inviteRoutes);
 
 // Event bus (Redis Streams when REDIS_URL is set; in-memory otherwise).
 // Started after routes are imported so module-level subscriptions are registered.

@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Sword, Book, Map, Plus, Save, Shield, X, ChevronRight, Skull, Star } from 'lucide-react';
+import { Sword, Book, Map, Plus, Save, Shield, X, ChevronRight, Skull, Star, Wifi } from 'lucide-react';
 import Footer from '@/components/Footer';
 import Link from 'next/link';
 
@@ -13,6 +13,8 @@ interface Campaign {
     status: string;
     startDate: string;
     endDate: string;
+    discordGuildId?: string;
+    discordChannelId?: string;
 }
 
 interface Session {
@@ -40,6 +42,15 @@ const FORM_CLS = "w-full max-w-lg bg-slate-900 border-4 border-black shadow-[10p
 const BTN_SUBMIT = "flex-1 flex items-center justify-center gap-2 p-4 border-4 border-black bg-teal-600 text-white font-permanent text-lg uppercase hover:bg-teal-500 transition-colors shadow-[4px_4px_0px_0px_rgba(255,255,255,1)]";
 const BTN_CANCEL = "px-6 p-4 border-4 border-black bg-zinc-700 text-white font-permanent text-lg uppercase hover:bg-zinc-600 transition-colors";
 
+const Toggle = ({ on, onClick, label, icon }: { on: boolean; onClick: () => void; label: string; icon?: React.ReactNode }) => (
+    <button type="button" role="switch" aria-checked={on} onClick={onClick} className="flex items-center gap-3 w-fit">
+        <span className={`relative inline-block w-12 h-6 border-2 border-black transition-colors shrink-0 ${on ? 'bg-teal-500' : 'bg-zinc-600'}`}>
+            <span className={`absolute top-0 h-full w-6 bg-white border-r-2 border-l-2 border-black transition-all ${on ? 'left-6' : 'left-0'}`} />
+        </span>
+        <span className="font-permanent text-xs text-white uppercase flex items-center gap-1 text-left">{icon}{label}</span>
+    </button>
+);
+
 export default function GameNightPage() {
     const router = useRouter();
     const [tab, setTab] = useState<'campaigns' | 'sessions' | 'characters'>('campaigns');
@@ -55,9 +66,14 @@ export default function GameNightPage() {
     const [campaignForm, setCampaignForm] = useState({
         title: '', description: '', status: 'Not Started', startDate: '', endDate: ''
     });
-    const [sessionForm, setSessionForm] = useState({
-        title: '', campaignId: '', date: '', location: '', isOnline: false, agenda: '', summary: ''
-    });
+    const EMPTY_SESSION = {
+        title: '', campaignId: '', date: '', endDate: '', location: '', isOnline: false, agenda: '', summary: '',
+        createDiscordEvent: false, createGoogleEvent: false,
+    };
+    const [sessionForm, setSessionForm] = useState(EMPTY_SESSION);
+    const [sessionError, setSessionError] = useState<string | null>(null);
+    const [sessionWarnings, setSessionWarnings] = useState<string[]>([]);
+    const [savingSession, setSavingSession] = useState(false);
     const [characterForm, setCharacterForm] = useState({
         name: '', class: '', level: 1, campaignId: '', gameType: ''
     });
@@ -104,30 +120,61 @@ export default function GameNightPage() {
         }
     };
 
+    const sessionCampaign = campaigns.find(c => c._id === sessionForm.campaignId);
+    const needsTimes = sessionForm.createDiscordEvent || sessionForm.createGoogleEvent;
+    const needsLocation = sessionForm.createDiscordEvent && !sessionCampaign?.discordChannelId && !sessionForm.isOnline;
+
     const handleCreateSession = async (e: React.FormEvent) => {
         e.preventDefault();
+        // External events need both start and end times
+        if (sessionForm.createDiscordEvent || sessionForm.createGoogleEvent) {
+            if (!sessionForm.date || !sessionForm.endDate) {
+                setSessionError('Start and end date/time are required for Discord or Google Calendar events');
+                return;
+            }
+            if (new Date(sessionForm.endDate) <= new Date(sessionForm.date)) {
+                setSessionError('End time must be after the start time');
+                return;
+            }
+            if (sessionForm.createDiscordEvent && !sessionCampaign?.discordChannelId && !sessionForm.location.trim() && !sessionForm.isOnline) {
+                setSessionError('Discord events need a location — enter one or mark the session as online');
+                return;
+            }
+        }
+        setSavingSession(true);
+        setSessionError(null);
         const token = localStorage.getItem('token');
-        const userStr = localStorage.getItem('user');
-        const user = userStr ? JSON.parse(userStr) : {};
-        const res = await fetch('/api/tabletop/prepare-session', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            body: JSON.stringify({
-                title: sessionForm.title,
-                campaignId: sessionForm.campaignId,
-                date: sessionForm.date,
-                location: sessionForm.location,
-                isOnline: sessionForm.isOnline,
-                agenda: sessionForm.agenda,
-                summary: sessionForm.summary,
-                ownerId: user.id || user._id,
-                ownerName: user.name,
-            }),
-        });
-        if (res.ok) {
-            setShowCreateSession(false);
-            setSessionForm({ title: '', campaignId: '', date: '', location: '', isOnline: false, agenda: '', summary: '' });
-            fetchAll();
+        try {
+            const res = await fetch('/api/tabletop/sessions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({
+                    title: sessionForm.title,
+                    campaign: sessionForm.campaignId,
+                    date: sessionForm.date,
+                    endDate: sessionForm.endDate,
+                    location: sessionForm.location,
+                    isOnline: sessionForm.isOnline,
+                    agenda: sessionForm.agenda,
+                    summary: sessionForm.summary,
+                    createDiscordEvent: sessionForm.createDiscordEvent,
+                    createGoogleEvent: sessionForm.createGoogleEvent,
+                }),
+            });
+            if (res.ok) {
+                const created = await res.json();
+                setSessionWarnings(created.warnings || []);
+                setShowCreateSession(false);
+                setSessionForm(EMPTY_SESSION);
+                fetchAll();
+            } else {
+                const err = await res.json().catch(() => ({}));
+                setSessionError(err.error || 'Failed to create session');
+            }
+        } catch {
+            setSessionError('Failed to create session');
+        } finally {
+            setSavingSession(false);
         }
     };
 
@@ -204,7 +251,7 @@ export default function GameNightPage() {
                         </p>
                     </div>
                     {tab === 'campaigns' && createButton(() => setShowCreateCampaign(true), 'NEW CAMPAIGN', 'create-campaign-btn')}
-                    {tab === 'sessions' && createButton(() => setShowCreateSession(true), 'NEW SESSION', 'create-session-btn')}
+                    {tab === 'sessions' && createButton(() => { setSessionForm(EMPTY_SESSION); setSessionError(null); setShowCreateSession(true); }, 'NEW SESSION', 'create-session-btn')}
                     {tab === 'characters' && createButton(() => setShowCreateCharacter(true), 'NEW CHARACTER', 'create-character-btn')}
                 </header>
 
@@ -263,6 +310,18 @@ export default function GameNightPage() {
                 {/* === SESSIONS TAB === */}
                 {tab === 'sessions' && (
                     <div className="space-y-4">
+                        {sessionWarnings.length > 0 && (
+                            <div className="p-3 border-4 border-black bg-yellow-100 dark:bg-yellow-900/40 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]">
+                                <div className="flex justify-between items-start gap-2">
+                                    <div className="space-y-1">
+                                        {sessionWarnings.map((w, i) => (
+                                            <p key={i} className="font-permanent text-xs text-yellow-800 dark:text-yellow-200 uppercase">{w}</p>
+                                        ))}
+                                    </div>
+                                    <button onClick={() => setSessionWarnings([])} className="text-zinc-500 hover:text-black dark:hover:text-white shrink-0"><X className="w-4 h-4" /></button>
+                                </div>
+                            </div>
+                        )}
                         {sessions.length === 0 ? (
                             <div className="text-center py-20 border-4 border-dashed border-zinc-300 dark:border-zinc-700">
                                 <Book className="w-16 h-16 text-zinc-300 dark:text-zinc-600 mx-auto mb-4" />
@@ -392,26 +451,24 @@ export default function GameNightPage() {
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className={LABEL_CLS}>Date & Time *</label>
+                                    <label className={LABEL_CLS}>Starts *</label>
                                     <input required type="datetime-local" className={INPUT_CLS} value={sessionForm.date} onChange={e => setSessionForm({ ...sessionForm, date: e.target.value })} />
                                 </div>
                                 <div>
-                                    <label className={LABEL_CLS}>Location</label>
-                                    <input className={INPUT_CLS} placeholder="GEOFF'S BASEMENT" value={sessionForm.location} onChange={e => setSessionForm({ ...sessionForm, location: e.target.value })} />
+                                    <label className={LABEL_CLS}>Ends {needsTimes && '*'}</label>
+                                    <input required={needsTimes} type="datetime-local" className={INPUT_CLS} value={sessionForm.endDate} onChange={e => setSessionForm({ ...sessionForm, endDate: e.target.value })} />
                                 </div>
                             </div>
-                            <button
-                                type="button"
-                                role="switch"
-                                aria-checked={sessionForm.isOnline}
+                            <div>
+                                <label className={LABEL_CLS}>Location {needsLocation && '*'}</label>
+                                <input required={needsLocation} className={INPUT_CLS} placeholder={sessionForm.isOnline ? 'ONLINE' : "GEOFF'S BASEMENT"} value={sessionForm.location} onChange={e => setSessionForm({ ...sessionForm, location: e.target.value })} />
+                            </div>
+                            <Toggle
+                                on={sessionForm.isOnline}
                                 onClick={() => setSessionForm({ ...sessionForm, isOnline: !sessionForm.isOnline })}
-                                className="flex items-center gap-3 w-fit"
-                            >
-                                <span className={`relative inline-block w-12 h-6 border-2 border-black transition-colors ${sessionForm.isOnline ? 'bg-teal-500' : 'bg-zinc-600'}`}>
-                                    <span className={`absolute top-0 h-full w-6 bg-white border-r-2 border-l-2 border-black transition-all ${sessionForm.isOnline ? 'left-6' : 'left-0'}`} />
-                                </span>
-                                <span className="font-permanent text-xs text-white uppercase">Online Session</span>
-                            </button>
+                                label="Online Session"
+                                icon={<Wifi className={`w-3 h-3 ${sessionForm.isOnline ? 'text-teal-400' : 'text-zinc-500'}`} />}
+                            />
                             <div>
                                 <label className={LABEL_CLS}>Agenda / Prep Notes</label>
                                 <textarea className={INPUT_CLS} rows={2} placeholder="WHAT'S PLANNED FOR THIS SESSION..." value={sessionForm.agenda} onChange={e => setSessionForm({ ...sessionForm, agenda: e.target.value })} />
@@ -420,9 +477,32 @@ export default function GameNightPage() {
                                 <label className={LABEL_CLS}>Summary</label>
                                 <textarea className={INPUT_CLS} rows={2} placeholder="WHAT HAPPENED THIS SESSION..." value={sessionForm.summary} onChange={e => setSessionForm({ ...sessionForm, summary: e.target.value })} />
                             </div>
+                            <div className="pt-3 border-t-2 border-white/10 space-y-3">
+                                <p className="font-permanent text-xs text-teal-400 uppercase">External Events</p>
+                                <Toggle
+                                    on={sessionForm.createDiscordEvent}
+                                    onClick={() => setSessionForm({ ...sessionForm, createDiscordEvent: !sessionForm.createDiscordEvent })}
+                                    label={!sessionForm.campaignId
+                                        ? 'Create Discord Event (select a campaign first)'
+                                        : sessionCampaign?.discordGuildId
+                                            ? 'Create Discord Event'
+                                            : 'Create Discord Event (link a server on this campaign first)'}
+                                />
+                                <Toggle
+                                    on={sessionForm.createGoogleEvent}
+                                    onClick={() => setSessionForm({ ...sessionForm, createGoogleEvent: !sessionForm.createGoogleEvent })}
+                                    label="Create Google Calendar Event"
+                                />
+                                {(sessionForm.createDiscordEvent || sessionForm.createGoogleEvent) && (
+                                    <p className="text-[10px] text-zinc-500 font-permanent uppercase leading-relaxed">
+                                        External events require start and end times{sessionForm.createDiscordEvent && !sessionCampaign?.discordChannelId ? ', and Discord needs a location (or online)' : ''}. The agenda becomes the event description.
+                                    </p>
+                                )}
+                            </div>
                         </div>
+                        {sessionError && <p className="mt-4 font-permanent text-xs text-red-400 uppercase">{sessionError}</p>}
                         <div className="flex gap-3 mt-8">
-                            <button type="submit" className={BTN_SUBMIT}><Save className="w-5 h-5" /> CREATE SESSION</button>
+                            <button type="submit" disabled={savingSession} className={BTN_SUBMIT + " disabled:opacity-50"}><Save className="w-5 h-5" /> {savingSession ? 'CREATING...' : 'CREATE SESSION'}</button>
                             <button type="button" onClick={() => setShowCreateSession(false)} className={BTN_CANCEL}>CANCEL</button>
                         </div>
                     </form>

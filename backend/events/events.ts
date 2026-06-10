@@ -34,6 +34,27 @@ export interface EventMap {
         body: string;
         createdAt: string; // ISO timestamp
     };
+
+    /** A direct message was sent between two users. */
+    "social.dm": {
+        messageId: string;
+        dmKey: string; // "<userIdA>:<userIdB>", ids sorted
+        recipientId: string;
+        sender: { id: string; name: string; email: string };
+        body: string;
+        createdAt: string; // ISO timestamp
+    };
+
+    /** A notification was created (or refreshed) for a user's bell. */
+    "user.notification": {
+        notificationId: string;
+        userId: string;
+        type: "friend_request" | "campaign_invite" | "message" | "system";
+        title: string;
+        body?: string;
+        link?: string;
+        createdAt: string; // ISO timestamp
+    };
 }
 
 export type EventName = keyof EventMap;

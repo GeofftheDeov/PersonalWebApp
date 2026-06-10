@@ -7,7 +7,7 @@ RUN npm install
 # Rebuild the source code only when needed
 FROM node:20-alpine AS builder
 WORKDIR /app
-ARG BACKEND_URL=http://backend:5000
+ARG BACKEND_URL=http://localhost:5000
 ARG NEXT_PUBLIC_API_URL
 ARG NEXT_PUBLIC_GOOGLE_CLIENT_ID
 ENV BACKEND_URL=$BACKEND_URL

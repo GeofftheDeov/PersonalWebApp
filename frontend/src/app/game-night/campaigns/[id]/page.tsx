@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Map, ArrowLeft, Calendar, Book, Users, Shield, ChevronRight, Crown, Save, X, Pencil, UserPlus, Check, Copy, Link2, Plus, Wifi } from 'lucide-react';
+import CampaignChat from '@/components/CampaignChat';
 
 interface Session {
     _id: string;
@@ -378,6 +379,9 @@ export default function CampaignDetailPage() {
                         )}
                     </div>
                 </div>
+
+                {/* Live campaign chat (event bus → SSE) */}
+                <CampaignChat campaignId={id} />
             </div>
 
             {/* Add Session Modal */}

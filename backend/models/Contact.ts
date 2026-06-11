@@ -19,6 +19,8 @@ const contactSchema = new mongoose.Schema({
     sfID: String,
     profilePicture: String,
     favoriteGames: [String],
+    // Cross-collection friend ids (may point at User, Lead, Contact, or Account records)
+    friends: [{ type: mongoose.Schema.Types.ObjectId }],
     createdAt: { type: Date, default: Date.now },
 });
 

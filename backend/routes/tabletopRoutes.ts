@@ -9,7 +9,8 @@ import Task from "../models/Task.js";
 import Event from "../models/Event.js";
 import Campaign from "../models/Campaign.js";
 import { auth } from "../middleware/auth.js";
-import { getAuthorizedCampaignIds } from "../utils/gameNightPlannerUtils.js";
+import { getAuthorizedCampaignIds, isCampaignGameMaster } from "../utils/gameNightPlannerUtils.js";
+import { findPersonById, personDisplayName } from "../utils/personUtils.js";
 import { getDecryptedKeys } from "./apiKeyRoutes.js";
 import { createDiscordScheduledEvent, buildGoogleCalendarLink, createGoogleCalendarEvent } from "../utils/integrations.js";
 import mongoose from "mongoose";
@@ -33,6 +34,11 @@ router.post("/sessions", auth, async (req: any, res) => {
         const targetCampaign = req.body.campaign?.toString();
         if (campaignIds && (!targetCampaign || !campaignIds.some((id: any) => id.toString() === targetCampaign))) {
             return res.status(403).json({ error: "Unauthorized" });
+        }
+
+        // Sessions are GM-only: only the campaign's Game Master may create them.
+        if (!(await isCampaignGameMaster(req.user, targetCampaign))) {
+            return res.status(403).json({ error: "Only the Game Master can create sessions for this campaign" });
         }
 
         const {
@@ -150,6 +156,14 @@ router.get("/sessions/:id", auth, async (req: any, res) => {
 
 router.put("/sessions/:id", auth, async (req: any, res) => {
     try {
+        const existing = await Session.findById(req.params.id).select("campaign");
+        if (!existing) return res.status(404).json({ error: "Session not found" });
+
+        // Sessions are GM-only: only the campaign's Game Master may edit them.
+        if (!(await isCampaignGameMaster(req.user, String(existing.campaign)))) {
+            return res.status(403).json({ error: "Only the Game Master can edit sessions for this campaign" });
+        }
+
         const { title, date, endDate, location, isOnline, agenda, summary, vodUrl } = req.body;
         const session = await Session.findByIdAndUpdate(
             req.params.id,
@@ -163,10 +177,55 @@ router.put("/sessions/:id", auth, async (req: any, res) => {
     }
 });
 
+// --- Ready-up check ---------------------------------------------------------
+// Players respond to the T-30min ready check. Any campaign member may respond;
+// responses are keyed by person id and upserted (you can change your mind).
+router.post("/sessions/:id/ready", auth, async (req: any, res) => {
+    try {
+        const { ready } = req.body as { ready?: boolean };
+        if (typeof ready !== "boolean") return res.status(400).json({ error: "ready (boolean) is required" });
+
+        const session = await Session.findById(req.params.id);
+        if (!session) return res.status(404).json({ error: "Session not found" });
+
+        const campaignIds = await getAuthorizedCampaignIds(req.user);
+        if (campaignIds && !campaignIds.some((id: any) => String(id) === String(session.campaign))) {
+            return res.status(403).json({ error: "Unauthorized" });
+        }
+
+        const person = await findPersonById(req.user.id, "name firstName lastName handle");
+        const name = person ? personDisplayName(person.doc) : String(req.user.email).split("@")[0];
+
+        if (!session.readyCheck) {
+            session.readyCheck = { sentAt: undefined, responses: [] } as any;
+        }
+        const responses: any = session.readyCheck!.responses;
+        const existing = responses.find((r: any) => r.playerId === String(req.user.id));
+        if (existing) {
+            existing.ready = ready;
+            existing.name = name;
+            existing.respondedAt = new Date();
+        } else {
+            responses.push({ playerId: String(req.user.id), name, ready, respondedAt: new Date() });
+        }
+        session.markModified("readyCheck");
+        await session.save();
+
+        res.json({ readyCheck: session.readyCheck });
+    } catch (error: any) {
+        res.status(500).json({ error: "Failed to record ready status", details: error.message });
+    }
+});
+
 // --- Tabletop Lifecycle: Prepare Session ---
-router.post("/prepare-session", async (req, res) => {
+router.post("/prepare-session", auth, async (req: any, res) => {
     try {
         const { title, campaignId, date, location, isOnline, agenda, ownerId, ownerName } = req.body;
+
+        // GM-only, same as direct session creation (this endpoint was previously unauthenticated).
+        if (!(await isCampaignGameMaster(req.user, campaignId?.toString()))) {
+            return res.status(403).json({ error: "Only the Game Master can create sessions for this campaign" });
+        }
 
         // 1. Create Session
         const session = new Session({

@@ -2,13 +2,13 @@ import express, { Response } from "express";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import Message from "../models/Message.js";
-import User from "../models/User.js";
 import CampaignMember from "../models/CampaignMember.js";
 import Campaign from "../models/Campaign.js";
 import { auth } from "../middleware/auth.js";
 import { getAuthorizedCampaignIds } from "../utils/gameNightPlannerUtils.js";
 import { bus } from "../events/index.js";
 import { notify } from "../utils/notify.js";
+import { findPersonById, findPeopleByEmail, personDisplayName } from "../utils/personUtils.js";
 
 const router = express.Router();
 
@@ -143,8 +143,10 @@ router.post("/campaign/:campaignId", auth, async (req: any, res) => {
             return res.status(403).json({ error: "Not a member of this campaign" });
         }
 
-        const dbUser = await User.findById(req.user.id).select("name handle email");
-        const senderName = dbUser?.handle || dbUser?.name || req.user.email;
+        // Senders may be Users, Leads, Contacts, or Accounts — always display
+        // the handle (or name), never the email address.
+        const sender = await findPersonById(req.user.id, "name firstName lastName handle email");
+        const senderName = sender ? personDisplayName(sender.doc) : String(req.user.email).split("@")[0];
 
         const message = await Message.create({
             campaign: campaignId,
@@ -182,12 +184,12 @@ async function notifyCampaignMembers(campaignId: string, senderId: string, sende
         ]);
         const emails = [...new Set(members.map(m => m.email).filter((e): e is string => Boolean(e)))];
         if (!emails.length) return;
-        const users = await User.find({ email: { $in: emails } }).select("_id");
+        const people = await findPeopleByEmail(emails);
         const preview = body.length > 80 ? `${body.slice(0, 77)}...` : body;
         await Promise.all(
-            users
-                .filter(u => String(u._id) !== String(senderId))
-                .map(u => notify(u._id, {
+            people
+                .filter(p => String(p.doc._id) !== String(senderId))
+                .map(p => notify(p.doc._id, {
                     type: "message",
                     title: `New message in "${campaign?.title || 'a campaign'}"`,
                     body: `${senderName}: ${preview}`,
@@ -224,8 +226,8 @@ router.get("/campaign/:campaignId/stream", async (req: any, res) => {
 /** DMs are friends-only; returns the canonical dmKey or null. */
 async function assertDmAccess(userId: string, otherUserId: string): Promise<string | null> {
     if (!mongoose.Types.ObjectId.isValid(otherUserId) || String(otherUserId) === String(userId)) return null;
-    const me = await User.findById(userId).select("friends");
-    if (!me?.friends?.some((f: any) => String(f) === String(otherUserId))) return null;
+    const me = await findPersonById(userId, "friends");
+    if (!me?.doc?.friends?.some((f: any) => String(f) === String(otherUserId))) return null;
     return dmKeyFor(userId, otherUserId);
 }
 
@@ -270,8 +272,8 @@ router.post("/dm/:userId", auth, async (req: any, res) => {
         const key = await assertDmAccess(req.user.id, otherUserId);
         if (!key) return res.status(403).json({ error: "You can only message friends" });
 
-        const dbUser = await User.findById(req.user.id).select("name handle email");
-        const senderName = dbUser?.handle || dbUser?.name || req.user.email;
+        const sender = await findPersonById(req.user.id, "name firstName lastName handle email");
+        const senderName = sender ? personDisplayName(sender.doc) : String(req.user.email).split("@")[0];
 
         const message = await Message.create({
             dmKey: key,

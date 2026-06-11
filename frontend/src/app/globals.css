@@ -27,13 +27,28 @@ body {
   caret-color: transparent; /* Hide flashing bar */
 }
 
-input, textarea {
+input, textarea, [contenteditable] {
   user-select: text !important; /* Re-enable selection for inputs */
   -webkit-user-select: text !important;
   -moz-user-select: text !important;
   -ms-user-select: text !important;
   caret-color: auto !important; /* Restore flashing bar for inputs */
 }
+
+/* Tiptap rich-text editor */
+.tiptap {
+  outline: none;
+}
+.tiptap p { margin-bottom: 0.25rem; }
+.tiptap p:last-child { margin-bottom: 0; }
+.tiptap ul { list-style: disc; padding-left: 1.25rem; margin: 0.25rem 0; }
+.tiptap ol { list-style: decimal; padding-left: 1.25rem; margin: 0.25rem 0; }
+.tiptap code { font-family: monospace; font-size: 0.85em; background: rgba(0,0,0,0.08); padding: 0.1em 0.3em; border-radius: 3px; }
+.dark .tiptap code { background: rgba(255,255,255,0.12); }
+.tiptap pre { background: rgba(0,0,0,0.08); padding: 0.5rem; margin: 0.25rem 0; border-radius: 3px; }
+.dark .tiptap pre { background: rgba(255,255,255,0.08); }
+.tiptap pre code { background: none; padding: 0; }
+.tiptap blockquote { border-left: 3px solid #6b7280; padding-left: 0.75rem; margin: 0.25rem 0; opacity: 0.8; font-style: italic; }
 
 /* Calendar Icon Dark Mode Fix */
 .dark input[type="date"]::-webkit-calendar-picker-indicator {

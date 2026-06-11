@@ -23,6 +23,7 @@ import notificationRoutes from "./routes/notificationRoutes.js";
 import inviteRoutes from "./routes/inviteRoutes.js";
 import { snapshotAlpacaNow } from "./routes/adminRoutes.js";
 import { startEventBus, stopEventBus } from "./events/index.js";
+import { startReadyCheckLoop } from "./utils/readyCheck.js";
 
 import https from "https";
 import http from "http";
@@ -102,6 +103,9 @@ app.use("/api/campaign-invites", inviteRoutes);
 startEventBus()
     .then(() => console.log("[BACKEND] Event bus started."))
     .catch((err) => console.error("[BACKEND] Event bus failed to start:", err));
+
+// Ready-up checks: ping campaign members 30 minutes before each session.
+startReadyCheckLoop();
 
 process.on("SIGTERM", () => {
     stopEventBus().finally(() => process.exit(0));

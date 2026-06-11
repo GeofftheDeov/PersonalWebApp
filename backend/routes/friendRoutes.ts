@@ -84,7 +84,7 @@ router.post("/request", auth, async (req: any, res) => {
 router.get("/requests", auth, async (req: any, res) => {
     try {
         const userId = req.user.id;
-
+        
         const [incomingDocs, outgoingDocs] = await Promise.all([
             FriendRequest.find({ to: userId, status: "pending" }),
             FriendRequest.find({ from: userId, status: "pending" }),

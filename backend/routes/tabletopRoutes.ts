@@ -227,6 +227,7 @@ router.post("/prepare-session", auth, async (req: any, res) => {
             return res.status(403).json({ error: "Only the Game Master can create sessions for this campaign" });
         }
 
+
         // 1. Create Session
         const session = new Session({
             title,

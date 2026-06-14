@@ -20,6 +20,19 @@ export interface PatchNote {
 
 export const PATCH_NOTES: PatchNote[] = [
     {
+        version: '1.5.0',
+        date: '2026-06-14',
+        title: 'The Paperclip Dashboard',
+        summary: 'Manage your AI agents without leaving the site.',
+        changes: [
+            { kind: 'NEW', text: 'Org Chart page — visualise your Paperclip agent hierarchy as an expandable tree with status badges and a per-agent budget-burn bar.' },
+            { kind: 'NEW', text: 'CFO dashboard — track monthly spend and budget headroom across every agent at a glance.' },
+            { kind: 'NEW', text: 'Budgets page — adjust monthly budget caps for each agent directly from the UI.' },
+            { kind: 'NEW', text: 'Paperclip proxy backend — a secure API bridge tunnels these pages through the app\'s existing JWT auth so no Paperclip credential is ever exposed to the browser.' },
+            { kind: 'IMPROVED', text: 'Agent detail panel — pause/resume and heartbeat-invoke controls with a toast confirmation, plus a collapsible raw-JSON view for debugging.' },
+        ],
+    },
+    {
         version: '1.4.0',
         date: '2026-06-10',
         title: 'The Social Update',

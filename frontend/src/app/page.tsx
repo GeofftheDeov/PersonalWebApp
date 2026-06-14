@@ -116,14 +116,36 @@ export default function Home() {
             </p>
           </div>
 
-          {/* Feature 4: Friends & Salesforce */}
+          {/* Feature 4: Social Hub */}
           <div className="group relative border-4 border-black bg-zinc-100 p-8 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] transition-transform hover:-translate-y-1 hover:shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] hover:-rotate-1 dark:border-white dark:bg-zinc-900 dark:shadow-[8px_8px_0px_0px_rgba(255,255,255,1)] dark:hover:shadow-[12px_12px_0px_0px_rgba(255,255,255,1)]">
             <div className="mb-6 inline-flex h-16 w-16 items-center justify-center border-4 border-black bg-purple-600 text-3xl font-permanent text-white dark:border-white dark:text-black">
               04
             </div>
-            <h3 className="mb-4 text-3xl font-permanent uppercase">Friends &amp; Salesforce Sync</h3>
+            <h3 className="mb-4 text-3xl font-permanent uppercase">Social Hub</h3>
             <p className="border-t-4 border-black pt-4 text-lg font-permanent text-zinc-600 dark:border-white dark:text-zinc-400">
-              Send and manage friend requests across users, and on the backend, a bi-directional Salesforce sync layer keeps Leads, Contacts, and Campaign Members in step with the Mongo data model.
+              Friend requests, direct messages, and live campaign Table Talk — all surfaced through a real-time notifications bell for invites and new messages. A bi-directional Salesforce sync layer keeps Leads, Contacts, and Campaign Members in step with the Mongo data model on the backend.
+            </p>
+          </div>
+
+          {/* Feature 5: Admin & Trading */}
+          <div className="group relative border-4 border-black bg-zinc-100 p-8 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] transition-transform hover:-translate-y-1 hover:shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] hover:rotate-1 dark:border-white dark:bg-zinc-900 dark:shadow-[8px_8px_0px_0px_rgba(255,255,255,1)] dark:hover:shadow-[12px_12px_0px_0px_rgba(255,255,255,1)]">
+            <div className="mb-6 inline-flex h-16 w-16 items-center justify-center border-4 border-black bg-teal-600 text-3xl font-permanent text-white dark:border-white">
+              05
+            </div>
+            <h3 className="mb-4 text-3xl font-permanent uppercase">Admin &amp; Trading</h3>
+            <p className="border-t-4 border-black pt-4 text-lg font-permanent text-zinc-600 dark:border-white dark:text-zinc-400">
+              A private command center: Cloud-Claw (streaming AI assistant with Obsidian vault read and search tools), the Alpaca trading dashboard with live KPI charts and a 5-minute position snapshot loop, and an API Key Vault for storing provider credentials safely.
+            </p>
+          </div>
+
+          {/* Feature 6: Paperclip Agents */}
+          <div className="group relative border-4 border-black bg-zinc-100 p-8 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] transition-transform hover:-translate-y-1 hover:shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] hover:-rotate-1 dark:border-white dark:bg-zinc-900 dark:shadow-[8px_8px_0px_0px_rgba(255,255,255,1)] dark:hover:shadow-[12px_12px_0px_0px_rgba(255,255,255,1)]">
+            <div className="mb-6 inline-flex h-16 w-16 items-center justify-center border-4 border-black bg-yellow-400 text-3xl font-permanent text-black dark:border-white">
+              06
+            </div>
+            <h3 className="mb-4 text-3xl font-permanent uppercase">Paperclip Agents</h3>
+            <p className="border-t-4 border-black pt-4 text-lg font-permanent text-zinc-600 dark:border-white dark:text-zinc-400">
+              An org-chart view into the Paperclip AI agent hierarchy — expandable tree cards showing live status, monthly budget burn, and controls to pause, resume, or invoke a heartbeat for any agent without leaving the site.
             </p>
           </div>
         </div>

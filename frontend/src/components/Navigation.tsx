@@ -114,13 +114,37 @@ export default function Navigation() {
               <span className="relative z-10 group-hover:text-teal-600 transition-colors uppercase">GAME NIGHT</span>
               <div className={`${decorationCls} -rotate-1`}></div>
             </Link>
-            <Link 
-              href="/calendar" 
+            <Link
+              href="/calendar"
               onClick={() => setIsMenuOpen(false)}
               className={linkCls}
             >
               <span className="relative z-10 group-hover:text-teal-600 transition-colors uppercase">CALENDAR</span>
               <div className={`${decorationCls} -rotate-1`}></div>
+            </Link>
+            <Link
+              href="/paperclip/org"
+              onClick={() => setIsMenuOpen(false)}
+              className={linkCls}
+            >
+              <span className="relative z-10 group-hover:text-teal-600 transition-colors uppercase">ORG</span>
+              <div className={`${decorationCls} rotate-1`}></div>
+            </Link>
+            <Link
+              href="/paperclip/cfo"
+              onClick={() => setIsMenuOpen(false)}
+              className={linkCls}
+            >
+              <span className="relative z-10 group-hover:text-teal-600 transition-colors uppercase">CFO</span>
+              <div className={`${decorationCls} -rotate-1`}></div>
+            </Link>
+            <Link
+              href="/paperclip/budgets"
+              onClick={() => setIsMenuOpen(false)}
+              className={linkCls}
+            >
+              <span className="relative z-10 group-hover:text-teal-600 transition-colors uppercase">BUDGETS</span>
+              <div className={`${decorationCls} rotate-1`}></div>
             </Link>
             {!mobile && <NotificationsBell />}
             {!mobile && <SocialDock />}

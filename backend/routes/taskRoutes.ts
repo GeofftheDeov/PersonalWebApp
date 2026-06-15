@@ -3,18 +3,10 @@ const router = express.Router();
 import Task from "../models/Task.js";
 import { auth } from "../middleware/auth.js";
 import { bus } from "../events/index.js";
-import { getSFWritebackQueue, DEFAULT_JOB_OPTS } from "../jobs/queues.js";
+import { enqueueSFWriteback, enqueueNotionWriteback } from "../jobs/queues.js";
 
 // Apply authentication middleware to all routes
 router.use(auth);
-
-/** Enqueue a Salesforce write-back job for the given task. Fire-and-forget. */
-function enqueueSFWriteback(taskId: string): void {
-    const q = getSFWritebackQueue();
-    if (!q) return; // no Redis in local dev — skip silently
-    q.add("sf-writeback", { taskId }, { ...DEFAULT_JOB_OPTS })
-        .catch((err) => console.error("[taskRoutes] Failed to enqueue SF write-back:", err.message));
-}
 
 // Create a new task
 router.post("/", async (req: any, res) => {
@@ -49,6 +41,7 @@ router.post("/", async (req: any, res) => {
         const taskId = String(task._id);
         bus.publish("task.updated", { taskId, source: "web" }).catch(() => {});
         enqueueSFWriteback(taskId);
+        enqueueNotionWriteback(taskId);
 
         res.status(201).json({
             message: "Task created successfully!",
@@ -113,6 +106,7 @@ router.put("/:id", async (req: any, res) => {
         const taskId = String(task._id);
         bus.publish("task.updated", { taskId, source: "web" }).catch(() => {});
         enqueueSFWriteback(taskId);
+        enqueueNotionWriteback(taskId);
 
         res.json(task);
     } catch (error: any) {

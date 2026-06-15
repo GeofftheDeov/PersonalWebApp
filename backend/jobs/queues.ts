@@ -3,6 +3,8 @@ import { Queue } from "bullmq";
 export const QUEUE_NAMES = {
     NOTION_SYNC: "notion-sync",
     SF_WRITEBACK: "salesforce-writeback",
+    NOTION_WRITEBACK: "notion-writeback",
+    SF_POLL: "salesforce-poll",
 } as const;
 
 export const DEFAULT_JOB_OPTS = {
@@ -13,9 +15,12 @@ export const DEFAULT_JOB_OPTS = {
 };
 
 const NOTION_POLL_EVERY_MS = 15 * 60 * 1000; // every 15 minutes
+const SF_POLL_EVERY_MS = 15 * 60 * 1000; // every 15 minutes
 
 let _notionQueue: Queue | null = null;
 let _sfQueue: Queue | null = null;
+let _notionWritebackQueue: Queue | null = null;
+let _sfPollQueue: Queue | null = null;
 
 /**
  * Returns BullMQ connection options derived from REDIS_URL.
@@ -50,6 +55,40 @@ export function getSFWritebackQueue(): Queue | null {
     return _sfQueue;
 }
 
+export function getNotionWritebackQueue(): Queue | null {
+    const opts = getBullConnectionOptions();
+    if (!opts) return null;
+    if (!_notionWritebackQueue) {
+        _notionWritebackQueue = new Queue(QUEUE_NAMES.NOTION_WRITEBACK, { connection: opts });
+    }
+    return _notionWritebackQueue;
+}
+
+export function getSFPollQueue(): Queue | null {
+    const opts = getBullConnectionOptions();
+    if (!opts) return null;
+    if (!_sfPollQueue) {
+        _sfPollQueue = new Queue(QUEUE_NAMES.SF_POLL, { connection: opts });
+    }
+    return _sfPollQueue;
+}
+
+/** Fire-and-forget: enqueue a Salesforce writeback for a task. */
+export function enqueueSFWriteback(taskId: string): void {
+    const q = getSFWritebackQueue();
+    if (!q) return;
+    q.add("sf-writeback", { taskId }, { ...DEFAULT_JOB_OPTS })
+        .catch((err) => console.error("[queues] Failed to enqueue SF writeback:", err.message));
+}
+
+/** Fire-and-forget: enqueue a Notion writeback for a task. */
+export function enqueueNotionWriteback(taskId: string): void {
+    const q = getNotionWritebackQueue();
+    if (!q) return;
+    q.add("notion-writeback", { taskId }, { ...DEFAULT_JOB_OPTS })
+        .catch((err) => console.error("[queues] Failed to enqueue Notion writeback:", err.message));
+}
+
 /**
  * Register repeatable jobs. Idempotent — safe to call on every boot.
  * Uses upsertJobScheduler so re-registering on restart doesn't create duplicates.
@@ -66,13 +105,27 @@ export async function registerRepeatableJobs(): Promise<void> {
         { name: "notion-poll", data: {}, opts: { ...DEFAULT_JOB_OPTS } }
     );
     console.log("[bullmq] Registered repeatable notion-sync job (every 15 min)");
+
+    const sfPollQ = getSFPollQueue();
+    if (sfPollQ) {
+        await sfPollQ.upsertJobScheduler(
+            "sf-poll",
+            { every: SF_POLL_EVERY_MS },
+            { name: "sf-poll", data: {}, opts: { ...DEFAULT_JOB_OPTS } }
+        );
+        console.log("[bullmq] Registered repeatable salesforce-poll job (every 15 min)");
+    }
 }
 
 export async function closeBullConnection(): Promise<void> {
     await Promise.all([
         _notionQueue?.close(),
         _sfQueue?.close(),
+        _notionWritebackQueue?.close(),
+        _sfPollQueue?.close(),
     ]);
     _notionQueue = null;
     _sfQueue = null;
+    _notionWritebackQueue = null;
+    _sfPollQueue = null;
 }

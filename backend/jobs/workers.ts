@@ -2,13 +2,13 @@ import { Worker, Job } from "bullmq";
 import Task from "../models/Task.js";
 import { pullNotionTasks } from "../services/notionSync.js";
 import { pushTaskToSalesforce } from "../services/salesforceService.js";
-import { getBullConnection, QUEUE_NAMES } from "./queues.js";
+import { getBullConnectionOptions, QUEUE_NAMES } from "./queues.js";
 
 let _notionWorker: Worker | null = null;
 let _sfWorker: Worker | null = null;
 
 /**
- * Pull all recently-edited Notion tasks and upsert into MongoDB.
+ * Pull all Notion tasks and upsert into MongoDB.
  * Matches on notionPageId so re-runs are idempotent.
  */
 async function notionSyncProcessor(_job: Job): Promise<void> {
@@ -46,7 +46,7 @@ async function notionSyncProcessor(_job: Job): Promise<void> {
 }
 
 /**
- * Push a single task to Salesforce, then write the returned sfID back to MongoDB.
+ * Push a single task to Salesforce and write the returned sfID back to MongoDB.
  * Job data must include { taskId: string }.
  */
 async function sfWritebackProcessor(job: Job): Promise<void> {
@@ -61,12 +61,12 @@ async function sfWritebackProcessor(job: Job): Promise<void> {
     }
 
     const sfId = await pushTaskToSalesforce({
-        sfID: task.sfID,
+        sfID: task.sfID ?? undefined,
         title: task.title,
-        description: task.description,
-        status: task.status,
-        dueDate: task.dueDate,
-        ownerName: task.ownerName,
+        description: task.description ?? undefined,
+        status: task.status ?? undefined,
+        dueDate: task.dueDate ?? undefined,
+        ownerName: task.ownerName ?? undefined,
     });
 
     if (sfId) {
@@ -83,15 +83,15 @@ async function sfWritebackProcessor(job: Job): Promise<void> {
  * No-op (returns a no-op teardown) when Redis is unavailable.
  */
 export function startWorkers(): () => Promise<void> {
-    const conn = getBullConnection();
-    if (!conn) {
+    const opts = getBullConnectionOptions();
+    if (!opts) {
         console.log("[bullmq] No Redis — workers not started (local dev mode)");
         return async () => {};
     }
 
     _notionWorker = new Worker(QUEUE_NAMES.NOTION_SYNC, notionSyncProcessor, {
-        connection: conn,
-        concurrency: 1, // Notion API is rate-limited; process one at a time
+        connection: opts,
+        concurrency: 1, // Notion API rate-limited; one run at a time
     });
     _notionWorker.on("completed", (job) =>
         console.log(`[bullmq] notion-sync job ${job.id} completed`)
@@ -101,7 +101,7 @@ export function startWorkers(): () => Promise<void> {
     );
 
     _sfWorker = new Worker(QUEUE_NAMES.SF_WRITEBACK, sfWritebackProcessor, {
-        connection: conn,
+        connection: opts,
         concurrency: 3,
     });
     _sfWorker.on("completed", (job) =>

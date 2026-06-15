@@ -305,14 +305,14 @@ router.get('/runs/:runId/stream', auth, async (req: any, res: Response) => {
 // Allowed methods: GET, POST, PATCH, DELETE.
 // The client's Authorization header is intentionally NOT forwarded upstream —
 // the app's JWT is not a Paperclip credential.
-router.all('/proxy/*', auth, async (req: any, res: Response) => {
+router.all('/proxy/*path', auth, async (req: any, res: Response) => {
   const method = req.method.toUpperCase();
   if (!PROXY_ALLOWED_METHODS.has(method)) {
     return res.status(405).json({ error: `Method ${method} not allowed via proxy` });
   }
 
   // Strip the leading "/proxy" to get the downstream path fragment, then prepend /api/
-  const fragment = (req.params as any)[0] as string; // everything after /proxy/
+  const fragment = (req.params as any)['path'] as string; // everything after /proxy/
   const upstreamPath = `/api/${fragment}`;
 
   // Forward query string

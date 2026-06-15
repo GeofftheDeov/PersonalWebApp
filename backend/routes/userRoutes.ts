@@ -5,6 +5,10 @@ import Lead from "../models/Lead.js";
 import Contact from "../models/Contact.js";
 import Account from "../models/Account.js";
 import PlayerSession from "../models/PlayerSession.js";
+import CampaignMember from "../models/CampaignMember.js";
+import Campaign from "../models/Campaign.js";
+import { getAuthorizedCampaignIds } from "../utils/gameNightPlannerUtils.js";
+import { findPersonById, toPublicPerson } from "../utils/personUtils.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
@@ -399,6 +403,65 @@ router.put("/profile", auth, async (req: any, res) => {
     } catch (err) {
         console.error("Profile update error:", err);
         res.status(500).json({ error: "Failed to update profile" });
+    }
+});
+
+/**
+ * Read-only public profile of another player.
+ * Visible only to friends and campaign-mates (or admins / yourself).
+ * Deliberately exposes no edit surface and no child-record creation.
+ */
+router.get("/players/:id", auth, async (req: any, res) => {
+    try {
+        const targetId = req.params.id;
+        const target = await findPersonById(targetId);
+        if (!target) return res.status(404).json({ error: "Player not found" });
+
+        const viewerId = req.user.id;
+        const isSelf = String(viewerId) === String(targetId);
+
+        // Friendship is symmetric (both sides updated on accept) — check either side.
+        const viewer = await findPersonById(viewerId, "friends");
+        const isFriend =
+            viewer?.doc?.friends?.some((f: any) => String(f) === String(targetId)) ||
+            target.doc.friends?.some((f: any) => String(f) === String(viewerId));
+
+        // Campaign-mate check: any campaign both can see. null = admin (sees all).
+        const viewerCampaigns = await getAuthorizedCampaignIds(req.user);
+        const membershipOr: any[] = [
+            { lead: targetId },
+            { contact: targetId },
+            { account: targetId },
+        ];
+        if (target.doc.email) membershipOr.push({ email: target.doc.email });
+        const targetMemberships = await CampaignMember.find({ $or: membershipOr }).select("campaign status");
+        const targetCampaignIds = [...new Set(targetMemberships.map(m => String(m.campaign)))];
+        const sharedIds = viewerCampaigns === null
+            ? targetCampaignIds
+            : targetCampaignIds.filter(id => viewerCampaigns.some((v: any) => String(v) === id));
+
+        if (!isSelf && !isFriend && sharedIds.length === 0) {
+            return res.status(403).json({ error: "You can only view profiles of friends or campaign-mates" });
+        }
+
+        const sharedCampaigns = await Campaign.find({ _id: { $in: sharedIds } }).select("title status");
+        const gmCampaignIds = new Set(
+            targetMemberships.filter(m => m.status === "Game Master").map(m => String(m.campaign))
+        );
+
+        res.json({
+            ...toPublicPerson(target),
+            isFriend: Boolean(isFriend),
+            sharedCampaigns: sharedCampaigns.map(c => ({
+                _id: c._id,
+                title: c.title,
+                status: c.status,
+                isGameMaster: gmCampaignIds.has(String(c._id)),
+            })),
+        });
+    } catch (err) {
+        console.error("Player profile error:", err);
+        res.status(500).json({ error: "Failed to fetch player profile" });
     }
 });
 

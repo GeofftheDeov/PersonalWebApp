@@ -16,6 +16,7 @@ import syncRoutes from "./routes/syncRoutes.js";
 import campaignMemberRoutes from "./routes/campaignMemberRoutes.js";
 import friendRoutes from "./routes/friendRoutes.js";
 import cloudClawRoutes from "./routes/cloudClawRoutes.js";
+import paperclipRoutes from "./routes/paperclipRoutes.js";
 import apiKeyRoutes from "./routes/apiKeyRoutes.js";
 import googleCalendarRoutes from "./routes/googleCalendarRoutes.js";
 import messageRoutes from "./routes/messageRoutes.js";
@@ -23,6 +24,7 @@ import notificationRoutes from "./routes/notificationRoutes.js";
 import inviteRoutes from "./routes/inviteRoutes.js";
 import { snapshotAlpacaNow } from "./routes/adminRoutes.js";
 import { startEventBus, stopEventBus } from "./events/index.js";
+import { startReadyCheckLoop } from "./utils/readyCheck.js";
 
 import https from "https";
 import http from "http";
@@ -91,6 +93,7 @@ app.use("/api/sync", syncRoutes);
 app.use("/api/campaign-members", campaignMemberRoutes);
 app.use("/api/friends", friendRoutes);
 app.use("/api/cloud-claw", cloudClawRoutes);
+app.use("/api/paperclip", paperclipRoutes);
 app.use("/api/api-keys", apiKeyRoutes);
 app.use("/api/google-calendar", googleCalendarRoutes);
 app.use("/api/messages", messageRoutes);
@@ -102,6 +105,9 @@ app.use("/api/campaign-invites", inviteRoutes);
 startEventBus()
     .then(() => console.log("[BACKEND] Event bus started."))
     .catch((err) => console.error("[BACKEND] Event bus failed to start:", err));
+
+// Ready-up checks: ping campaign members 30 minutes before each session.
+startReadyCheckLoop();
 
 process.on("SIGTERM", () => {
     stopEventBus().finally(() => process.exit(0));

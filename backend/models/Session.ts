@@ -16,6 +16,17 @@ const sessionSchema = new mongoose.Schema({
     googleEventId: String,
     googleCalendarLink: String,
     sfID: String,
+    // Ready-up check: sent ~30 minutes before the session starts. Players
+    // respond via POST /api/tabletop/sessions/:id/ready.
+    readyCheck: {
+        sentAt: Date,
+        responses: [{
+            playerId: { type: String, required: true }, // person id (User/Lead/Contact/Account)
+            name: String,
+            ready: { type: Boolean, default: false },
+            respondedAt: Date,
+        }],
+    },
     createdAt: { type: Date, default: Date.now },
 });
 

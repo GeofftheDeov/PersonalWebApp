@@ -6,14 +6,15 @@ const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOSTNAME || '0.0.0.0';
 const port = parseInt(process.env.PORT, 10) || 3000;
 
+// Log but do NOT exit: a single failed render inside Next.js (which surfaces
+// as an unhandled rejection) was killing the whole server, failing ALB health
+// checks and taking the site down with a 502.
 process.on('uncaughtException', (err) => {
-    console.error('FATAL: Uncaught Exception:', err);
-    process.exit(1);
+    console.error('ERROR: Uncaught Exception:', err);
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('FATAL: Unhandled Rejection at:', promise, 'reason:', reason);
-    process.exit(1);
+process.on('unhandledRejection', (reason) => {
+    console.error('ERROR: Unhandled Rejection, reason:', reason);
 });
 
 console.log(`-> Starting server in ${dev ? 'development' : 'production'} mode...`);

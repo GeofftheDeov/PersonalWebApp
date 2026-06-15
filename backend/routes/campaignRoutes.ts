@@ -9,6 +9,7 @@ import Account from "../models/Account.js";
 import User from "../models/User.js";
 import { auth } from "../middleware/auth.js";
 import { getAuthorizedCampaignIds } from "../utils/gameNightPlannerUtils.js";
+import { findPeopleByEmail } from "../utils/personUtils.js";
 
 // Create a new campaign
 router.post("/", auth, async (req: any, res) => {
@@ -198,7 +199,29 @@ router.get("/:id/members", auth, async (req: any, res) => {
             .populate("contact")
             .populate("account")
             .sort({ joinedAt: 1 });
-        res.json(members);
+
+        // Attach a resolvable person id so the UI can link to read-only player
+        // profiles. Members linked by ref use it directly; email-only members
+        // (User-type joins) are resolved by email across all person collections.
+        const unresolvedEmails = [...new Set(
+            members
+                .filter((m: any) => !m.lead && !m.contact && !m.account && m.email)
+                .map((m: any) => m.email as string)
+        )];
+        const people = await findPeopleByEmail(unresolvedEmails);
+        const idByEmail = new Map(people.map(p => [String(p.doc.email).toLowerCase(), String(p.doc._id)]));
+
+        const enriched = members.map((m: any) => {
+            const obj = m.toObject();
+            obj.playerId =
+                m.lead?._id?.toString() ||
+                m.contact?._id?.toString() ||
+                m.account?._id?.toString() ||
+                (m.email ? idByEmail.get(m.email.toLowerCase()) : null) ||
+                null;
+            return obj;
+        });
+        res.json(enriched);
     } catch (error: any) {
         console.error("Error fetching campaign members:", error);
         res.status(500).json({ error: "Failed to fetch members", details: error.message });

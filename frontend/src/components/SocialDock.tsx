@@ -2,17 +2,22 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, UserPlus, MessageCircle, X, Search, Check, Trash2, ExternalLink, ArrowLeft, Map, MessageSquare } from 'lucide-react';
+import Link from 'next/link';
+import { Users, UserPlus, MessageCircle, X, Search, Check, Trash2, ExternalLink, ArrowLeft, Map, MessageSquare, User as UserIcon } from 'lucide-react';
 import ChatThread, { ChatChannel } from './ChatThread';
 
 interface Friend {
   _id: string;
   name: string;
-  handle: string;
+  handle: string | null;
   userNumber: string;
+  recordType?: string;
   discordId?: string;
   discordHandle?: string;
 }
+
+/** Display name: handle if set, otherwise the record's name (never an email). */
+const friendLabel = (f: { handle?: string | null; name?: string }) => f.handle || f.name || 'UNKNOWN';
 
 interface Request {
   _id: string;
@@ -317,14 +322,14 @@ export default function SocialDock() {
                             {friends.map((f) => (
                               <button
                                 key={f._id}
-                                onClick={() => openChat({ channel: { kind: 'dm', id: f._id }, title: `@${f.handle}` })}
+                                onClick={() => openChat({ channel: { kind: 'dm', id: f._id }, title: `@${friendLabel(f)}` })}
                                 className="w-full flex items-center gap-3 p-3 bg-zinc-800 border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-1 hover:translate-y-1 hover:shadow-none transition-all text-left"
                               >
                                 <div className="p-1.5 bg-yellow-400 border-2 border-black shrink-0">
                                   <Users size={14} className="text-black" />
                                 </div>
                                 <div className="min-w-0 flex-grow">
-                                  <p className="font-black text-sm text-white truncate">@{f.handle?.toUpperCase()}</p>
+                                  <p className="font-black text-sm text-white truncate">@{friendLabel(f).toUpperCase()}</p>
                                   <p className="text-[10px] text-zinc-500 font-bold">#{f.userNumber}</p>
                                 </div>
                                 <MessageSquare size={16} className="text-zinc-600 shrink-0" />
@@ -349,7 +354,7 @@ export default function SocialDock() {
                         <div key={friend._id} className="p-4 bg-zinc-800 border-4 border-black shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] hover:translate-x-1 hover:translate-y-1 hover:shadow-none transition-all">
                           <div className="flex justify-between items-start mb-3">
                             <div>
-                              <h3 className="font-black text-xl text-white">@{friend.handle.toUpperCase()}</h3>
+                              <h3 className="font-black text-xl text-white">@{friendLabel(friend).toUpperCase()}</h3>
                               <p className="text-xs text-zinc-500 font-bold">#{friend.userNumber}</p>
                             </div>
                             <button 
@@ -362,12 +367,20 @@ export default function SocialDock() {
                           
                           <div className="flex gap-2">
                             <button
-                              onClick={() => openChat({ channel: { kind: 'dm', id: friend._id }, title: `@${friend.handle}` })}
+                              onClick={() => openChat({ channel: { kind: 'dm', id: friend._id }, title: `@${friendLabel(friend)}` })}
                               className="flex-grow flex items-center justify-center gap-2 py-2 bg-teal-500 border-2 border-black text-black font-black text-xs uppercase hover:bg-teal-400 transition-colors"
                             >
                               <MessageSquare size={14} />
                               MESSAGE
                             </button>
+                            <Link
+                              href={`/players/${friend._id}`}
+                              onClick={() => setIsOpen(false)}
+                              className="flex items-center justify-center gap-2 px-3 py-2 bg-yellow-400 border-2 border-black text-black font-black text-xs uppercase hover:bg-white transition-colors"
+                            >
+                              <UserIcon size={14} />
+                              PROFILE
+                            </Link>
                             {friend.discordId && (
                               <button
                                 onClick={() => openDiscordDM(friend.discordId!)}
@@ -396,7 +409,7 @@ export default function SocialDock() {
                         <div key={req._id} className="p-4 bg-zinc-800 border-4 border-black shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]">
                           <div className="mb-4">
                             <p className="text-xs text-teal-400 font-black uppercase mb-1">New Request From:</p>
-                            <h3 className="font-black text-xl text-white">@{req.from?.handle?.toUpperCase()}</h3>
+                            <h3 className="font-black text-xl text-white">@{req.from ? friendLabel(req.from).toUpperCase() : 'UNKNOWN'}</h3>
                             <p className="text-xs text-zinc-500 font-bold">#{req.from?.userNumber}</p>
                           </div>
                           <div className="flex gap-2">
@@ -448,8 +461,8 @@ export default function SocialDock() {
                     {searchResult && (
                       <div className="p-4 bg-zinc-800 border-4 border-black shadow-[6px_6px_0px_0px_rgba(255,255,255,0.1)] animate-in fade-in zoom-in duration-300">
                         <div className="mb-4">
-                          <h3 className="font-black text-2xl text-white">@{searchResult.handle.toUpperCase()}</h3>
-                          <p className="text-xs text-zinc-500 font-bold">#{searchResult.userNumber}</p>
+                          <h3 className="font-black text-2xl text-white">@{friendLabel(searchResult).toUpperCase()}</h3>
+                          <p className="text-xs text-zinc-500 font-bold">#{searchResult.userNumber}{searchResult.recordType ? ` · ${searchResult.recordType.toUpperCase()}` : ''}</p>
                         </div>
                         <button
                           onClick={() => sendRequest(searchResult._id)}

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
-import { Book, ArrowLeft, Calendar, MapPin, FileText, Map, Save, X, Pencil, Wifi } from 'lucide-react';
+import { Book, ArrowLeft, Calendar, MapPin, FileText, Map, Save, X, Pencil, Wifi, Swords, Check, Clock } from 'lucide-react';
 
 const INPUT_CLS = "w-full p-3 border-4 border-black bg-white text-black font-permanent text-base uppercase focus:border-yellow-400 outline-none";
 const LABEL_CLS = "block text-teal-400 font-permanent uppercase text-xs mb-1";
@@ -25,6 +25,9 @@ export default function SessionDetailPage() {
     const [editing, setEditing] = useState(false);
     const [saving, setSaving] = useState(false);
     const [form, setForm] = useState<any>({});
+    const [isGM, setIsGM] = useState(false);
+    const [members, setMembers] = useState<any[]>([]);
+    const [readySaving, setReadySaving] = useState(false);
 
     const token = () => localStorage.getItem('token');
 
@@ -38,6 +41,21 @@ export default function SessionDetailPage() {
                     const s = await res.json();
                     setSession(s);
                     setForm({ title: s.title, date: toDatetimeInput(s.date), endDate: toDatetimeInput(s.endDate), location: s.location || '', isOnline: !!s.isOnline, agenda: s.agenda || '', summary: s.summary || '', vodUrl: s.vodUrl || '' });
+                    // Sessions are GM-only to edit — check the viewer's campaign role.
+                    if (s.campaign?._id) {
+                        try {
+                            const mRes = await fetch(`/api/campaigns/${s.campaign._id}/members`, { headers: { Authorization: `Bearer ${t}` } });
+                            if (mRes.ok) {
+                                const memberRows = await mRes.json();
+                                setMembers(memberRows);
+                                const me = JSON.parse(localStorage.getItem('user') || 'null');
+                                setIsGM(Boolean(me && (me.role === 'admin' || memberRows.some((m: any) =>
+                                    m.status === 'Game Master' &&
+                                    ((m.email && me.email && m.email.toLowerCase() === me.email.toLowerCase()) || (m.playerId && m.playerId === me.id))
+                                ))));
+                            }
+                        } catch { /* edit stays hidden */ }
+                    }
                 } else router.push('/game-night');
             })
             .catch(() => router.push('/game-night'))
@@ -56,10 +74,43 @@ export default function SessionDetailPage() {
         setSaving(false);
     };
 
+    const handleReady = async (ready: boolean) => {
+        setReadySaving(true);
+        try {
+            const res = await fetch(`/api/tabletop/sessions/${id}/ready`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+                body: JSON.stringify({ ready }),
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setSession((prev: any) => ({ ...prev, readyCheck: data.readyCheck }));
+            }
+        } finally {
+            setReadySaving(false);
+        }
+    };
+
     if (loading) return <div className="min-h-screen flex items-center justify-center"><span className="text-3xl font-permanent text-teal-600 animate-pulse">LOADING SESSION...</span></div>;
     if (!session) return null;
 
     const sessionDate = session.date ? new Date(session.date) : null;
+
+    // Ready check panel: visible once the T-30min check has been sent, until
+    // a few hours after the session starts.
+    const readyCheck = session.readyCheck;
+    const showReadyCheck = Boolean(
+        readyCheck?.sentAt && sessionDate &&
+        Date.now() < sessionDate.getTime() + 4 * 60 * 60 * 1000
+    );
+    const me = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('user') || 'null') : null;
+    const myResponse = readyCheck?.responses?.find((r: any) => r.playerId === me?.id);
+    const memberName = (m: any) => {
+        if (m.firstName || m.lastName) return `${m.firstName || ''} ${m.lastName || ''}`.trim();
+        return m.email?.split('@')[0] || 'Unknown Player';
+    };
+    const responseFor = (m: any) => readyCheck?.responses?.find((r: any) => m.playerId && r.playerId === m.playerId);
+    const readyCount = readyCheck?.responses?.filter((r: any) => r.ready).length ?? 0;
 
     return (
         <div className="min-h-[calc(100vh-76px)] flex flex-col">
@@ -87,12 +138,58 @@ export default function SessionDetailPage() {
                             )}
                         </div>
                     </div>
-                    {!editing && (
+                    {!editing && isGM && (
                         <button onClick={() => setEditing(true)} className="flex items-center gap-2 px-4 py-2 border-4 border-black bg-yellow-400 text-black font-permanent uppercase text-sm hover:bg-white transition-colors shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] shrink-0">
                             <Pencil className="w-4 h-4" /> EDIT
                         </button>
                     )}
                 </div>
+
+                {/* Ready Check */}
+                {showReadyCheck && (
+                    <div className="mb-8 p-6 border-4 border-black bg-slate-900 shadow-[8px_8px_0px_0px_rgba(234,179,8,1)] space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <h2 className="font-permanent text-lg text-white uppercase flex items-center gap-2">
+                                <Swords className="w-5 h-5 text-yellow-400" /> Ready Check
+                                <span className="text-sm text-zinc-400">({readyCount}/{members.length} ready)</span>
+                            </h2>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => handleReady(true)}
+                                    disabled={readySaving || myResponse?.ready === true}
+                                    className={`flex items-center gap-2 px-4 py-2 border-4 border-black font-permanent uppercase text-sm transition-colors shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] disabled:opacity-60 ${myResponse?.ready === true ? 'bg-teal-500 text-white' : 'bg-yellow-400 text-black hover:bg-white'}`}
+                                >
+                                    <Check className="w-4 h-4" /> {myResponse?.ready === true ? "YOU'RE READY!" : 'READY UP'}
+                                </button>
+                                <button
+                                    onClick={() => handleReady(false)}
+                                    disabled={readySaving || myResponse?.ready === false}
+                                    className="flex items-center gap-2 px-4 py-2 border-4 border-black bg-zinc-700 text-white font-permanent uppercase text-sm hover:bg-zinc-600 transition-colors disabled:opacity-60"
+                                >
+                                    <X className="w-4 h-4" /> {"CAN'T MAKE IT"}
+                                </button>
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {members.map((m: any) => {
+                                const r = responseFor(m);
+                                return (
+                                    <div key={m._id} className="flex items-center gap-3 p-2.5 border-2 border-black bg-zinc-800">
+                                        <span className={`p-1 border-2 border-black shrink-0 ${r?.ready ? 'bg-teal-500' : r ? 'bg-red-500' : 'bg-zinc-600'}`}>
+                                            {r?.ready ? <Check className="w-3.5 h-3.5 text-white" /> : r ? <X className="w-3.5 h-3.5 text-white" /> : <Clock className="w-3.5 h-3.5 text-zinc-300" />}
+                                        </span>
+                                        <div className="min-w-0">
+                                            <p className="font-permanent text-xs text-white uppercase truncate">{r?.name || memberName(m)}</p>
+                                            <p className={`font-permanent text-[10px] uppercase ${r?.ready ? 'text-teal-400' : r ? 'text-red-400' : 'text-zinc-500'}`}>
+                                                {r?.ready ? 'Ready' : r ? "Can't make it" : 'Awaiting'}
+                                            </p>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
 
                 {/* Edit Form */}
                 {editing && (

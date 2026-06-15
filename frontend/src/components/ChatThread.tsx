@@ -16,6 +16,12 @@ export interface ChatChannel {
     id: string;
 }
 
+/** Older messages stored the sender's email as the name — show the handle-ish local part instead. */
+const senderLabel = (s: { name?: string }) => {
+    const n = s?.name || 'UNKNOWN';
+    return n.includes('@') ? n.split('@')[0] : n;
+};
+
 /**
  * Live chat thread for the Social Hub — campaign Table Talk or a friend DM.
  * History via REST, live updates via SSE, both fed by the backend event bus
@@ -138,7 +144,7 @@ export default function ChatThread({ channel, placeholder }: { channel: ChatChan
                         <div key={m.messageId} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
                             <div className={`max-w-[85%] p-2 border-2 border-black ${mine ? 'bg-teal-500 text-white' : 'bg-zinc-700 text-white'}`}>
                                 <div className="flex items-baseline gap-2">
-                                    <span className={`font-black text-[10px] uppercase ${mine ? 'text-yellow-300' : 'text-teal-400'}`}>{m.sender.name}</span>
+                                    <span className={`font-black text-[10px] uppercase ${mine ? 'text-yellow-300' : 'text-teal-400'}`}>{senderLabel(m.sender)}</span>
                                     <span className={`text-[9px] font-bold ${mine ? 'text-teal-100' : 'text-zinc-400'}`}>{fmtTime(m.createdAt)}</span>
                                 </div>
                                 <p className="text-sm whitespace-pre-wrap break-words">{m.body}</p>

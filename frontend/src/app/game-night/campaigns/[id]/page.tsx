@@ -21,6 +21,7 @@ interface Member {
     firstName?: string;
     lastName?: string;
     status?: string;
+    playerId?: string | null;
     contact?: { name?: string };
     lead?: { firstName?: string; lastName?: string };
     account?: { name?: string };
@@ -44,6 +45,21 @@ const memberName = (m: Member) => {
 };
 
 const toDateInput = (d?: string) => d ? new Date(d).toISOString().split('T')[0] : '';
+
+/** Is the logged-in user the Game Master of this campaign (or an admin)? */
+const computeIsGM = (members: Member[]) => {
+    try {
+        const me = JSON.parse(localStorage.getItem('user') || 'null');
+        if (!me) return false;
+        if (me.role === 'admin') return true;
+        return members.some(m =>
+            m.status === 'Game Master' &&
+            ((m.email && me.email && m.email.toLowerCase() === me.email.toLowerCase()) || (m.playerId && m.playerId === me.id))
+        );
+    } catch {
+        return false;
+    }
+};
 
 const Toggle = ({ on, onClick, label, icon }: { on: boolean; onClick: () => void; label: string; icon?: React.ReactNode }) => (
     <button type="button" role="switch" aria-checked={on} onClick={onClick} className="flex items-center gap-3 w-fit">
@@ -70,6 +86,7 @@ export default function CampaignDetailPage() {
     const [form, setForm] = useState<any>({});
     const [friends, setFriends] = useState<any[]>([]);
     const [inviteStatus, setInviteStatus] = useState<Record<string, string>>({});
+    const [isGM, setIsGM] = useState(false);
 
     const EMPTY_SESSION = { title: '', date: '', endDate: '', location: '', isOnline: false, agenda: '', createDiscordEvent: false, createGoogleEvent: false };
     const [showSessionModal, setShowSessionModal] = useState(false);
@@ -95,7 +112,11 @@ export default function CampaignDetailPage() {
             setCampaign(c);
             setForm({ title: c.title, description: c.description || '', status: c.status, startDate: toDateInput(c.startDate), endDate: toDateInput(c.endDate), discordGuildId: c.discordGuildId || '', discordChannelId: c.discordChannelId || '' });
             if (sessRes.ok) setSessions(await sessRes.json());
-            if (membRes.ok) setMembers(await membRes.json());
+            if (membRes.ok) {
+                const memberRows = await membRes.json();
+                setMembers(memberRows);
+                setIsGM(computeIsGM(memberRows));
+            }
         }).catch(() => router.push('/game-night'))
           .finally(() => setLoading(false));
     }, [id, router]);
@@ -318,64 +339,10 @@ export default function CampaignDetailPage() {
                     </div>
                 )}
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    {/* Sessions */}
-                    <div className="lg:col-span-2">
-                        <div className="flex items-center justify-between mb-4">
-                            <h2 className="text-2xl font-permanent text-black dark:text-white uppercase flex items-center gap-2">
-                                <Book className="w-5 h-5 text-teal-500" /> Sessions <span className="ml-1 text-sm text-zinc-400">({sessions.length})</span>
-                            </h2>
-                            <button
-                                onClick={() => { setSessionForm(EMPTY_SESSION); setSessionError(null); setShowSessionModal(true); }}
-                                className="flex items-center gap-2 px-3 py-1.5 border-2 border-black bg-yellow-400 text-black font-permanent uppercase text-xs hover:bg-white transition-colors shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
-                            >
-                                <Plus className="w-3 h-3" /> ADD SESSION
-                            </button>
-                        </div>
-                        {sessionWarnings.length > 0 && (
-                            <div className="mb-4 p-3 border-4 border-black bg-yellow-100 dark:bg-yellow-900/40 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]">
-                                <div className="flex justify-between items-start gap-2">
-                                    <div className="space-y-1">
-                                        {sessionWarnings.map((w, i) => (
-                                            <p key={i} className="font-permanent text-xs text-yellow-800 dark:text-yellow-200 uppercase">{w}</p>
-                                        ))}
-                                    </div>
-                                    <button onClick={() => setSessionWarnings([])} className="text-zinc-500 hover:text-black dark:hover:text-white shrink-0"><X className="w-4 h-4" /></button>
-                                </div>
-                            </div>
-                        )}
-                        {sessions.length === 0 ? (
-                            <div className="py-10 border-4 border-dashed border-zinc-300 dark:border-zinc-700 text-center">
-                                <Book className="w-10 h-10 text-zinc-300 dark:text-zinc-600 mx-auto mb-2" />
-                                <p className="font-permanent text-sm text-zinc-400 uppercase">No sessions logged yet.</p>
-                            </div>
-                        ) : (
-                            <div className="space-y-3">
-                                {sessions.map(s => (
-                                    <Link key={s._id} href={`/game-night/sessions/${s._id}`} className="flex gap-4 p-4 border-4 border-black bg-white dark:bg-slate-800 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:-translate-y-0.5 transition-transform items-start group block">
-                                        <div className="p-2 bg-teal-500 border-2 border-black shrink-0"><Book className="w-4 h-4 text-white" /></div>
-                                        <div className="flex-grow min-w-0">
-                                            <h3 className="font-permanent text-sm text-black dark:text-white uppercase group-hover:text-teal-600 transition-colors truncate">{s.title}</h3>
-                                            <div className="flex gap-3 mt-1 flex-wrap">
-                                                <span className="text-xs font-permanent text-teal-600 dark:text-yellow-400 uppercase">{new Date(s.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).toUpperCase()}</span>
-                                                {s.location && <span className="text-xs font-permanent text-zinc-400 uppercase">{s.location}</span>}
-                                                {s.isOnline && (
-                                                    <span className="flex items-center gap-1 px-1.5 text-xs font-permanent uppercase border-2 border-black bg-teal-500 text-white">
-                                                        <Wifi className="w-3 h-3" /> ONLINE
-                                                    </span>
-                                                )}
-                                            </div>
-                                            {s.summary && <p className="mt-1 text-xs font-permanent text-zinc-500 dark:text-zinc-400 uppercase line-clamp-1">{s.summary}</p>}
-                                        </div>
-                                        <ChevronRight className="w-4 h-4 text-zinc-300 dark:text-zinc-600 shrink-0 self-center group-hover:text-teal-500 transition-colors" />
-                                    </Link>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Players */}
-                    <div>
+                {/* Table Talk + Players */}
+                <div className="flex flex-col lg:flex-row gap-6 mb-10">
+                    {/* Players sidebar */}
+                    <div className="lg:w-64 shrink-0">
                         <div className="flex items-center justify-between mb-4">
                             <h2 className="text-2xl font-permanent text-black dark:text-white uppercase flex items-center gap-2">
                                 <Users className="w-5 h-5 text-yellow-500" /> Players <span className="ml-1 text-sm text-zinc-400">({members.length})</span>
@@ -394,24 +361,93 @@ export default function CampaignDetailPage() {
                             </div>
                         ) : (
                             <div className="space-y-2">
-                                {members.map(m => (
-                                    <div key={m._id} className="flex items-center gap-3 p-3 border-4 border-black bg-white dark:bg-slate-800 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]">
-                                        <div className={`p-1.5 border-2 border-black shrink-0 ${m.status === 'Game Master' ? 'bg-yellow-400' : 'bg-teal-500'}`}>
-                                            {m.status === 'Game Master' ? <Crown className="w-4 h-4 text-black" /> : <Shield className="w-4 h-4 text-white" />}
-                                        </div>
-                                        <div className="flex-grow min-w-0">
-                                            <p className="font-permanent text-sm text-black dark:text-white uppercase truncate">{memberName(m)}</p>
-                                            {m.status && <p className="text-xs font-permanent text-teal-600 dark:text-yellow-400 uppercase">{m.status}</p>}
-                                        </div>
-                                    </div>
-                                ))}
+                                {members.map(m => {
+                                    const row = (
+                                        <>
+                                            <div className={`p-1.5 border-2 border-black shrink-0 ${m.status === 'Game Master' ? 'bg-yellow-400' : 'bg-teal-500'}`}>
+                                                {m.status === 'Game Master' ? <Crown className="w-4 h-4 text-black" /> : <Shield className="w-4 h-4 text-white" />}
+                                            </div>
+                                            <div className="flex-grow min-w-0">
+                                                <p className="font-permanent text-sm text-black dark:text-white uppercase truncate">{memberName(m)}</p>
+                                                {m.status && <p className="text-xs font-permanent text-teal-600 dark:text-yellow-400 uppercase">{m.status}</p>}
+                                            </div>
+                                        </>
+                                    );
+                                    const cls = "flex items-center gap-3 p-3 border-4 border-black bg-white dark:bg-slate-800 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]";
+                                    return m.playerId ? (
+                                        <Link key={m._id} href={`/players/${m.playerId}`} className={`${cls} hover:-translate-y-0.5 transition-transform`} title="View profile">
+                                            {row}
+                                        </Link>
+                                    ) : (
+                                        <div key={m._id} className={cls}>{row}</div>
+                                    );
+                                })}
                             </div>
                         )}
                     </div>
+
+                    {/* Live campaign chat (event bus → SSE) */}
+                    <div className="flex-grow min-w-0">
+                        <CampaignChat campaignId={id} />
+                    </div>
                 </div>
 
-                {/* Live campaign chat (event bus → SSE) */}
-                <CampaignChat campaignId={id} />
+                {/* Sessions */}
+                <div>
+                    <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-2xl font-permanent text-black dark:text-white uppercase flex items-center gap-2">
+                            <Book className="w-5 h-5 text-teal-500" /> Sessions <span className="ml-1 text-sm text-zinc-400">({sessions.length})</span>
+                        </h2>
+                        {isGM && (
+                            <button
+                                onClick={() => { setSessionForm(EMPTY_SESSION); setSessionError(null); setShowSessionModal(true); }}
+                                className="flex items-center gap-2 px-3 py-1.5 border-2 border-black bg-yellow-400 text-black font-permanent uppercase text-xs hover:bg-white transition-colors shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
+                            >
+                                <Plus className="w-3 h-3" /> ADD SESSION
+                            </button>
+                        )}
+                    </div>
+                    {sessionWarnings.length > 0 && (
+                        <div className="mb-4 p-3 border-4 border-black bg-yellow-100 dark:bg-yellow-900/40 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]">
+                            <div className="flex justify-between items-start gap-2">
+                                <div className="space-y-1">
+                                    {sessionWarnings.map((w, i) => (
+                                        <p key={i} className="font-permanent text-xs text-yellow-800 dark:text-yellow-200 uppercase">{w}</p>
+                                    ))}
+                                </div>
+                                <button onClick={() => setSessionWarnings([])} className="text-zinc-500 hover:text-black dark:hover:text-white shrink-0"><X className="w-4 h-4" /></button>
+                            </div>
+                        </div>
+                    )}
+                    {sessions.length === 0 ? (
+                        <div className="py-10 border-4 border-dashed border-zinc-300 dark:border-zinc-700 text-center">
+                            <Book className="w-10 h-10 text-zinc-300 dark:text-zinc-600 mx-auto mb-2" />
+                            <p className="font-permanent text-sm text-zinc-400 uppercase">No sessions logged yet.</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-3">
+                            {sessions.map(s => (
+                                <Link key={s._id} href={`/game-night/sessions/${s._id}`} className="flex gap-4 p-4 border-4 border-black bg-white dark:bg-slate-800 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:-translate-y-0.5 transition-transform items-start group block">
+                                    <div className="p-2 bg-teal-500 border-2 border-black shrink-0"><Book className="w-4 h-4 text-white" /></div>
+                                    <div className="flex-grow min-w-0">
+                                        <h3 className="font-permanent text-sm text-black dark:text-white uppercase group-hover:text-teal-600 transition-colors truncate">{s.title}</h3>
+                                        <div className="flex gap-3 mt-1 flex-wrap">
+                                            <span className="text-xs font-permanent text-teal-600 dark:text-yellow-400 uppercase">{new Date(s.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).toUpperCase()}</span>
+                                            {s.location && <span className="text-xs font-permanent text-zinc-400 uppercase">{s.location}</span>}
+                                            {s.isOnline && (
+                                                <span className="flex items-center gap-1 px-1.5 text-xs font-permanent uppercase border-2 border-black bg-teal-500 text-white">
+                                                    <Wifi className="w-3 h-3" /> ONLINE
+                                                </span>
+                                            )}
+                                        </div>
+                                        {s.summary && <p className="mt-1 text-xs font-permanent text-zinc-500 dark:text-zinc-400 uppercase line-clamp-1">{s.summary}</p>}
+                                    </div>
+                                    <ChevronRight className="w-4 h-4 text-zinc-300 dark:text-zinc-600 shrink-0 self-center group-hover:text-teal-500 transition-colors" />
+                                </Link>
+                            ))}
+                        </div>
+                    )}
+                </div>
             </div>
 
             {/* Add Session Modal */}

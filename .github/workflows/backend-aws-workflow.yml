@@ -70,6 +70,61 @@ jobs:
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
 
+    - name: Register Redis task definition
+      id: register-redis
+      run: |
+        TASK_DEF_ARN=$(aws ecs register-task-definition \
+          --cli-input-json file://.aws/redis-task-definition.json \
+          --query 'taskDefinition.taskDefinitionArn' \
+          --output text)
+        echo "arn=$TASK_DEF_ARN" >> $GITHUB_OUTPUT
+
+    - name: Deploy prod Redis ECS service
+      run: |
+        TASK_DEF_ARN="${{ steps.register-redis.outputs.arn }}"
+        SERVICE_STATUS=$(aws ecs describe-services \
+          --cluster ${{ env.ECS_CLUSTER }} \
+          --services redis-prod-service \
+          --query 'services[0].status' \
+          --output text 2>/dev/null || echo "MISSING")
+
+        if [ "$SERVICE_STATUS" = "ACTIVE" ]; then
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service redis-prod-service \
+            --task-definition "$TASK_DEF_ARN" \
+            --no-cli-pager
+        else
+          # First-time creation: wire Cloud Map discovery as redis.pwa.internal
+          NAMESPACE_ID=$(aws servicediscovery list-namespaces \
+            --query "Namespaces[?Name=='pwa.internal'].Id | [0]" \
+            --output text)
+
+          SD_SERVICE_ARN=$(aws servicediscovery list-services \
+            --filters "Name=NAMESPACE_ID,Values=$NAMESPACE_ID,Condition=EQ" \
+            --query "Services[?Name=='redis'].Arn | [0]" \
+            --output text)
+
+          if [ -z "$SD_SERVICE_ARN" ] || [ "$SD_SERVICE_ARN" = "None" ]; then
+            SD_SERVICE_ARN=$(aws servicediscovery create-service \
+              --name redis \
+              --namespace-id "$NAMESPACE_ID" \
+              --dns-config "NamespaceId=$NAMESPACE_ID,RoutingPolicy=WEIGHTED,DnsRecords=[{Type=A,TTL=10}]" \
+              --query 'Service.Arn' \
+              --output text)
+          fi
+
+          aws ecs create-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service-name redis-prod-service \
+            --task-definition "$TASK_DEF_ARN" \
+            --desired-count 1 \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[subnet-0c33b8b801beec11a,subnet-007a79d52272fe680,subnet-0bbcf124b53fd8f43],securityGroups=[sg-018f4b475a22317f4],assignPublicIp=DISABLED}" \
+            --service-registries "registryArn=$SD_SERVICE_ARN" \
+            --no-cli-pager
+        fi
+
     - name: Build, tag, and push backend image to Amazon ECR
       id: build-backend-image
       env:
@@ -119,6 +174,11 @@ jobs:
           SF_CLIENT_ID=${{ secrets.SF_CLIENT_ID }}
           SF_PRIVATE_KEY_CONTENT=${{ secrets.SF_PRIVATE_KEY_CONTENT }}
           GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
+          ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+          ALPACA_API_KEY=${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY=${{ secrets.ALPACA_SECRET_KEY }}
+          VAULT_TOKEN=${{ secrets.VAULT_TOKEN }}
+          VAULT_ENCRYPTION_KEY=${{ secrets.VAULT_ENCRYPTION_KEY }}
 
     - name: Fill in the new frontend image ID in the Amazon ECS task definition
       id: frontend-task-def

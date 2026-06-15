@@ -127,31 +127,33 @@ jobs:
 
     - name: Build, tag, and push backend image to Amazon ECR
       id: build-backend-image
+      timeout-minutes: 45
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         IMAGE_TAG: ${{ github.sha }}
       run: |
-        # Build a docker container and
-        # push it to ECR so that it can
-        # be deployed to ECS.
         cd backend
         docker buildx build --platform linux/arm64 \
+          --cache-from type=gha,scope=backend \
+          --cache-to type=gha,mode=max,scope=backend \
+          --provenance=false \
           -t $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:$IMAGE_TAG \
           -t $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:prod \
           --push .
         echo "image=$ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
-        
+
     - name: Build, tag, and push frontend image to Amazon ECR
       id: build-frontend-image
+      timeout-minutes: 45
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         IMAGE_TAG: ${{ github.sha }}
       run: |
-        # Build a docker container and
-        # push it to ECR so that it can
-        # be deployed to ECS.
         cd frontend
         docker buildx build --platform linux/arm64 \
+          --cache-from type=gha,scope=frontend \
+          --cache-to type=gha,mode=max,scope=frontend \
+          --provenance=false \
           -t $ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:$IMAGE_TAG \
           -t $ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:prod \
           --build-arg NEXT_PUBLIC_GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }} \

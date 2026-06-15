@@ -140,3 +140,64 @@ export const createLeadFromAccount = async (account: any) => {
         source: "Web App"
     });
 };
+
+const SF_TASK_OBJECT = process.env.SF_TASK_OBJECT || "Task";
+
+/** Map app status to Salesforce Task Status picklist value. */
+function mapStatusToSF(status: string | undefined): string {
+    if (status === "In Progress") return "In Progress";
+    if (status === "Completed") return "Completed";
+    return "Not Started";
+}
+
+/**
+ * Push a task to Salesforce — creates if no sfID, updates otherwise.
+ * Returns the Salesforce record Id or null on failure.
+ */
+export const pushTaskToSalesforce = async (task: {
+    sfID?: string;
+    title: string;
+    description?: string;
+    status?: string;
+    dueDate?: Date | string | null;
+    ownerName?: string;
+}): Promise<string | null> => {
+    await loginToSalesforce();
+    if (!isLoggedIn) {
+        console.warn("[salesforceService] Not logged in — skipping task push");
+        return null;
+    }
+
+    const sfStatus = mapStatusToSF(task.status);
+    const activityDate = task.dueDate
+        ? (task.dueDate instanceof Date ? task.dueDate : new Date(task.dueDate))
+              .toISOString()
+              .split("T")[0]
+        : undefined;
+
+    const payload: Record<string, any> = {
+        Subject: task.title,
+        Description: task.description ?? undefined,
+        Status: sfStatus,
+        ...(activityDate ? { ActivityDate: activityDate } : {}),
+    };
+
+    try {
+        if (task.sfID) {
+            await conn.sobject(SF_TASK_OBJECT).update({ Id: task.sfID, ...payload });
+            console.log(`[salesforceService] Updated ${SF_TASK_OBJECT} ${task.sfID}`);
+            return task.sfID;
+        } else {
+            const ret = await conn.sobject(SF_TASK_OBJECT).create(payload);
+            if ((ret as any).success) {
+                console.log(`[salesforceService] Created ${SF_TASK_OBJECT} ${(ret as any).id}`);
+                return (ret as any).id;
+            }
+            console.error(`[salesforceService] Failed to create ${SF_TASK_OBJECT}:`, (ret as any).errors);
+            return null;
+        }
+    } catch (err: any) {
+        console.error("[salesforceService] pushTaskToSalesforce error:", err.message);
+        return null;
+    }
+};

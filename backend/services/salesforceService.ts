@@ -143,6 +143,57 @@ export const createLeadFromAccount = async (account: any) => {
 
 const SF_TASK_OBJECT = process.env.SF_TASK_OBJECT || "Task";
 
+export interface SFTask {
+    sfID: string;
+    title: string;
+    description?: string;
+    status: string;
+    dueDate?: Date;
+    lastModifiedDate: Date;
+}
+
+function mapStatusFromSF(sfStatus: string | undefined): string {
+    if (sfStatus === "In Progress") return "In Progress";
+    if (sfStatus === "Completed") return "Completed";
+    return "Not Started";
+}
+
+/**
+ * Pull tasks modified in Salesforce since a given date.
+ * Defaults to the last 20 minutes if not specified.
+ */
+export const pullTasksFromSalesforce = async (since?: Date): Promise<SFTask[]> => {
+    await loginToSalesforce();
+    if (!isLoggedIn) {
+        console.warn("[salesforceService] Not logged in — skipping task pull");
+        return [];
+    }
+
+    const lookback = since ?? new Date(Date.now() - 20 * 60 * 1000);
+    const soqlDate = lookback.toISOString();
+
+    try {
+        const query =
+            `SELECT Id, Subject, Description, Status, ActivityDate, LastModifiedDate ` +
+            `FROM ${SF_TASK_OBJECT} ` +
+            `WHERE LastModifiedDate > ${soqlDate} ` +
+            `ORDER BY LastModifiedDate DESC LIMIT 200`;
+
+        const result = await conn.query<any>(query);
+        return (result.records ?? []).map((r: any) => ({
+            sfID: r.Id,
+            title: r.Subject ?? "",
+            description: r.Description ?? undefined,
+            status: mapStatusFromSF(r.Status),
+            dueDate: r.ActivityDate ? new Date(r.ActivityDate) : undefined,
+            lastModifiedDate: new Date(r.LastModifiedDate),
+        }));
+    } catch (err: any) {
+        console.error("[salesforceService] pullTasksFromSalesforce error:", err.message);
+        return [];
+    }
+};
+
 /** Map app status to Salesforce Task Status picklist value. */
 function mapStatusToSF(status: string | undefined): string {
     if (status === "In Progress") return "In Progress";

@@ -2,6 +2,8 @@ import express from "express";
 const router = express.Router();
 import Task from "../models/Task.js";
 import { auth } from "../middleware/auth.js";
+import { bus } from "../events/index.js";
+import { enqueueSFWriteback, enqueueNotionWriteback } from "../jobs/queues.js";
 
 // Apply authentication middleware to all routes
 router.use(auth);
@@ -10,11 +12,11 @@ router.use(auth);
 router.post("/", async (req: any, res) => {
     try {
         const { title, description, status, dueDate, sfID, sfRecordTypeID, sfRecordTypeName } = req.body;
-        
+
         // Validation
         if (!title || !dueDate) {
-            return res.status(400).json({ 
-                error: "Missing required fields: title, dueDate" 
+            return res.status(400).json({
+                error: "Missing required fields: title, dueDate"
             });
         }
 
@@ -22,21 +24,26 @@ router.post("/", async (req: any, res) => {
         const ownerId = req.user.id;
         const ownerName = req.body.ownerName || req.user.email;
 
-        const task = new Task({ 
-            title, 
-            description, 
-            status, 
-            dueDate, 
-            sfID, 
-            sfRecordTypeID, 
-            sfRecordTypeName, 
-            ownerId, 
+        const task = new Task({
+            title,
+            description,
+            status,
+            dueDate,
+            sfID,
+            sfRecordTypeID,
+            sfRecordTypeName,
+            ownerId,
             ownerName
         });
-        
+
         await task.save();
-        
-        res.status(201).json({ 
+
+        const taskId = String(task._id);
+        bus.publish("task.updated", { taskId, source: "web" }).catch(() => {});
+        enqueueSFWriteback(taskId);
+        enqueueNotionWriteback(taskId);
+
+        res.status(201).json({
             message: "Task created successfully!",
             task: {
                 _id: task._id,
@@ -88,13 +95,19 @@ router.put("/:id", async (req: any, res) => {
     try {
         const { title, description, status, dueDate } = req.body;
         const task = await Task.findOneAndUpdate(
-            { _id: req.params.id, ownerId: req.user.id }, 
-            { title, description, status, dueDate }, 
+            { _id: req.params.id, ownerId: req.user.id },
+            { title, description, status, dueDate },
             { new: true }
         );
         if (!task) {
             return res.status(404).json({ error: "Task not found or unauthorized" });
         }
+
+        const taskId = String(task._id);
+        bus.publish("task.updated", { taskId, source: "web" }).catch(() => {});
+        enqueueSFWriteback(taskId);
+        enqueueNotionWriteback(taskId);
+
         res.json(task);
     } catch (error: any) {
         console.error("Error updating task:", error);

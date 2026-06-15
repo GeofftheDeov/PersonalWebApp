@@ -25,6 +25,8 @@ import inviteRoutes from "./routes/inviteRoutes.js";
 import { snapshotAlpacaNow } from "./routes/adminRoutes.js";
 import { startEventBus, stopEventBus } from "./events/index.js";
 import { startReadyCheckLoop } from "./utils/readyCheck.js";
+import { startWorkers } from "./jobs/workers.js";
+import { registerRepeatableJobs, closeBullConnection } from "./jobs/queues.js";
 
 import https from "https";
 import http from "http";
@@ -109,8 +111,15 @@ startEventBus()
 // Ready-up checks: ping campaign members 30 minutes before each session.
 startReadyCheckLoop();
 
+// BullMQ workers + repeatable jobs (no-op when REDIS_URL is unset).
+const stopWorkers = startWorkers();
+registerRepeatableJobs().catch((err) =>
+    console.error("[BACKEND] Failed to register repeatable jobs:", err)
+);
+
 process.on("SIGTERM", () => {
-    stopEventBus().finally(() => process.exit(0));
+    Promise.all([stopEventBus(), stopWorkers(), closeBullConnection()])
+        .finally(() => process.exit(0));
 });
 
 

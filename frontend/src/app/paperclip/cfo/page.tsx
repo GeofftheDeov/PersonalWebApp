@@ -170,6 +170,9 @@ export default function CFOConsolePage() {
   useEffect(() => {
     const t = token();
     if (!t) { router.push('/login'); return; }
+    const userStr = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
+    const userType = userStr ? (JSON.parse(userStr) as any).type : null;
+    if (userType !== 'User') { router.push('/dashboard'); return; }
   }, [router]);
 
   // ── Load agents
@@ -179,6 +182,7 @@ export default function CFOConsolePage() {
     try {
       const res = await fetch('/api/paperclip/agents', { headers: ah() });
       if (res.status === 401) { router.push('/login'); return; }
+      if (res.status === 403) { router.push('/dashboard'); return; }
       const data = await res.json();
       const list: Agent[] = Array.isArray(data) ? data : (data?.agents ?? data?.items ?? []);
       setAgents(list);

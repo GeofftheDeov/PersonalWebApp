@@ -1,7 +1,17 @@
-import express, { Response } from 'express';
+import express, { Response, NextFunction } from 'express';
 import { auth } from '../middleware/auth.js';
 
 const router = express.Router();
+
+// Paperclip is restricted to Users only — Leads and Accounts may not access it.
+function userOnly(req: any, res: Response, next: NextFunction) {
+  if (req.user?.type !== 'User') {
+    return res.status(403).json({ error: 'Forbidden: Paperclip access requires a User account' });
+  }
+  next();
+}
+
+router.use(auth, userOnly);
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -84,7 +94,7 @@ function requireCompanyId(res: Response): string | null {
 // ── Curated routes ────────────────────────────────────────────────────────────
 
 // GET /api/paperclip/org
-router.get('/org', auth, async (req: any, res: Response) => {
+router.get('/org', async (req: any, res: Response) => {
   const cid = requireCompanyId(res);
   if (!cid) return;
   const result = await pcFetch(`/api/companies/${cid}/org`);
@@ -93,7 +103,7 @@ router.get('/org', auth, async (req: any, res: Response) => {
 });
 
 // GET /api/paperclip/agents
-router.get('/agents', auth, async (req: any, res: Response) => {
+router.get('/agents', async (req: any, res: Response) => {
   const cid = requireCompanyId(res);
   if (!cid) return;
   const result = await pcFetch(`/api/companies/${cid}/agents`);
@@ -102,28 +112,28 @@ router.get('/agents', auth, async (req: any, res: Response) => {
 });
 
 // GET /api/paperclip/agents/:id
-router.get('/agents/:id', auth, async (req: any, res: Response) => {
+router.get('/agents/:id', async (req: any, res: Response) => {
   const result = await pcFetch(`/api/agents/${req.params.id}`);
   if (result.error) return res.status(result.status).json({ error: result.error });
   res.json(result.data);
 });
 
 // POST /api/paperclip/agents/:id/pause
-router.post('/agents/:id/pause', auth, async (req: any, res: Response) => {
+router.post('/agents/:id/pause', async (req: any, res: Response) => {
   const result = await pcFetch(`/api/agents/${req.params.id}/pause`, { method: 'POST' });
   if (result.error) return res.status(result.status).json({ error: result.error });
   res.json(result.data);
 });
 
 // POST /api/paperclip/agents/:id/resume
-router.post('/agents/:id/resume', auth, async (req: any, res: Response) => {
+router.post('/agents/:id/resume', async (req: any, res: Response) => {
   const result = await pcFetch(`/api/agents/${req.params.id}/resume`, { method: 'POST' });
   if (result.error) return res.status(result.status).json({ error: result.error });
   res.json(result.data);
 });
 
 // POST /api/paperclip/agents/:id/heartbeat  →  POST /api/agents/:id/heartbeat/invoke
-router.post('/agents/:id/heartbeat', auth, async (req: any, res: Response) => {
+router.post('/agents/:id/heartbeat', async (req: any, res: Response) => {
   const result = await pcFetch(`/api/agents/${req.params.id}/heartbeat/invoke`, {
     method: 'POST',
   });
@@ -132,7 +142,7 @@ router.post('/agents/:id/heartbeat', auth, async (req: any, res: Response) => {
 });
 
 // PATCH /api/paperclip/agents/:id/budget  — body: { budgetMonthlyCents: number }
-router.patch('/agents/:id/budget', auth, async (req: any, res: Response) => {
+router.patch('/agents/:id/budget', async (req: any, res: Response) => {
   const { budgetMonthlyCents } = req.body as { budgetMonthlyCents?: number };
   if (typeof budgetMonthlyCents !== 'number') {
     return res.status(400).json({ error: 'budgetMonthlyCents (number) is required' });
@@ -146,7 +156,7 @@ router.patch('/agents/:id/budget', auth, async (req: any, res: Response) => {
 });
 
 // GET /api/paperclip/issues
-router.get('/issues', auth, async (req: any, res: Response) => {
+router.get('/issues', async (req: any, res: Response) => {
   const cid = requireCompanyId(res);
   if (!cid) return;
   const result = await pcFetch(`/api/companies/${cid}/issues`);
@@ -155,7 +165,7 @@ router.get('/issues', auth, async (req: any, res: Response) => {
 });
 
 // POST /api/paperclip/issues  — body: { title, description?, assigneeAgentId? }
-router.post('/issues', auth, async (req: any, res: Response) => {
+router.post('/issues', async (req: any, res: Response) => {
   const cid = requireCompanyId(res);
   if (!cid) return;
   const { title, description, assigneeAgentId } = req.body as {
@@ -175,14 +185,14 @@ router.post('/issues', auth, async (req: any, res: Response) => {
 });
 
 // GET /api/paperclip/issues/:id
-router.get('/issues/:id', auth, async (req: any, res: Response) => {
+router.get('/issues/:id', async (req: any, res: Response) => {
   const result = await pcFetch(`/api/issues/${req.params.id}`);
   if (result.error) return res.status(result.status).json({ error: result.error });
   res.json(result.data);
 });
 
 // PATCH /api/paperclip/issues/:id
-router.patch('/issues/:id', auth, async (req: any, res: Response) => {
+router.patch('/issues/:id', async (req: any, res: Response) => {
   const result = await pcFetch(`/api/issues/${req.params.id}`, {
     method: 'PATCH',
     body: JSON.stringify(req.body),
@@ -192,7 +202,7 @@ router.patch('/issues/:id', auth, async (req: any, res: Response) => {
 });
 
 // GET /api/paperclip/costs
-router.get('/costs', auth, async (req: any, res: Response) => {
+router.get('/costs', async (req: any, res: Response) => {
   const cid = requireCompanyId(res);
   if (!cid) return;
   const result = await pcFetch(`/api/companies/${cid}/costs`);
@@ -206,7 +216,7 @@ router.get('/costs', auth, async (req: any, res: Response) => {
 // Polls the Paperclip run-events endpoint every 2 s and forwards new events
 // as SSE `event: run_event` frames.  Ends with `event: done` when the run
 // reaches a terminal status or after 10 minutes.
-router.get('/runs/:runId/stream', auth, async (req: any, res: Response) => {
+router.get('/runs/:runId/stream', async (req: any, res: Response) => {
   const { runId } = req.params as { runId: string };
 
   res.setHeader('Content-Type', 'text/event-stream');
@@ -305,7 +315,7 @@ router.get('/runs/:runId/stream', auth, async (req: any, res: Response) => {
 // Allowed methods: GET, POST, PATCH, DELETE.
 // The client's Authorization header is intentionally NOT forwarded upstream —
 // the app's JWT is not a Paperclip credential.
-router.all('/proxy/*path', auth, async (req: any, res: Response) => {
+router.all('/proxy/*path', async (req: any, res: Response) => {
   const method = req.method.toUpperCase();
   if (!PROXY_ALLOWED_METHODS.has(method)) {
     return res.status(405).json({ error: `Method ${method} not allowed via proxy` });

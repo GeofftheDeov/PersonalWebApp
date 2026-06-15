@@ -349,11 +349,15 @@ export default function BudgetsPage() {
   const loadAgents = useCallback(async () => {
     const t = token();
     if (!t) { router.push('/login'); return; }
+    const userStr = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
+    const userType = userStr ? (JSON.parse(userStr) as any).type : null;
+    if (userType !== 'User') { router.push('/dashboard'); return; }
     setLoading(true);
     setError(null);
     try {
       const res = await fetch('/api/paperclip/agents', { headers: ah() });
       if (res.status === 401) { router.push('/login'); return; }
+      if (res.status === 403) { router.push('/dashboard'); return; }
       const data = await res.json();
       if (!res.ok) throw new Error((data as any)?.error ?? 'Failed to load agents');
       const list: Agent[] = Array.isArray(data) ? data : (data?.agents ?? data?.items ?? []);

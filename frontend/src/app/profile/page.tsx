@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Footer from '@/components/Footer';
+import CalendarView from '@/components/CalendarView';
 
 export default function ProfilePage() {
     const router = useRouter();
@@ -795,6 +796,8 @@ export default function ProfilePage() {
                         </div>
                     )}
                 </div>
+
+                <CalendarView />
             </div>
 
             <Footer>

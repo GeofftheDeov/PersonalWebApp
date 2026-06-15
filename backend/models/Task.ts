@@ -9,12 +9,15 @@ const taskSchema = new mongoose.Schema({
         default: "Not Started"
     },
     dueDate: Date,
-    // Polymorphic reference or just generic related fields? 
-    // For simplicity now, let's keep it unlinked or manual until specific requirements allow
     createdAt: { type: Date, default: Date.now },
+    // Salesforce sync fields
     sfID: String,
     sfRecordTypeID: String,
     sfRecordTypeName: String,
+    sfLastSynced: Date,
+    // Notion sync fields
+    notionPageId: String,
+    notionLastSynced: Date,
     ownerId: String,
     ownerName: String,
 });

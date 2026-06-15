@@ -120,7 +120,7 @@ jobs:
             --task-definition "$TASK_DEF_ARN" \
             --desired-count 1 \
             --launch-type FARGATE \
-            --network-configuration "awsvpcConfiguration={subnets=[subnet-0c33b8b801beec11a,subnet-007a79d52272fe680,subnet-0bbcf124b53fd8f43],securityGroups=[sg-018f4b475a22317f4],assignPublicIp=DISABLED}" \
+            --network-configuration "awsvpcConfiguration={subnets=[subnet-0c33b8b801beec11a,subnet-007a79d52272fe680,subnet-0bbcf124b53fd8f43],securityGroups=[sg-018f4b475a22317f4],assignPublicIp=ENABLED}" \
             --service-registries "registryArn=$SD_SERVICE_ARN" \
             --no-cli-pager
         fi

@@ -7,6 +7,7 @@ import { renderPage } from '../utils/adminUi.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import AlpacaSnapshot from '../models/AlpacaSnapshot.js';
 import { getDecryptedKeys } from './apiKeyRoutes.js';
+import { evaluateLiveApplyGate } from '../utils/liveApplyGate.js';
 
 const router = express.Router();
 
@@ -1066,6 +1067,20 @@ router.get('/alpaca/api/personal/orders', async (req: any, res) => {
 // Mirrors current paper positions as market orders on the live account.
 // Body: { orders: [{ symbol, notional }] }  (confirmed by the client modal).
 router.post('/alpaca/api/apply-to-personal', async (req: any, res) => {
+    // MUR-62 SAFETY GATE: real-money order placement is OFF by default and
+    // requires an explicit, per-trade, interactive board-member confirmation.
+    // Non-interactive / agent / service-token callers are rejected here before
+    // any vault key is decrypted or any order is sent to Alpaca.
+    const gate = evaluateLiveApplyGate({
+        enabledEnv: process.env.LIVE_APPLY_TO_PERSONAL_ENABLED,
+        confirmHeader: req.header('X-Live-Apply-Confirm'),
+        confirmBody: req.body?.confirmation,
+    });
+    if (!gate.allowed) {
+        console.warn(`[MUR-62] Blocked live apply-to-personal (${gate.code}) user=${req.adminUser?.id}`);
+        return res.status(gate.status).json({ error: gate.error, code: gate.code });
+    }
+
     const { orders } = req.body as { orders?: { symbol: string; notional: number }[] };
     if (!Array.isArray(orders) || orders.length === 0) {
         return res.status(400).json({ error: 'orders array is required' });
@@ -1369,14 +1384,29 @@ router.get('/alpaca', (req, res) => {
 
         async function confirmApply() {
             if (!pendingOrders.length) return;
+
+            // MUR-62: real-money orders require an explicit, per-trade interactive
+            // confirmation typed by the board member. The phrase is also sent as a
+            // header so the server can reject non-interactive / agent callers.
+            const CONFIRM_PHRASE = 'I CONFIRM LIVE ORDERS';
+            const typed = window.prompt(
+                'LIVE REAL-MONEY ORDERS\\n\\nThis places real orders on your live Alpaca account.\\nType exactly the following to confirm:\\n\\n' + CONFIRM_PHRASE
+            );
+            if (typed !== CONFIRM_PHRASE) {
+                const resultEl = document.getElementById('modal-result');
+                resultEl.style.display = 'block';
+                resultEl.innerHTML = \`<span class="modal-err">Cancelled — confirmation phrase not entered.</span>\`;
+                return;
+            }
+
             const btn = document.getElementById('modal-confirm-btn');
             btn.disabled = true;
             btn.textContent = 'Placing orders...';
 
             const r = await fetch('/admin/alpaca/api/apply-to-personal?token=' + TOKEN, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ orders: pendingOrders }),
+                headers: { 'Content-Type': 'application/json', 'X-Live-Apply-Confirm': CONFIRM_PHRASE },
+                body: JSON.stringify({ orders: pendingOrders, confirmation: CONFIRM_PHRASE }),
             });
             const data = await r.json();
 

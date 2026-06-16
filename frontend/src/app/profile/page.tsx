@@ -19,6 +19,7 @@ export default function ProfilePage() {
     const [games, setGames] = useState<string[]>([]);
     const [gameInput, setGameInput] = useState('');
     const [savingGames, setSavingGames] = useState(false);
+    const [activeTab, setActiveTab] = useState<'info' | 'calendar' | 'games'>('info');
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const EMPTY_KEY_FORM = { provider: '', label: '', keyId: '', secret: '' };
@@ -303,7 +304,20 @@ export default function ProfilePage() {
                     </h1>
                 </header>
 
-                <div className="flex flex-col md:flex-row gap-10 items-start">
+                {/* Profile tabs */}
+                <div className="flex gap-2 mb-10 border-b-4 border-black pb-4">
+                    {(['info', 'calendar', 'games'] as const).map(tab => (
+                        <button
+                            key={tab}
+                            onClick={() => setActiveTab(tab)}
+                            className={`px-6 py-3 border-4 border-black font-permanent uppercase text-base tracking-wide transition-colors ${activeTab === tab ? 'bg-black dark:bg-white text-white dark:text-black' : 'bg-white dark:bg-zinc-800 text-black dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-700 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]'}`}
+                        >
+                            {tab === 'info' ? 'INFO' : tab === 'calendar' ? 'CALENDAR' : 'GAMES'}
+                        </button>
+                    ))}
+                </div>
+
+                {activeTab === 'info' && (<div className="flex flex-col md:flex-row gap-10 items-start">
 
                     {/* Profile picture column */}
                     <div className="flex flex-col items-center gap-4 shrink-0">
@@ -473,8 +487,9 @@ export default function ProfilePage() {
                             </div>
                         )}
                     </div>
-                </div>
-                {/* Favorite games */}
+                </div>)}
+
+                {activeTab === 'games' && (<>
                 <div className="mt-16">
                     <h2 className="text-3xl sm:text-4xl md:text-5xl font-permanent text-yellow-400 uppercase relative w-fit mb-8">
                         <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Favorite Games</span>
@@ -631,8 +646,9 @@ export default function ProfilePage() {
                         </div>
                     )}
                 </div>
-                {/* API Key Vault */}
-                <div className="mt-16">
+                </>)}
+
+                {activeTab === 'info' && (<div className="mt-16">
                     <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
                         <h2 className="text-3xl sm:text-4xl md:text-5xl font-permanent text-yellow-400 uppercase relative w-fit">
                             <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">API Key Vault</span>
@@ -795,9 +811,9 @@ export default function ProfilePage() {
                             ))}
                         </div>
                     )}
-                </div>
+                </div>)}
 
-                <CalendarView />
+                {activeTab === 'calendar' && <CalendarView />}
             </div>
 
             <Footer>

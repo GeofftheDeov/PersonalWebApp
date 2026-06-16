@@ -149,14 +149,14 @@ export default function CalendarView() {
 
     if (loading) {
         return (
-            <div className="mt-16 pt-8 border-t-8 border-black py-8 text-center">
+            <div className="py-8 text-center">
                 <span className="text-2xl font-permanent text-teal-600 animate-pulse uppercase">Loading Calendar...</span>
             </div>
         );
     }
 
     return (
-        <div className="mt-16 pt-8 border-t-8 border-black">
+        <div className="mt-4">
             <header className="mb-8 border-b-8 border-black pb-6">
                 <h2 className="text-4xl sm:text-5xl md:text-7xl font-permanent text-black dark:text-black leading-none tracking-tight uppercase break-words">
                     <span className="drop-shadow-[6px_6px_0px_rgba(250,204,21,1)]">YOUR</span>

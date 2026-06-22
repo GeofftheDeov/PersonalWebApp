@@ -1,5 +1,25 @@
 import dotenv from "dotenv";
 dotenv.config();
+
+const INSECURE_JWT_DEFAULT = "your-secret-key-change-this";
+const jwtSecret = process.env.JWT_SECRET;
+if (!jwtSecret || jwtSecret === INSECURE_JWT_DEFAULT) {
+    if (process.env.NODE_ENV === "production") {
+        throw new Error("FATAL: JWT_SECRET must be set to a strong secret in production");
+    } else {
+        console.warn("[SECURITY] WARNING: JWT_SECRET is missing or using the insecure default. Set a strong secret before deploying to production.");
+    }
+}
+
+const vaultKey = process.env.VAULT_ENCRYPTION_KEY;
+if (!vaultKey) {
+    if (process.env.NODE_ENV === "production") {
+        throw new Error("FATAL: VAULT_ENCRYPTION_KEY must be set in production");
+    } else {
+        console.warn("[SECURITY] WARNING: VAULT_ENCRYPTION_KEY is not set. The API Key Vault will not function.");
+    }
+}
+
 import express from "express";
 import mongoose from "mongoose";
 import cors from "cors";

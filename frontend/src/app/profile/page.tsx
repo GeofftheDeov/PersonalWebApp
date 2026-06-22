@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Footer from '@/components/Footer';
+import CalendarView from '@/components/CalendarView';
 
 export default function ProfilePage() {
     const router = useRouter();
@@ -18,6 +19,7 @@ export default function ProfilePage() {
     const [games, setGames] = useState<string[]>([]);
     const [gameInput, setGameInput] = useState('');
     const [savingGames, setSavingGames] = useState(false);
+    const [activeTab, setActiveTab] = useState<'info' | 'calendar' | 'games' | 'vault'>('info');
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const EMPTY_KEY_FORM = { provider: '', label: '', keyId: '', secret: '' };
@@ -302,7 +304,20 @@ export default function ProfilePage() {
                     </h1>
                 </header>
 
-                <div className="flex flex-col md:flex-row gap-10 items-start">
+                {/* Profile tabs */}
+                <div className="flex flex-wrap gap-2 mb-10 border-b-4 border-black pb-4">
+                    {(['info', 'calendar', 'games', 'vault'] as const).map(tab => (
+                        <button
+                            key={tab}
+                            onClick={() => setActiveTab(tab)}
+                            className={`px-6 py-3 border-4 border-black font-permanent uppercase text-base tracking-wide transition-colors ${activeTab === tab ? 'bg-black dark:bg-white text-white dark:text-black' : 'bg-white dark:bg-zinc-800 text-black dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-700 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]'}`}
+                        >
+                            {tab === 'info' ? 'INFO' : tab === 'calendar' ? 'CALENDAR' : tab === 'games' ? 'GAMES' : 'VAULT'}
+                        </button>
+                    ))}
+                </div>
+
+                {activeTab === 'info' && (<div className="flex flex-col md:flex-row gap-10 items-start">
 
                     {/* Profile picture column */}
                     <div className="flex flex-col items-center gap-4 shrink-0">
@@ -472,8 +487,9 @@ export default function ProfilePage() {
                             </div>
                         )}
                     </div>
-                </div>
-                {/* Favorite games */}
+                </div>)}
+
+                {activeTab === 'games' && (<>
                 <div className="mt-16">
                     <h2 className="text-3xl sm:text-4xl md:text-5xl font-permanent text-yellow-400 uppercase relative w-fit mb-8">
                         <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Favorite Games</span>
@@ -520,42 +536,6 @@ export default function ProfilePage() {
                     )}
                 </div>
 
-                {/* Campaigns */}
-                <div className="mt-16">
-                    <h2 className="text-3xl sm:text-4xl md:text-5xl font-permanent text-teal-600 uppercase relative w-fit mb-8">
-                        <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Campaigns</span>
-                    </h2>
-
-                    {campaigns.length === 0 ? (
-                        <p className="font-permanent text-xl text-zinc-500 uppercase">Not in any campaigns yet.</p>
-                    ) : (
-                        <div className="grid gap-4 sm:grid-cols-2">
-                            {campaigns.map((c) => {
-                                const statusCls =
-                                    c.status === 'In Progress' ? 'bg-teal-500 text-white' :
-                                    c.status === 'Completed' ? 'bg-zinc-500 text-white' :
-                                    'bg-yellow-400 text-black';
-                                return (
-                                    <Link
-                                        key={c._id}
-                                        href={`/game-night/campaigns/${c._id}`}
-                                        className="block p-5 border-4 border-black dark:border-white bg-zinc-200 dark:bg-slate-800 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] transition-shadow"
-                                    >
-                                        <p className="font-permanent text-xl text-teal-600 dark:text-yellow-400 uppercase tracking-tight leading-tight">
-                                            {c.title}
-                                        </p>
-                                        {c.status && (
-                                            <span className={`inline-block mt-2 px-2 py-0.5 text-xs font-permanent uppercase border-2 border-black ${statusCls}`}>
-                                                {c.status}
-                                            </span>
-                                        )}
-                                    </Link>
-                                );
-                            })}
-                        </div>
-                    )}
-                </div>
-
                 {/* Characters */}
                 <div className="mt-16">
                     <h2 className="text-3xl sm:text-4xl md:text-5xl font-permanent text-yellow-400 uppercase relative w-fit mb-8">
@@ -597,59 +577,13 @@ export default function ProfilePage() {
                         </div>
                     )}
                 </div>
+                </>)}
 
-                {/* Sessions attended */}
-                <div className="mt-16">
-                    <h2 className="text-3xl sm:text-4xl md:text-5xl font-permanent text-teal-600 uppercase relative w-fit mb-8">
-                        <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Sessions Attended</span>
-                    </h2>
-
-                    {sessions.length === 0 ? (
-                        <p className="font-permanent text-xl text-zinc-500 uppercase">No sessions on record.</p>
-                    ) : (
-                        <div className="grid gap-4 sm:grid-cols-2">
-                            {sessions.map((s) => (
-                                <Link
-                                    key={s.playerSessionId}
-                                    href={`/game-night/sessions/${s.sessionId}`}
-                                    className="block p-5 border-4 border-black dark:border-white bg-zinc-200 dark:bg-slate-800 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] transition-shadow"
-                                >
-                                    <p className="font-permanent text-xl text-teal-600 dark:text-yellow-400 uppercase tracking-tight leading-tight">
-                                        {s.title}
-                                    </p>
-                                    {s.campaign && (
-                                        <p className="font-permanent text-sm text-zinc-500 dark:text-zinc-400 uppercase mt-1">
-                                            {s.campaign.title}
-                                        </p>
-                                    )}
-                                    <p className="font-permanent text-sm text-zinc-500 dark:text-zinc-400 uppercase mt-1">
-                                        {new Date(s.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
-                                    </p>
-                                </Link>
-                            ))}
-                        </div>
-                    )}
-                </div>
-                {/* API Key Vault */}
-                <div className="mt-16">
-                    <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
-                        <h2 className="text-3xl sm:text-4xl md:text-5xl font-permanent text-yellow-400 uppercase relative w-fit">
-                            <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">API Key Vault</span>
-                        </h2>
-                        {!showKeyForm && (
-                            <button
-                                onClick={() => { setKeyForm(EMPTY_KEY_FORM); setKeyError(null); setShowKeyForm(true); }}
-                                className="px-6 py-2 bg-yellow-400 text-black dark:bg-teal-600 dark:text-white font-permanent text-lg uppercase hover:bg-yellow-500 dark:hover:bg-teal-700 transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] border-2 border-black dark:border-white"
-                            >
-                                ADD KEY
-                            </button>
-                        )}
-                    </div>
-                    <p className="font-permanent text-xs text-zinc-500 uppercase mb-6">
-                        Keys are encrypted at rest. Secrets are never displayed after saving.
-                    </p>
-
+                {activeTab === 'info' && (<div className="mt-16">
                     {/* Google Calendar connection */}
+                    <h2 className="text-3xl sm:text-4xl md:text-5xl font-permanent text-yellow-400 uppercase relative w-fit mb-8">
+                        <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Integrations</span>
+                    </h2>
                     <div className="mb-8 p-5 border-4 border-black dark:border-white bg-zinc-200 dark:bg-slate-800 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
                         <div className="flex flex-wrap items-center justify-between gap-4">
                             <div>
@@ -680,6 +614,25 @@ export default function ProfilePage() {
                             <p className="font-permanent text-xs uppercase mt-3 text-teal-600 dark:text-yellow-400">{gcalNotice}</p>
                         )}
                     </div>
+                </div>)}
+
+                {activeTab === 'vault' && (<div className="mt-16">
+                    <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+                        <h2 className="text-3xl sm:text-4xl md:text-5xl font-permanent text-yellow-400 uppercase relative w-fit">
+                            <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">API Key Vault</span>
+                        </h2>
+                        {!showKeyForm && (
+                            <button
+                                onClick={() => { setKeyForm(EMPTY_KEY_FORM); setKeyError(null); setShowKeyForm(true); }}
+                                className="px-6 py-2 bg-yellow-400 text-black dark:bg-teal-600 dark:text-white font-permanent text-lg uppercase hover:bg-yellow-500 dark:hover:bg-teal-700 transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] border-2 border-black dark:border-white"
+                            >
+                                ADD KEY
+                            </button>
+                        )}
+                    </div>
+                    <p className="font-permanent text-xs text-zinc-500 uppercase mb-6">
+                        Keys are encrypted at rest. Secrets are never displayed after saving.
+                    </p>
 
                     {showKeyForm && (
                         <form onSubmit={saveApiKey} className="mb-8 p-6 border-4 border-black bg-slate-900 shadow-[8px_8px_0px_0px_rgba(13,148,136,1)] space-y-4">
@@ -791,6 +744,77 @@ export default function ProfilePage() {
                                         </div>
                                     </div>
                                 </div>
+                            ))}
+                        </div>
+                    )}
+                </div>)}
+
+                {activeTab === 'calendar' && <CalendarView />}
+
+                {/* Campaigns — always visible below tabs */}
+                <div className="mt-16">
+                    <h2 className="text-3xl sm:text-4xl md:text-5xl font-permanent text-teal-600 uppercase relative w-fit mb-8">
+                        <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Campaigns</span>
+                    </h2>
+
+                    {campaigns.length === 0 ? (
+                        <p className="font-permanent text-xl text-zinc-500 uppercase">Not in any campaigns yet.</p>
+                    ) : (
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            {campaigns.map((c) => {
+                                const statusCls =
+                                    c.status === 'In Progress' ? 'bg-teal-500 text-white' :
+                                    c.status === 'Completed' ? 'bg-zinc-500 text-white' :
+                                    'bg-yellow-400 text-black';
+                                return (
+                                    <Link
+                                        key={c._id}
+                                        href={`/game-night/campaigns/${c._id}`}
+                                        className="block p-5 border-4 border-black dark:border-white bg-zinc-200 dark:bg-slate-800 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] transition-shadow"
+                                    >
+                                        <p className="font-permanent text-xl text-teal-600 dark:text-yellow-400 uppercase tracking-tight leading-tight">
+                                            {c.title}
+                                        </p>
+                                        {c.status && (
+                                            <span className={`inline-block mt-2 px-2 py-0.5 text-xs font-permanent uppercase border-2 border-black ${statusCls}`}>
+                                                {c.status}
+                                            </span>
+                                        )}
+                                    </Link>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+
+                {/* Sessions attended — always visible below tabs */}
+                <div className="mt-16">
+                    <h2 className="text-3xl sm:text-4xl md:text-5xl font-permanent text-teal-600 uppercase relative w-fit mb-8">
+                        <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Sessions Attended</span>
+                    </h2>
+
+                    {sessions.length === 0 ? (
+                        <p className="font-permanent text-xl text-zinc-500 uppercase">No sessions on record.</p>
+                    ) : (
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            {sessions.map((s) => (
+                                <Link
+                                    key={s.playerSessionId}
+                                    href={`/game-night/sessions/${s.sessionId}`}
+                                    className="block p-5 border-4 border-black dark:border-white bg-zinc-200 dark:bg-slate-800 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] transition-shadow"
+                                >
+                                    <p className="font-permanent text-xl text-teal-600 dark:text-yellow-400 uppercase tracking-tight leading-tight">
+                                        {s.title}
+                                    </p>
+                                    {s.campaign && (
+                                        <p className="font-permanent text-sm text-zinc-500 dark:text-zinc-400 uppercase mt-1">
+                                            {s.campaign.title}
+                                        </p>
+                                    )}
+                                    <p className="font-permanent text-sm text-zinc-500 dark:text-zinc-400 uppercase mt-1">
+                                        {new Date(s.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+                                    </p>
+                                </Link>
                             ))}
                         </div>
                     )}

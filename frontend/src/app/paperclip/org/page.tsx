@@ -297,12 +297,16 @@ export default function OrgChartPage() {
     setError(null);
     const t = token();
     if (!t) { router.push('/login'); return; }
+    const userStr = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
+    const userType = userStr ? (JSON.parse(userStr) as any).type : null;
+    if (userType !== 'User') { router.push('/dashboard'); return; }
 
     try {
       const res = await fetch('/api/paperclip/org', {
         headers: { Authorization: `Bearer ${t}` },
       });
       if (res.status === 401) { router.push('/login'); return; }
+      if (res.status === 403) { router.push('/dashboard'); return; }
       const data = await res.json();
       if (!res.ok) throw new Error((data as any)?.error ?? 'Failed to load org');
 

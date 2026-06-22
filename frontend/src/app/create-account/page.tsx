@@ -24,6 +24,10 @@ export default function CreateAccountPage() {
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError('');
+        setLoading(true);
+
         if (!formData.email && !formData.phone) {
             setError('Please provide either an email or a phone number');
             setLoading(false);

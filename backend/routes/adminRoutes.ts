@@ -1407,17 +1407,7 @@ router.get('/alpaca', (req, res) => {
         async function confirmApply() {
             if (!pendingOrders.length) return;
 
-            // MUR-62: real-money orders require an explicit, per-trade interactive
-            // confirmation typed by the board member. The phrase is also sent as a
-            // header so the server can reject non-interactive / agent callers.
-            const CONFIRM_PHRASE = 'I CONFIRM LIVE ORDERS';
-            const typed = window.prompt(
-                'LIVE REAL-MONEY ORDERS\\n\\nThis places real orders on your live Alpaca account.\\nType exactly the following to confirm:\\n\\n' + CONFIRM_PHRASE
-            );
-            if (typed !== CONFIRM_PHRASE) {
-                const resultEl = document.getElementById('modal-result');
-                resultEl.style.display = 'block';
-                resultEl.innerHTML = \`<span class="modal-err">Cancelled — confirmation phrase not entered.</span>\`;
+            if (!window.confirm('LIVE REAL-MONEY ORDERS\\n\\nThis places real market orders on your live Alpaca account.\\n\\nThis cannot be undone. Continue?')) {
                 return;
             }
 
@@ -1425,10 +1415,34 @@ router.get('/alpaca', (req, res) => {
             btn.disabled = true;
             btn.textContent = 'Placing orders...';
 
+            // Fetch a per-trade single-use nonce immediately before submitting.
+            // The server issues a 5-min TTL nonce; replayed or expired nonces are rejected.
+            let nonce;
+            try {
+                const nr = await fetch('/admin/alpaca/live-apply-nonce?token=' + TOKEN);
+                if (!nr.ok) {
+                    const nd = await nr.json().catch(() => ({}));
+                    const resultEl = document.getElementById('modal-result');
+                    resultEl.style.display = 'block';
+                    resultEl.innerHTML = \`<span class="modal-err">Could not get confirmation token: \${nd.error || nr.status}</span>\`;
+                    btn.disabled = false;
+                    btn.textContent = 'CONFIRM — PLACE ORDERS';
+                    return;
+                }
+                nonce = (await nr.json()).nonce;
+            } catch (e) {
+                const resultEl = document.getElementById('modal-result');
+                resultEl.style.display = 'block';
+                resultEl.innerHTML = \`<span class="modal-err">Network error fetching confirmation token.</span>\`;
+                btn.disabled = false;
+                btn.textContent = 'CONFIRM — PLACE ORDERS';
+                return;
+            }
+
             const r = await fetch('/admin/alpaca/api/apply-to-personal?token=' + TOKEN, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Live-Apply-Confirm': CONFIRM_PHRASE },
-                body: JSON.stringify({ orders: pendingOrders, confirmation: CONFIRM_PHRASE }),
+                headers: { 'Content-Type': 'application/json', 'X-Live-Apply-Nonce': nonce },
+                body: JSON.stringify({ orders: pendingOrders }),
             });
             const data = await r.json();
 

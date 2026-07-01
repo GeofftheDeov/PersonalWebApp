@@ -1,8 +1,9 @@
-// MUR-62 verification — run with: npx tsx backend/utils/liveApplyGate.test.ts
-// Proves the live apply-to-personal path cannot auto-execute: it is OFF by
-// default and rejects non-interactive / agent / service-token callers.
+// MUR-77 gate hardening — run with: npx tsx backend/utils/liveApplyGate.test.ts
+// Covers: default-OFF behaviour, human principal check, nonce replay/expiry,
+// agent/service-token rejection, and the happy path.
 import assert from 'node:assert/strict';
-import { evaluateLiveApplyGate, LIVE_APPLY_CONFIRM_PHRASE } from './liveApplyGate.js';
+import { evaluateLiveApplyGate } from './liveApplyGate.js';
+import { issueNonce, consumeNonce, _resetNonceStore } from './liveApplyNonce.js';
 
 let passed = 0;
 function check(name: string, fn: () => void) {
@@ -11,43 +12,113 @@ function check(name: string, fn: () => void) {
     console.log(`  ok - ${name}`);
 }
 
-// Default OFF (env unset): blocked, regardless of confirmation present.
-check('default (env unset) blocks even with valid confirmation', () => {
+// ── Default-OFF behaviour ───────────────────────────────────────────────────
+
+check('default (env unset) blocks even with valid human principal + nonce', () => {
+    const { nonce } = issueNonce();
     const r = evaluateLiveApplyGate({
         enabledEnv: undefined,
-        confirmHeader: LIVE_APPLY_CONFIRM_PHRASE,
-        confirmBody: LIVE_APPLY_CONFIRM_PHRASE,
+        principalType: 'User',
+        confirmNonce: nonce,
+        verifyNonce: consumeNonce,
     });
     assert.equal(r.allowed, false);
     assert.equal(r.status, 403);
     assert.equal(r.code, 'LIVE_APPLY_DISABLED');
 });
 
-// Anything other than 'true' stays off.
-check("env='1' / 'false' do not enable", () => {
+check("env='1'/'false'/'TRUE'/'yes'/'' do not enable", () => {
+    const { nonce } = issueNonce();
+    let calls = 0;
     for (const v of ['1', 'false', 'TRUE', 'yes', '']) {
-        assert.equal(evaluateLiveApplyGate({ enabledEnv: v, confirmHeader: LIVE_APPLY_CONFIRM_PHRASE, confirmBody: LIVE_APPLY_CONFIRM_PHRASE }).allowed, false);
+        const r = evaluateLiveApplyGate({ enabledEnv: v, principalType: 'User', confirmNonce: nonce, verifyNonce: () => (calls++, true) });
+        assert.equal(r.allowed, false, `env='${v}' should not enable`);
     }
 });
 
-// Enabled but agent / service-token caller (no confirmation): rejected.
-check('enabled + no confirmation (agent caller) is rejected', () => {
-    const r = evaluateLiveApplyGate({ enabledEnv: 'true', confirmHeader: undefined, confirmBody: undefined });
+// ── Agent / service-token rejection (positive principal check) ──────────────
+
+check('enabled + no principalType (agent/service caller) is rejected', () => {
+    const { nonce } = issueNonce();
+    const r = evaluateLiveApplyGate({
+        enabledEnv: 'true',
+        principalType: undefined,
+        confirmNonce: nonce,
+        verifyNonce: () => true,
+    });
     assert.equal(r.allowed, false);
-    assert.equal(r.code, 'LIVE_APPLY_CONFIRMATION_REQUIRED');
+    assert.equal(r.code, 'LIVE_APPLY_AGENT_FORBIDDEN');
 });
 
-// Enabled but only one of header/body present: rejected.
-check('enabled + partial confirmation is rejected', () => {
-    assert.equal(evaluateLiveApplyGate({ enabledEnv: 'true', confirmHeader: LIVE_APPLY_CONFIRM_PHRASE, confirmBody: undefined }).allowed, false);
-    assert.equal(evaluateLiveApplyGate({ enabledEnv: 'true', confirmHeader: undefined, confirmBody: LIVE_APPLY_CONFIRM_PHRASE }).allowed, false);
+check('enabled + service token type is rejected', () => {
+    const r = evaluateLiveApplyGate({
+        enabledEnv: 'true',
+        principalType: 'service',
+        confirmNonce: 'any',
+        verifyNonce: () => true,
+    });
+    assert.equal(r.allowed, false);
+    assert.equal(r.code, 'LIVE_APPLY_AGENT_FORBIDDEN');
 });
 
-// Enabled + full explicit interactive confirmation: allowed.
-check('enabled + explicit interactive confirmation is allowed', () => {
-    const r = evaluateLiveApplyGate({ enabledEnv: 'true', confirmHeader: LIVE_APPLY_CONFIRM_PHRASE, confirmBody: LIVE_APPLY_CONFIRM_PHRASE });
+check('Lead principal type is accepted (board member via Google login)', () => {
+    const { nonce } = issueNonce();
+    const r = evaluateLiveApplyGate({
+        enabledEnv: 'true',
+        principalType: 'Lead',
+        confirmNonce: nonce,
+        verifyNonce: consumeNonce,
+    });
+    assert.equal(r.allowed, true);
+});
+
+// ── Nonce replay and expiry ─────────────────────────────────────────────────
+
+check('nonce replay is rejected (single-use)', () => {
+    const { nonce } = issueNonce();
+    // First use: should pass
+    const r1 = evaluateLiveApplyGate({
+        enabledEnv: 'true', principalType: 'User', confirmNonce: nonce, verifyNonce: consumeNonce,
+    });
+    assert.equal(r1.allowed, true, 'first use should succeed');
+    // Replay: same nonce reused
+    const r2 = evaluateLiveApplyGate({
+        enabledEnv: 'true', principalType: 'User', confirmNonce: nonce, verifyNonce: consumeNonce,
+    });
+    assert.equal(r2.allowed, false, 'replay should be rejected');
+    assert.equal(r2.code, 'LIVE_APPLY_NONCE_INVALID');
+});
+
+check('unknown nonce is rejected', () => {
+    const r = evaluateLiveApplyGate({
+        enabledEnv: 'true', principalType: 'User', confirmNonce: 'not-a-real-nonce', verifyNonce: consumeNonce,
+    });
+    assert.equal(r.allowed, false);
+    assert.equal(r.code, 'LIVE_APPLY_NONCE_INVALID');
+});
+
+check('no nonce provided is rejected', () => {
+    const r = evaluateLiveApplyGate({
+        enabledEnv: 'true', principalType: 'User', confirmNonce: undefined, verifyNonce: consumeNonce,
+    });
+    assert.equal(r.allowed, false);
+    assert.equal(r.code, 'LIVE_APPLY_NONCE_INVALID');
+});
+
+// ── Happy path ──────────────────────────────────────────────────────────────
+
+check('enabled + User principal + fresh nonce is allowed', () => {
+    const { nonce } = issueNonce();
+    const r = evaluateLiveApplyGate({
+        enabledEnv: 'true',
+        principalType: 'User',
+        confirmNonce: nonce,
+        verifyNonce: consumeNonce,
+    });
     assert.equal(r.allowed, true);
     assert.equal(r.status, 200);
+    assert.equal(r.code, 'LIVE_APPLY_ALLOWED');
 });
 
-console.log(`\nMUR-62 live-apply gate: ${passed} checks passed.`);
+_resetNonceStore();
+console.log(`\nMUR-77 live-apply gate (nonce hardening): ${passed} checks passed.`);

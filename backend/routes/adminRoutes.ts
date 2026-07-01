@@ -8,6 +8,7 @@ import { renderMarkdown } from '../utils/markdown.js';
 import AlpacaSnapshot from '../models/AlpacaSnapshot.js';
 import { getDecryptedKeys } from './apiKeyRoutes.js';
 import { evaluateLiveApplyGate } from '../utils/liveApplyGate.js';
+import { issueNonce, consumeNonce } from '../utils/liveApplyNonce.js';
 
 const router = express.Router();
 
@@ -25,7 +26,7 @@ const verifyToken = (req: any, res: express.Response, next: express.NextFunction
 
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET || "your-secret-key-change-this") as any;
-        req.adminUser = { id: decoded.id, email: decoded.email };
+        req.adminUser = { id: decoded.id, email: decoded.email, principalType: decoded.type };
         next();
     } catch (err: any) {
         console.log(`[AUTH] 401: Invalid token for ${req.originalUrl}. Error: ${err.message}`);
@@ -1028,7 +1029,15 @@ router.get('/alpaca/api/snapshots', async (req, res) => {
 // These routes use the requesting admin's vault keys (provider: 'alpaca_live')
 // rather than the shared env-var paper keys.
 
+// personalAlpacaFetch is intentionally restricted to read-only (GET) requests.
+// Mutating methods (POST/DELETE/PATCH) must go through the gated apply-to-personal
+// route so the MUR-77 gate is always evaluated. This prevents future callers from
+// accidentally bypassing the live-order gate by calling this primitive directly.
 async function personalAlpacaFetch(userId: mongoose.Types.ObjectId, urlPath: string, opts?: RequestInit): Promise<unknown> {
+    const method = (opts?.method ?? 'GET').toUpperCase();
+    if (method !== 'GET') {
+        throw new Error(`personalAlpacaFetch only allows GET requests. Use the gated apply-to-personal route for ${method} ${urlPath}.`);
+    }
     const keys = await getDecryptedKeys(userId, 'alpaca_live');
     if (!keys) throw new Error('No personal Alpaca keys found. Add them on the Profile page.');
     const base = 'https://api.alpaca.markets/v2';
@@ -1063,21 +1072,34 @@ router.get('/alpaca/api/personal/orders', async (req: any, res) => {
     } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+// GET /admin/alpaca/live-apply-nonce
+// Issues a single-use, time-bounded nonce (5-min TTL) for the live apply gate.
+// The UI must fetch this immediately before submitting the apply-to-personal POST
+// and echo the nonce in the X-Live-Apply-Nonce header. Requires the env to be ON.
+router.get('/alpaca/live-apply-nonce', (req: any, res) => {
+    if (process.env.LIVE_APPLY_TO_PERSONAL_ENABLED !== 'true') {
+        return res.status(403).json({ error: 'Live apply is disabled; nonce not available.', code: 'LIVE_APPLY_DISABLED' });
+    }
+    res.json(issueNonce());
+});
+
 // POST /admin/alpaca/api/apply-to-personal
 // Mirrors current paper positions as market orders on the live account.
 // Body: { orders: [{ symbol, notional }] }  (confirmed by the client modal).
 router.post('/alpaca/api/apply-to-personal', async (req: any, res) => {
-    // MUR-62 SAFETY GATE: real-money order placement is OFF by default and
-    // requires an explicit, per-trade, interactive board-member confirmation.
-    // Non-interactive / agent / service-token callers are rejected here before
+    // MUR-62 + MUR-77 SAFETY GATE: real-money order placement is OFF by default.
+    // When enabled, requires (a) a human board-member JWT (positive type check) and
+    // (b) a valid per-trade server-issued single-use nonce from the nonce endpoint.
+    // Non-interactive, service, and agent token callers are rejected before
     // any vault key is decrypted or any order is sent to Alpaca.
     const gate = evaluateLiveApplyGate({
         enabledEnv: process.env.LIVE_APPLY_TO_PERSONAL_ENABLED,
-        confirmHeader: req.header('X-Live-Apply-Confirm'),
-        confirmBody: req.body?.confirmation,
+        principalType: req.adminUser?.principalType,
+        confirmNonce: req.header('X-Live-Apply-Nonce'),
+        verifyNonce: consumeNonce,
     });
     if (!gate.allowed) {
-        console.warn(`[MUR-62] Blocked live apply-to-personal (${gate.code}) user=${req.adminUser?.id}`);
+        console.warn(`[MUR-77] Blocked live apply-to-personal (${gate.code}) user=${req.adminUser?.id}`);
         return res.status(gate.status).json({ error: gate.error, code: gate.code });
     }
 

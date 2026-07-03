@@ -88,6 +88,7 @@ jobs:
             SYNC_API_KEY=${{ secrets.SYNC_API_KEY }}
             EMAIL_PASS=${{ secrets.EMAIL_PASS }}
             JWT_SECRET=${{ secrets.JWT_SECRET }}
+            VAULT_ENCRYPTION_KEY=${{ secrets.VAULT_ENCRYPTION_KEY }}
             SF_PASSWORD=${{ secrets.SF_PASSWORD }}
             SF_CLIENT_ID=${{ secrets.SF_CLIENT_ID }}
             SF_PRIVATE_KEY_CONTENT=${{ secrets.SF_PRIVATE_KEY_CONTENT }}

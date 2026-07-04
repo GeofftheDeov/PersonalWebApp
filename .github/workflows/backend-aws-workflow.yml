@@ -168,6 +168,9 @@ jobs:
         task-definition: ${{ env.ECS_TASK_DEFINITION }}
         container-name: ${{ env.CONTAINER_BACKEND }}
         image: ${{ steps.build-backend-image.outputs.image }}
+        # NOTE: ANTHROPIC_API_KEY, ALPACA_API_KEY, ALPACA_SECRET_KEY are now injected
+        # via the task-def `secrets` block (AWS Secrets Manager), not as plaintext env.
+        # Do not re-add them here — doing so re-exposes them as plaintext task-def env.
         environment-variables: |
           SYNC_API_KEY=${{ secrets.SYNC_API_KEY }}
           EMAIL_PASS=${{ secrets.EMAIL_PASS }}
@@ -175,9 +178,6 @@ jobs:
           SF_CLIENT_ID=${{ secrets.SF_CLIENT_ID }}
           SF_PRIVATE_KEY_CONTENT=${{ secrets.SF_PRIVATE_KEY_CONTENT }}
           GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
-          ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
-          ALPACA_API_KEY=${{ secrets.ALPACA_API_KEY }}
-          ALPACA_SECRET_KEY=${{ secrets.ALPACA_SECRET_KEY }}
           VAULT_TOKEN=${{ secrets.VAULT_TOKEN }}
 
     - name: Fill in the new frontend image ID in the Amazon ECS task definition
@@ -239,10 +239,10 @@ jobs:
         PROD_IP=$(aws ecs describe-tasks --cluster artistic-hippopotamus-hw7oq2 --tasks "$PROD_TASK_ID" --query 'tasks[0].attachments[0].details[?name==`privateIPv4Address`].value' --output text)
 
         # Get Dev Task IP
-        DEV_TASK_ARN=$(aws ecs list-tasks --cluster dev-cluster --service-name personal-web-app-dev-service --query 'taskArns[0]' --output text)
+        DEV_TASK_ARN=$(aws ecs list-tasks --cluster dev-cluster --service-name personal-web-app-dev-service --query 'taskArns[0]' --output text 2>/dev/null || echo "None")
         if [ -z "$DEV_TASK_ARN" ] || [ "$DEV_TASK_ARN" = "None" ]; then
-          echo "Error: No running tasks found in dev cluster"
-          exit 1
+          echo "::notice::No running tasks in dev cluster — skipping data refresh (dev is optional; prod deploy already succeeded)."
+          exit 0
         fi
         DEV_TASK_ID=$(echo "$DEV_TASK_ARN" | awk -F'/' '{print $NF}')
         DEV_IP=$(aws ecs describe-tasks --cluster dev-cluster --tasks "$DEV_TASK_ID" --query 'tasks[0].attachments[0].details[?name==`privateIPv4Address`].value' --output text)

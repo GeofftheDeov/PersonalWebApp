@@ -138,22 +138,31 @@ router.put("/request/:id", auth, async (req: any, res) => {
             }
             await modelForType(fromPerson.type).findByIdAndUpdate(request.from, { $addToSet: { friends: request.to } }, { session });
             await modelForType(toPerson.type).findByIdAndUpdate(request.to, { $addToSet: { friends: request.from } }, { session });
-        } else {
+        } else if (action === "reject") {
             request.status = "rejected";
             await request.save({ session });
+        } else {
+            throw new Error("Invalid action. Must be 'accept' or 'reject'");
         }
 
         await session.commitTransaction();
         session.endSession();
 
-        // Clear the recipient's bell entry; tell the sender if accepted.
+        // Clear the recipient's bell entry; notify the sender based on action.
         resolveNotifications(userId, `fr:${request._id}`).catch(() => { /* logged inside */ });
+
+        const actor = await findPersonById(userId, "name firstName lastName handle");
+        const actorName = actor ? personDisplayName(actor.doc) : "Someone";
+
         if (action === "accept") {
-            const accepter = await findPersonById(userId, "name firstName lastName handle");
-            const accepterName = accepter ? personDisplayName(accepter.doc) : "Someone";
             notify(request.from, {
                 type: "system",
-                title: `@${accepterName} accepted your friend request`,
+                title: `@${actorName} accepted your friend request`,
+            }).catch(() => { /* logged inside */ });
+        } else if (action === "reject") {
+            notify(request.from, {
+                type: "system",
+                title: `@${actorName} declined your friend request`,
             }).catch(() => { /* logged inside */ });
         }
 
@@ -221,13 +230,4 @@ router.post("/link-discord", auth, async (req: any, res) => {
 
         const me = await findPersonById(userId);
         if (!me) return res.status(404).json({ error: "Account not found" });
-        await modelForType(me.type).findByIdAndUpdate(userId, { discordId, discordHandle });
-
-        res.json({ message: "Discord account linked successfully" });
-    } catch (error) {
-        console.error("Link discord error:", error);
-        res.status(500).json({ error: "Failed to link discord" });
-    }
-});
-
-export default router;
+      

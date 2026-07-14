@@ -166,7 +166,8 @@ router.put("/request/:id", auth, async (req: any, res) => {
             }).catch(() => { /* logged inside */ });
         }
 
-        res.json({ message: `Request ${action}ed successfully` });
+        const actionDisplay = action === "accept" ? "accepted" : "declined";
+        res.json({ message: `Request ${actionDisplay} successfully` });
     } catch (error) {
         await session.abortTransaction();
         session.endSession();
@@ -230,4 +231,13 @@ router.post("/link-discord", auth, async (req: any, res) => {
 
         const me = await findPersonById(userId);
         if (!me) return res.status(404).json({ error: "Account not found" });
-      
+        await modelForType(me.type).findByIdAndUpdate(userId, { discordId, discordHandle });
+
+        res.json({ message: "Discord account linked successfully" });
+    } catch (error) {
+        console.error("Link discord error:", error);
+        res.status(500).json({ error: "Failed to link discord" });
+    }
+});
+
+export default router;

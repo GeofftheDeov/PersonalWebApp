@@ -62,10 +62,13 @@ const statusBadge = (s?: string) => {
   return 'bg-zinc-700 text-zinc-300';
 };
 
-// Derive a readable label from a raw run event
+// Derive a readable label from a raw run event.
+// Verified heartbeat-run event rows look like:
+// { seq, eventType: 'lifecycle' | 'adapter.invoke' | ..., stream, level,
+//   message: 'run started', payload, createdAt }
 function eventToEntry(evt: RunEvent): TranscriptEntry {
   const tool = evt.tool ?? evt.toolName ?? '';
-  const kind = (evt.type ?? evt.kind ?? '').toLowerCase();
+  const kind = (evt.type ?? evt.kind ?? (evt as any).eventType ?? '').toLowerCase();
   const ts = Date.now();
 
   if (tool || kind === 'tool_call' || kind === 'tool_result' || kind === 'tool_use') {
@@ -79,7 +82,9 @@ function eventToEntry(evt: RunEvent): TranscriptEntry {
   }
 
   const text =
-    typeof evt.content === 'string'
+    typeof (evt as any).message === 'string'
+      ? (evt as any).message
+      : typeof evt.content === 'string'
       ? evt.content
       : typeof (evt as any).text === 'string'
       ? (evt as any).text
@@ -159,7 +164,7 @@ export default function CFOConsolePage() {
   const [streaming, setStreaming] = useState(false);
   const [streamDone, setStreamDone] = useState(false);
   const [streamConnected, setStreamConnected] = useState(false);
-  const esRef = useRef<EventSource | null>(null);
+  const pollAbortRef = useRef<{ stopped: boolean } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Toast
@@ -211,61 +216,81 @@ export default function CFOConsolePage() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [transcript]);
 
-  // ── SSE stream
+  // ── Run transcript polling
+  // Polls /api/paperclip/runs/:id/events with a cursor every 2s until the run
+  // reaches a terminal status (or 10 min). Plain fetch means the normal
+  // Authorization header works — EventSource couldn't send one.
+  const POLL_MS = 2_000;
+  const POLL_TIMEOUT_MS = 10 * 60 * 1_000;
+  // Verified Paperclip heartbeat-run statuses; the last four are terminal.
+  const TERMINAL = new Set(['succeeded', 'failed', 'cancelled', 'timed_out']);
+
   const startStream = useCallback((rid: string) => {
-    if (esRef.current) esRef.current.close();
+    if (pollAbortRef.current) pollAbortRef.current.stopped = true;
+    const ctl = { stopped: false };
+    pollAbortRef.current = ctl;
 
     setTranscript([{ kind: 'status', text: `Connecting to run ${rid}…`, ts: Date.now() }]);
     setStreamDone(false);
     setStreamConnected(false);
     setStreaming(true);
 
-    const t = token();
-    const url = `/api/paperclip/runs/${encodeURIComponent(rid)}/stream?token=${encodeURIComponent(t ?? '')}`;
-    const es = new EventSource(url);
-    esRef.current = es;
-
-    es.addEventListener('status', (e: MessageEvent) => {
-      try {
-        const d = JSON.parse(e.data);
-        setStreamConnected(true);
-        setTranscript(prev => [...prev, { kind: 'status', text: d.text ?? 'Connected', ts: Date.now() }]);
-      } catch { /* ignore */ }
-    });
-
-    es.addEventListener('run_event', (e: MessageEvent) => {
-      try {
-        const evt: RunEvent = JSON.parse(e.data);
-        setTranscript(prev => [...prev, eventToEntry(evt)]);
-      } catch { /* ignore malformed frame */ }
-    });
-
-    es.addEventListener('done', (e: MessageEvent) => {
-      try {
-        const d = JSON.parse(e.data);
-        setTranscript(prev => [...prev, { kind: 'status', text: `Run ${d.status ?? 'done'}`, ts: Date.now() }]);
-      } catch { /* ignore */ }
+    const finish = (msg: string, isError = false) => {
+      if (ctl.stopped) return;
+      ctl.stopped = true;
+      setTranscript(prev => [...prev, { kind: isError ? 'error' : 'status', text: msg, ts: Date.now() }]);
       setStreamDone(true);
       setStreaming(false);
-      es.close();
-    });
+      setStreamConnected(false);
+    };
 
-    es.addEventListener('error', (e: MessageEvent) => {
-      let text = 'Stream error';
-      try { text = JSON.parse(e.data)?.message ?? text; } catch { /* ignore */ }
-      setTranscript(prev => [...prev, { kind: 'error', text, ts: Date.now() }]);
-      setStreamDone(true);
-      setStreaming(false);
-      es.close();
-    });
+    (async () => {
+      let cursor = 0; // last seen event seq (numeric, monotonic)
+      const startedAt = Date.now();
 
-    es.onerror = () => { setStreamConnected(false); };
+      while (!ctl.stopped) {
+        if (Date.now() - startedAt > POLL_TIMEOUT_MS) {
+          finish('Stopped watching after 10 minutes', true);
+          return;
+        }
 
-    return () => { es.close(); };
+        try {
+          const qs = cursor > 0 ? `?afterSeq=${cursor}` : '';
+          const res = await fetch(`/api/paperclip/runs/${encodeURIComponent(rid)}/events${qs}`, { headers: ah() });
+          const data = await res.json();
+          if (!res.ok) { finish((data as any)?.error ?? `Upstream ${res.status}`, true); return; }
+          if (ctl.stopped) return;
+
+          setStreamConnected(true);
+          // The events endpoint returns a bare array of rows, each with a
+          // numeric `seq` — poll incrementally with ?afterSeq=<last seq>.
+          const events: RunEvent[] = Array.isArray(data) ? data : [];
+          if (events.length > 0) {
+            setTranscript(prev => [...prev, ...events.map(eventToEntry)]);
+            for (const evt of events) {
+              const seq = (evt as any)?.seq;
+              if (typeof seq === 'number' && seq > cursor) cursor = seq;
+            }
+          }
+
+          // Terminal-status check
+          const statusRes = await fetch(`/api/paperclip/runs/${encodeURIComponent(rid)}`, { headers: ah() });
+          if (statusRes.ok) {
+            const run = await statusRes.json();
+            const status = String((run as any)?.status ?? '').toLowerCase();
+            if (TERMINAL.has(status)) { finish(`Run ${status}`); return; }
+          }
+        } catch {
+          setStreamConnected(false); // transient network error — keep polling
+        }
+
+        await new Promise<void>(resolve => setTimeout(resolve, POLL_MS));
+      }
+    })();
   }, []);
 
   useEffect(() => {
-    return () => { esRef.current?.close(); };
+    return () => { if (pollAbortRef.current) pollAbortRef.current.stopped = true; };
   }, []);
 
   // ── Submit issue

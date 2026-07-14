@@ -84,19 +84,22 @@ jobs:
           task-definition: ${{ env.ECS_TASK_DEFINITION }}
           container-name: ${{ env.CONTAINER_BACKEND }}
           image: ${{ steps.build-backend-image.outputs.image }}
+          # NOTE: JWT_SECRET, VAULT_ENCRYPTION_KEY, ANTHROPIC_API_KEY, ALPACA_API_KEY and
+          # ALPACA_SECRET_KEY are injected via the ECS `secrets` block (Secrets Manager
+          # valueFrom) in dev-task-definition.json — do NOT re-add them below. ECS rejects
+          # a task definition where the same name appears in both `environment` and
+          # `secrets` ("The secret name must be unique..."), and an unset GitHub secret
+          # renders an empty string, which hard-crashes the backend at boot (MUR-165/169).
+          # Comments cannot go inside the block below: the render action parses every
+          # line as KEY=value and throws on lines without "=".
           environment-variables: |
             SYNC_API_KEY=${{ secrets.SYNC_API_KEY }}
             EMAIL_PASS=${{ secrets.EMAIL_PASS }}
-            JWT_SECRET=${{ secrets.JWT_SECRET }}
-            VAULT_ENCRYPTION_KEY=${{ secrets.VAULT_ENCRYPTION_KEY }}
             SF_PASSWORD=${{ secrets.SF_PASSWORD }}
             SF_CLIENT_ID=${{ secrets.SF_CLIENT_ID }}
             SF_PRIVATE_KEY_CONTENT=${{ secrets.SF_PRIVATE_KEY_CONTENT }}
             FRONTEND_URL=https://deov.geoffthedeov.net
             GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
-            ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
-            ALPACA_API_KEY=${{ secrets.ALPACA_API_KEY }}
-            ALPACA_SECRET_KEY=${{ secrets.ALPACA_SECRET_KEY }}
             VAULT_TOKEN=${{ secrets.VAULT_TOKEN }}
             GITHUB_VAULT_REPO=GeofftheDeov/obsidian-vault
             OBSIDIAN_VAULT_PATH=/obsidian-vault

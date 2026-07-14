@@ -8,6 +8,7 @@ import { renderMarkdown } from '../utils/markdown.js';
 import AlpacaSnapshot from '../models/AlpacaSnapshot.js';
 import { getDecryptedKeys } from './apiKeyRoutes.js';
 import { evaluateLiveApplyGate } from '../utils/liveApplyGate.js';
+import { pcFetch, paperclipConfigured, PAPERCLIP_COMPANY_ID } from '../services/paperclipClient.js';
 
 const router = express.Router();
 
@@ -2059,6 +2060,277 @@ router.get('/alpaca', (req, res) => {
         token,
         title: 'Alpaca Dashboard',
         activePage: 'alpaca',
+        content,
+        extraStyles
+    }));
+});
+
+// ── Paperclip control-plane page ─────────────────────────────────────────────
+// Read-mostly dashboard over the Paperclip service (org, agents, budgets,
+// costs, issues) with pause/resume + budget controls. Uses the shared client
+// in services/paperclipClient.ts; when PAPERCLIP_BASE_URL is unset the page
+// renders a "not configured" banner instead of erroring.
+
+// Aggregated snapshot — each section fails independently so partial upstream
+// outages still render whatever is available.
+router.get('/paperclip/api/overview', async (_req, res) => {
+    if (!paperclipConfigured()) {
+        return res.json({ configured: false });
+    }
+    if (!PAPERCLIP_COMPANY_ID) {
+        return res.json({ configured: true, companyId: null });
+    }
+    const cid = PAPERCLIP_COMPANY_ID;
+    const [org, agents, costs, issues] = await Promise.all([
+        pcFetch(`/api/companies/${cid}/org`),
+        pcFetch(`/api/companies/${cid}/agents`),
+        pcFetch(`/api/companies/${cid}/costs/summary`),
+        pcFetch(`/api/companies/${cid}/issues`),
+    ]);
+    res.json({
+        configured: true,
+        companyId: cid,
+        org: org.error ? { error: org.error } : org.data,
+        agents: agents.error ? { error: agents.error } : agents.data,
+        costs: costs.error ? { error: costs.error } : costs.data,
+        issues: issues.error ? { error: issues.error } : issues.data,
+    });
+});
+
+router.post('/paperclip/api/agents/:id/pause', async (req, res) => {
+    const result = await pcFetch(`/api/agents/${req.params.id}/pause`, { method: 'POST' });
+    if (result.error) return res.status(result.status).json({ error: result.error });
+    res.json(result.data);
+});
+
+router.post('/paperclip/api/agents/:id/resume', async (req, res) => {
+    const result = await pcFetch(`/api/agents/${req.params.id}/resume`, { method: 'POST' });
+    if (result.error) return res.status(result.status).json({ error: result.error });
+    res.json(result.data);
+});
+
+router.post('/paperclip/api/agents/:id/budget', async (req, res) => {
+    const { budgetMonthlyCents } = req.body as { budgetMonthlyCents?: number };
+    if (typeof budgetMonthlyCents !== 'number' || budgetMonthlyCents < 0) {
+        return res.status(400).json({ error: 'budgetMonthlyCents (non-negative number) is required' });
+    }
+    const result = await pcFetch(`/api/agents/${req.params.id}/budgets`, {
+        method: 'PATCH',
+        body: JSON.stringify({ budgetMonthlyCents }),
+    });
+    if (result.error) return res.status(result.status).json({ error: result.error });
+    res.json(result.data);
+});
+
+router.get('/paperclip', (req: any, res) => {
+    const token = req.query.token as string;
+
+    const content = `
+        <div class="pc-wrap">
+            <div id="pc-banner" class="pc-banner hidden"></div>
+
+            <div class="pc-grid">
+                <div class="pc-card pc-span2">
+                    <div class="pc-card-head">
+                        <h2>AGENTS</h2>
+                        <button class="btn" id="pc-refresh">REFRESH</button>
+                    </div>
+                    <table class="pc-table" id="pc-agents">
+                        <thead>
+                            <tr><th>NAME</th><th>ROLE</th><th>STATUS</th><th>BUDGET/MO</th><th>ACTIONS</th></tr>
+                        </thead>
+                        <tbody><tr><td colspan="5" class="pc-muted">Loading…</td></tr></tbody>
+                    </table>
+                </div>
+
+                <div class="pc-card">
+                    <div class="pc-card-head"><h2>COSTS</h2></div>
+                    <div id="pc-costs" class="pc-muted">Loading…</div>
+                </div>
+
+                <div class="pc-card">
+                    <div class="pc-card-head"><h2>ISSUES</h2></div>
+                    <div id="pc-issues" class="pc-muted">Loading…</div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            const TOKEN = '${token}';
+            const $ = (id) => document.getElementById(id);
+
+            const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            })[c]);
+
+            const dollars = (cents) => (typeof cents === 'number')
+                ? '$' + (cents / 100).toFixed(2)
+                : '—';
+
+            function banner(msg, kind) {
+                const b = $('pc-banner');
+                b.textContent = msg;
+                b.className = 'pc-banner ' + (kind || '');
+            }
+
+            async function api(path, opts) {
+                const sep = path.includes('?') ? '&' : '?';
+                const r = await fetch('/admin/paperclip/api' + path + sep + 'token=' + TOKEN, opts);
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+                return data;
+            }
+
+            function renderAgents(agentsRaw) {
+                const tbody = $('pc-agents').querySelector('tbody');
+                if (agentsRaw && agentsRaw.error) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="pc-err">' + esc(agentsRaw.error) + '</td></tr>';
+                    return;
+                }
+                const list = Array.isArray(agentsRaw) ? agentsRaw : (agentsRaw?.agents ?? agentsRaw?.items ?? []);
+                if (!list.length) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="pc-muted">No agents.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = list.map((a) => {
+                    const status = String(a.status ?? 'unknown').toLowerCase();
+                    const paused = status === 'paused';
+                    return '<tr>' +
+                        '<td>' + esc(a.name ?? a.id) + '</td>' +
+                        '<td>' + esc(a.role ?? a.title ?? '—') + '</td>' +
+                        '<td><span class="pc-status pc-status-' + esc(status) + '">' + esc(status.toUpperCase()) + '</span></td>' +
+                        '<td>' + dollars(a.budgetMonthlyCents) + '</td>' +
+                        '<td>' +
+                            '<button class="btn btn-sm" data-act="' + (paused ? 'resume' : 'pause') + '" data-id="' + esc(a.id) + '">' + (paused ? 'RESUME' : 'PAUSE') + '</button> ' +
+                            '<button class="btn btn-sm" data-act="budget" data-id="' + esc(a.id) + '" data-budget="' + (a.budgetMonthlyCents ?? 0) + '">BUDGET</button>' +
+                        '</td>' +
+                    '</tr>';
+                }).join('');
+            }
+
+            function renderCosts(costsRaw) {
+                const el = $('pc-costs');
+                if (costsRaw && costsRaw.error) { el.innerHTML = '<span class="pc-err">' + esc(costsRaw.error) + '</span>'; return; }
+                if (costsRaw == null) { el.innerHTML = '<span class="pc-muted">No data.</span>'; return; }
+                // Render whatever numeric summary fields exist; fall back to raw JSON.
+                const entries = Object.entries(costsRaw).filter(([, v]) => typeof v === 'number' || typeof v === 'string');
+                el.innerHTML = entries.length
+                    ? '<dl class="pc-dl">' + entries.map(([k, v]) =>
+                        '<dt>' + esc(k) + '</dt><dd>' + esc(/cents/i.test(k) && typeof v === 'number' ? dollars(v) : v) + '</dd>'
+                      ).join('') + '</dl>'
+                    : '<pre class="pc-pre">' + esc(JSON.stringify(costsRaw, null, 2)) + '</pre>';
+            }
+
+            function renderIssues(issuesRaw) {
+                const el = $('pc-issues');
+                if (issuesRaw && issuesRaw.error) { el.innerHTML = '<span class="pc-err">' + esc(issuesRaw.error) + '</span>'; return; }
+                const list = Array.isArray(issuesRaw) ? issuesRaw : (issuesRaw?.issues ?? issuesRaw?.items ?? []);
+                if (!list.length) { el.innerHTML = '<span class="pc-muted">No issues.</span>'; return; }
+                el.innerHTML = '<ul class="pc-issue-list">' + list.slice(0, 10).map((i) =>
+                    '<li><span class="pc-status">' + esc(String(i.status ?? '?').toUpperCase()) + '</span> ' + esc(i.title ?? i.id ?? '') + '</li>'
+                ).join('') + '</ul>';
+            }
+
+            async function load() {
+                try {
+                    const o = await api('/overview');
+                    if (!o.configured) {
+                        banner('Paperclip is not configured on this environment (PAPERCLIP_BASE_URL is unset). See .aws/PAPERCLIP_SERVICE.md.', 'warn');
+                        return;
+                    }
+                    if (!o.companyId) {
+                        banner('PAPERCLIP_COMPANY_ID is not set — service is reachable but no company is selected.', 'warn');
+                        return;
+                    }
+                    banner('Connected — company ' + o.companyId, 'ok');
+                    renderAgents(o.agents);
+                    renderCosts(o.costs);
+                    renderIssues(o.issues);
+                } catch (e) {
+                    banner('Error: ' + e.message, 'err');
+                }
+            }
+
+            $('pc-agents').addEventListener('click', async (ev) => {
+                const btn = ev.target.closest('button[data-act]');
+                if (!btn) return;
+                const id = btn.dataset.id;
+                try {
+                    if (btn.dataset.act === 'budget') {
+                        const current = (Number(btn.dataset.budget) / 100).toFixed(2);
+                        const input = prompt('Monthly budget in dollars:', current);
+                        if (input == null) return;
+                        const cents = Math.round(parseFloat(input) * 100);
+                        if (!Number.isFinite(cents) || cents < 0) { banner('Invalid budget amount', 'err'); return; }
+                        await api('/agents/' + encodeURIComponent(id) + '/budget', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ budgetMonthlyCents: cents }),
+                        });
+                    } else {
+                        await api('/agents/' + encodeURIComponent(id) + '/' + btn.dataset.act, { method: 'POST' });
+                    }
+                    await load();
+                } catch (e) {
+                    banner('Error: ' + e.message, 'err');
+                }
+            });
+
+            $('pc-refresh').addEventListener('click', load);
+            load();
+        </script>
+    `;
+
+    const extraStyles = `
+        body { align-items: flex-start; justify-content: center; overflow-y: auto; }
+        .pc-wrap { width: 90%; max-width: 1100px; padding: 2rem 0; }
+        .hidden { display: none; }
+
+        .pc-banner {
+            border: 1px solid #333; padding: 0.75rem 1rem; margin-bottom: 1.5rem;
+            font-size: 0.85rem; letter-spacing: 0.5px; background: #111;
+        }
+        .pc-banner.ok   { border-color: #0d9488; color: #2dd4bf; }
+        .pc-banner.warn { border-color: #f97316; color: #fdba74; }
+        .pc-banner.err  { border-color: #dc2626; color: #fca5a5; }
+
+        .pc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+        .pc-span2 { grid-column: span 2; }
+        .pc-card { background: #111; border: 1px solid #333; padding: 1rem 1.25rem; }
+        .pc-card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
+        .pc-card-head h2 { margin: 0; font-size: 1rem; letter-spacing: 2px; color: #f97316; }
+
+        .btn {
+            background: #000; color: #e0e0e0; border: 1px solid #555;
+            font-family: inherit; font-size: 0.75rem; letter-spacing: 1px;
+            padding: 0.35rem 0.75rem;
+        }
+        .btn:hover { border-color: #0d9488; color: #2dd4bf; }
+        .btn-sm { padding: 0.2rem 0.5rem; font-size: 0.7rem; }
+
+        .pc-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        .pc-table th { text-align: left; color: #888; font-size: 0.7rem; letter-spacing: 1px; border-bottom: 1px solid #333; padding: 0.4rem 0.5rem; }
+        .pc-table td { border-bottom: 1px solid #222; padding: 0.5rem; }
+
+        .pc-status { font-size: 0.7rem; letter-spacing: 1px; padding: 0.1rem 0.4rem; border: 1px solid #555; }
+        .pc-status-active, .pc-status-running { border-color: #0d9488; color: #2dd4bf; }
+        .pc-status-paused { border-color: #f97316; color: #fdba74; }
+        .pc-status-error, .pc-status-failed { border-color: #dc2626; color: #fca5a5; }
+
+        .pc-muted { color: #666; }
+        .pc-err { color: #fca5a5; }
+        .pc-dl { display: grid; grid-template-columns: auto 1fr; gap: 0.25rem 1rem; margin: 0; font-size: 0.85rem; }
+        .pc-dl dt { color: #888; }
+        .pc-dl dd { margin: 0; }
+        .pc-pre { font-size: 0.75rem; color: #aaa; white-space: pre-wrap; user-select: text !important; }
+        .pc-issue-list { list-style: none; margin: 0; padding: 0; font-size: 0.85rem; }
+        .pc-issue-list li { padding: 0.35rem 0; border-bottom: 1px solid #222; }
+    `;
+
+    res.send(renderPage({
+        token,
+        title: 'Paperclip Control Plane',
+        activePage: 'paperclip',
         content,
         extraStyles
     }));

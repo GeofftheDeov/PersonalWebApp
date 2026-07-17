@@ -94,9 +94,9 @@ jobs:
             SF_PRIVATE_KEY_CONTENT=${{ secrets.SF_PRIVATE_KEY_CONTENT }}
             FRONTEND_URL=https://deov.geoffthedeov.net
             GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
-            ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
-            ALPACA_API_KEY=${{ secrets.ALPACA_API_KEY }}
-            ALPACA_SECRET_KEY=${{ secrets.ALPACA_SECRET_KEY }}
+            # NOTE: ANTHROPIC_API_KEY, ALPACA_API_KEY, ALPACA_SECRET_KEY are now injected
+            # via the ECS `secrets` block (Secrets Manager valueFrom) in dev-task-definition.json,
+            # not as plaintext task-def env here. See MUR-169 (mirrors the prod change in MUR-182).
             VAULT_TOKEN=${{ secrets.VAULT_TOKEN }}
             GITHUB_VAULT_REPO=GeofftheDeov/obsidian-vault
             OBSIDIAN_VAULT_PATH=/obsidian-vault

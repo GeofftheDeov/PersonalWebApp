@@ -25,7 +25,7 @@ export async function getAuthorizedCampaignIds(user: any) {
     };
 
     const memberships = await CampaignMember.find(membershipQuery).select("campaign");
-    return memberships.map(m => m.campaign);
+    return memberships.map((m: any) => m.campaign);
 }
 
 /**

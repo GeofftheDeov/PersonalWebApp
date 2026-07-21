@@ -1,24 +1,18 @@
-import mongoose, { Schema, Document } from 'mongoose';
+import { defineModel } from "../db/model.js";
+import User from "./User.js";
 
 export interface IMessage {
-  role: 'user' | 'assistant';
+  role: "user" | "assistant";
   content: string;
 }
 
-export interface ICloudClawSession extends Document {
-  userId: mongoose.Types.ObjectId;
-  messages: IMessage[];
-  updatedAt: Date;
-}
-
-const MessageSchema = new Schema<IMessage>({
-  role:    { type: String, enum: ['user', 'assistant'], required: true },
-  content: { type: String, required: true },
-}, { _id: false });
-
-const CloudClawSessionSchema = new Schema<ICloudClawSession>({
-  userId:   { type: Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
-  messages: { type: [MessageSchema], default: [] },
-}, { timestamps: true });
-
-export default mongoose.model<ICloudClawSession>('CloudClawSession', CloudClawSessionSchema);
+const CloudClawSession = defineModel({
+  table: "cloud_claw_sessions",
+  fields: {
+    userId: { col: "user_id", type: "uuid" },
+    messages: { col: "messages", type: "jsonb" },
+    createdAt: "created_at", updatedAt: "updated_at",
+  },
+  refs: { userId: () => User },
+});
+export default CloudClawSession;

@@ -1,6 +1,6 @@
 import express, { Response } from "express";
 import jwt from "jsonwebtoken";
-import mongoose from "mongoose";
+import { isUuid } from "../db/model.js";
 import Message from "../models/Message.js";
 import CampaignMember from "../models/CampaignMember.js";
 import Campaign from "../models/Campaign.js";
@@ -93,7 +93,7 @@ function sseAuth(req: any, res: Response): boolean {
 
 /** Auth check on the campaign, shared by all three endpoints. */
 async function assertCampaignAccess(user: any, campaignId: string): Promise<boolean> {
-    if (!mongoose.Types.ObjectId.isValid(campaignId)) return false;
+    if (!isUuid(campaignId)) return false;
     const authorized = await getAuthorizedCampaignIds(user);
     if (authorized === null) return true; // admin
     return authorized.some((id: any) => String(id) === String(campaignId));
@@ -115,7 +115,7 @@ router.get("/campaign/:campaignId", auth, async (req: any, res) => {
         if (req.query.before) {
             const before = String(req.query.before);
             query.createdAt = {
-                $lt: mongoose.Types.ObjectId.isValid(before)
+                $lt: isUuid(before)
                     ? (await Message.findById(before).select("createdAt"))?.createdAt ?? new Date()
                     : new Date(before),
             };
@@ -150,7 +150,7 @@ router.post("/campaign/:campaignId", auth, async (req: any, res) => {
 
         const message = await Message.create({
             campaign: campaignId,
-            event: eventId && mongoose.Types.ObjectId.isValid(eventId) ? eventId : undefined,
+            event: eventId && isUuid(eventId) ? eventId : undefined,
             sender: { id: req.user.id, name: senderName, email: req.user.email },
             body: body.trim(),
         });
@@ -182,9 +182,9 @@ async function notifyCampaignMembers(campaignId: string, senderId: string, sende
             Campaign.findById(campaignId).select("title"),
             CampaignMember.find({ campaign: campaignId }).select("email"),
         ]);
-        const emails = [...new Set(members.map(m => m.email).filter((e): e is string => Boolean(e)))];
+        const emails = [...new Set(members.map((m: any) => m.email).filter((e: any): e is string => Boolean(e)))];
         if (!emails.length) return;
-        const people = await findPeopleByEmail(emails);
+        const people = await findPeopleByEmail(emails as string[]);
         const preview = body.length > 80 ? `${body.slice(0, 77)}...` : body;
         await Promise.all(
             people
@@ -225,7 +225,7 @@ router.get("/campaign/:campaignId/stream", async (req: any, res) => {
 
 /** DMs are friends-only; returns the canonical dmKey or null. */
 async function assertDmAccess(userId: string, otherUserId: string): Promise<string | null> {
-    if (!mongoose.Types.ObjectId.isValid(otherUserId) || String(otherUserId) === String(userId)) return null;
+    if (!isUuid(otherUserId) || String(otherUserId) === String(userId)) return null;
     const me = await findPersonById(userId, "friends");
     if (!me?.doc?.friends?.some((f: any) => String(f) === String(otherUserId))) return null;
     return dmKeyFor(userId, otherUserId);
@@ -245,7 +245,7 @@ router.get("/dm/:userId", auth, async (req: any, res) => {
         if (req.query.before) {
             const before = String(req.query.before);
             query.createdAt = {
-                $lt: mongoose.Types.ObjectId.isValid(before)
+                $lt: isUuid(before)
                     ? (await Message.findById(before).select("createdAt"))?.createdAt ?? new Date()
                     : new Date(before),
             };

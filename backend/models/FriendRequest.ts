@@ -1,26 +1,13 @@
-import mongoose from "mongoose";
+import { defineModel } from "../db/model.js";
+import User from "./User.js";
 
-const friendRequestSchema = new mongoose.Schema({
-  from: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User",
-    required: true
+const FriendRequest = defineModel({
+  table: "friend_requests",
+  fields: {
+    from: { col: "from_user", type: "uuid" },
+    to: { col: "to_user", type: "uuid" },
+    status: "status", createdAt: "created_at",
   },
-  to: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User",
-    required: true
-  },
-  status: {
-    type: String,
-    enum: ["pending", "accepted", "rejected"],
-    default: "pending"
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now
-  }
+  refs: { from: () => User, to: () => User },
 });
-
-const FriendRequest = mongoose.model("FriendRequest", friendRequestSchema);
 export default FriendRequest;

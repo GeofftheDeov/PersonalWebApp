@@ -1,10 +1,15 @@
 services:
-  mongodb:
-    image: mongo:latest
+  postgres:
+    image: postgres:16
+    environment:
+      - POSTGRES_USER=pwa
+      - POSTGRES_PASSWORD=pwa
+      - POSTGRES_DB=personal_web_app
     ports:
-      - "27017:27017"
+      - "5432:5432"
     volumes:
-      - mongo_data:/data/db
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
 
   redis:
     image: redis:7-alpine
@@ -22,11 +27,11 @@ services:
       - "5000:5000"
       - "5001:5001"
     environment:
-      - MONGO_URI=mongodb://mongodb:27017/personal_web_app
+      - DATABASE_URL=postgresql://pwa:pwa@postgres:5432/personal_web_app
       - PORT=5000
       - REDIS_URL=redis://redis:6379
     depends_on:
-      - mongodb
+      - postgres
       - redis
     env_file:
       - ./backend/.env
@@ -51,6 +56,28 @@ services:
     env_file:
       - ./backend/.env
 
+  resume-review:
+    # Stan's Resume Review project. Built from the sibling repo checkout —
+    # requires C:\Users\Geoffrey\Documents\GitHub\resume_review to exist
+    # alongside PersonalWebApp.
+    build:
+      context: ../resume_review/resume_review
+      dockerfile: Dockerfile
+    ports:
+      # Host 5002 (5000/5001 are taken by backend); container listens on 5000.
+      - "5002:5000"
+    environment:
+      # Optional server-side defaults; users can also supply their own
+      # OpenAI/Anthropic key per request in the UI.
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-sonnet-5}
+      - FLASK_SECRET=${RESUME_REVIEW_FLASK_SECRET:-change-me}
+    volumes:
+      - resume_uploads:/app/backend/uploads
+
 volumes:
-  mongo_data:
+  postgres_data:
   redis_data:
+  resume_uploads:

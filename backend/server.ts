@@ -21,7 +21,7 @@ if (!vaultKey) {
 }
 
 import express from "express";
-import mongoose from "mongoose";
+import pool from "./db/index.js";
 import cors from "cors";
 import userRoutes from "./routes/userRoutes.js";
 import leadRoutes from "./routes/leadRoutes.js";
@@ -79,15 +79,17 @@ app.get("/", (req, res) => {
     res.json({ message: "Personal Web App Backend API is Running", version: "1.2.0" });
 });
 
-app.get("/health", (req, res) => {
-    const mongoStatus = mongoose.connection.readyState;
-    // 0 = disconnected, 1 = connected, 2 = connecting, 3 = disconnecting
-    const statusMap: any = { 0: "disconnected", 1: "connected", 2: "connecting", 3: "disconnecting" };
-
+app.get("/health", async (req, res) => {
+    let dbStatus = "connected";
+    try {
+        await pool.query("SELECT 1");
+    } catch {
+        dbStatus = "disconnected";
+    }
     res.status(200).json({
         status: "ok",
         timestamp: new Date().toISOString(),
-        mongodb: statusMap[mongoStatus] || "unknown"
+        postgres: dbStatus
     });
 });
 app.use((req, res, next) => {
@@ -96,12 +98,12 @@ app.use((req, res, next) => {
 });
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-mongoose.connect(process.env.MONGO_URI || "mongodb://localhost:27017/personal_web_app")
+pool.query("SELECT 1")
   .then(() => {
-    const uri = process.env.MONGO_URI || 'DEFAULT (localhost)';
-    console.log(`[BACKEND] MongoDB Connected! URI: ${uri.replace(/:([^@]+)@/, ':***@')}`);
+    const uri = process.env.DATABASE_URL || "DEFAULT (localhost)";
+    console.log(`[BACKEND] Postgres connected! ${uri.replace(/:\/\/([^:]+):([^@]+)@/, "://$1:***@")}`);
   })
-  .catch((err) => console.error(err));
+  .catch((err) => console.error("[BACKEND] Postgres connection failed:", err));
 app.use("/db", dbRoutes);
 app.use("/admin", adminRoutes);
 app.use("/api/users", userRoutes);

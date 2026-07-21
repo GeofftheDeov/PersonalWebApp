@@ -1,4 +1,3 @@
-import mongoose from "mongoose";
 import Notification from "../models/Notification.js";
 import { bus } from "../events/index.js";
 
@@ -17,7 +16,7 @@ interface NotifyInput {
  * event bus. Never throws — notifications are best-effort side effects and
  * must not fail the request that triggered them.
  */
-export async function notify(userId: string | mongoose.Types.ObjectId, input: NotifyInput) {
+export async function notify(userId: string | string, input: NotifyInput) {
     try {
         let doc;
         if (input.sourceKey) {
@@ -69,7 +68,7 @@ export async function notify(userId: string | mongoose.Types.ObjectId, input: No
 }
 
 /** Mark notifications matching a sourceKey as read (e.g. request resolved elsewhere). */
-export async function resolveNotifications(userId: string | mongoose.Types.ObjectId, sourceKey: string) {
+export async function resolveNotifications(userId: string | string, sourceKey: string) {
     try {
         await Notification.updateMany({ user: userId, sourceKey, read: false }, { $set: { read: true } });
     } catch (err: any) {

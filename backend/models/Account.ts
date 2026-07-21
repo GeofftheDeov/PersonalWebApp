@@ -1,114 +1,38 @@
-import mongoose from "mongoose";
-import bcrypt from "bcryptjs";
+import { defineModel } from "../db/model.js";
+import { hashPasswordHook, fourDigit, digitTag } from "./_shared.js";
 import { createLeadFromAccount } from "../services/salesforceService.js";
 
-const accountSchema = new mongoose.Schema({
-    name: { type: String, required: true },
-    email: { type: String, required: false },
-    password: { type: String, required: false },
-    resetPasswordToken: String,
-    resetPasswordExpires: Date,
-    isVerified: { type: Boolean, default: false },
-    emailVerificationToken: String,
-    industry: String,
-    company: String,
-    website: String,
-    handle: String,
-    phone: String,
-    address: String,
-    userNumber: String,
-    userDigit: String,
-    sfID: String,
-    sfRecordTypeID: String,
-    sfRecordTypeName: String,
-    profilePicture: String,
-    favoriteGames: [String],
-    // Cross-collection friend ids (may point at User, Lead, Contact, or Account records)
-    friends: [{ type: mongoose.Schema.Types.ObjectId }],
-    createdAt: { type: Date, default: Date.now },
-});
-
-accountSchema.pre("save", async function() {
-    // Generate IDs if missing
-    if (!this.userNumber) {
-        this.userNumber = Math.floor(1000 + Math.random() * 9000).toString();
-    }
-    if (!this.userDigit) {
-        this.userDigit = "ACC-" + Date.now();
-    }
-
-    if (!this.isModified("password") || !this.password) return;
-    
-    // Don't re-hash if it looks like an existing bcrypt hash
-    if (this.password.startsWith('$2a$') || this.password.startsWith('$2b$')) {
-        return;
-    }
-
-    try {
-        const salt = await bcrypt.genSalt(10);
-        this.password = await bcrypt.hash(this.password, salt);
-    } catch (err: any) {
-        throw err;
-    }
-});
-
-// Post-save hook to sync to Salesforce
-accountSchema.post("save", async function (doc) {
-    // Only sync if this is a new Account (no Salesforce ID yet)
-    if (!doc.sfID) {
+const Account = defineModel({
+  table: "accounts",
+  fields: {
+    name: "name", email: "email", password: "password",
+    resetPasswordToken: "reset_password_token", resetPasswordExpires: "reset_password_expires",
+    isVerified: "is_verified", emailVerificationToken: "email_verification_token",
+    industry: "industry", company: "company", website: "website", handle: "handle",
+    phone: "phone", address: "address", userNumber: "user_number", userDigit: "user_digit",
+    sfID: "sf_id", sfRecordTypeID: "sf_record_type_id", sfRecordTypeName: "sf_record_type_name",
+    profilePicture: "profile_picture",
+    favoriteGames: { col: "favorite_games", type: "text[]" },
+    friends: { col: "friends", type: "uuid[]" },
+    createdAt: "created_at",
+  },
+  defaults: { userNumber: fourDigit, userDigit: digitTag("ACC") },
+  preSave: hashPasswordHook,
+  postSave: (doc) => {
+    if (doc.sfID) return;
+    setImmediate(async () => {
+      try {
         console.log("New Account saved, syncing to Salesforce...");
-        const sfAccountResponse = await createLeadFromAccount(doc);
-        if (sfAccountResponse?.id) {
-            // Update without triggering another save hook
-            const updateData: any = {
-                sfID: sfAccountResponse.id
-            };
-            
-            // Add optional fields if they exist
-            if ((sfAccountResponse as any).recordTypeId) {
-                updateData.sfRecordTypeID = (sfAccountResponse as any).recordTypeId;
-            }
-            if ((sfAccountResponse as any).recordTypeName) {
-                updateData.sfRecordTypeName = (sfAccountResponse as any).recordTypeName;
-            }
-            
-            await Account.updateOne(
-                { _id: doc._id },
-                { $set: updateData }
-            );
-            console.log(`Salesforce Account created with ID: ${sfAccountResponse.id}`);
+        const sf = await createLeadFromAccount(doc);
+        if (sf?.id) {
+          const update: any = { sfID: sf.id };
+          if ((sf as any).recordTypeId) update.sfRecordTypeID = (sf as any).recordTypeId;
+          if ((sf as any).recordTypeName) update.sfRecordTypeName = (sf as any).recordTypeName;
+          await Account.updateOne({ _id: doc._id }, { $set: update });
+          console.log(`Salesforce Account created with ID: ${sf.id}`);
         }
-    }
+      } catch (err) { console.error("[SALESFORCE] Account sync error:", err); }
+    });
+  },
 });
-
-// Post-update hook to sync to Salesforce
-accountSchema.post("updateOne", async function (doc) {
-    // Only sync if this is a new Account (no Salesforce ID yet)
-    if (!doc.sfID) {
-        console.log("New Account saved, syncing to Salesforce...");
-        const sfAccountResponse = await createLeadFromAccount(doc);
-        if (sfAccountResponse?.id) {
-            // Update without triggering another save hook
-            const updateData: any = {
-                sfID: sfAccountResponse.id
-            };
-            
-            // Add optional fields if they exist
-            if ((sfAccountResponse as any).recordTypeId) {
-                updateData.sfRecordTypeID = (sfAccountResponse as any).recordTypeId;
-            }
-            if ((sfAccountResponse as any).recordTypeName) {
-                updateData.sfRecordTypeName = (sfAccountResponse as any).recordTypeName;
-            }
-            
-            await Account.updateOne(
-                { _id: doc._id },
-                { $set: updateData }
-            );
-            console.log(`Salesforce Account created with ID: ${sfAccountResponse.id}`);
-        }
-    }
-});
-
-const Account = mongoose.model("Account", accountSchema);
 export default Account;

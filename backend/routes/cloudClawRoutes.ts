@@ -4,7 +4,6 @@ import fs from 'fs';
 import path from 'path';
 import { auth } from '../middleware/auth.js';
 import CloudClawSession from '../models/CloudClawSession.js';
-import mongoose from 'mongoose';
 import { renderMarkdown } from '../utils/markdown.js';
 
 const router = express.Router();
@@ -217,12 +216,12 @@ router.post('/chat', auth, async (req: any, res: Response) => {
   if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
 
   try {
-    const userId = new mongoose.Types.ObjectId(req.user.id);
+    const userId = String(req.user.id);
     let session = await CloudClawSession.findOne({ userId });
     if (!session) session = new CloudClawSession({ userId, messages: [] });
 
     // Build Anthropic message history from stored session
-    const history: Anthropic.MessageParam[] = session.messages.map(m => ({
+    const history: Anthropic.MessageParam[] = session.messages.map((m: any) => ({
       role: m.role,
       content: m.content,
     }));
@@ -273,11 +272,11 @@ router.post('/chat/stream', auth, async (req: any, res: Response) => {
   req.on('close', () => { console.log('[cloud-claw] stream: req close event (may be benign body-end)'); });
 
   try {
-    const userId = new mongoose.Types.ObjectId(req.user.id);
+    const userId = String(req.user.id);
     let session = await CloudClawSession.findOne({ userId });
     if (!session) session = new CloudClawSession({ userId, messages: [] });
 
-    const history: Anthropic.MessageParam[] = session.messages.map(m => ({ role: m.role, content: m.content }));
+    const history: Anthropic.MessageParam[] = session.messages.map((m: any) => ({ role: m.role, content: m.content }));
     history.push({ role: 'user', content: message });
 
     let assistantText = '';
@@ -376,7 +375,7 @@ router.post('/chat/stream', auth, async (req: any, res: Response) => {
 // DELETE /api/cloud-claw/chat  — clear conversation history
 router.delete('/chat', auth, async (req: any, res: Response) => {
   try {
-    const userId = new mongoose.Types.ObjectId(req.user.id);
+    const userId = String(req.user.id);
     await CloudClawSession.findOneAndUpdate({ userId }, { messages: [] }, { upsert: true });
     res.json({ ok: true });
   } catch (err: any) {
@@ -387,9 +386,9 @@ router.delete('/chat', auth, async (req: any, res: Response) => {
 // GET /api/cloud-claw/history  — fetch existing conversation
 router.get('/history', auth, async (req: any, res: Response) => {
   try {
-    const userId = new mongoose.Types.ObjectId(req.user.id);
+    const userId = String(req.user.id);
     const session = await CloudClawSession.findOne({ userId });
-    const messages = (session?.messages ?? []).map(m => ({
+    const messages = (session?.messages ?? []).map((m: any) => ({
       role: m.role,
       content: m.content,
       html: m.role === 'assistant' && typeof m.content === 'string' ? renderMarkdown(m.content) : undefined,

@@ -1,23 +1,15 @@
-import mongoose from "mongoose";
+import { defineModel } from "../db/model.js";
+import Session from "./Session.js";
+import Dungeon from "./Dungeon.js";
 
-const encounterSchema = new mongoose.Schema({
-    name: { type: String, required: true },
-    description: String,
-    difficulty: {
-        type: String,
-        enum: ["Easy", "Medium", "Hard", "Deadly"],
-        default: "Medium"
-    },
-    type: {
-        type: String,
-        enum: ["Combat", "Social", "Exploration", "Other"],
-        default: "Combat"
-    },
-    session: { type: mongoose.Schema.Types.ObjectId, ref: "Session" },
-    dungeon: { type: mongoose.Schema.Types.ObjectId, ref: "Dungeon" },
-    sfID: String,
-    createdAt: { type: Date, default: Date.now },
+const Encounter = defineModel({
+  table: "encounters",
+  fields: {
+    name: "name", description: "description", difficulty: "difficulty", type: "type",
+    session: { col: "session_id", type: "uuid" },
+    dungeon: { col: "dungeon_id", type: "uuid" },
+    sfID: "sf_id", createdAt: "created_at",
+  },
+  refs: { session: () => Session, dungeon: () => Dungeon },
 });
-
-const Encounter = mongoose.model("Encounter", encounterSchema);
 export default Encounter;

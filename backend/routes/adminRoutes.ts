@@ -2,7 +2,6 @@ import express from 'express';
 import jwt from 'jsonwebtoken';
 import fs from 'fs';
 import path from 'path';
-import mongoose from 'mongoose';
 import { renderPage } from '../utils/adminUi.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import AlpacaSnapshot from '../models/AlpacaSnapshot.js';
@@ -1029,7 +1028,7 @@ router.get('/alpaca/api/snapshots', async (req, res) => {
 // These routes use the requesting admin's vault keys (provider: 'alpaca_live')
 // rather than the shared env-var paper keys.
 
-async function personalAlpacaFetch(userId: mongoose.Types.ObjectId, urlPath: string, opts?: RequestInit): Promise<unknown> {
+async function personalAlpacaFetch(userId: string, urlPath: string, opts?: RequestInit): Promise<unknown> {
     const keys = await getDecryptedKeys(userId, 'alpaca_live');
     if (!keys) throw new Error('No personal Alpaca keys found. Add them on the Profile page.');
     const base = 'https://api.alpaca.markets/v2';
@@ -1045,21 +1044,21 @@ async function personalAlpacaFetch(userId: mongoose.Types.ObjectId, urlPath: str
 
 router.get('/alpaca/api/personal/account', async (req: any, res) => {
     try {
-        const userId = new mongoose.Types.ObjectId(req.adminUser.id);
+        const userId = String(req.adminUser.id);
         res.json(await personalAlpacaFetch(userId, '/account'));
     } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 router.get('/alpaca/api/personal/positions', async (req: any, res) => {
     try {
-        const userId = new mongoose.Types.ObjectId(req.adminUser.id);
+        const userId = String(req.adminUser.id);
         res.json(await personalAlpacaFetch(userId, '/positions'));
     } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 router.get('/alpaca/api/personal/orders', async (req: any, res) => {
     try {
-        const userId = new mongoose.Types.ObjectId(req.adminUser.id);
+        const userId = String(req.adminUser.id);
         res.json(await personalAlpacaFetch(userId, '/orders?limit=20&status=all'));
     } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -1087,7 +1086,7 @@ router.post('/alpaca/api/apply-to-personal', async (req: any, res) => {
         return res.status(400).json({ error: 'orders array is required' });
     }
     try {
-        const userId = new mongoose.Types.ObjectId(req.adminUser.id);
+        const userId = String(req.adminUser.id);
         const keys = await getDecryptedKeys(userId, 'alpaca_live');
         if (!keys) return res.status(400).json({ error: 'No personal Alpaca keys found. Add them on the Profile page.' });
 

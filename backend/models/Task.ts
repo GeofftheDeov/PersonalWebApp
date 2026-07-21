@@ -1,26 +1,12 @@
-import mongoose from "mongoose";
+import { defineModel } from "../db/model.js";
 
-const taskSchema = new mongoose.Schema({
-    title: { type: String, required: true },
-    description: String,
-    status: {
-        type: String,
-        enum: ["Not Started", "In Progress", "Completed"],
-        default: "Not Started"
-    },
-    dueDate: Date,
-    createdAt: { type: Date, default: Date.now },
-    // Salesforce sync fields
-    sfID: String,
-    sfRecordTypeID: String,
-    sfRecordTypeName: String,
-    sfLastSynced: Date,
-    // Notion sync fields
-    notionPageId: String,
-    notionLastSynced: Date,
-    ownerId: String,
-    ownerName: String,
+const Task = defineModel({
+  table: "tasks",
+  fields: {
+    title: "title", description: "description", status: "status", dueDate: "due_date",
+    sfID: "sf_id", sfRecordTypeID: "sf_record_type_id", sfRecordTypeName: "sf_record_type_name",
+    sfLastSynced: "sf_last_synced", notionPageId: "notion_page_id", notionLastSynced: "notion_last_synced",
+    ownerId: "owner_id", ownerName: "owner_name", createdAt: "created_at",
+  },
 });
-
-const Task = mongoose.model("Task", taskSchema);
 export default Task;

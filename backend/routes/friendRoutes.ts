@@ -2,7 +2,7 @@ import express from "express";
 const router = express.Router();
 import FriendRequest from "../models/FriendRequest.js";
 import { auth } from "../middleware/auth.js";
-import mongoose from "mongoose";
+import { startSession } from "../db/model.js";
 import { notify, resolveNotifications } from "../utils/notify.js";
 import { findPersonById, findPersonByHandle, modelForType, personDisplayName, toPublicPerson } from "../utils/personUtils.js";
 
@@ -96,10 +96,10 @@ router.get("/requests", auth, async (req: any, res) => {
             return person ? toPublicPerson(person) : null;
         };
 
-        const incoming = await Promise.all(incomingDocs.map(async r => ({
+        const incoming = await Promise.all(incomingDocs.map(async (r: any) => ({
             _id: r._id, status: r.status, createdAt: r.createdAt, from: await resolveParty(r.from),
         })));
-        const outgoing = await Promise.all(outgoingDocs.map(async r => ({
+        const outgoing = await Promise.all(outgoingDocs.map(async (r: any) => ({
             _id: r._id, status: r.status, createdAt: r.createdAt, to: await resolveParty(r.to),
         })));
 
@@ -112,7 +112,7 @@ router.get("/requests", auth, async (req: any, res) => {
 
 // Respond to friend request (Accept/Reject)
 router.put("/request/:id", auth, async (req: any, res) => {
-    const session = await mongoose.startSession();
+    const session = await startSession();
     session.startTransaction();
     try {
         const { action } = req.body; // 'accept' or 'reject'
@@ -166,7 +166,8 @@ router.put("/request/:id", auth, async (req: any, res) => {
             }).catch(() => { /* logged inside */ });
         }
 
-        res.json({ message: `Request ${action}ed successfully` });
+        const actionDisplay = action === "accept" ? "accepted" : "declined";
+        res.json({ message: `Request ${actionDisplay} successfully` });
     } catch (error) {
         await session.abortTransaction();
         session.endSession();
@@ -196,7 +197,7 @@ router.get("/list", auth, async (req: any, res) => {
 
 // Remove friend
 router.delete("/:id", auth, async (req: any, res) => {
-    const session = await mongoose.startSession();
+    const session = await startSession();
     session.startTransaction();
     try {
         const friendId = req.params.id;
@@ -230,4 +231,13 @@ router.post("/link-discord", auth, async (req: any, res) => {
 
         const me = await findPersonById(userId);
         if (!me) return res.status(404).json({ error: "Account not found" });
-      
+        await modelForType(me.type).findByIdAndUpdate(userId, { discordId, discordHandle });
+
+        res.json({ message: "Discord account linked successfully" });
+    } catch (error) {
+        console.error("Link discord error:", error);
+        res.status(500).json({ error: "Failed to link discord" });
+    }
+});
+
+export default router;

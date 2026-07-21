@@ -1,4 +1,4 @@
-import mongoose from "mongoose";
+import { isUuid } from "../db/model.js";
 import User from "../models/User.js";
 import Lead from "../models/Lead.js";
 import Contact from "../models/Contact.js";
@@ -13,7 +13,7 @@ import Account from "../models/Account.js";
 
 export type PersonType = "User" | "Lead" | "Contact" | "Account";
 
-export const PERSON_MODELS: Record<PersonType, mongoose.Model<any>> = {
+export const PERSON_MODELS: Record<PersonType, any> = {
     User,
     Lead,
     Contact,
@@ -22,7 +22,7 @@ export const PERSON_MODELS: Record<PersonType, mongoose.Model<any>> = {
 
 const PERSON_TYPES: PersonType[] = ["User", "Lead", "Contact", "Account"];
 
-export function modelForType(type?: string): mongoose.Model<any> {
+export function modelForType(type?: string): any {
     return PERSON_MODELS[(type as PersonType)] || Lead;
 }
 
@@ -32,8 +32,8 @@ export interface ResolvedPerson {
 }
 
 /** Find a person by id, whichever collection they live in. */
-export async function findPersonById(id: string | mongoose.Types.ObjectId, select?: string): Promise<ResolvedPerson | null> {
-    if (!mongoose.Types.ObjectId.isValid(String(id))) return null;
+export async function findPersonById(id: string | string, select?: string): Promise<ResolvedPerson | null> {
+    if (!isUuid(String(id))) return null;
     const results = await Promise.all(
         PERSON_TYPES.map(async (type) => {
             const q = PERSON_MODELS[type].findById(id);

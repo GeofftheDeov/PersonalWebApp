@@ -1,5 +1,4 @@
 import express, { Response } from 'express';
-import mongoose from 'mongoose';
 import { auth } from '../middleware/auth.js';
 import ApiKeyVault from '../models/ApiKeyVault.js';
 import { encrypt, decrypt } from '../utils/encryption.js';
@@ -11,9 +10,9 @@ const router = express.Router();
 // Secrets are never returned — only a redacted preview of the key ID.
 router.get('/', auth, async (req: any, res: Response) => {
   try {
-    const userId = new mongoose.Types.ObjectId(req.user.id);
+    const userId = String(req.user.id);
     const entries = await ApiKeyVault.find({ userId }).lean();
-    res.json(entries.map(e => ({
+    res.json(entries.map((e: any) => ({
       provider: e.provider,
       label: e.label,
       keyIdPreview: (() => {
@@ -37,7 +36,7 @@ router.put('/:provider', auth, async (req: any, res: Response) => {
     return res.status(400).json({ error: 'keyId and secret are required' });
   }
   try {
-    const userId = new mongoose.Types.ObjectId(req.user.id);
+    const userId = String(req.user.id);
     const { provider } = req.params;
 
     await ApiKeyVault.findOneAndUpdate(
@@ -59,7 +58,7 @@ router.put('/:provider', auth, async (req: any, res: Response) => {
 // ── DELETE /api/api-keys/:provider ────────────────────────────────────────────
 router.delete('/:provider', auth, async (req: any, res: Response) => {
   try {
-    const userId = new mongoose.Types.ObjectId(req.user.id);
+    const userId = String(req.user.id);
     await ApiKeyVault.findOneAndDelete({ userId, provider: req.params.provider });
     res.json({ ok: true });
   } catch (err: any) {
@@ -72,7 +71,7 @@ router.delete('/:provider', auth, async (req: any, res: Response) => {
  * Used internally by admin routes — NOT exposed as an HTTP handler.
  */
 export async function getDecryptedKeys(
-  userId: mongoose.Types.ObjectId,
+  userId: string,
   provider: string,
 ): Promise<{ keyId: string; secret: string } | null> {
   const entry = await ApiKeyVault.findOne({ userId, provider }).lean();

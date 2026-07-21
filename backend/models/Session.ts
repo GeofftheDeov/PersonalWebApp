@@ -1,34 +1,18 @@
-import mongoose from "mongoose";
+import { defineModel } from "../db/model.js";
+import Campaign from "./Campaign.js";
 
-const sessionSchema = new mongoose.Schema({
-    title: { type: String, required: true },
-    campaign: { type: mongoose.Schema.Types.ObjectId, ref: "Campaign", required: true },
-    date: { type: Date, default: Date.now },
-    // End time — required when creating Discord (external) or Google Calendar events.
-    endDate: Date,
-    location: String,
-    isOnline: { type: Boolean, default: false },
-    agenda: String,
-    summary: String,
-    vodUrl: String,
-    // External event integrations
-    discordEventId: String,
-    googleEventId: String,
-    googleCalendarLink: String,
-    sfID: String,
-    // Ready-up check: sent ~30 minutes before the session starts. Players
-    // respond via POST /api/tabletop/sessions/:id/ready.
-    readyCheck: {
-        sentAt: Date,
-        responses: [{
-            playerId: { type: String, required: true }, // person id (User/Lead/Contact/Account)
-            name: String,
-            ready: { type: Boolean, default: false },
-            respondedAt: Date,
-        }],
-    },
-    createdAt: { type: Date, default: Date.now },
+const Session = defineModel({
+  table: "game_sessions",
+  fields: {
+    title: "title",
+    campaign: { col: "campaign_id", type: "uuid" },
+    date: "date", endDate: "end_date", location: "location", isOnline: "is_online",
+    agenda: "agenda", summary: "summary", vodUrl: "vod_url",
+    discordEventId: "discord_event_id", googleEventId: "google_event_id",
+    googleCalendarLink: "google_calendar_link", sfID: "sf_id",
+    readyCheck: { col: "ready_check", type: "jsonb" },
+    createdAt: "created_at",
+  },
+  refs: { campaign: () => Campaign },
 });
-
-const Session = mongoose.model("Session", sessionSchema);
 export default Session;

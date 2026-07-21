@@ -1,17 +1,13 @@
-import mongoose from "mongoose";
+import { defineModel } from "../db/model.js";
+import Account from "./Account.js";
 
-const opportunitySchema = new mongoose.Schema({
-    name: { type: String, required: true },
-    amount: Number,
-    stage: {
-        type: String,
-        enum: ["Probe", "Negotiate", "Closed Won", "Closed Lost"],
-        default: "Probe"
-    },
-    closeDate: Date,
-    accountId: { type: mongoose.Schema.Types.ObjectId, ref: "Account" },
-    createdAt: { type: Date, default: Date.now },
+const Opportunity = defineModel({
+  table: "opportunities",
+  fields: {
+    name: "name", amount: "amount", stage: "stage", closeDate: "close_date",
+    accountId: { col: "account_id", type: "uuid" },
+    createdAt: "created_at",
+  },
+  refs: { accountId: () => Account },
 });
-
-const Opportunity = mongoose.model("Opportunity", opportunitySchema);
 export default Opportunity;

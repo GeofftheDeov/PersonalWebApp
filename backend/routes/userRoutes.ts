@@ -118,7 +118,7 @@ router.post("/login", async (req, res) => {
             return res.status(400).json({ error: "Email and password are required" });
         }
 
-        console.log(`[AUTH/DEBUG] DB URI: ${process.env.MONGO_URI ? process.env.MONGO_URI.replace(/:([^@]+)@/, ':***@') : 'MISSING'}`);
+        console.log(`[AUTH/DEBUG] DB URL: ${process.env.DATABASE_URL ? process.env.DATABASE_URL.replace(/:\/\/([^:]+):([^@]+)@/, "://$1:***@") : "MISSING"}`);
         email = email.trim().toLowerCase();
         console.log(`[AUTH/DEBUG] Normalized login attempt for: "${email}"`);
 
@@ -435,7 +435,7 @@ router.get("/players/:id", auth, async (req: any, res) => {
         ];
         if (target.doc.email) membershipOr.push({ email: target.doc.email });
         const targetMemberships = await CampaignMember.find({ $or: membershipOr }).select("campaign status");
-        const targetCampaignIds = [...new Set(targetMemberships.map(m => String(m.campaign)))];
+        const targetCampaignIds = [...new Set(targetMemberships.map((m: any) => String(m.campaign)))];
         const sharedIds = viewerCampaigns === null
             ? targetCampaignIds
             : targetCampaignIds.filter(id => viewerCampaigns.some((v: any) => String(v) === id));
@@ -446,13 +446,13 @@ router.get("/players/:id", auth, async (req: any, res) => {
 
         const sharedCampaigns = await Campaign.find({ _id: { $in: sharedIds } }).select("title status");
         const gmCampaignIds = new Set(
-            targetMemberships.filter(m => m.status === "Game Master").map(m => String(m.campaign))
+            targetMemberships.filter((m: any) => m.status === "Game Master").map((m: any) => String(m.campaign))
         );
 
         res.json({
             ...toPublicPerson(target),
             isFriend: Boolean(isFriend),
-            sharedCampaigns: sharedCampaigns.map(c => ({
+            sharedCampaigns: sharedCampaigns.map((c: any) => ({
                 _id: c._id,
                 title: c.title,
                 status: c.status,

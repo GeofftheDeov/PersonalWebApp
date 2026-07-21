@@ -1,17 +1,18 @@
-import mongoose from "mongoose";
+import { defineModel } from "../db/model.js";
+import Account from "./Account.js";
+import Campaign from "./Campaign.js";
+import Dungeon from "./Dungeon.js";
 
-const characterSchema = new mongoose.Schema({
-    name: { type: String, required: true },
-    player: { type: mongoose.Schema.Types.ObjectId, ref: "Account", required: true },
-    campaign: { type: mongoose.Schema.Types.ObjectId, ref: "Campaign" },
-    dungeon: { type: mongoose.Schema.Types.ObjectId, ref: "Dungeon" },
-    gameType: String,
-    class: String,
-    level: { type: Number, default: 1 },
-    isDead: { type: Boolean, default: false },
-    sfID: String,
-    createdAt: { type: Date, default: Date.now },
+const Character = defineModel({
+  table: "characters",
+  fields: {
+    name: "name",
+    player: { col: "player_id", type: "uuid" },
+    campaign: { col: "campaign_id", type: "uuid" },
+    dungeon: { col: "dungeon_id", type: "uuid" },
+    gameType: "game_type", class: "class", level: "level", isDead: "is_dead",
+    sfID: "sf_id", createdAt: "created_at",
+  },
+  refs: { player: () => Account, campaign: () => Campaign, dungeon: () => Dungeon },
 });
-
-const Character = mongoose.model("Character", characterSchema);
 export default Character;

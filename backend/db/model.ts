@@ -309,6 +309,48 @@ class Query<T = any> implements PromiseLike<T> {
   }
 }
 
+/**
+ * Thenable wrapper returned by the *AndUpdate statics so callers can chain
+ * .select() / .populate() / .lean(), the way mongoose Queries allowed.
+ *
+ * Before this, those statics were plain `async` methods returning a bare
+ * Promise, so `Model.findByIdAndUpdate(...).select("-password")` threw
+ * "select is not a function" at runtime. That broke PUT /users/profile
+ * (any profile edit, e.g. changing your handle) and the tabletop session /
+ * character updates, which chain .populate(). Regression from the mongoose
+ * -> node-postgres port; the update itself always worked.
+ */
+class UpdateQuery<T = any> implements PromiseLike<T> {
+  private _select: string | null = null;
+  private _populate: Array<string | { path: string; select?: string }> = [];
+  private _lean = false;
+
+  constructor(private M: any, private run: () => Promise<any>) {}
+
+  select(spec: string) { this._select = spec; return this; }
+  populate(spec: string | { path: string; select?: string }) { this._populate.push(spec); return this; }
+  lean() { this._lean = true; return this; }
+
+  then<R1 = T, R2 = never>(
+    onfulfilled?: ((value: T) => R1 | PromiseLike<R1>) | null,
+    onrejected?: ((reason: any) => R2 | PromiseLike<R2>) | null,
+  ): PromiseLike<R1 | R2> {
+    return this.exec().then(onfulfilled as any, onrejected as any);
+  }
+  catch(onrejected: (reason: any) => any) { return this.exec().catch(onrejected); }
+
+  async exec(): Promise<any> {
+    const doc = await this.run();
+    if (!doc) return null;
+    if (this._select != null) {
+      doc.__partial = true;
+      applySelect(doc, this._select);
+    }
+    if (this._populate.length) await populateDocs(this.M, [doc], this._populate);
+    return this._lean ? doc.toObject() : doc;
+  }
+}
+
 function applySelect(doc: any, spec: string): any {
   const parts = spec.split(/\s+/).filter(Boolean);
   const excludes = parts.filter((p) => p.startsWith("-")).map((p) => p.slice(1));
@@ -472,35 +514,39 @@ export function defineModel(def: ModelDef): any {
       return { matchedCount: res.rowCount, modifiedCount: res.rowCount };
     }
 
-    static async findOneAndUpdate(filter: any, update: any, opts: { session?: ClientSession; new?: boolean; upsert?: boolean } = {}) {
-      const r = runner(opts.session);
-      const params: any[] = [];
-      const setSql = buildUpdate(def, update, params);
-      const where = buildWhere(def, filter, params);
-      const { rows } = await r.query(
-        `UPDATE ${def.table} SET ${setSql} WHERE id = (SELECT id FROM ${def.table} WHERE ${where} LIMIT 1) RETURNING *`, params);
-      if (rows[0]) return rowToDoc(def, rows[0], Model, false);
-      if (!opts.upsert) return null;
-      // upsert: merge equality fields from the filter + $set/$setOnInsert + plain update fields
-      const seed: Record<string, any> = {};
-      for (const [k, v] of Object.entries(filter ?? {})) {
-        if (!k.startsWith("$") && (typeof v !== "object" || v instanceof Date || v === null)) seed[k] = v;
-      }
-      Object.assign(seed, update?.$setOnInsert ?? {});
-      Object.assign(seed, update?.$set ?? {});
-      for (const [k, v] of Object.entries(update ?? {})) if (!k.startsWith("$")) seed[k] = v;
-      const doc = new Model(seed);
-      return doc.save({ session: opts.session });
+    static findOneAndUpdate(filter: any, update: any, opts: { session?: ClientSession; new?: boolean; upsert?: boolean } = {}) {
+      return new UpdateQuery(Model, async () => {
+        const r = runner(opts.session);
+        const params: any[] = [];
+        const setSql = buildUpdate(def, update, params);
+        const where = buildWhere(def, filter, params);
+        const { rows } = await r.query(
+          `UPDATE ${def.table} SET ${setSql} WHERE id = (SELECT id FROM ${def.table} WHERE ${where} LIMIT 1) RETURNING *`, params);
+        if (rows[0]) return rowToDoc(def, rows[0], Model, false);
+        if (!opts.upsert) return null;
+        // upsert: merge equality fields from the filter + $set/$setOnInsert + plain update fields
+        const seed: Record<string, any> = {};
+        for (const [k, v] of Object.entries(filter ?? {})) {
+          if (!k.startsWith("$") && (typeof v !== "object" || v instanceof Date || v === null)) seed[k] = v;
+        }
+        Object.assign(seed, update?.$setOnInsert ?? {});
+        Object.assign(seed, update?.$set ?? {});
+        for (const [k, v] of Object.entries(update ?? {})) if (!k.startsWith("$")) seed[k] = v;
+        const doc = new Model(seed);
+        return doc.save({ session: opts.session });
+      });
     }
 
-    static async findByIdAndUpdate(id: any, update: any, opts: { session?: ClientSession; new?: boolean } = {}) {
-      if (!isUuid(String(id))) return null;
-      const params: any[] = [];
-      const setSql = buildUpdate(def, update, params);
-      params.push(String(id));
-      const { rows } = await runner(opts.session).query(
-        `UPDATE ${def.table} SET ${setSql} WHERE id = $${params.length} RETURNING *`, params);
-      return rows[0] ? rowToDoc(def, rows[0], Model, false) : null;
+    static findByIdAndUpdate(id: any, update: any, opts: { session?: ClientSession; new?: boolean } = {}) {
+      return new UpdateQuery(Model, async () => {
+        if (!isUuid(String(id))) return null;
+        const params: any[] = [];
+        const setSql = buildUpdate(def, update, params);
+        params.push(String(id));
+        const { rows } = await runner(opts.session).query(
+          `UPDATE ${def.table} SET ${setSql} WHERE id = $${params.length} RETURNING *`, params);
+        return rows[0] ? rowToDoc(def, rows[0], Model, false) : null;
+      });
     }
 
     static async findByIdAndDelete(id: any, opts: { session?: ClientSession } = {}) {

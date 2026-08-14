@@ -113,7 +113,7 @@ router.get("/requests", auth, async (req: any, res) => {
 // Respond to friend request (Accept/Reject)
 router.put("/request/:id", auth, async (req: any, res) => {
     const session = await startSession();
-    session.startTransaction();
+    await session.startTransaction();
     try {
         const { action } = req.body; // 'accept' or 'reject'
         const requestId = req.params.id;
@@ -198,7 +198,7 @@ router.get("/list", auth, async (req: any, res) => {
 // Remove friend
 router.delete("/:id", auth, async (req: any, res) => {
     const session = await startSession();
-    session.startTransaction();
+    await session.startTransaction();
     try {
         const friendId = req.params.id;
         const userId = req.user.id;

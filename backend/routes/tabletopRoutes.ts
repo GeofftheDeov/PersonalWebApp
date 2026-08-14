@@ -13,7 +13,6 @@ import { getAuthorizedCampaignIds, isCampaignGameMaster } from "../utils/gameNig
 import { findPersonById, personDisplayName } from "../utils/personUtils.js";
 import { getDecryptedKeys } from "./apiKeyRoutes.js";
 import { createDiscordScheduledEvent, buildGoogleCalendarLink, createGoogleCalendarEvent } from "../utils/integrations.js";
-import mongoose from "mongoose";
 
 // --- Sessions ---
 router.get("/sessions", auth, async (req: any, res) => {
@@ -84,7 +83,7 @@ router.post("/sessions", auth, async (req: any, res) => {
         // ── Discord scheduled event ────────────────────────────────────────────
         if (createDiscordEvent) {
             try {
-                const keys = await getDecryptedKeys(new mongoose.Types.ObjectId(req.user.id), "discord");
+                const keys = await getDecryptedKeys(String(req.user.id), "discord");
                 if (!keys) {
                     warnings.push("Discord event skipped: no 'discord' bot token in your API Key Vault.");
                 } else {
@@ -119,7 +118,7 @@ router.post("/sessions", auth, async (req: any, res) => {
             session.googleCalendarLink = buildGoogleCalendarLink(eventInput);
             // If the creator connected their Google account, also insert the event directly.
             try {
-                const keys = await getDecryptedKeys(new mongoose.Types.ObjectId(req.user.id), "google_calendar");
+                const keys = await getDecryptedKeys(String(req.user.id), "google_calendar");
                 if (keys) {
                     const ev = await createGoogleCalendarEvent(keys.secret, eventInput);
                     session.googleEventId = ev.id;

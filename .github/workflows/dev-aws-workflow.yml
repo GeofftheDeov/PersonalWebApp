@@ -84,12 +84,15 @@ jobs:
           task-definition: ${{ env.ECS_TASK_DEFINITION }}
           container-name: ${{ env.CONTAINER_BACKEND }}
           image: ${{ steps.build-backend-image.outputs.image }}
-          # NOTE: JWT_SECRET, VAULT_ENCRYPTION_KEY, ANTHROPIC_API_KEY, ALPACA_API_KEY and
-          # ALPACA_SECRET_KEY are injected via the ECS `secrets` block (Secrets Manager
-          # valueFrom) in dev-task-definition.json — do NOT re-add them below. ECS rejects
-          # a task definition where the same name appears in both `environment` and
-          # `secrets` ("The secret name must be unique..."), and an unset GitHub secret
-          # renders an empty string, which hard-crashes the backend at boot (MUR-165/169).
+          # NOTE: JWT_SECRET, VAULT_ENCRYPTION_KEY, ANTHROPIC_API_KEY, ALPACA_API_KEY,
+          # ALPACA_SECRET_KEY, DATABASE_URL and VAULT_TOKEN are injected via the ECS
+          # `secrets` block (Secrets Manager valueFrom) in dev-task-definition.json — do
+          # NOT re-add them below. ECS rejects a task definition where the same name
+          # appears in both `environment` and `secrets` ("The secret name must be
+          # unique..."), and an unset GitHub secret renders an empty string, which
+          # hard-crashes the backend at boot (MUR-165/169). VAULT_TOKEN moved to the
+          # secrets block in the Postgres migration — this exact duplicate broke the
+          # 2026-07-20 deploy.
           # Comments cannot go inside the block below: the render action parses every
           # line as KEY=value and throws on lines without "=".
           environment-variables: |
@@ -100,7 +103,6 @@ jobs:
             SF_PRIVATE_KEY_CONTENT=${{ secrets.SF_PRIVATE_KEY_CONTENT }}
             FRONTEND_URL=https://deov.geoffthedeov.net
             GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
-            VAULT_TOKEN=${{ secrets.VAULT_TOKEN }}
             GITHUB_VAULT_REPO=GeofftheDeov/obsidian-vault
             OBSIDIAN_VAULT_PATH=/obsidian-vault
 

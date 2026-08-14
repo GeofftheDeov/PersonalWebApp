@@ -1,6 +1,5 @@
 import express, { Response } from 'express';
 import jwt from 'jsonwebtoken';
-import mongoose from 'mongoose';
 import { OAuth2Client } from 'google-auth-library';
 import { auth } from '../middleware/auth.js';
 import ApiKeyVault from '../models/ApiKeyVault.js';
@@ -72,7 +71,7 @@ router.get('/callback', async (req: any, res: Response) => {
             return res.redirect(`${frontend}/profile?gcal=noRefreshToken`);
         }
 
-        const userId = new mongoose.Types.ObjectId(decoded.id as string);
+        const userId = String(decoded.id as string);
         await ApiKeyVault.findOneAndUpdate(
             { userId, provider: PROVIDER },
             {
@@ -93,7 +92,7 @@ router.get('/callback', async (req: any, res: Response) => {
 // ── GET /api/google-calendar/status ───────────────────────────────────────────
 router.get('/status', auth, async (req: any, res: Response) => {
     try {
-        const userId = new mongoose.Types.ObjectId(req.user.id);
+        const userId = String(req.user.id);
         const entry = await ApiKeyVault.findOne({ userId, provider: PROVIDER }).lean();
         res.json({
             connected: !!entry,
@@ -107,7 +106,7 @@ router.get('/status', auth, async (req: any, res: Response) => {
 // ── DELETE /api/google-calendar ───────────────────────────────────────────────
 router.delete('/', auth, async (req: any, res: Response) => {
     try {
-        const userId = new mongoose.Types.ObjectId(req.user.id);
+        const userId = String(req.user.id);
         await ApiKeyVault.findOneAndDelete({ userId, provider: PROVIDER });
         res.json({ ok: true });
     } catch (err: any) {

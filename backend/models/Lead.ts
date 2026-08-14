@@ -1,82 +1,39 @@
-import mongoose from "mongoose";
-import bcrypt from "bcryptjs";
+import { defineModel } from "../db/model.js";
+import { hashPasswordHook, fourDigit, digitTag } from "./_shared.js";
 import { createLeadInSalesforce } from "../services/salesforceService.js";
 
-const leadSchema = new mongoose.Schema({
-    firstName: { type: String, required: true },
-    lastName: { type: String, required: true },
-    email: { type: String, required: false },
-    password: { type: String, required: true },
-    resetPasswordToken: String,
-    resetPasswordExpires: Date,
-    isVerified: { type: Boolean, default: false },
-    emailVerificationToken: String,
-    company: { type: String, required: false },
-    handle: String,
-    phone: String,
-    status: {
-        type: String,
-        enum: ["New", "Contacted", "Qualified", "Lost", "Converted"],
-        default: "New"
-    },
-    source: { type: String, default: "Web App" },
-    userNumber: String,
-    userDigit: String,
-    sfLeadId: String,
-    sfRecordTypeId: String,
-    sfRecordTypeName: String,
-    profilePicture: String,
-    favoriteGames: [String],
-    // Cross-collection friend ids (may point at User, Lead, Contact, or Account records)
-    friends: [{ type: mongoose.Schema.Types.ObjectId }],
-    createdAt: { type: Date, default: Date.now },
+const Lead = defineModel({
+  table: "leads",
+  fields: {
+    firstName: "first_name", lastName: "last_name", email: "email", password: "password",
+    resetPasswordToken: "reset_password_token", resetPasswordExpires: "reset_password_expires",
+    isVerified: "is_verified", emailVerificationToken: "email_verification_token",
+    company: "company", handle: "handle", phone: "phone",
+    status: "status", source: "source",
+    userNumber: "user_number", userDigit: "user_digit",
+    sfLeadId: "sf_lead_id", sfRecordTypeId: "sf_record_type_id", sfRecordTypeName: "sf_record_type_name",
+    profilePicture: "profile_picture",
+    favoriteGames: { col: "favorite_games", type: "text[]" },
+    friends: { col: "friends", type: "uuid[]" },
+    createdAt: "created_at",
+  },
+  defaults: { userNumber: fourDigit, userDigit: digitTag("LD") },
+  preSave: hashPasswordHook,
+  postSave: (doc) => {
+    if (doc.sfLeadId) return;
+    setImmediate(async () => {
+      try {
+        console.log("[SALESFORCE] New Lead saved, starting background sync...");
+        const sf = await createLeadInSalesforce(doc);
+        if (sf?.id) {
+          const update: any = { sfLeadId: sf.id };
+          if ((sf as any).recordTypeId) update.sfRecordTypeId = (sf as any).recordTypeId;
+          if ((sf as any).recordTypeName) update.sfRecordTypeName = (sf as any).recordTypeName;
+          await Lead.updateOne({ _id: doc._id }, { $set: update });
+          console.log(`[SALESFORCE] Result: Success (ID: ${sf.id})`);
+        }
+      } catch (err) { console.error("[SALESFORCE] Background Sync Error:", err); }
+    });
+  },
 });
-
-leadSchema.pre("save", async function() {
-    // Generate IDs if missing
-    if (!this.userNumber) {
-        this.userNumber = Math.floor(1000 + Math.random() * 9000).toString();
-    }
-    if (!this.userDigit) {
-        this.userDigit = "LD-" + Date.now();
-    }
-
-    if (!this.isModified("password")) return;
-    try {
-        const salt = await bcrypt.genSalt(10);
-        this.password = await bcrypt.hash(this.password, salt);
-    } catch (err: any) {
-        throw err;
-    }
-});
-
-// Post-save hook to sync to Salesforce
-leadSchema.post("save", async function (doc) {
-    // Only sync if this is a new lead (no Salesforce ID yet)
-    if (!doc.sfLeadId) {
-        setImmediate(async () => {
-            try {
-                console.log("[SALESFORCE] New Lead saved, starting background sync...");
-                const sfLeadResponse = await createLeadInSalesforce(doc);
-                if (sfLeadResponse?.id) {
-                    const updateData: any = { sfLeadId: sfLeadResponse.id };
-                    if ((sfLeadResponse as any).recordTypeId) updateData.sfRecordTypeId = (sfLeadResponse as any).recordTypeId;
-                    if ((sfLeadResponse as any).recordTypeName) updateData.sfRecordTypeName = (sfLeadResponse as any).recordTypeName;
-                    
-                    // Use model directly from this context
-                    await (doc.constructor as mongoose.Model<any>).updateOne(
-                        { _id: doc._id },
-                        { $set: updateData }
-                    );
-                    console.log(`[SALESFORCE] Result: Success (ID: ${sfLeadResponse.id})`);
-                }
-            } catch (err) {
-                console.error("[SALESFORCE] Background Sync Error:", err);
-            }
-        });
-    }
-});
-
-const Lead = mongoose.model("Lead", leadSchema);
 export default Lead;
-

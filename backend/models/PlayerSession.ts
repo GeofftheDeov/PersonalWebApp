@@ -1,13 +1,17 @@
-import mongoose from "mongoose";
+import { defineModel } from "../db/model.js";
+import Session from "./Session.js";
+import Account from "./Account.js";
+import Campaign from "./Campaign.js";
 
-const playerSessionSchema = new mongoose.Schema({
-    name: { type: String, required: true },
-    session: { type: mongoose.Schema.Types.ObjectId, ref: "Session", required: true },
-    player: { type: mongoose.Schema.Types.ObjectId, ref: "Account", required: true },
-    campaign: { type: mongoose.Schema.Types.ObjectId, ref: "Campaign", required: true },
-    sfID: String,
-    createdAt: { type: Date, default: Date.now },
+const PlayerSession = defineModel({
+  table: "player_sessions",
+  fields: {
+    name: "name",
+    session: { col: "session_id", type: "uuid" },
+    player: { col: "player_id", type: "uuid" },
+    campaign: { col: "campaign_id", type: "uuid" },
+    sfID: "sf_id", createdAt: "created_at",
+  },
+  refs: { session: () => Session, player: () => Account, campaign: () => Campaign },
 });
-
-const PlayerSession = mongoose.model("PlayerSession", playerSessionSchema);
 export default PlayerSession;

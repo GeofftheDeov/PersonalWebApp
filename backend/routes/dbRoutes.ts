@@ -1,5 +1,4 @@
 import express from 'express';
-import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
 import multer from 'multer';
 import csv from 'csv-parser';
@@ -8,10 +7,51 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { sendResetPasswordEmail } from "../services/emailService.js";
 import { renderPage } from '../utils/adminUi.js';
+import User from "../models/User.js";
+import Account from "../models/Account.js";
+import Contact from "../models/Contact.js";
+import Lead from "../models/Lead.js";
+import Campaign from "../models/Campaign.js";
+import CampaignMember from "../models/CampaignMember.js";
+import CampaignInvite from "../models/CampaignInvite.js";
+import Character from "../models/Character.js";
+import Dungeon from "../models/Dungeon.js";
+import Encounter from "../models/Encounter.js";
+import Event from "../models/Event.js";
+import FriendRequest from "../models/FriendRequest.js";
+import Message from "../models/Message.js";
+import Notification from "../models/Notification.js";
+import Opportunity from "../models/Opportunity.js";
+import PlayerSession from "../models/PlayerSession.js";
+import Session from "../models/Session.js";
+import Task from "../models/Task.js";
+import ApiKeyVault from "../models/ApiKeyVault.js";
+import AlpacaSnapshot from "../models/AlpacaSnapshot.js";
+import CloudClawSession from "../models/CloudClawSession.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
 const router = express.Router();
+
+/**
+ * Postgres port: the admin browser used to enumerate raw Mongo collections.
+ * It now routes through the model registry so field names stay camelCase and
+ * model hooks (hashing, defaults) still apply.
+ */
+const COLLECTIONS: Record<string, any> = {
+    users: User, accounts: Account, contacts: Contact, leads: Lead,
+    campaigns: Campaign, campaign_members: CampaignMember, campaign_invites: CampaignInvite,
+    characters: Character, dungeons: Dungeon, encounters: Encounter, events: Event,
+    friend_requests: FriendRequest, game_sessions: Session, player_sessions: PlayerSession,
+    tasks: Task, opportunities: Opportunity, messages: Message, notifications: Notification,
+    api_key_vault: ApiKeyVault, alpaca_snapshots: AlpacaSnapshot, cloud_claw_sessions: CloudClawSession,
+};
+const listCollectionNames = (): string[] => Object.keys(COLLECTIONS).sort();
+const modelFor = (name: string): any => {
+    const m = COLLECTIONS[name];
+    if (!m) throw new Error(`Unknown collection: ${name}`);
+    return m;
+};
 
 // Middleware to verify token in query param
 const verifyToken = (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -380,8 +420,7 @@ const dbStyles = `
 router.get('/', async (req, res) => {
     try {
         const token = req.query.token as string;
-        const collections = await mongoose.connection.db?.listCollections().toArray();
-        const collectionNames = collections?.map(c => c.name) || [];
+        const collectionNames = listCollectionNames();
         
         const sidebarHtml = renderSidebar(token, collectionNames, null);
         const mainContentHtml = `
@@ -409,20 +448,19 @@ router.get('/:collection', async (req, res) => {
     const token = req.query.token as string;
     
     try {
-        const collections = await mongoose.connection.db?.listCollections().toArray();
-        const collectionNames = collections?.map(c => c.name) || [];
-        const data = await mongoose.connection.db?.collection(collection).find().toArray();
+        const collectionNames = listCollectionNames();
+        const data = (await modelFor(collection).find()).map((d: any) => d.toObject());
         
         let tableContent = "";
 
         if (data && data.length > 0) {
              // Aggregate all unique keys from all records to ensure columns for mixed structures
              const allKeys = new Set<string>();
-             data.forEach(row => Object.keys(row).forEach(k => allKeys.add(k)));
+             data.forEach((row: any) => Object.keys(row).forEach(k => allKeys.add(k)));
              const keys = Array.from(allKeys);
 
              const tableHeader = `<tr>${keys.map(k => `<th onclick="handleSort(event, '${k}')" data-key="${k}">${k}</th>`).join('')}<th>ACTIONS</th></tr>`;
-             const tableRows = data.map(row => {
+             const tableRows = data.map((row: any) => {
                  const id = (row as any)._id;
                  return `
                     <tr>
@@ -736,8 +774,7 @@ router.get('/:collection', async (req, res) => {
 router.get('/:collection/new', async (req, res) => {
     const { collection } = req.params;
     const token = req.query.token as string;
-    const collections = await mongoose.connection.db?.listCollections().toArray();
-    const collectionNames = collections?.map(c => c.name) || [];
+    const collectionNames = listCollectionNames();
 
     const content = `
         <main class="main-content">
@@ -782,7 +819,7 @@ router.post('/:collection/create', async (req, res) => {
             doc.password = await bcrypt.hash(doc.password, salt);
         }
 
-        await mongoose.connection.db?.collection(collection).insertOne(doc);
+        await modelFor(collection).create(doc);
         res.redirect(`/db/${collection}?token=${token}`);
     } catch (err: any) {
         res.status(400).send(`Invalid JSON or Create Error: ${err.message}`);
@@ -795,9 +832,8 @@ router.get('/:collection/edit/:id', async (req, res) => {
     const token = req.query.token as string;
     
     try {
-        const collections = await mongoose.connection.db?.listCollections().toArray();
-        const collectionNames = collections?.map(c => c.name) || [];
-        const doc = await mongoose.connection.db?.collection(collection).findOne({ _id: new mongoose.Types.ObjectId(id) });
+        const collectionNames = listCollectionNames();
+        const doc = (await modelFor(collection).findById(id))?.toObject();
 
         if (!doc) return res.status(404).send("Document not found");
 
@@ -847,10 +883,7 @@ router.post('/:collection/update/:id', async (req, res) => {
             updateDoc.password = await bcrypt.hash(updateDoc.password, salt);
         }
 
-        await mongoose.connection.db?.collection(collection).updateOne(
-            { _id: new mongoose.Types.ObjectId(id) },
-            { $set: updateDoc }
-        );
+        await modelFor(collection).findByIdAndUpdate(id, { $set: updateDoc });
         res.redirect(`/db/${collection}?token=${token}`);
     } catch (err: any) {
         res.status(400).send(`Invalid JSON or Update Error: ${err.message}`);
@@ -861,7 +894,7 @@ router.post('/:collection/update/:id', async (req, res) => {
 router.post('/:collection/delete/:id', async (req, res) => {
     const { collection, id } = req.params;
     try {
-        await mongoose.connection.db?.collection(collection).deleteOne({ _id: new mongoose.Types.ObjectId(id) });
+        await modelFor(collection).findByIdAndDelete(id);
         res.sendStatus(200);
     } catch (err) {
         res.status(500).send('Delete failed');
@@ -872,15 +905,12 @@ router.post('/:collection/delete/:id', async (req, res) => {
 router.post('/:collection/reset-password/:id', async (req, res) => {
     const { collection, id } = req.params;
     try {
-        const doc = await mongoose.connection.db?.collection(collection).findOne({ _id: new mongoose.Types.ObjectId(id) });
+        const doc = (await modelFor(collection).findById(id))?.toObject();
         if (!doc) return res.status(404).send('Document not found');
         const email = doc.email;
         if (!email) return res.status(400).send('Document has no email field');
         const token = crypto.randomBytes(20).toString('hex');
-        await mongoose.connection.db?.collection(collection).updateOne(
-            { _id: new mongoose.Types.ObjectId(id) },
-            { $set: { resetPasswordToken: token, resetPasswordExpires: Date.now() + 3600000 } }
-        );
+        await modelFor(collection).findByIdAndUpdate(id, { $set: { resetPasswordToken: token, resetPasswordExpires: new Date(Date.now() + 3600000) } });
         await sendResetPasswordEmail(email, token);
         res.status(200).send(`Reset email sent to ${email}`);
     } catch (err: any) {
@@ -934,13 +964,13 @@ router.post('/:collection/import', upload.single('csv'), async (req: any, res) =
                     else if (record.name && record.email) { query = { name: record.name, email: record.email }; }
                     else if (record.email)                { query = { email: record.email }; }
                     if (Object.keys(query).length > 0) {
-                        const existing = await mongoose.connection.db?.collection(collection).findOne(query);
+                        const existing = await modelFor(collection).findOne(query);
                         if (!existing) toInsert.push(record);
                     } else {
                         toInsert.push(record);
                     }
                 }
-                if (toInsert.length > 0) await mongoose.connection.db?.collection(collection).insertMany(toInsert);
+                for (const record of toInsert) await modelFor(collection).create(record);
                 res.status(200).send(`Import complete. Inserted ${toInsert.length} records, skipped ${results.length - toInsert.length} duplicates.`);
             } catch (err: any) {
                 res.status(500).send(`Database error: ${err.message}`);

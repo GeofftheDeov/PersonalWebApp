@@ -1,28 +1,12 @@
-import mongoose from "mongoose";
+import { defineModel } from "../db/model.js";
 
-const campaignSchema = new mongoose.Schema({
-    title: { type: String, required: true },
-    description: String,
-    status: {
-        type: String,
-        enum: ["Not Started", "In Progress", "Completed"],
-        default: "Not Started"
-    },
-    startDate: Date,
-    endDate: Date,
-    // Discord integration: the server (guild) where session events are created.
-    // The session creator's bot (token stored in their API Key Vault under
-    // provider 'discord') must be a member of this guild with Manage Events.
-    discordGuildId: String,
-    // Optional voice channel — if set, Discord events are created as VOICE
-    // events in this channel; otherwise EXTERNAL events with a location.
-    discordChannelId: String,
-    sfID: String,
-    // Polymorphic reference or just generic related fields?
-    // For simplicity now, let's keep it unlinked or manual until specific requirements allow
-    createdAt: { type: Date, default: Date.now },
+const Campaign = defineModel({
+  table: "campaigns",
+  fields: {
+    title: "title", description: "description", status: "status",
+    startDate: "start_date", endDate: "end_date",
+    discordGuildId: "discord_guild_id", discordChannelId: "discord_channel_id",
+    sfID: "sf_id", createdAt: "created_at",
+  },
 });
-
-const Campaign = mongoose.model("Campaign", campaignSchema);
-
 export default Campaign;

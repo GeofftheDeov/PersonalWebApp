@@ -1,46 +1,21 @@
-import mongoose from "mongoose";
-import bcrypt from "bcryptjs";
+import { defineModel } from "../db/model.js";
+import { hashPasswordHook, fourDigit, digitTag } from "./_shared.js";
 
-const contactSchema = new mongoose.Schema({
-    name: { type: String, required: true },
-    email: { type: String, required: false },
-    password: { type: String, required: false },
-    isVerified: { type: Boolean, default: false },
-    emailVerificationToken: String,
-    resetPasswordToken: String,
-    resetPasswordExpires: Date,
-    phone: String,
-    handle: String,
-    role: String,
-    accountId: { type: mongoose.Schema.Types.ObjectId, ref: "Account" },
-    userNumber: String,
-    userDigit: String,
-    notes: String,
-    sfID: String,
-    profilePicture: String,
-    favoriteGames: [String],
-    // Cross-collection friend ids (may point at User, Lead, Contact, or Account records)
-    friends: [{ type: mongoose.Schema.Types.ObjectId }],
-    createdAt: { type: Date, default: Date.now },
+const Contact = defineModel({
+  table: "contacts",
+  fields: {
+    name: "name", email: "email", password: "password",
+    isVerified: "is_verified", emailVerificationToken: "email_verification_token",
+    resetPasswordToken: "reset_password_token", resetPasswordExpires: "reset_password_expires",
+    phone: "phone", handle: "handle", role: "role",
+    accountId: { col: "account_id", type: "uuid" },
+    userNumber: "user_number", userDigit: "user_digit", notes: "notes", sfID: "sf_id",
+    profilePicture: "profile_picture",
+    favoriteGames: { col: "favorite_games", type: "text[]" },
+    friends: { col: "friends", type: "uuid[]" },
+    createdAt: "created_at",
+  },
+  defaults: { userNumber: fourDigit, userDigit: digitTag("CON") },
+  preSave: hashPasswordHook,
 });
-
-contactSchema.pre("save", async function() {
-    // Generate IDs if missing
-    if (!this.userNumber) {
-        this.userNumber = Math.floor(1000 + Math.random() * 9000).toString();
-    }
-    if (!this.userDigit) {
-        this.userDigit = "CON-" + Date.now();
-    }
-
-    if (!this.isModified("password") || !this.password) return;
-    try {
-        const salt = await bcrypt.genSalt(10);
-        this.password = await bcrypt.hash(this.password, salt);
-    } catch (err: any) {
-        throw err;
-    }
-});
-
-const Contact = mongoose.model("Contact", contactSchema);
 export default Contact;

@@ -49,6 +49,8 @@ export default function SocialDock() {
   const [searchError, setSearchError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
+  const [processingRequestId, setProcessingRequestId] = useState<string | null>(null);
+  const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -146,6 +148,9 @@ export default function SocialDock() {
 
   const respondToRequest = async (requestId: string, action: 'accept' | 'reject') => {
     const token = localStorage.getItem('token');
+    setProcessingRequestId(requestId);
+    setFeedbackMessage(null);
+
     try {
       const res = await fetch(`/api/friends/request/${requestId}`, {
         method: 'PUT',
@@ -155,11 +160,30 @@ export default function SocialDock() {
         },
         body: JSON.stringify({ action })
       });
+
       if (res.ok) {
-        fetchSocialData();
+        const actionText = action === 'accept' ? 'accepted' : 'declined';
+        setFeedbackMessage({
+          type: 'success',
+          text: `Friend request ${actionText}!`
+        });
+        await fetchSocialData();
+        setTimeout(() => setFeedbackMessage(null), 3000);
+      } else {
+        const data = await res.json();
+        setFeedbackMessage({
+          type: 'error',
+          text: data.error || `Failed to ${action} request`
+        });
       }
     } catch (err) {
       console.error("Error responding to request", err);
+      setFeedbackMessage({
+        type: 'error',
+        text: 'Error processing request. Please try again.'
+      });
+    } finally {
+      setProcessingRequestId(null);
     }
   };
 
@@ -400,6 +424,17 @@ export default function SocialDock() {
                 {/* REQUESTS TAB */}
                 {activeTab === 'requests' && (
                   <div className="space-y-4">
+                    {feedbackMessage && (
+                      <div
+                        className={`p-3 border-2 border-black font-black text-xs uppercase ${
+                          feedbackMessage.type === 'success'
+                            ? 'bg-green-500 text-black'
+                            : 'bg-red-500 text-black'
+                        }`}
+                      >
+                        {feedbackMessage.text}
+                      </div>
+                    )}
                     {incomingRequests.length === 0 ? (
                       <div className="text-center py-12 text-zinc-500 border-4 border-dashed border-zinc-700 font-bold uppercase">
                         No pending requests.
@@ -415,15 +450,17 @@ export default function SocialDock() {
                           <div className="flex gap-2">
                             <button
                               onClick={() => respondToRequest(req._id, 'accept')}
-                              className="flex-1 flex items-center justify-center gap-2 py-2 bg-green-500 border-2 border-black text-black font-black text-xs uppercase hover:bg-green-400 transition-colors"
+                              disabled={processingRequestId === req._id}
+                              className="flex-1 flex items-center justify-center gap-2 py-2 bg-green-500 border-2 border-black text-black font-black text-xs uppercase hover:bg-green-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                              <Check size={14} /> ACCEPT
+                              <Check size={14} /> {processingRequestId === req._id ? 'ACCEPTING...' : 'ACCEPT'}
                             </button>
                             <button
                               onClick={() => respondToRequest(req._id, 'reject')}
-                              className="flex-1 flex items-center justify-center gap-2 py-2 bg-red-500 border-2 border-black text-black font-black text-xs uppercase hover:bg-red-400 transition-colors"
+                              disabled={processingRequestId === req._id}
+                              className="flex-1 flex items-center justify-center gap-2 py-2 bg-red-500 border-2 border-black text-black font-black text-xs uppercase hover:bg-red-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                              <X size={14} /> DECLINE
+                              <X size={14} /> {processingRequestId === req._id ? 'DECLINING...' : 'DECLINE'}
                             </button>
                           </div>
                         </div>
@@ -455,38 +492,4 @@ export default function SocialDock() {
                           {isLoading ? "..." : <Search size={20} />}
                         </button>
                       </div>
-                      {searchError && <p className="text-red-500 text-xs font-black uppercase">{searchError}</p>}
-                    </form>
-
-                    {searchResult && (
-                      <div className="p-4 bg-zinc-800 border-4 border-black shadow-[6px_6px_0px_0px_rgba(255,255,255,0.1)] animate-in fade-in zoom-in duration-300">
-                        <div className="mb-4">
-                          <h3 className="font-black text-2xl text-white">@{friendLabel(searchResult).toUpperCase()}</h3>
-                          <p className="text-xs text-zinc-500 font-bold">#{searchResult.userNumber}{searchResult.recordType ? ` · ${searchResult.recordType.toUpperCase()}` : ''}</p>
-                        </div>
-                        <button
-                          onClick={() => sendRequest(searchResult._id)}
-                          className="w-full flex items-center justify-center gap-2 py-3 bg-teal-500 border-2 border-black text-black font-black uppercase hover:bg-teal-400 transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:shadow-none active:translate-x-1 active:translate-y-1"
-                        >
-                          <UserPlus size={18} /> SEND FRIEND REQUEST
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Footer */}
-              <div className="p-6 bg-black border-t-4 border-zinc-800">
-                <p className="text-[10px] text-zinc-600 font-black uppercase tracking-[0.2em] leading-relaxed">
-                  Connect by handle. Chat right here.<br/>
-                  The Personal Web App Social Layer v2.0
-                </p>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-    </>
-  );
-}
+                      {searchError && <p className="text-red-500 text-xs font-black uppercase">{searchError}</p>}

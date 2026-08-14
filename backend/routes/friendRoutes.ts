@@ -2,7 +2,7 @@ import express from "express";
 const router = express.Router();
 import FriendRequest from "../models/FriendRequest.js";
 import { auth } from "../middleware/auth.js";
-import mongoose from "mongoose";
+import { startSession } from "../db/model.js";
 import { notify, resolveNotifications } from "../utils/notify.js";
 import { findPersonById, findPersonByHandle, modelForType, personDisplayName, toPublicPerson } from "../utils/personUtils.js";
 
@@ -96,10 +96,10 @@ router.get("/requests", auth, async (req: any, res) => {
             return person ? toPublicPerson(person) : null;
         };
 
-        const incoming = await Promise.all(incomingDocs.map(async r => ({
+        const incoming = await Promise.all(incomingDocs.map(async (r: any) => ({
             _id: r._id, status: r.status, createdAt: r.createdAt, from: await resolveParty(r.from),
         })));
-        const outgoing = await Promise.all(outgoingDocs.map(async r => ({
+        const outgoing = await Promise.all(outgoingDocs.map(async (r: any) => ({
             _id: r._id, status: r.status, createdAt: r.createdAt, to: await resolveParty(r.to),
         })));
 
@@ -112,7 +112,7 @@ router.get("/requests", auth, async (req: any, res) => {
 
 // Respond to friend request (Accept/Reject)
 router.put("/request/:id", auth, async (req: any, res) => {
-    const session = await mongoose.startSession();
+    const session = await startSession();
     session.startTransaction();
     try {
         const { action } = req.body; // 'accept' or 'reject'
@@ -138,26 +138,36 @@ router.put("/request/:id", auth, async (req: any, res) => {
             }
             await modelForType(fromPerson.type).findByIdAndUpdate(request.from, { $addToSet: { friends: request.to } }, { session });
             await modelForType(toPerson.type).findByIdAndUpdate(request.to, { $addToSet: { friends: request.from } }, { session });
-        } else {
+        } else if (action === "reject") {
             request.status = "rejected";
             await request.save({ session });
+        } else {
+            throw new Error("Invalid action. Must be 'accept' or 'reject'");
         }
 
         await session.commitTransaction();
         session.endSession();
 
-        // Clear the recipient's bell entry; tell the sender if accepted.
+        // Clear the recipient's bell entry; notify the sender based on action.
         resolveNotifications(userId, `fr:${request._id}`).catch(() => { /* logged inside */ });
+
+        const actor = await findPersonById(userId, "name firstName lastName handle");
+        const actorName = actor ? personDisplayName(actor.doc) : "Someone";
+
         if (action === "accept") {
-            const accepter = await findPersonById(userId, "name firstName lastName handle");
-            const accepterName = accepter ? personDisplayName(accepter.doc) : "Someone";
             notify(request.from, {
                 type: "system",
-                title: `@${accepterName} accepted your friend request`,
+                title: `@${actorName} accepted your friend request`,
+            }).catch(() => { /* logged inside */ });
+        } else if (action === "reject") {
+            notify(request.from, {
+                type: "system",
+                title: `@${actorName} declined your friend request`,
             }).catch(() => { /* logged inside */ });
         }
 
-        res.json({ message: `Request ${action}ed successfully` });
+        const actionDisplay = action === "accept" ? "accepted" : "declined";
+        res.json({ message: `Request ${actionDisplay} successfully` });
     } catch (error) {
         await session.abortTransaction();
         session.endSession();
@@ -187,7 +197,7 @@ router.get("/list", auth, async (req: any, res) => {
 
 // Remove friend
 router.delete("/:id", auth, async (req: any, res) => {
-    const session = await mongoose.startSession();
+    const session = await startSession();
     session.startTransaction();
     try {
         const friendId = req.params.id;

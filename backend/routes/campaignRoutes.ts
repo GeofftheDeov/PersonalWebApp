@@ -208,7 +208,7 @@ router.get("/:id/members", auth, async (req: any, res) => {
                 .filter((m: any) => !m.lead && !m.contact && !m.account && m.email)
                 .map((m: any) => m.email as string)
         )];
-        const people = await findPeopleByEmail(unresolvedEmails);
+        const people = await findPeopleByEmail(unresolvedEmails as string[]);
         const idByEmail = new Map(people.map(p => [String(p.doc.email).toLowerCase(), String(p.doc._id)]));
 
         const enriched = members.map((m: any) => {

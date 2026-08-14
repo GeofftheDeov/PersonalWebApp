@@ -1,19 +1,19 @@
-import mongoose from "mongoose";
+import { defineModel } from "../db/model.js";
+import Campaign from "./Campaign.js";
+import Lead from "./Lead.js";
+import Contact from "./Contact.js";
+import Account from "./Account.js";
 
-const campaignMemberSchema = new mongoose.Schema({
-    campaign: { type: mongoose.Schema.Types.ObjectId, ref: "Campaign", required: true },
-    lead: { type: mongoose.Schema.Types.ObjectId, ref: "Lead", required: false },
-    contact: { type: mongoose.Schema.Types.ObjectId, ref: "Contact", required: false },
-    account: { type: mongoose.Schema.Types.ObjectId, ref: "Account", required: false },
-    email: { type: String, required: false },
-    phone: { type: String, required: false },
-    firstName: { type: String, required: false },
-    lastName: { type: String, required: false },
-    status: { type: String, required: false },
-    joinedAt: { type: Date, default: Date.now, required: false },
-    sfID: String,
-    createdAt: { type: Date, default: Date.now },
+const CampaignMember = defineModel({
+  table: "campaign_members",
+  fields: {
+    campaign: { col: "campaign_id", type: "uuid" },
+    lead: { col: "lead_id", type: "uuid" },
+    contact: { col: "contact_id", type: "uuid" },
+    account: { col: "account_id", type: "uuid" },
+    email: "email", phone: "phone", firstName: "first_name", lastName: "last_name",
+    status: "status", joinedAt: "joined_at", sfID: "sf_id", createdAt: "created_at",
+  },
+  refs: { campaign: () => Campaign, lead: () => Lead, contact: () => Contact, account: () => Account },
 });
-
-const CampaignMember = mongoose.model("CampaignMember", campaignMemberSchema);
 export default CampaignMember;

@@ -1,5 +1,5 @@
 import express from "express";
-import mongoose from "mongoose";
+import { isUuid } from "../db/model.js";
 import Campaign from "../models/Campaign.js";
 import CampaignInvite from "../models/CampaignInvite.js";
 import CampaignMember from "../models/CampaignMember.js";
@@ -17,7 +17,7 @@ const router = express.Router();
 router.post("/", auth, async (req: any, res) => {
     try {
         const { campaignId, toUserId } = req.body;
-        if (!mongoose.Types.ObjectId.isValid(campaignId) || !mongoose.Types.ObjectId.isValid(toUserId)) {
+        if (!isUuid(campaignId) || !isUuid(toUserId)) {
             return res.status(400).json({ error: "campaignId and toUserId are required" });
         }
 

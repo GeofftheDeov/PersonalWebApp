@@ -58,8 +58,8 @@ async function sendReadyCheck(session: any) {
 
     // 1. Bell notifications for every member, whatever collection they live in.
     const members = await CampaignMember.find({ campaign: campaignId }).select("email");
-    const emails = [...new Set(members.map(m => m.email).filter((e): e is string => Boolean(e)))];
-    const people = await findPeopleByEmail(emails);
+    const emails = [...new Set(members.map((m: any) => m.email).filter((e: any): e is string => Boolean(e)))];
+    const people = await findPeopleByEmail(emails as string[]);
     await Promise.all(people.map(p => notify(p.doc._id, {
         type: "system",
         title: `Ready check: "${session.title}" starts at ${startTime}`,

@@ -493,3 +493,37 @@ export default function SocialDock() {
                         </button>
                       </div>
                       {searchError && <p className="text-red-500 text-xs font-black uppercase">{searchError}</p>}
+                    </form>
+
+                    {searchResult && (
+                      <div className="p-4 bg-zinc-800 border-4 border-black shadow-[6px_6px_0px_0px_rgba(255,255,255,0.1)] animate-in fade-in zoom-in duration-300">
+                        <div className="mb-4">
+                          <h3 className="font-black text-2xl text-white">@{friendLabel(searchResult).toUpperCase()}</h3>
+                          <p className="text-xs text-zinc-500 font-bold">#{searchResult.userNumber}{searchResult.recordType ? ` · ${searchResult.recordType.toUpperCase()}` : ''}</p>
+                        </div>
+                        <button
+                          onClick={() => sendRequest(searchResult._id)}
+                          className="w-full flex items-center justify-center gap-2 py-3 bg-teal-500 border-2 border-black text-black font-black uppercase hover:bg-teal-400 transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:shadow-none active:translate-x-1 active:translate-y-1"
+                        >
+                          <UserPlus size={18} /> SEND FRIEND REQUEST
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="p-6 bg-black border-t-4 border-zinc-800">
+                <p className="text-[10px] text-zinc-600 font-black uppercase tracking-[0.2em] leading-relaxed">
+                  Connect by handle. Chat right here.<br/>
+                  The Personal Web App Social Layer v2.0
+                </p>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+    </>
+  );
+}

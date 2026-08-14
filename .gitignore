@@ -6,3 +6,4 @@ certs/
 .gemini/
 changes.diff
 /backend/dist/
+.fuse_hidden*

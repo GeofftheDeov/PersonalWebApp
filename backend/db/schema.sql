@@ -160,11 +160,22 @@ CREATE TABLE accounts (
   reset_password_token      text,
   reset_password_expires    timestamptz,
 
-  -- app authorization -- NOT the Salesforce profile below
+  -- Two axes, deliberately two columns (GitHub #28):
+  --   app_role     -- CAN YOU DO IT. Gates the admin portal and
+  --                   getAuthorizedCampaignIds. Derived from sf_profile
+  --                   through sf_profile_role_map, User-sourced rows only.
+  --   account_tier -- WHAT HAVE YOU PAID FOR. Gates supporter-only surface.
+  --                   Derived from sf_object through sf_object_tier_map.
+  -- Collapsing them would repeat the bug #28 was opened to fix: a tier change
+  -- could then move somebody's admin access.
   app_role                  text NOT NULL DEFAULT 'user'
                               CHECK (app_role IN ('user','admin')),
   app_role_source           text NOT NULL DEFAULT 'sf'
                               CHECK (app_role_source IN ('sf','manual')),
+  account_tier              text NOT NULL DEFAULT 'free'
+                              CHECK (account_tier IN ('free','member','patron')),
+  account_tier_source       text NOT NULL DEFAULT 'sf'
+                              CHECK (account_tier_source IN ('sf','manual')),
 
   -- ---- identity / display (app-owned) ----
   name                      text,
@@ -247,6 +258,43 @@ CREATE TABLE person_outbox (
 );
 CREATE INDEX idx_person_outbox_pending ON person_outbox (created_at)
   WHERE status = 'pending';
+
+-- ---------- the two source maps (GitHub #28 / Paperclip MUR-321) ----------
+
+-- Salesforce Profile -> app_role. A table, not an inline string comparison:
+-- SF admins add Profiles and this will grow. Anything NOT listed here resolves
+-- to 'user' -- default deny, so a new Profile appearing in the org can never
+-- grant admin by accident. Profile exists only on the Salesforce User object,
+-- so this map can only ever affect User-sourced accounts.
+CREATE TABLE sf_profile_role_map (
+  sf_profile text PRIMARY KEY,
+  app_role   text NOT NULL CHECK (app_role IN ('user','admin')),
+  note       text,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TRIGGER trg_sf_profile_role_map_updated BEFORE UPDATE ON sf_profile_role_map
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+INSERT INTO sf_profile_role_map (sf_profile, app_role, note) VALUES
+  ('System Administrator', 'admin', 'The only Profile in the org with an assigned User (board, 2026-08-21).');
+
+-- sObject -> account_tier. Also a table rather than a constant: the tier policy
+-- is expected to move as the paid tiers develop, and that should be an UPDATE
+-- rather than a deploy.
+CREATE TABLE sf_object_tier_map (
+  sf_object    text PRIMARY KEY CHECK (sf_object IN ('Lead','Contact','Account','User')),
+  account_tier text NOT NULL CHECK (account_tier IN ('free','member','patron')),
+  note         text,
+  updated_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE TRIGGER trg_sf_object_tier_map_updated BEFORE UPDATE ON sf_object_tier_map
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+INSERT INTO sf_object_tier_map (sf_object, account_tier, note) VALUES
+  ('Lead',    'free',   'Signed up, no relationship with the site yet. New app signups land here.'),
+  ('Contact', 'member', 'Known to the site but has not funded it.'),
+  ('Account', 'patron', 'Has donated to keep the site running.'),
+  ('User',    'patron', 'Salesforce User - staff. Treated as patron so a tier gate never locks out an operator.');
 
 -- ============================================================
 -- Social graph

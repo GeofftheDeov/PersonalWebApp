@@ -308,6 +308,7 @@ INSERT INTO sf_object_tier_map (sf_object, account_tier, note) VALUES
 
 CREATE TABLE friend_requests (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+
   from_user   uuid NOT NULL REFERENCES sf_users(id) ON DELETE CASCADE,
   to_user     uuid NOT NULL REFERENCES sf_users(id) ON DELETE CASCADE,
   status      text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','rejected')),
@@ -374,6 +375,7 @@ CREATE TABLE dungeons (
 CREATE TABLE characters (
   id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name       text NOT NULL,
+
   player_id  uuid NOT NULL REFERENCES sf_accounts(id) ON DELETE CASCADE,
   campaign_id uuid REFERENCES campaigns(id) ON DELETE SET NULL,
   dungeon_id  uuid REFERENCES dungeons(id)  ON DELETE SET NULL,
@@ -411,6 +413,7 @@ CREATE TABLE player_sessions (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name        text NOT NULL,
   session_id  uuid NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,
+
   player_id   uuid NOT NULL REFERENCES sf_accounts(id) ON DELETE CASCADE,
   campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
   sf_id       text,
@@ -494,6 +497,7 @@ CREATE INDEX idx_messages_dm_created       ON messages (dm_key, created_at DESC)
 
 CREATE TABLE notifications (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+
   user_id     uuid NOT NULL REFERENCES sf_users(id) ON DELETE CASCADE,
   type        text NOT NULL CHECK (type IN ('friend_request','campaign_invite','message','system')),
   title       text NOT NULL,

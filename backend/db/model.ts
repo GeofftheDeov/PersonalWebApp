@@ -12,7 +12,7 @@ import pool from "./index.js";
 
 // ---------------------------------------------------------------- types
 
-type FieldType = "plain" | "jsonb" | "uuid" | "uuid[]" | "text[]";
+type FieldType = "plain" | "jsonb" | "uuid" | "uuid[]" | "text[]" | "date" | "jsonpath";
 
 export interface FieldDef {
   col: string;
@@ -78,13 +78,66 @@ function runner(session?: ClientSession | null): pg.Pool | pg.PoolClient {
   return session?.client ?? pool;
 }
 
+/**
+ * An HTML form that leaves an optional input untouched submits `""`, not
+ * `undefined`. Mongo accepted `""` in an optional Date field; Postgres rejects
+ * it outright:
+ *
+ *   invalid input syntax for type timestamp with time zone: ""
+ *
+ * So every create with a blank optional date 500s — which is the default state
+ * of most of those forms. `""` is not a meaningful value for a date or a uuid
+ * (unlike text, where empty and absent can legitimately differ), so for those
+ * two types it is normalised to NULL here rather than being audited at each of
+ * the ~20 call sites. See GitHub #41.
+ *
+ * Note the deliberate limit: only blank/whitespace becomes NULL. A non-empty
+ * but unparseable date is still sent to Postgres and still errors, because
+ * silently nulling a mistyped date loses data the user thought they entered.
+ */
+function blankToNull(value: any): any {
+  if (value === undefined) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+  return value;
+}
+
 function toParam(value: any, type: FieldType): any {
   if (type === "jsonb") return value === undefined || value === null ? null : JSON.stringify(value);
+  if (type === "date" || type === "uuid") return blankToNull(value);
   return value === undefined ? null : value;
 }
 
 function castSuffix(type: FieldType): string {
   return type === "jsonb" ? "::jsonb" : "";
+}
+
+/**
+ * Resolve a dotted filter key that reaches *into* a jsonb column, e.g.
+ * `{ "readyCheck.sentAt": { $exists: false } }` -> `ready_check->>'sentAt'`.
+ *
+ * Mongo traversed subdocuments natively, so the port left call sites like the
+ * ready-check sweep filtering on a dotted path. buildWhere throws on any key
+ * not in def.fields, so that query has been failing every 60s since the port:
+ *
+ *   [ready-check] sweep failed: [db] game_sessions: unknown filter field
+ *   "readyCheck.sentAt"
+ *
+ * Returns null unless the head of the path is a declared jsonb field, so a
+ * genuinely unknown field still raises "unknown filter field" as before.
+ */
+function jsonbPathField(def: ModelDef, key: string): FieldDef | null {
+  const dot = key.indexOf(".");
+  if (dot < 1) return null;
+  const head = fdef(def, key.slice(0, dot));
+  if (!head || head.type !== "jsonb") return null;
+  const path = key.slice(dot + 1).split(".").map((p) => p.replace(/'/g, "''"));
+  const expr = path.length === 1
+    ? `${head.col}->>'${path[0]}'`
+    : `${head.col}#>>'{${path.join(",")}}'`;
+  // `->>` yields text. Equality, $in, $ne, $exists and $regex all behave; the
+  // ordering operators would compare lexically, which is silently wrong for
+  // numbers and dates, so fieldCond rejects them on a jsonb path.
+  return { col: expr, type: "jsonpath" };
 }
 
 /** Convert a JS RegExp (or string) to a Postgres regex condition. */
@@ -106,7 +159,9 @@ function buildWhere(def: ModelDef, filter: any, params: any[]): string {
       parts.push(`(${sub.join(key === "$or" ? " OR " : " AND ")})`);
       continue;
     }
-    const f = key === "_id" || key === "id" ? { col: "id", type: "uuid" as FieldType } : fdef(def, key);
+    const f = key === "_id" || key === "id"
+      ? { col: "id", type: "uuid" as FieldType }
+      : fdef(def, key) ?? jsonbPathField(def, key);
     if (!f) throw new Error(`[db] ${def.table}: unknown filter field "${key}"`);
     parts.push(fieldCond(f, value, params));
   }
@@ -142,10 +197,17 @@ function fieldCond(f: FieldDef, value: any, params: any[]): string {
           if (v === null) conds.push(`${f.col} IS NOT NULL`);
           else { params.push(v); conds.push(`${f.col} IS DISTINCT FROM $${params.length}`); }
           break;
-        case "$gt": params.push(v); conds.push(`${f.col} > $${params.length}`); break;
-        case "$gte": params.push(v); conds.push(`${f.col} >= $${params.length}`); break;
-        case "$lt": params.push(v); conds.push(`${f.col} < $${params.length}`); break;
-        case "$lte": params.push(v); conds.push(`${f.col} <= $${params.length}`); break;
+        case "$gt": case "$gte": case "$lt": case "$lte": {
+          // `->>` on a jsonb path yields text, so these would compare lexically
+          // — silently wrong for numbers and dates. Refuse rather than lie.
+          if (f.type === "jsonpath") {
+            throw new Error(`[db] ${op} is not supported on a jsonb path (${f.col}); use plain SQL with an explicit cast`);
+          }
+          const sqlOp = op === "$gt" ? ">" : op === "$gte" ? ">=" : op === "$lt" ? "<" : "<=";
+          params.push(v);
+          conds.push(`${f.col} ${sqlOp} $${params.length}`);
+          break;
+        }
         case "$regex": conds.push(regexCond(f.col, v as any, (value as any).$options, params)); break;
         case "$options": break; // consumed by $regex
         case "$exists": conds.push((v as boolean) ? `${f.col} IS NOT NULL` : `${f.col} IS NULL`); break;

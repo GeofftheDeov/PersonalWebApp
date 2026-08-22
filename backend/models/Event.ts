@@ -4,7 +4,7 @@ const Event = defineModel({
   table: "events",
   fields: {
     title: "title", description: "description", status: "status",
-    startDate: "start_date", endDate: "end_date", createdAt: "created_at",
+    startDate: { col: "start_date", type: "date" }, endDate: { col: "end_date", type: "date" }, createdAt: { col: "created_at", type: "date" },
   },
 });
 export default Event;

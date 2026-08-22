@@ -17,6 +17,26 @@
 -- Existence of the referenced person is enforced in the data layer, which
 -- already resolves ids across all four tables. Trade-off: deleting a person no
 -- longer cascades these rows, so they must be cleaned up by the application.
+--
+-- ---------------------------------------------------------------------------
+-- History (GitHub #42): this was authored on 2026-08-14 and run by hand
+-- against the Neon dev branch, but the commit never left the laptop, so the
+-- repo — and therefore any database built from schema.sql, including the Neon
+-- production branch — never got it. Re-authored here so the promotion has a
+-- record to run. It is a no-op against dev (DROP ... IF EXISTS).
+--
+-- Order relative to the Phase 1 rename does not matter. These constraints live
+-- on friend_requests / notifications / characters / player_sessions, none of
+-- which Phase 1 renames, and Phase 1's constraint-rename block only touches
+-- constraints whose conrelid is one of the four sf_* tables. The names below
+-- are correct before and after it. Run this one first anyway, per #42, so the
+-- fix that unblocks friend requests lands before the larger migration.
+--
+-- campaign_invites deliberately keeps its FKs to sf_users. That flow is
+-- User-only in code (inviteRoutes.ts resolves both sides with User.findById),
+-- so widening the schema alone would not make cross-type invites work — it
+-- would just move the failure. Tracked separately.
+-- ---------------------------------------------------------------------------
 
 ALTER TABLE friend_requests DROP CONSTRAINT IF EXISTS friend_requests_from_user_fkey;
 ALTER TABLE friend_requests DROP CONSTRAINT IF EXISTS friend_requests_to_user_fkey;

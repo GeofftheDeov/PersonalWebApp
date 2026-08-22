@@ -9,7 +9,7 @@ const Lead = defineModel({
   table: "sf_leads",
   fields: {
     firstName: "first_name", lastName: "last_name", email: "email", password: "password",
-    resetPasswordToken: "reset_password_token", resetPasswordExpires: "reset_password_expires",
+    resetPasswordToken: "reset_password_token", resetPasswordExpires: { col: "reset_password_expires", type: "date" },
     isVerified: "is_verified", emailVerificationToken: "email_verification_token",
     company: "company", handle: "handle", phone: "phone",
     status: "status", source: "source",
@@ -18,7 +18,7 @@ const Lead = defineModel({
     profilePicture: "profile_picture",
     favoriteGames: { col: "favorite_games", type: "text[]" },
     friends: { col: "friends", type: "uuid[]" },
-    createdAt: "created_at",
+    createdAt: { col: "created_at", type: "date" },
   },
   defaults: { userNumber: fourDigit, userDigit: digitTag("LD") },
   preSave: hashPasswordHook,

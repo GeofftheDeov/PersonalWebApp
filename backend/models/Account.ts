@@ -11,7 +11,7 @@ const Account = defineModel({
   table: "sf_accounts",
   fields: {
     name: "name", email: "email", password: "password",
-    resetPasswordToken: "reset_password_token", resetPasswordExpires: "reset_password_expires",
+    resetPasswordToken: "reset_password_token", resetPasswordExpires: { col: "reset_password_expires", type: "date" },
     isVerified: "is_verified", emailVerificationToken: "email_verification_token",
     industry: "industry", company: "company", website: "website", handle: "handle",
     phone: "phone", address: "address", userNumber: "user_number", userDigit: "user_digit",
@@ -19,7 +19,7 @@ const Account = defineModel({
     profilePicture: "profile_picture",
     favoriteGames: { col: "favorite_games", type: "text[]" },
     friends: { col: "friends", type: "uuid[]" },
-    createdAt: "created_at",
+    createdAt: { col: "created_at", type: "date" },
   },
   defaults: { userNumber: fourDigit, userDigit: digitTag("ACC") },
   preSave: hashPasswordHook,

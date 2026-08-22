@@ -15,7 +15,12 @@ pg.types.setTypeParser(pg.types.builtins.INT8, (v) => (v === null ? null : parse
 
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: true },
+  // Neon always speaks TLS. A loopback URL means a throwaway local cluster —
+  // the one scripts/test-*.ts run against — which does not, so insisting on
+  // SSL there makes the regression tests unrunnable. Never true in ECS.
+  ssl: /(\/\/|@)(127\.0\.0\.1|localhost)[:/]/.test(process.env.DATABASE_URL ?? "")
+    ? false
+    : { rejectUnauthorized: true },
   max: 10,                      // Neon free tier allows plenty; keep modest
   idleTimeoutMillis: 30_000,    // release idle conns so Neon can autosuspend
   connectionTimeoutMillis: 10_000,

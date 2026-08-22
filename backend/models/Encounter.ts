@@ -8,7 +8,7 @@ const Encounter = defineModel({
     name: "name", description: "description", difficulty: "difficulty", type: "type",
     session: { col: "session_id", type: "uuid" },
     dungeon: { col: "dungeon_id", type: "uuid" },
-    sfID: "sf_id", createdAt: "created_at",
+    sfID: "sf_id", createdAt: { col: "created_at", type: "date" },
   },
   refs: { session: () => Session, dungeon: () => Dungeon },
 });

@@ -1,8 +1,11 @@
 import { defineModel } from "../db/model.js";
 import { hashPasswordHook, fourDigit, digitTag } from "./_shared.js";
 
+// Phase 1 of the unified account model (#33) renamed this table to sf_contacts.
+// It is now a Salesforce landing table. account_id still points at sf_accounts,
+// which is Salesforce's own Contact -> Account relationship and stays that way.
 const Contact = defineModel({
-  table: "contacts",
+  table: "sf_contacts",
   fields: {
     name: "name", email: "email", password: "password",
     isVerified: "is_verified", emailVerificationToken: "email_verification_token",

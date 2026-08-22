@@ -2,8 +2,13 @@ import { defineModel } from "../db/model.js";
 import { hashPasswordHook, fourDigit, digitTag } from "./_shared.js";
 import { createLeadFromAccount } from "../services/salesforceService.js";
 
+// Phase 1 of the unified account model (#33) renamed this table to sf_accounts.
+// NOTE: `accounts` is now a DIFFERENT, currently empty table — the app's single
+// person table, filled by the Phase 2 backfill (#34). This model is the
+// Salesforce Account landing table and must never be pointed back at
+// "accounts".
 const Account = defineModel({
-  table: "accounts",
+  table: "sf_accounts",
   fields: {
     name: "name", email: "email", password: "password",
     resetPasswordToken: "reset_password_token", resetPasswordExpires: "reset_password_expires",

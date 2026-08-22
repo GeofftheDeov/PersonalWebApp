@@ -8,7 +8,7 @@ const CampaignInvite = defineModel({
     campaign: { col: "campaign_id", type: "uuid" },
     from: { col: "from_user", type: "uuid" },
     to: { col: "to_user", type: "uuid" },
-    status: "status", createdAt: "created_at",
+    status: "status", createdAt: { col: "created_at", type: "date" },
   },
   refs: { campaign: () => Campaign, from: () => User, to: () => User },
 });

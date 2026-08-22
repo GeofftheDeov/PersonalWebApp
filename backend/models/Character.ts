@@ -11,7 +11,7 @@ const Character = defineModel({
     campaign: { col: "campaign_id", type: "uuid" },
     dungeon: { col: "dungeon_id", type: "uuid" },
     gameType: "game_type", class: "class", level: "level", isDead: "is_dead",
-    sfID: "sf_id", createdAt: "created_at",
+    sfID: "sf_id", createdAt: { col: "created_at", type: "date" },
   },
   refs: { player: () => Account, campaign: () => Campaign, dungeon: () => Dungeon },
 });

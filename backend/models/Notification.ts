@@ -7,7 +7,7 @@ const Notification = defineModel({
     user: { col: "user_id", type: "uuid" },
     type: "type", title: "title", body: "body", link: "link", sourceKey: "source_key",
     meta: { col: "meta", type: "jsonb" },
-    count: "count", read: "read", createdAt: "created_at",
+    count: "count", read: "read", createdAt: { col: "created_at", type: "date" },
   },
   refs: { user: () => User },
 });

@@ -7,7 +7,7 @@ const ApiKeyVault = defineModel({
     userId: { col: "user_id", type: "uuid" },
     provider: "provider", label: "label",
     encryptedKeyId: "encrypted_key_id", encryptedSecret: "encrypted_secret",
-    createdAt: "created_at", updatedAt: "updated_at",
+    createdAt: { col: "created_at", type: "date" }, updatedAt: { col: "updated_at", type: "date" },
   },
   refs: { userId: () => User },
 });

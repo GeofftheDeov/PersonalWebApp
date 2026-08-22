@@ -4,9 +4,9 @@ import Account from "./Account.js";
 const Opportunity = defineModel({
   table: "opportunities",
   fields: {
-    name: "name", amount: "amount", stage: "stage", closeDate: "close_date",
+    name: "name", amount: "amount", stage: "stage", closeDate: { col: "close_date", type: "date" },
     accountId: { col: "account_id", type: "uuid" },
-    createdAt: "created_at",
+    createdAt: { col: "created_at", type: "date" },
   },
   refs: { accountId: () => Account },
 });

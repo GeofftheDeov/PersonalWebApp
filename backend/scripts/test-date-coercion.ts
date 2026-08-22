@@ -87,11 +87,13 @@ async function main() {
     assertNull(o, ["closeDate", "accountId"]);
   });
 
-  // #41 flagged campaign_invites as possibly a *different* bug — it has no
-  // date column at all. It is: from_user/to_user are NOT NULL and still carry
-  // FKs to sf_users, so an invite to anyone who is not an sf_users row fails
-  // on the constraint, not on coercion. See the note in #42.
-  await check("campaign_invites: create with two real sf_users", async () => {
+  // #41 flagged campaign_invites as possibly a *different* bug. It is — it has
+  // no date column at all. from_user/to_user are person refs that were still
+  // pinned to sf_users by a FK, so an invite to anyone who is not a User failed
+  // on the constraint rather than on coercion. Anyone can be invited to a
+  // campaign whatever table they live in, so those FKs are gone too; every
+  // cross-type pair is covered in test-person-refs.ts.
+  await check("campaign_invites: User -> User", async () => {
     const { rows } = await pool.query(
       `INSERT INTO sf_users (name, password) VALUES ('a','x'), ('b','x') RETURNING id`);
     const i = await CampaignInvite.create({
@@ -100,18 +102,15 @@ async function main() {
     if (!i._id) throw new Error("no id returned");
   });
 
-  await check("campaign_invites: invite to a non-sf_users person (the real #42 failure)", async () => {
+  await check("campaign_invites: User -> Contact (was the #42 failure)", async () => {
     const { rows: u } = await pool.query(
       `INSERT INTO sf_users (name, password) VALUES ('inviter','x') RETURNING id`);
     const { rows: c } = await pool.query(
       `INSERT INTO sf_contacts (name) VALUES ('a contact') RETURNING id`);
-    let threw = false;
-    try {
-      await CampaignInvite.create({ campaign: String(parent._id), from: u[0].id, to: c[0].id });
-    } catch (e: any) {
-      threw = /foreign key|violates/i.test(e.message);
-    }
-    if (!threw) throw new Error("expected the sf_users FK to reject a contact — schema.sql may have been fixed");
+    const i = await CampaignInvite.create({
+      campaign: String(parent._id), from: u[0].id, to: c[0].id,
+    });
+    if (!i._id) throw new Error("no id returned");
   });
 
   // A real date must still round-trip, and garbage must still be rejected —

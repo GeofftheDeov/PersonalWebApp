@@ -32,8 +32,8 @@ $$ LANGUAGE plpgsql;
 --   sf_contacts.account_id      -> sf_accounts(id)   (SF Contact -> Account)
 --   opportunities.account_id    -> sf_accounts(id)   (SF Opportunity -> Account)
 -- The app-facing references still pointing at landing tables
--- (campaign_members.*, campaign_invites.*, api_key_vault.user_id,
--- cloud_claw_sessions.user_id) are rewritten to accounts(id) in Phase 3.
+-- (campaign_members.*, api_key_vault.user_id, cloud_claw_sessions.user_id) are
+-- rewritten to accounts(id) in Phase 3.
 -- ============================================================
 
 CREATE TABLE sf_users (
@@ -355,8 +355,11 @@ CREATE INDEX idx_campaign_members_campaign ON campaign_members (campaign_id);
 CREATE TABLE campaign_invites (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
-  from_user   uuid NOT NULL REFERENCES sf_users(id) ON DELETE CASCADE,
-  to_user     uuid NOT NULL REFERENCES sf_users(id) ON DELETE CASCADE,
+  -- Polymorphic person ref: User | Lead | Contact | Account (see personUtils.ts).
+  -- Anyone can be invited to a campaign, whatever table they live in, so no FK
+  -- is possible; existence is enforced in the data layer. GitHub #42.
+  from_user   uuid NOT NULL,
+  to_user     uuid NOT NULL,
   status      text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','declined')),
   created_at  timestamptz NOT NULL DEFAULT now()
 );
@@ -520,6 +523,10 @@ CREATE INDEX idx_notifications_dedupe ON notifications (user_id, type, source_ke
 -- Integrations / trading
 -- ============================================================
 
+-- NOTE: user_id here is NOT a polymorphic person ref, unlike the columns above.
+-- The key vault and the Cloud Claw console are staff-only surfaces whose owner
+-- genuinely is a Salesforce User, so the FK stays. Phase 3 (#35) repoints both
+-- at accounts(id) along with the rest of the app-facing references.
 CREATE TABLE api_key_vault (
   id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id          uuid NOT NULL REFERENCES sf_users(id) ON DELETE CASCADE,

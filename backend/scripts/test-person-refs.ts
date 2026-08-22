@@ -4,9 +4,10 @@
  *
  * PersonalWebApp treats User | Lead | Contact | Account as interchangeable
  * people (personUtils.ts). Before this fix, schema.sql still declared
- * friend_requests / notifications / characters / player_sessions as REFERENCES
- * sf_users(id) or sf_accounts(id), so anything built from it — including the
- * Neon production branch — came up broken for 18 of 19 accounts.
+ * friend_requests / notifications / characters / player_sessions /
+ * campaign_invites as REFERENCES sf_users(id) or sf_accounts(id), so anything
+ * built from it — including the Neon production branch — came up broken for 18
+ * of 19 accounts.
  *
  * Run against a throwaway cluster loaded from db/schema.sql:
  *   DATABASE_URL=postgresql://postgres@127.0.0.1:5433/pwatest npx tsx scripts/test-person-refs.ts
@@ -53,6 +54,22 @@ async function main() {
     }
   }
 
+  // Anyone can be invited to a campaign, whatever table they live in
+  // (Geoff, 2026-08-22) — the invite picker offers your friends list, and
+  // `friends` is polymorphic, so every pair below is reachable from the UI.
+  const { rows: camp } = await pool.query(
+    `INSERT INTO campaigns (title) VALUES ('a campaign') RETURNING id`);
+  for (const [fromType, fromId] of people) {
+    for (const [toType, toId] of people) {
+      if (fromId === toId) continue;
+      await check(`campaign_invite ${fromType} -> ${toType}`, async () => {
+        await pool.query(
+          `INSERT INTO campaign_invites (campaign_id, from_user, to_user) VALUES ($1, $2, $3)`,
+          [camp[0].id, fromId, toId]);
+      });
+    }
+  }
+
   for (const [type, id] of people) {
     await check(`notification for a ${type}`, async () => {
       await pool.query(
@@ -63,15 +80,29 @@ async function main() {
     });
   }
 
-  // The five constraints must be absent from a freshly built database.
+  // All seven person constraints must be absent from a freshly built database.
   const { rows: fks } = await pool.query(`
     SELECT conname FROM pg_constraint
     WHERE contype = 'f' AND conname IN (
       'friend_requests_from_user_fkey','friend_requests_to_user_fkey',
       'notifications_user_id_fkey','characters_player_id_fkey',
-      'player_sessions_player_id_fkey')`);
-  await check("none of the five person FKs exist", async () => {
+      'player_sessions_player_id_fkey',
+      'campaign_invites_from_user_fkey','campaign_invites_to_user_fkey')`);
+  await check("none of the seven person FKs exist", async () => {
     if (fks.length) throw new Error(`still present: ${fks.map((r) => r.conname).join(", ")}`);
+  });
+
+  // The staff-only integrations are NOT person refs and must keep theirs —
+  // their owner genuinely is a Salesforce User until Phase 3 (#35). Without
+  // this half, dropping every FK in the schema would also make the test pass.
+  const { rows: kept } = await pool.query(`
+    SELECT conname FROM pg_constraint
+    WHERE contype = 'f' AND conname IN (
+      'api_key_vault_user_id_fkey','cloud_claw_sessions_user_id_fkey')`);
+  await check("api_key_vault and cloud_claw_sessions keep their sf_users FKs", async () => {
+    if (kept.length !== 2) {
+      throw new Error(`expected 2, found ${kept.length}: ${kept.map((r) => r.conname).join(", ")}`);
+    }
   });
 
   console.log(`\n  ${pass} passed, ${fail} failed\n`);

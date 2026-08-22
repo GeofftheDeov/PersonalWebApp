@@ -32,14 +32,25 @@
 -- are correct before and after it. Run this one first anyway, per #42, so the
 -- fix that unblocks friend requests lands before the larger migration.
 --
--- campaign_invites deliberately keeps its FKs to sf_users. That flow is
--- User-only in code (inviteRoutes.ts resolves both sides with User.findById),
--- so widening the schema alone would not make cross-type invites work — it
--- would just move the failure. Tracked separately.
+-- campaign_invites is included, reversing the original note on e71113ae. That
+-- note said the invite flow was "User-only in code", so widening the schema
+-- would only move the failure. It was describing the bug, not the design:
+-- anyone can be invited to a campaign whatever table they live in (Geoff,
+-- 2026-08-22). campaign_members has been polymorphic all along (lead_id /
+-- contact_id / account_id), getAuthorizedCampaignIds already matches on any of
+-- them, and the invite picker offers your friends list — which is a polymorphic
+-- uuid[]. inviteRoutes.ts was the sole holdout and is fixed alongside this.
+--
+-- api_key_vault.user_id and cloud_claw_sessions.user_id keep their FKs to
+-- sf_users. Those are not person references in the polymorphic sense — they are
+-- staff-only integrations (the key vault, the Cloud Claw console) whose owner
+-- genuinely is a Salesforce User. Phase 3 (#35) repoints them at accounts(id).
 -- ---------------------------------------------------------------------------
 
-ALTER TABLE friend_requests DROP CONSTRAINT IF EXISTS friend_requests_from_user_fkey;
-ALTER TABLE friend_requests DROP CONSTRAINT IF EXISTS friend_requests_to_user_fkey;
-ALTER TABLE notifications   DROP CONSTRAINT IF EXISTS notifications_user_id_fkey;
-ALTER TABLE characters      DROP CONSTRAINT IF EXISTS characters_player_id_fkey;
-ALTER TABLE player_sessions DROP CONSTRAINT IF EXISTS player_sessions_player_id_fkey;
+ALTER TABLE friend_requests   DROP CONSTRAINT IF EXISTS friend_requests_from_user_fkey;
+ALTER TABLE friend_requests   DROP CONSTRAINT IF EXISTS friend_requests_to_user_fkey;
+ALTER TABLE notifications     DROP CONSTRAINT IF EXISTS notifications_user_id_fkey;
+ALTER TABLE characters        DROP CONSTRAINT IF EXISTS characters_player_id_fkey;
+ALTER TABLE player_sessions   DROP CONSTRAINT IF EXISTS player_sessions_player_id_fkey;
+ALTER TABLE campaign_invites  DROP CONSTRAINT IF EXISTS campaign_invites_from_user_fkey;
+ALTER TABLE campaign_invites  DROP CONSTRAINT IF EXISTS campaign_invites_to_user_fkey;

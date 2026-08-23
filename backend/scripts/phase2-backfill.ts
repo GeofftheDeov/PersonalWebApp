@@ -137,7 +137,20 @@ export async function runBackfill(
 ): Promise<BackfillResult> {
   const { groups, excluded } = validate(rows);
 
-  await client.query("TRUNCATE accounts, account_source_links CASCADE");
+  // `person_outbox` has an FK to `accounts`, so a bare CASCADE here also
+  // truncates the Salesforce write-back queue — announced by nothing louder
+  // than a psql NOTICE. It is empty in Phase 2, but this script is built to be
+  // re-run, and from Phase 3 on that queue holds real pending writes. Refuse
+  // rather than discard, and name the table being truncated instead of letting
+  // CASCADE reach it implicitly.
+  const { rows: queued } = await client.query(
+    `SELECT count(*)::int AS n FROM person_outbox`);
+  if (queued[0].n > 0) {
+    throw new Error(
+      `person_outbox holds ${queued[0].n} queued Salesforce write-back(s); ` +
+      `truncating accounts would discard them. Drain the outbox first.`);
+  }
+  await client.query("TRUNCATE accounts, account_source_links, person_outbox");
 
   let accounts = 0;
   let links = 0;
@@ -188,7 +201,17 @@ export async function runBackfill(
     const usersRole = pick("role", "sf_users");
 
     // sf_leads names its Salesforce id sf_lead_id, not sf_id.
+    const sfIdOf = (row: any) => row.sf_id ?? row.sf_lead_id ?? null;
+
+    // The account carries the WINNER's Salesforce id...
     const sfId = pick("sf_id") ?? pick("sf_lead_id");
+
+    // ...but each account_source_links row carries its OWN source row's, so
+    // (sf_object, sf_id) keeps identifying exactly one Salesforce record. Using
+    // the winner's id on every link made a Contact link claim the Account's
+    // 001 id, which is the id a write-back would then update.
+    const sfIdByRow = new Map<string, string | null>(
+      sources.map((s) => [`${s.table}:${s.row.id}`, sfIdOf(s.row)]));
 
     await client.query(
       `INSERT INTO accounts (
@@ -228,7 +251,9 @@ export async function runBackfill(
            (source_table, source_id, account_id, sf_object, sf_id, is_primary)
          VALUES ($1,$2,$3,$4,$5,$6)`,
         [m.source_table, m.source_id, winner.source_id,
-         SF_OBJECT[m.source_table], sfId, m === winner],
+         SF_OBJECT[m.source_table],
+         sfIdByRow.get(`${m.source_table}:${m.source_id}`) ?? null,
+         m === winner],
       );
       links++;
     }

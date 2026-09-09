@@ -7,3 +7,9 @@ certs/
 changes.diff
 /backend/dist/
 .fuse_hidden*
+
+# Phase 3 (#35): the merge sheet carries other people's names and emails and
+# this repo is public; the map render and the patch files are both derived.
+person-merge-adjudication.csv
+wayfinder-map.html
+patches/

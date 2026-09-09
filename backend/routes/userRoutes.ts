@@ -1,11 +1,9 @@
 import express from "express";
 const router = express.Router();
-import User from "../models/User.js";
-import Lead from "../models/Lead.js";
-import Contact from "../models/Contact.js";
 import Account from "../models/Account.js";
 import PlayerSession from "../models/PlayerSession.js";
 import CampaignMember from "../models/CampaignMember.js";
+import CampaignInvite from "../models/CampaignInvite.js";
 import Campaign from "../models/Campaign.js";
 import { getAuthorizedCampaignIds } from "../utils/gameNightPlannerUtils.js";
 import { findPersonById, toPublicPerson } from "../utils/personUtils.js";
@@ -18,6 +16,18 @@ import fs from "fs";
 import { sendResetPasswordEmail, sendVerificationEmail } from "../services/emailService.js";
 import { auth } from "../middleware/auth.js";
 import { OAuth2Client } from "google-auth-library";
+
+/**
+ * Phase 3 (#35, plan §3.2).
+ *
+ * Five separate four-table fallback cascades used to live in this file — login,
+ * google-login, verify-email, forgot-password, reset-password — each walking
+ * User, then Account, then Contact, then Lead, and each remembering which table
+ * it landed in so later code could pick the same model again. Every one of them
+ * is now a single query against `accounts`, on an indexed citext column: the
+ * `{ $regex: ^email$, i }` pattern that forced a sequential scan on every login
+ * attempt is gone with them.
+ */
 
 const uploadDir = path.join(process.cwd(), "uploads", "profile-pictures");
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
@@ -41,26 +51,85 @@ const upload = multer({
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
+const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-this";
+
+/**
+ * The token carries only who you are. It deliberately does NOT carry what you
+ * may do: `app_role` is read from the database at the moment it is needed, so
+ * revoking admin takes effect immediately rather than at the end of somebody's
+ * hour-long token. The old `type` claim is not emitted at all — after the merge
+ * it could only be meaningless or wrong, and a claim nothing reads is a claim
+ * something will eventually start reading again by mistake.
+ */
+const signToken = (person: any) =>
+    jwt.sign({ id: person._id, email: person.email }, JWT_SECRET, { expiresIn: "1h" });
+
+/** The user object the client stores. Capability comes from explicit columns. */
+const publicUser = (person: any) => ({
+    id: person._id,
+    email: person.email,
+    name: person.name || person.firstName || "User",
+    userNumber: person.userNumber,
+    userDigit: person.userDigit,
+    phone: person.phone,
+    // Authorization and entitlement, deliberately two fields (#28). A tier
+    // change must never move somebody's access.
+    appRole: person.appRole,
+    accountTier: person.accountTier,
+    // Provenance only — where the record came from. The Paperclip gate is the
+    // one place allowed to read it, and it says so at the point of use.
+    recordType: person.sfObject ?? null,
+    company: person.company,
+    industry: person.industry,
+    website: person.website,
+    handle: person.handle,
+    profilePicture: person.profilePicture,
+});
+
+/**
+ * Bind any pending invites addressed to this email (plan §3.5). A Game Master
+ * can invite somebody who has no account yet; this is where that invite finds
+ * its person. Run on registration and again on login, so an invite sent between
+ * the two is not stranded.
+ */
+async function bindPendingInvites(person: any): Promise<void> {
+    if (!person?.email) return;
+    try {
+        await CampaignInvite.updateMany(
+            { toEmail: person.email, to: null, status: "pending" },
+            { $set: { to: person._id } },
+        );
+    } catch (err: any) {
+        // Never fail a login over this; the next login retries.
+        console.error("[INVITES] binding pending invites failed:", err.message);
+    }
+}
+
 router.post("/register", async (req, res) => {
   try {
     const { name, email, password } = req.body;
     const isDev = process.env.NODE_ENV === "development" || req.headers.host?.includes("localhost");
     const token = isDev ? undefined : crypto.randomBytes(20).toString("hex");
 
-    const user = new User({ 
-      name, 
-      email, 
-      password: password,
+    // sf_object = 'Lead' with sf_id NULL is the marker for "app-native, not yet
+    // in the CRM" (§2.8). The nightly outbox drain creates the Salesforce Lead
+    // and writes the id back; nothing about signup waits on Salesforce.
+    const user = new Account({
+      name,
+      email,
+      password,
       isVerified: isDev,
-      emailVerificationToken: token
+      emailVerificationToken: token,
+      sfObject: "Lead",
     });
-    
+
     await user.save();
+    await bindPendingInvites(user);
     if (!isDev && token) await sendVerificationEmail(email, token);
-    
-    res.status(201).json({ 
+
+    res.status(201).json({
       message: isDev ? "User registered successfully!" : "User registered successfully! Please check your email to verify your account.",
-      isVerified: isDev 
+      isVerified: isDev
     });
   } catch (error: any) {
     console.error("Register Error:", error);
@@ -73,31 +142,12 @@ router.post("/verify-email", async (req, res) => {
     if (!token) return res.status(400).json({ error: "Token is required" });
 
     try {
-        let user: any = await User.findOne({ emailVerificationToken: token });
-        let Model: any = User;
+        const user = await Account.findOne({ emailVerificationToken: token });
+        if (!user) return res.status(400).json({ error: "Invalid or expired token" });
 
-        if (!user) {
-            user = await Account.findOne({ emailVerificationToken: token });
-            Model = Account;
-        }
-
-        if (!user) {
-            user = await Contact.findOne({ emailVerificationToken: token });
-            Model = Contact;
-        }
-
-        if (!user) {
-            user = await Lead.findOne({ emailVerificationToken: token });
-            Model = Lead;
-        }
-
-        if (!user) {
-            return res.status(400).json({ error: "Invalid or expired token" });
-        }
-
-        await Model.updateOne(
+        await Account.updateOne(
             { _id: user._id },
-            { 
+            {
                 $set: { isVerified: true },
                 $unset: { emailVerificationToken: "" }
             }
@@ -118,87 +168,36 @@ router.post("/login", async (req, res) => {
             return res.status(400).json({ error: "Email and password are required" });
         }
 
-        console.log(`[AUTH/DEBUG] DB URL: ${process.env.DATABASE_URL ? process.env.DATABASE_URL.replace(/:\/\/([^:]+):([^@]+)@/, "://$1:***@") : "MISSING"}`);
         email = email.trim().toLowerCase();
-        console.log(`[AUTH/DEBUG] Normalized login attempt for: "${email}"`);
 
-        let user: any = await User.findOne({ email: { $regex: new RegExp(`^${email}$`, 'i') } });
-        let userType = "User";   
-        
-        if (!user) {
-            console.log(`[AUTH/DEBUG] Not found in Users. Checking Accounts...`);
-            user = await Account.findOne({ email: { $regex: new RegExp(`^${email}$`, 'i') } });
-            userType = "Account";
-        }
+        // accounts.email is citext with a unique index. One query, no cascade,
+        // no case-insensitive regex forcing a sequential scan.
+        const user: any = await Account.findOne({ email });
 
         if (!user) {
-            console.log(`[AUTH/DEBUG] Not found in Accounts. Checking Contacts...`);
-            user = await Contact.findOne({ email: { $regex: new RegExp(`^${email}$`, 'i') } });
-            userType = "Contact";
+            console.log(`[AUTH] No account with email "${email}"`);
+            return res.status(401).json({ error: "Invalid credentials" });
         }
 
-        if (!user) {
-            console.log(`[AUTH/DEBUG] Not found in Contacts. Checking Leads...`);
-            user = await Lead.findOne({ email: { $regex: new RegExp(`^${email}$`, 'i') } });
-            userType = "Lead";
-        }
-
-        if (!user) {
-            console.log(`[AUTH/DEBUG] CRITICAL: No user found with email: "${email}" in any collection (even case-insensitive).`);
-            return res.status(401).json({ error: "Invalid credentials [DEBUG-817]" });
-        }
-
-        console.log(`[AUTH/DEBUG] User found in ${userType}. ID: ${user._id}`);
-        console.log(`[AUTH/DEBUG] Stored Email: "${user.email}"`);
-
-        // Verify password
-        console.log(`[AUTH/DEBUG] Checking if password is set...`);
+        // Most people merged in from Salesforce have no password: 34 of 40 dev
+        // landing rows carry no email either. They set one through reset.
         if (!user.password) {
-            console.log(`[AUTH/DEBUG] No password set for: "${email}". Prompting for reset.`);
-            return res.status(403).json({ 
-                error: "Password not set", 
+            return res.status(403).json({
+                error: "Password not set",
                 message: "Professional accounts synced from Salesforce must set a password for first-time login. Please use 'Forgot Password'.",
-                requiresReset: true 
+                requiresReset: true
             });
         }
 
-        console.log(`[AUTH/DEBUG] Comparing passwords...`);
         const isMatch = await bcrypt.compare(password, user.password);
-        console.log(`[AUTH/DEBUG] Password match result: ${isMatch}`);
-
         if (!isMatch) {
-             console.log(`[AUTH/DEBUG] Authentication FAILED for: "${email}"`);
-             return res.status(401).json({ error: "Incorrect Password" });
+            console.log(`[AUTH] Bad password for "${email}"`);
+            return res.status(401).json({ error: "Incorrect Password" });
         }
 
-        console.log(`[AUTH/DEBUG] Authentication SUCCESS for: "${email}"`);
+        await bindPendingInvites(user);
 
-        // Generate Token
-        const token = jwt.sign(
-            { id: user._id, type: userType, email: user.email },
-            process.env.JWT_SECRET || "your-secret-key-change-this",
-            { expiresIn: "1h" }
-        );
-
-        res.json({
-            token,
-            user: {
-                id: user._id,
-                type: userType,
-                email: user.email,
-                name: user.name || user.firstName || user.title,
-                userNumber: user.userNumber,
-                userDigit: user.userDigit,
-                phone: user.phone,
-                role: user.role,
-                company: user.company,
-                industry: user.industry,
-                website: user.website,
-                handle: user.handle,
-                profilePicture: user.profilePicture
-            }
-        });
-
+        res.json({ token: signToken(user), user: publicUser(user) });
     } catch (error: any) {
         console.error("Login error:", error);
         res.status(500).json({ error: "Login failed" });
@@ -221,126 +220,43 @@ router.post("/google-login", async (req, res) => {
         const payload = ticket.getPayload() as any;
         if (!payload) return res.status(400).json({ error: "Invalid Google Token" });
 
-        const { email, name, given_name, family_name, picture, phone_number } = payload;
+        const { email, name, given_name, family_name, phone_number } = payload;
         console.log(`[AUTH] Google login attempt for: ${email}`);
 
-        let user: any = null;
-        let userType = "";
+        // Three fallback ladders of four queries each — email, then phone, then
+        // name — collapse to three queries. The order is kept: matching on name
+        // is a last resort and stays one.
+        let user: any = email ? await Account.findOne({ email }) : null;
 
-        // 1. Unified Lookup: Search by Email
-        user = await User.findOne({ email });
-        if (user) userType = "User";
-
-        if (!user) {
-            user = await Account.findOne({ email });
-            if (user) userType = "Account";
-        }
-
-        if (!user) {
-            user = await Contact.findOne({ email });
-            if (user) userType = "Contact";
-        }
-
-        if (!user) {
-            user = await Lead.findOne({ email });
-            if (user) userType = "Lead";
-        }
-
-        // 2. Fallback: Search by Phone
         if (!user && phone_number) {
-            console.log(`[AUTH] Email match failed. Searching by phone: ${phone_number}`);
-            user = await User.findOne({ phone: phone_number });
-            if (user) userType = "User";
-
-            if (!user) {
-                user = await Account.findOne({ phone: phone_number });
-                if (user) userType = "Account";
-            }
-
-            if (!user) {
-                user = await Contact.findOne({ phone: phone_number });
-                if (user) userType = "Contact";
-            }
-
-            if (!user) {
-                user = await Lead.findOne({ phone: phone_number });
-                if (user) userType = "Lead";
-            }
+            user = await Account.findOne({ phone: phone_number });
         }
 
-        // 3. Fallback: Search by Name
         if (!user && name) {
-            console.log(`[AUTH] Phone match failed. Searching by name: ${name}`);
             const firstName = given_name || name.split(" ")[0];
             const lastName = family_name || name.split(" ").slice(1).join(" ") || "N/A";
-
-            user = await User.findOne({ name }); // User model uses 'name'
-            if (user) userType = "User";
-
-            if (!user) {
-                user = await Account.findOne({ name }); // Account model uses 'name'
-                if (user) userType = "Account";
-            }
-
-            if (!user) {
-                user = await Contact.findOne({ name }); // Contact uses 'name'
-                if (user) userType = "Contact";
-            }
-
-            if (!user) {
-                user = await Lead.findOne({ firstName, lastName }); // Lead model uses firstName/lastName
-                if (user) userType = "Lead";
-            }
+            user = await Account.findOne({ name })
+                ?? await Account.findOne({ firstName, lastName });
         }
 
-        // 4. Auto-creation: If still not found, create a new Lead
         if (!user) {
-            console.log(`[AUTH] User not found. Creating new Lead for: ${email}`);
-            const firstName = given_name || (name ? name.split(" ")[0] : "New");
-            const lastName = family_name || (name ? name.split(" ").slice(1).join(" ") : "Google User");
-            
-            user = new Lead({
-                firstName,
-                lastName,
+            console.log(`[AUTH] No account found. Creating one for: ${email}`);
+            user = new Account({
+                firstName: given_name || (name ? name.split(" ")[0] : "New"),
+                lastName: family_name || (name ? name.split(" ").slice(1).join(" ") : "Google User"),
+                name,
                 email,
                 password: crypto.randomBytes(16).toString("hex"),
                 phone: phone_number,
-                source: "Google Login",
-                status: "New"
+                leadStatus: "New",
+                sfObject: "Lead",
             });
             await user.save();
-            userType = "Lead";
-            console.log(`[AUTH] New Lead created successfully`);
         }
 
-        console.log(`[AUTH] Google login successful for: ${email} (${userType})`);
+        await bindPendingInvites(user);
 
-        // Generate Token
-        const jwtToken = jwt.sign(
-            { id: user._id, type: userType, email: user.email },
-            process.env.JWT_SECRET || "your-secret-key-change-this",
-            { expiresIn: "1h" }
-        );
-
-        res.json({
-            token: jwtToken,
-            user: {
-                id: user._id,
-                type: userType,
-                email: user.email,
-                name: user.name || user.firstName || user.lastName || "User",
-                userNumber: user.userNumber,
-                userDigit: user.userDigit,
-                phone: user.phone,
-                role: user.role,
-                company: user.company,
-                industry: user.industry,
-                website: user.website,
-                handle: user.handle,
-                profilePicture: user.profilePicture
-            }
-        });
-
+        res.json({ token: signToken(user), user: publicUser(user) });
     } catch (error: any) {
         console.error("Google login error:", error);
         res.status(500).json({ error: "Google login failed" });
@@ -349,14 +265,8 @@ router.post("/google-login", async (req, res) => {
 
 router.get("/profile", auth, async (req: any, res) => {
     try {
-        const { id, type } = req.user;
-        let Model: any;
-        if (type === "User") Model = User;
-        else if (type === "Account") Model = Account;
-        else if (type === "Contact") Model = Contact;
-        else Model = Lead;
-
-        const user = await Model.findById(id).select("-password -resetPasswordToken -resetPasswordExpires -emailVerificationToken");
+        const user = await Account.findById(req.user.id)
+            .select("-password -resetPasswordToken -resetPasswordExpires -emailVerificationToken");
         if (!user) return res.status(404).json({ error: "User not found" });
 
         res.json(user);
@@ -365,34 +275,59 @@ router.get("/profile", auth, async (req: any, res) => {
     }
 });
 
+/**
+ * Capability for the client's own UI. The nav used to gate on the `type` stored
+ * in localStorage, which outlives the token and cannot be refreshed — so after
+ * the cutover a stale copy would have hidden the admin link from its owner.
+ * Reading it from the server means the client can never be stale about what it
+ * may do, and the server-side gates do not trust this answer anyway.
+ */
+router.get("/me/capabilities", auth, async (req: any, res) => {
+    try {
+        const user = await Account.findById(req.user.id)
+            .select("appRole accountTier sfObject handle profilePicture");
+        if (!user) return res.status(404).json({ error: "User not found" });
+        res.json({
+            appRole: user.appRole,
+            accountTier: user.accountTier,
+            recordType: user.sfObject ?? null,
+            handle: user.handle ?? null,
+            profilePicture: user.profilePicture ?? null,
+        });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to fetch capabilities" });
+    }
+});
+
 router.put("/profile", auth, async (req: any, res) => {
     try {
-        const { id, type } = req.user;
         const updateData = req.body;
-        
-        // Prevent sensitive field updates
+
+        // Prevent sensitive field updates. appRole and accountTier are here for
+        // the obvious reason; their *_source companions are here because setting
+        // one to 'manual' would freeze the nightly merge out of that column.
         delete updateData._id;
         delete updateData.password;
         delete updateData.email;
-        delete updateData.role;
+        delete updateData.appRole;
+        delete updateData.appRoleSource;
+        delete updateData.accountTier;
+        delete updateData.accountTierSource;
         delete updateData.isVerified;
+        delete updateData.sfObject;
+        delete updateData.sfID;
 
-        let Model: any;
-        if (type === "User") Model = User;
-        else if (type === "Account") Model = Account;
-        else if (type === "Contact") Model = Contact;
-        else Model = Lead;
-
-        // Special handling for Lead model which uses firstName/lastName
-        if (type === "Lead" && updateData.name) {
-             const parts = updateData.name.split(' ');
-             updateData.firstName = parts[0];
-             updateData.lastName = parts.slice(1).join(' ') || 'N/A';
-             delete updateData.name;
+        // Leads used to keep firstName/lastName while the other three kept
+        // `name`, so a rename had to know which table it was in. accounts has
+        // all three columns; keep them consistent when a display name arrives.
+        if (updateData.name) {
+            const parts = String(updateData.name).trim().split(/\s+/);
+            updateData.firstName = parts[0];
+            updateData.lastName = parts.slice(1).join(" ") || null;
         }
 
-        const updatedUser = await Model.findByIdAndUpdate(
-            id,
+        const updatedUser = await Account.findByIdAndUpdate(
+            req.user.id,
             { $set: updateData },
             { new: true }
         ).select("-password");
@@ -428,13 +363,8 @@ router.get("/players/:id", auth, async (req: any, res) => {
 
         // Campaign-mate check: any campaign both can see. null = admin (sees all).
         const viewerCampaigns = await getAuthorizedCampaignIds(req.user);
-        const membershipOr: any[] = [
-            { lead: targetId },
-            { contact: targetId },
-            { account: targetId },
-        ];
-        if (target.doc.email) membershipOr.push({ email: target.doc.email });
-        const targetMemberships = await CampaignMember.find({ $or: membershipOr }).select("campaign status");
+        const targetMemberships = await CampaignMember.find({ person: targetId })
+            .select("campaign status");
         const targetCampaignIds = [...new Set(targetMemberships.map((m: any) => String(m.campaign)))];
         const sharedIds = viewerCampaigns === null
             ? targetCampaignIds
@@ -495,22 +425,15 @@ router.post("/profile/picture", auth, upload.single("profilePicture"), async (re
     try {
         if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
-        const { id, type } = req.user;
         const pictureUrl = `/uploads/profile-pictures/${req.file.filename}`;
 
-        let Model: any;
-        if (type === "User") Model = User;
-        else if (type === "Account") Model = Account;
-        else if (type === "Contact") Model = Contact;
-        else Model = Lead;
-
-        const existing = await Model.findById(id).select("profilePicture");
+        const existing = await Account.findById(req.user.id).select("profilePicture");
         if (existing?.profilePicture) {
             const oldPath = path.join(process.cwd(), existing.profilePicture);
             if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
         }
 
-        await Model.findByIdAndUpdate(id, { $set: { profilePicture: pictureUrl } });
+        await Account.findByIdAndUpdate(req.user.id, { $set: { profilePicture: pictureUrl } });
 
         res.json({ profilePicture: pictureUrl });
     } catch (err: any) {
@@ -522,43 +445,18 @@ router.post("/profile/picture", auth, upload.single("profilePicture"), async (re
 router.post("/forgot-password", async (req, res) => {
     const { email } = req.body;
     try {
-        let user: any = await User.findOne({ email });
-        let userType = "User";
-
-        if (!user) {
-            user = await Account.findOne({ email });
-            userType = "Account";
-        }
-
-        if (!user) {
-            user = await Contact.findOne({ email });
-            userType = "Contact";
-        }
-
-        if (!user) {
-            user = await Lead.findOne({ email });
-            userType = "Lead";
-        }
-
-        if (!user) {
-            return res.status(404).json({ error: "User not found" });
-        }
+        const user: any = await Account.findOne({ email });
+        if (!user) return res.status(404).json({ error: "User not found" });
 
         const token = crypto.randomBytes(20).toString("hex");
-        
-        let Model: any;
-        if (userType === "User") Model = User;
-        else if (userType === "Account") Model = Account;
-        else if (userType === "Contact") Model = Contact;
-        else Model = Lead;
 
-        await Model.updateOne(
+        await Account.updateOne(
             { _id: user._id },
-            { 
-                $set: { 
-                    resetPasswordToken: token, 
+            {
+                $set: {
+                    resetPasswordToken: token,
                     resetPasswordExpires: new Date(Date.now() + 3600000) // 1 hour
-                } 
+                }
             }
         );
 
@@ -574,59 +472,17 @@ router.post("/forgot-password", async (req, res) => {
 router.post("/reset-password", async (req, res) => {
     const { token, newPassword } = req.body;
     try {
-        console.log(`[RESET] Searching for token: ${token}`);
-        let user: any = await User.findOne({
+        const doc: any = await Account.findOne({
             resetPasswordToken: token,
             resetPasswordExpires: { $gt: new Date() },
         });
-        let userType = "User";
 
-        if (!user) {
-            user = await Account.findOne({
-                resetPasswordToken: token,
-                resetPasswordExpires: { $gt: new Date() },
-            });
-            userType = "Account";
-        }
-
-        if (!user) {
-            user = await Contact.findOne({
-                resetPasswordToken: token,
-                resetPasswordExpires: { $gt: new Date() },
-            });
-            userType = "Contact";
-        }
-
-        if (!user) {
-            user = await Lead.findOne({
-                resetPasswordToken: token,
-                resetPasswordExpires: { $gt: new Date() },
-            });
-            userType = "Lead";
-        }
-
-        if (!user) {
-            console.log(`[RESET] FAILED: No user found for token ${token} or it has expired.`);
-            // Debug: Check if token exists AT ALL without expiration check
-            const debugUser = await User.findOne({ resetPasswordToken: token });
-            if (debugUser) {
-                console.log(`[RESET] DEBUG: Token exists but expiration check failed. DB Value: ${debugUser.resetPasswordExpires}, Type: ${typeof debugUser.resetPasswordExpires}`);
-            }
+        if (!doc) {
+            console.log(`[RESET] No account for this token, or it has expired.`);
             return res.status(400).json({ error: "Invalid or expired token" });
         }
-        console.log(`[RESET] SUCCESS: Found ${userType} ${user.email}`);
 
-        // We need to use the model specifically to trigger pre-save hooks if they exist
-        let Model: any;
-        if (userType === "User") Model = User;
-        else if (userType === "Account") Model = Account;
-        else if (userType === "Contact") Model = Contact;
-        else Model = Lead;
-
-        // Fetch the document again to ensure it's a Mongoose document for .save()
-        const doc = await Model.findById(user._id);
-        if (!doc) return res.status(404).json({ error: "User no longer exists" });
-
+        // Assigning plaintext is deliberate: the model's preSave hook hashes it.
         doc.password = newPassword;
         doc.resetPasswordToken = undefined;
         doc.resetPasswordExpires = undefined;

@@ -3,13 +3,33 @@ const router = express.Router();
 import Campaign from "../models/Campaign.js";
 import CampaignMember from "../models/CampaignMember.js";
 import Session from "../models/Session.js";
-import Lead from "../models/Lead.js";
-import Contact from "../models/Contact.js";
 import Account from "../models/Account.js";
-import User from "../models/User.js";
 import { auth } from "../middleware/auth.js";
 import { getAuthorizedCampaignIds } from "../utils/gameNightPlannerUtils.js";
-import { findPeopleByEmail } from "../utils/personUtils.js";
+import { personDisplayName } from "../utils/personUtils.js";
+
+/**
+ * Phase 3 (#35, plan §3.4). Auto-enrolment used to branch on req.user.type to
+ * choose which of lead_id / contact_id / account_id to write — and the `else`
+ * branch, the one a Salesforce User fell into, wrote NO person column at all,
+ * only an email. That is why getAuthorizedCampaignIds had to OR over four
+ * things including an unindexed email match, and why a Game Master could be the
+ * member row with the least to identify them by. One person_id replaces it.
+ */
+
+/** Membership fields for the signed-in person. No branch, no email fallback. */
+async function memberFieldsFor(user: any, campaignId: string, status: string) {
+    const person = await Account.findById(user.id).select("name firstName lastName handle email");
+    return {
+        campaign: campaignId,
+        person: user.id,
+        email: person?.email ?? user.email,
+        firstName: person?.firstName ?? personDisplayName(person),
+        lastName: person?.lastName ?? undefined,
+        status,
+        joinedAt: new Date(),
+    };
+}
 
 // Create a new campaign
 router.post("/", auth, async (req: any, res) => {
@@ -33,32 +53,7 @@ router.post("/", auth, async (req: any, res) => {
         await campaign.save();
 
         // Auto-enroll creator as Game Master
-        const memberFields: any = {
-            campaign: campaign._id,
-            email: req.user.email,
-            status: "Game Master",
-            joinedAt: new Date(),
-        };
-        if (req.user.type === "Lead") {
-            memberFields.lead = req.user.id;
-            const u = await Lead.findById(req.user.id).select("firstName lastName");
-            if (u) { memberFields.firstName = u.firstName; memberFields.lastName = u.lastName; }
-        } else if (req.user.type === "Contact") {
-            memberFields.contact = req.user.id;
-            const u = await Contact.findById(req.user.id).select("name");
-            if (u?.name) {
-                const [first, ...rest] = u.name.split(" ");
-                memberFields.firstName = first;
-                if (rest.length) memberFields.lastName = rest.join(" ");
-            }
-        } else if (req.user.type === "Account") {
-            memberFields.account = req.user.id;
-            const u = await Account.findById(req.user.id).select("name");
-            if (u?.name) memberFields.firstName = u.name;
-        } else {
-            const u = await User.findById(req.user.id).select("name");
-            if (u?.name) memberFields.firstName = u.name;
-        }
+        const memberFields = await memberFieldsFor(req.user, campaign._id, "Game Master");
         await new CampaignMember(memberFields).save();
 
         res.status(201).json({
@@ -149,36 +144,12 @@ router.post("/:id/join", auth, async (req: any, res) => {
         const campaign = await Campaign.findById(req.params.id);
         if (!campaign) return res.status(404).json({ error: "Campaign not found" });
 
-        const existing = await CampaignMember.findOne({ campaign: req.params.id, email: req.user.email });
+        // Membership is keyed on the person, not their email. Matching on email
+        // let the same person join twice under two different records.
+        const existing = await CampaignMember.findOne({ campaign: req.params.id, person: req.user.id });
         if (existing) return res.status(409).json({ error: "Already a member of this campaign" });
 
-        const memberFields: any = {
-            campaign: req.params.id,
-            email: req.user.email,
-            status: "Player",
-            joinedAt: new Date(),
-        };
-        if (req.user.type === "Lead") {
-            memberFields.lead = req.user.id;
-            const u = await Lead.findById(req.user.id).select("firstName lastName");
-            if (u) { memberFields.firstName = u.firstName; memberFields.lastName = u.lastName; }
-        } else if (req.user.type === "Contact") {
-            memberFields.contact = req.user.id;
-            const u = await Contact.findById(req.user.id).select("name");
-            if (u?.name) {
-                const [first, ...rest] = u.name.split(" ");
-                memberFields.firstName = first;
-                if (rest.length) memberFields.lastName = rest.join(" ");
-            }
-        } else if (req.user.type === "Account") {
-            memberFields.account = req.user.id;
-            const u = await Account.findById(req.user.id).select("name");
-            if (u?.name) memberFields.firstName = u.name;
-        } else {
-            const u = await User.findById(req.user.id).select("name");
-            if (u?.name) memberFields.firstName = u.name;
-        }
-
+        const memberFields = await memberFieldsFor(req.user, req.params.id, "Player");
         const member = await new CampaignMember(memberFields).save();
         res.status(201).json({ message: "Joined campaign successfully!", member });
     } catch (error: any) {
@@ -195,30 +166,15 @@ router.get("/:id/members", auth, async (req: any, res) => {
             return res.status(403).json({ error: "Unauthorized" });
         }
         const members = await CampaignMember.find({ campaign: req.params.id })
-            .populate("lead")
-            .populate("contact")
-            .populate("account")
+            .populate("person")
             .sort({ joinedAt: 1 });
 
-        // Attach a resolvable person id so the UI can link to read-only player
-        // profiles. Members linked by ref use it directly; email-only members
-        // (User-type joins) are resolved by email across all person collections.
-        const unresolvedEmails = [...new Set(
-            members
-                .filter((m: any) => !m.lead && !m.contact && !m.account && m.email)
-                .map((m: any) => m.email as string)
-        )];
-        const people = await findPeopleByEmail(unresolvedEmails as string[]);
-        const idByEmail = new Map(people.map(p => [String(p.doc.email).toLowerCase(), String(p.doc._id)]));
-
+        // playerId used to be assembled from whichever of three refs was set,
+        // with an email lookup across four collections for the rows that had
+        // none. Every member now has one.
         const enriched = members.map((m: any) => {
             const obj = m.toObject();
-            obj.playerId =
-                m.lead?._id?.toString() ||
-                m.contact?._id?.toString() ||
-                m.account?._id?.toString() ||
-                (m.email ? idByEmail.get(m.email.toLowerCase()) : null) ||
-                null;
+            obj.playerId = m.person?._id?.toString() ?? null;
             return obj;
         });
         res.json(enriched);

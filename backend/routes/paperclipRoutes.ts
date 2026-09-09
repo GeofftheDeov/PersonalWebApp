@@ -1,17 +1,37 @@
 import express, { Response, NextFunction } from 'express';
 import { auth } from '../middleware/auth.js';
+import Account from '../models/Account.js';
 
 const router = express.Router();
 
-// Paperclip is restricted to Users only — Leads and Accounts may not access it.
-function userOnly(req: any, res: Response, next: NextFunction) {
-  if (req.user?.type !== 'User') {
-    return res.status(403).json({ error: 'Forbidden: Paperclip access requires a User account' });
+/**
+ * Paperclip access (#35, plan §3.4).
+ *
+ * This was `req.user.type !== 'User'`, using the JWT's type as a proxy for
+ * "staff". After the merge everyone is an account, so that test would have been
+ * true for everybody and 403'd the entire site — including the one person who
+ * uses Paperclip.
+ *
+ * Geoff's ruling: an admin of Paperclip may hold their access through EITHER
+ * Salesforce or the web app, and both should get in. So the gate is the union of
+ * the two — `app_role = 'admin'` OR a record that came from the Salesforce User
+ * object. It is deliberately not `account_tier`: a tier is what somebody has
+ * paid for and must never move their access (#28).
+ *
+ * `sf_object` is the only place in the app allowed to gate anything, and only
+ * here. Plan §4.6 replaces this half of the test with `paperclip_user_id` once
+ * that column exists (#36); until then there is no column that says "has a
+ * Paperclip identity", and inventing one now would prejudge that ticket.
+ */
+async function paperclipOnly(req: any, res: Response, next: NextFunction) {
+  const person = await Account.findById(req.user?.id).select("appRole sfObject");
+  if (!person || (person.appRole !== 'admin' && person.sfObject !== 'User')) {
+    return res.status(403).json({ error: 'Forbidden: Paperclip access requires an admin or Salesforce user account' });
   }
   next();
 }
 
-router.use(auth, userOnly);
+router.use(auth, paperclipOnly);
 
 // ── Config ────────────────────────────────────────────────────────────────────
 // Shared Paperclip client lives in services/paperclipClient.ts (also used by

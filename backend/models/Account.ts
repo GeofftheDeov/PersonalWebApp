@@ -1,43 +1,65 @@
+import { randomUUID } from "node:crypto";
 import { defineModel } from "../db/model.js";
 import { hashPasswordHook, fourDigit, digitTag } from "./_shared.js";
-import { createLeadFromAccount } from "../services/salesforceService.js";
 
-// Phase 1 of the unified account model (#33) renamed this table to sf_accounts.
-// NOTE: `accounts` is now a DIFFERENT, currently empty table — the app's single
-// person table, filled by the Phase 2 backfill (#34). This model is the
-// Salesforce Account landing table and must never be pointed back at
-// "accounts".
+/**
+ * The app's single person table (#35, plan §2.2).
+ *
+ * Before Phase 3 this model pointed at the Salesforce Account landing table and
+ * a person could live in any of four collections. Now everyone is an account:
+ * `models/SfAccount.ts` is the landing table, and this is the app.
+ *
+ * There is no postSave Salesforce push any more. The old `setImmediate` hook
+ * fired inside the signup request, had no retries, and left a half-created
+ * person whenever Salesforce was unreachable. Writes now enqueue on
+ * `person_outbox` and drain nightly with backoff (§2.7).
+ *
+ * Two axes, deliberately two columns (#28): `appRole` gates authorization,
+ * `accountTier` gates supporter-only surface. Never collapse them — a tier
+ * change must never move somebody's access.
+ */
 const Account = defineModel({
-  table: "sf_accounts",
+  table: "accounts",
   fields: {
-    name: "name", email: "email", password: "password",
-    resetPasswordToken: "reset_password_token", resetPasswordExpires: { col: "reset_password_expires", type: "date" },
+    // accounts.id carries no database default on purpose: Phase 2 supplies it so
+    // the winning source row donates its UUID and existing references need no
+    // remap. That makes minting one the app's job for people it creates itself.
+    _id: { col: "id", type: "uuid" },
+
+    email: "email", password: "password",
     isVerified: "is_verified", emailVerificationToken: "email_verification_token",
-    industry: "industry", company: "company", website: "website", handle: "handle",
-    phone: "phone", address: "address", userNumber: "user_number", userDigit: "user_digit",
-    sfID: "sf_id", sfRecordTypeID: "sf_record_type_id", sfRecordTypeName: "sf_record_type_name",
+    resetPasswordToken: "reset_password_token",
+    resetPasswordExpires: { col: "reset_password_expires", type: "date" },
+
+    appRole: "app_role", appRoleSource: "app_role_source",
+    accountTier: "account_tier", accountTierSource: "account_tier_source",
+
+    name: "name", firstName: "first_name", lastName: "last_name",
+    handle: "handle", userNumber: "user_number", userDigit: "user_digit",
     profilePicture: "profile_picture",
     favoriteGames: { col: "favorite_games", type: "text[]" },
+    discordId: "discord_id", discordHandle: "discord_handle",
     friends: { col: "friends", type: "uuid[]" },
+    isActive: "is_active",
+
+    phone: "phone", company: "company", industry: "industry",
+    website: "website", address: "address", leadStatus: "lead_status",
+    sfProfile: "sf_profile",
+
+    sfObject: "sf_object", sfID: "sf_id",
+    sfRecordTypeID: "sf_record_type_id", sfRecordTypeName: "sf_record_type_name",
+    sfLastSyncedAt: { col: "sf_last_synced_at", type: "date" },
+    sfLastPushedAt: { col: "sf_last_pushed_at", type: "date" },
+
     createdAt: { col: "created_at", type: "date" },
+    updatedAt: { col: "updated_at", type: "date" },
   },
-  defaults: { userNumber: fourDigit, userDigit: digitTag("ACC") },
+  defaults: {
+    _id: randomUUID,
+    userNumber: fourDigit,
+    userDigit: digitTag("LD"),   // app signups enter the CRM as Leads (§2.8)
+    sfObject: "Lead",
+  },
   preSave: hashPasswordHook,
-  postSave: (doc) => {
-    if (doc.sfID) return;
-    setImmediate(async () => {
-      try {
-        console.log("New Account saved, syncing to Salesforce...");
-        const sf = await createLeadFromAccount(doc);
-        if (sf?.id) {
-          const update: any = { sfID: sf.id };
-          if ((sf as any).recordTypeId) update.sfRecordTypeID = (sf as any).recordTypeId;
-          if ((sf as any).recordTypeName) update.sfRecordTypeName = (sf as any).recordTypeName;
-          await Account.updateOne({ _id: doc._id }, { $set: update });
-          console.log(`Salesforce Account created with ID: ${sf.id}`);
-        }
-      } catch (err) { console.error("[SALESFORCE] Account sync error:", err); }
-    });
-  },
 });
 export default Account;

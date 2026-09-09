@@ -1,10 +1,15 @@
 import { defineModel } from "../db/model.js";
-import { hashPasswordHook, fourDigit, digitTag } from "./_shared.js";
 
-// Phase 1 of the unified account model (#33) renamed this table to sf_users.
-// It is now a Salesforce landing table: the nightly pull writes into it and the
-// app reads it. App writes move to the `accounts` table in Phase 3 (#35).
-const User = defineModel({
+/**
+ * Salesforce User landing table. Read-only from the app's point of view: the
+ * nightly pull writes here and the merge reads it. `sf_users` is pull-only in
+ * both directions of ownership (§2.6) — creating a Salesforce User needs a
+ * Platform Event and a spare User licence, and the org has neither.
+ *
+ * The app's person table is `models/Account.ts`. Nothing outside syncRoutes and
+ * the admin table browser should import this.
+ */
+const SfUser = defineModel({
   table: "sf_users",
   fields: {
     name: "name", email: "email", phone: "phone", handle: "handle", password: "password",
@@ -17,7 +22,5 @@ const User = defineModel({
     friends: { col: "friends", type: "uuid[]" },
     createdAt: { col: "created_at", type: "date" }, updatedAt: { col: "updated_at", type: "date" },
   },
-  defaults: { userNumber: fourDigit, userDigit: digitTag("ADM") },
-  preSave: hashPasswordHook,
 });
-export default User;
+export default SfUser;

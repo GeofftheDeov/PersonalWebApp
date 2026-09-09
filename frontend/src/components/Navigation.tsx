@@ -6,13 +6,16 @@ import { useEffect, useRef, useState } from 'react';
 import { Menu, X, ChevronDown } from 'lucide-react';
 import SocialDock from './SocialDock';
 import NotificationsBell from './NotificationsBell';
+import { useCapabilities, canAdmin, canPaperclip } from '../lib/capabilities';
 
 export default function Navigation() {
   const router = useRouter();
   const pathname = usePathname();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [token, setToken] = useState<string | null>(null);
-  const [userType, setUserType] = useState<string | null>(null);
+  // Capability comes from the server, not from the `user` object in
+  // localStorage. See lib/capabilities.ts for why.
+  const caps = useCapabilities(token);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [paperclipOpen, setPaperclipOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -24,20 +27,8 @@ export default function Navigation() {
   useEffect(() => {
     const checkAuth = () => {
       const t = localStorage.getItem('token');
-      const userStr = localStorage.getItem('user');
       setIsLoggedIn(!!t);
       setToken(t);
-      if (userStr) {
-        try {
-          const user = JSON.parse(userStr);
-          setUserType(user.type || null);
-        } catch (e) {
-          console.error("Error parsing user from localStorage:", e);
-          setUserType(null);
-        }
-      } else {
-        setUserType(null);
-      }
     };
     checkAuth();
     window.addEventListener('storage', checkAuth);
@@ -121,8 +112,8 @@ export default function Navigation() {
                 <div className={`${decorationCls} -rotate-1`} />
               </Link>
 
-              {/* Paperclip dropdown — User-only */}
-              {userType === 'User' && (
+              {/* Paperclip — admins, or people who came from a Salesforce User */}
+              {canPaperclip(caps) && (
                 <div className="relative" ref={paperclipRef}>
                   <button
                     onClick={() => { setPaperclipOpen(o => !o); setMoreOpen(false); }}
@@ -164,8 +155,8 @@ export default function Navigation() {
                 )}
               </div>
 
-              {/* Admin — User-only */}
-              {userType === 'User' && (
+              {/* Admin portal — app_role only. The server agrees (#43). */}
+              {canAdmin(caps) && (
                 <a
                   href={`/admin?token=${token}`}
                   target="_blank"
@@ -214,7 +205,7 @@ export default function Navigation() {
             <>
               <Link href="/dashboard" onClick={closeMenu} className={mobileLinkCls}>DASHBOARD</Link>
 
-              {userType === 'User' && (
+              {canPaperclip(caps) && (
                 <div className="flex flex-col items-center gap-3">
                   <button
                     onClick={() => setMobilePaperclipOpen(o => !o)}
@@ -249,7 +240,7 @@ export default function Navigation() {
                 )}
               </div>
 
-              {userType === 'User' && (
+              {canAdmin(caps) && (
                 <a
                   href={`/admin?token=${token}`}
                   target="_blank"

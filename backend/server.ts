@@ -93,7 +93,11 @@ app.get("/health", async (req, res) => {
     });
 });
 app.use((req, res, next) => {
-    console.log(`[BACKEND] ${req.method} ${req.url}`);
+    // req.url includes the query string, and /admin authenticates by ?token=.
+    // This middleware runs before /admin mounts, so every admin page load used to
+    // write a valid JWT into CloudWatch in plaintext, readable for the log
+    // group's whole retention period (#39). Redact before logging, not after.
+    console.log(`[BACKEND] ${req.method} ${req.url.replace(/([?&]token=)[^&]+/, "$1***")}`);
     next();
 });
 app.use(express.json());

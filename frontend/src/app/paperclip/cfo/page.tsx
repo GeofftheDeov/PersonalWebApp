@@ -175,9 +175,10 @@ export default function CFOConsolePage() {
   useEffect(() => {
     const t = token();
     if (!t) { router.push('/login'); return; }
-    const userStr = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
-    const userType = userStr ? (JSON.parse(userStr) as any).type : null;
-    if (userType !== 'User') { router.push('/dashboard'); return; }
+    // The type-based pre-check that used to live here read `user.type` from
+    // localStorage, which after the account merge is "Account" for everybody --
+    // it would have bounced every visitor, including the one who has access.
+    // The server's paperclipOnly gate decides, and the 403 below acts on it.
   }, [router]);
 
   // ── Load agents

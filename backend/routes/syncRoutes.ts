@@ -1,10 +1,10 @@
 import express from "express";
 const router = express.Router();
 
-import User from "../models/User.js";
-import Lead from "../models/Lead.js";
-import Contact from "../models/Contact.js";
-import Account from "../models/Account.js";
+import SfUser from "../models/SfUser.js";
+import SfLead from "../models/SfLead.js";
+import SfContact from "../models/SfContact.js";
+import SfAccount from "../models/SfAccount.js";
 import Campaign from "../models/Campaign.js";
 import Session from "../models/Session.js";
 import Character from "../models/Character.js";
@@ -45,7 +45,7 @@ router.post("/users", authenticateSync, async (req, res) => {
 
         for (const u of users) {
             try {
-                const existing = await User.findOne({
+                const existing = await SfUser.findOne({
                     $or: [
                         ...(u.sfID ? [{ sfID: u.sfID }] : []),
                         ...(u.email ? [{ email: u.email }] : []),
@@ -65,7 +65,7 @@ router.post("/users", authenticateSync, async (req, res) => {
                 } else {
                     // Create new user — password will be hashed by pre-save hook
                     const tempPassword = u.password || `SF_IMPORT_${u.sfID || Date.now()}`;
-                    await User.create({
+                    await SfUser.create({
                         name: u.name,
                         email: u.email,
                         phone: u.phone,
@@ -102,7 +102,7 @@ router.post("/leads", authenticateSync, async (req, res) => {
 
         for (const l of leads) {
             try {
-                const existing = await Lead.findOne({
+                const existing = await SfLead.findOne({
                     $or: [
                         ...(l.sfLeadId ? [{ sfLeadId: l.sfLeadId }] : []),
                         ...(l.email ? [{ email: l.email }] : []),
@@ -123,7 +123,7 @@ router.post("/leads", authenticateSync, async (req, res) => {
                     results.updated++;
                 } else {
                     const tempPassword = l.password || `SF_IMPORT_${l.sfLeadId || Date.now()}`;
-                    await Lead.create({
+                    await SfLead.create({
                         firstName: l.firstName,
                         lastName: l.lastName,
                         email: l.email,
@@ -167,11 +167,11 @@ router.post("/contacts", authenticateSync, async (req, res) => {
                 // Resolve account reference from sfID if provided
                 let accountId = null;
                 if (c.accountSfID) {
-                    const account = await Account.findOne({ sfID: c.accountSfID }) as any;
+                    const account = await SfAccount.findOne({ sfID: c.accountSfID }) as any;
                     if (account) accountId = account._id;
                 }
 
-                const existing = await Contact.findOne({
+                const existing = await SfContact.findOne({
                     $or: [
                         ...(c.sfID ? [{ sfID: c.sfID }] : []),
                         ...(c.email ? [{ email: c.email }] : []),
@@ -188,7 +188,7 @@ router.post("/contacts", authenticateSync, async (req, res) => {
                     await existing.save();
                     results.updated++;
                 } else {
-                    await Contact.create({
+                    await SfContact.create({
                         name: c.name,
                         email: c.email,
                         phone: c.phone,
@@ -292,7 +292,7 @@ router.post("/characters", authenticateSync, async (req, res) => {
                 // Resolve player Account reference
                 let playerId = null;
                 if (c.playerSfID) {
-                    const account = await Account.findOne({ sfID: c.playerSfID }) as any;
+                    const account = await SfAccount.findOne({ sfID: c.playerSfID }) as any;
                     if (account) playerId = account._id;
                 }
 
@@ -420,7 +420,7 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
                     const email = r.PersonEmail || r.Email;
                     
                     // Check for existing Account or User with this email/sfID
-                    let existing = await Account.findOne({
+                    let existing = await SfAccount.findOne({
                         $or: [
                             ...(sfID ? [{ sfID }] : []),
                             ...(email ? [{ email }] : []),
@@ -429,7 +429,7 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
 
                     // Also check Users collection to prevent duplicates for converted leads/users
                     if (!existing && email) {
-                        const existingUser = await User.findOne({ email });
+                        const existingUser = await SfUser.findOne({ email });
                         if (existingUser) {
                             console.log(`[SYNC] Found existing User for email ${email}, skipping Account creation.`);
                             results.skipped++;
@@ -449,7 +449,7 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
                         results.updated++;
                     } else {
                         const tempPassword = `SF_IMPORT_${sfID || Date.now()}`;
-                        await Account.create({
+                        await SfAccount.create({
                             name: r.Name,
                             email: email,
                             phone: r.Phone,
@@ -472,7 +472,7 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
                     const sfID = r.Id;
                     const email = r.Email;
                     
-                    const existing = await Lead.findOne({
+                    const existing = await SfLead.findOne({
                         $or: [
                             ...(sfID ? [{ sfLeadId: sfID }] : []),
                             ...(email ? [{ email }] : []),
@@ -491,7 +491,7 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
                         results.updated++;
                     } else {
                         const tempPassword = `SF_IMPORT_${sfID || Date.now()}`;
-                        await Lead.create({
+                        await SfLead.create({
                             firstName: r.FirstName,
                             lastName: r.LastName,
                             email: email,
@@ -517,11 +517,11 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
                     const email = r.Email;
                     let accountId = null;
                     if (r.AccountId) {
-                        const account = await Account.findOne({ sfID: r.AccountId }) as any;
+                        const account = await SfAccount.findOne({ sfID: r.AccountId }) as any;
                         if (account) accountId = account._id;
                     }
 
-                    const existing = await Contact.findOne({
+                    const existing = await SfContact.findOne({
                         $or: [
                             ...(sfID ? [{ sfID }] : []),
                             ...(email ? [{ email }] : []),
@@ -538,7 +538,7 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
                         results.updated++;
                     } else {
                         const tempPassword = `SF_IMPORT_${sfID || Date.now()}`;
-                        await Contact.create({
+                        await SfContact.create({
                             name: r.Name,
                             email: email,
                             phone: r.Phone,
@@ -644,7 +644,7 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
                     
                     let playerId = null;
                     if (r.Player__c) { // Note: Player__c is Account
-                        const account = await User.findOne({ sfID: r.Player__c }) as any;
+                        const account = await SfUser.findOne({ sfID: r.Player__c }) as any;
                         if (account) playerId = account._id;
                     }
                     
@@ -697,20 +697,20 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
 
                     let leadId = null;
                     if (r.LeadId) {
-                        const leadDoc = await Lead.findOne({ sfLeadId: r.LeadId }) as any;
+                        const leadDoc = await SfLead.findOne({ sfLeadId: r.LeadId }) as any;
                         if (leadDoc) leadId = leadDoc._id;
                     }
 
                     let contactId = null;
                     if (r.ContactId) {
-                        const contactDoc = await Contact.findOne({ sfID: r.ContactId }) as any;
+                        const contactDoc = await SfContact.findOne({ sfID: r.ContactId }) as any;
                         if (contactDoc) contactId = contactDoc._id;
                     }
 
                     // Account ref is derived from Contact in Salesforce
                     let accountId = null; 
                     if (contactId) {
-                        const contactDoc = await Contact.findById(contactId) as any;
+                        const contactDoc = await SfContact.findById(contactId) as any;
                         if (contactDoc) accountId = contactDoc.accountId;
                     }
 

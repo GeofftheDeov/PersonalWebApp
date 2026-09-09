@@ -4,7 +4,8 @@ import FriendRequest from "../models/FriendRequest.js";
 import { auth } from "../middleware/auth.js";
 import { startSession } from "../db/model.js";
 import { notify, resolveNotifications } from "../utils/notify.js";
-import { findPersonById, findPersonByHandle, modelForType, personDisplayName, toPublicPerson } from "../utils/personUtils.js";
+import Account from "../models/Account.js";
+import { findPersonById, findPersonByHandle, personDisplayName, toPublicPerson } from "../utils/personUtils.js";
 
 // Search for players by handle#number across Users, Leads, Contacts, and Accounts
 router.get("/search", auth, async (req: any, res) => {
@@ -128,16 +129,12 @@ router.put("/request/:id", auth, async (req: any, res) => {
             request.status = "accepted";
             await request.save({ session });
 
-            // Add to both parties' friends lists, whatever collection they live in
-            const [fromPerson, toPerson] = await Promise.all([
-                findPersonById(request.from),
-                findPersonById(request.to),
-            ]);
-            if (!fromPerson || !toPerson) {
-                throw new Error("Could not resolve both parties of the friend request");
-            }
-            await modelForType(fromPerson.type).findByIdAndUpdate(request.from, { $addToSet: { friends: request.to } }, { session });
-            await modelForType(toPerson.type).findByIdAndUpdate(request.to, { $addToSet: { friends: request.from } }, { session });
+            // Add to both parties' friends lists. This used to resolve each
+            // person first only to learn which of four models to update; both
+            // sides are accounts now, and the FKs on friend_requests mean the
+            // database has already guaranteed they exist.
+            await Account.findByIdAndUpdate(request.from, { $addToSet: { friends: request.to } }, { session });
+            await Account.findByIdAndUpdate(request.to, { $addToSet: { friends: request.from } }, { session });
         } else if (action === "reject") {
             request.status = "rejected";
             await request.save({ session });
@@ -203,13 +200,8 @@ router.delete("/:id", auth, async (req: any, res) => {
         const friendId = req.params.id;
         const userId = req.user.id;
 
-        const [me, friend] = await Promise.all([
-            findPersonById(userId),
-            findPersonById(friendId),
-        ]);
-
-        if (me) await modelForType(me.type).findByIdAndUpdate(userId, { $pull: { friends: friendId } }, { session });
-        if (friend) await modelForType(friend.type).findByIdAndUpdate(friendId, { $pull: { friends: userId } }, { session });
+        await Account.findByIdAndUpdate(userId, { $pull: { friends: friendId } }, { session });
+        await Account.findByIdAndUpdate(friendId, { $pull: { friends: userId } }, { session });
 
         await session.commitTransaction();
         session.endSession();
@@ -229,9 +221,8 @@ router.post("/link-discord", auth, async (req: any, res) => {
         const { discordId, discordHandle } = req.body;
         const userId = req.user.id;
 
-        const me = await findPersonById(userId);
-        if (!me) return res.status(404).json({ error: "Account not found" });
-        await modelForType(me.type).findByIdAndUpdate(userId, { discordId, discordHandle });
+        const updated = await Account.findByIdAndUpdate(userId, { discordId, discordHandle });
+        if (!updated) return res.status(404).json({ error: "Account not found" });
 
         res.json({ message: "Discord account linked successfully" });
     } catch (error) {

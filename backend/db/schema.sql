@@ -308,10 +308,11 @@ INSERT INTO sf_object_tier_map (sf_object, account_tier, note) VALUES
 
 CREATE TABLE friend_requests (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  -- Polymorphic person ref: User | Lead | Contact | Account (see personUtils.ts).
-  -- No FK is possible; existence is enforced in the data layer. GitHub #42.
-  from_user   uuid NOT NULL,
-  to_user     uuid NOT NULL,
+  -- #42 dropped these FKs because a person could live in any of four tables and
+  -- no constraint could name them all. Phase 3 (#35) unified those into
+  -- `accounts`, so the database can enforce existence again.
+  from_user   uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  to_user     uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   status      text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','rejected')),
   created_at  timestamptz NOT NULL DEFAULT now()
 );
@@ -338,6 +339,11 @@ CREATE TABLE campaigns (
 CREATE TABLE campaign_members (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  -- Membership always points at a real account (#35, plan §3.5). The
+  -- "invited but has no account yet" state lives on campaign_invites.to_email.
+  person_id   uuid REFERENCES accounts(id) ON DELETE CASCADE,
+  -- Superseded by person_id, kept until the cutover has soaked. Dropped, along
+  -- with person_id's NOT NULL, in the final Phase 3 migration.
   lead_id     uuid REFERENCES sf_leads(id)    ON DELETE SET NULL,
   contact_id  uuid REFERENCES sf_contacts(id) ON DELETE SET NULL,
   account_id  uuid REFERENCES sf_accounts(id) ON DELETE SET NULL,
@@ -351,20 +357,28 @@ CREATE TABLE campaign_members (
   created_at  timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_campaign_members_campaign ON campaign_members (campaign_id);
+CREATE INDEX idx_campaign_members_person ON campaign_members (person_id);
 
 CREATE TABLE campaign_invites (
-  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
-  -- Polymorphic person ref: User | Lead | Contact | Account (see personUtils.ts).
-  -- Anyone can be invited to a campaign, whatever table they live in, so no FK
-  -- is possible; existence is enforced in the data layer. GitHub #42.
-  from_user   uuid NOT NULL,
-  to_user     uuid NOT NULL,
-  status      text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','declined')),
-  created_at  timestamptz NOT NULL DEFAULT now()
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  campaign_id     uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  -- Anyone can be invited to a campaign (#42). Since #35 everyone is an account,
+  -- so the sender always has one and the FKs are back.
+  from_account_id uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  -- ...but the invitee may not exist yet. Invite by handle sets to_account_id;
+  -- invite by email for someone with no account sets to_email, and registration
+  -- binds it. Exactly one of the two is required.
+  to_account_id   uuid REFERENCES accounts(id) ON DELETE CASCADE,
+  to_email        citext,
+  status          text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','declined')),
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT campaign_invites_target
+    CHECK (to_account_id IS NOT NULL OR to_email IS NOT NULL)
 );
-CREATE INDEX idx_campaign_invites_to ON campaign_invites (to_user);
-CREATE INDEX idx_campaign_invites_lookup ON campaign_invites (campaign_id, to_user, status);
+CREATE INDEX idx_campaign_invites_to ON campaign_invites (to_account_id);
+CREATE INDEX idx_campaign_invites_lookup ON campaign_invites (campaign_id, to_account_id, status);
+CREATE INDEX idx_campaign_invites_email ON campaign_invites (to_email)
+  WHERE to_account_id IS NULL AND status = 'pending';
 
 CREATE TABLE dungeons (
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -529,7 +543,9 @@ CREATE INDEX idx_notifications_dedupe ON notifications (user_id, type, source_ke
 -- at accounts(id) along with the rest of the app-facing references.
 CREATE TABLE api_key_vault (
   id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id          uuid NOT NULL REFERENCES sf_users(id) ON DELETE CASCADE,
+  -- Staff-only integration. Its owner genuinely is a Salesforce User, but
+  -- since #35 that person is an account like everyone else.
+  user_id          uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   provider         text NOT NULL,
   label            text NOT NULL DEFAULT '',
   encrypted_key_id text NOT NULL,
@@ -556,7 +572,8 @@ CREATE INDEX idx_alpaca_snapshots_ts ON alpaca_snapshots (ts);
 
 CREATE TABLE cloud_claw_sessions (
   id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id    uuid NOT NULL UNIQUE REFERENCES sf_users(id) ON DELETE CASCADE,
+  -- Staff-only integration; see api_key_vault above. Repointed by #35.
+  user_id    uuid NOT NULL UNIQUE REFERENCES accounts(id) ON DELETE CASCADE,
   -- [{ role: 'user'|'assistant', content }]
   messages   jsonb NOT NULL DEFAULT '[]',
   created_at timestamptz NOT NULL DEFAULT now(),

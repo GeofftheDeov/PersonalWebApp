@@ -6,17 +6,22 @@
 #   pwa_fresh     current schema.sql, in one shot
 #
 # The first proves the migrations do what they claim. The second, compared
-# against the first, proves schema.sql says the same thing they do -- the check
+# against the first, proves schema.sql says the same thing they do — the check
 # that PR #46 did not have.
 #
 # Neon is unreachable from any session environment (403 at the egress gateway on
 # every port; no DNS on the desktop shell), so this proves LOGIC ONLY. Anything
 # depending on real dev rows has to be run against dev by hand.
 #
+# The first database must start from the schema DEV ACTUALLY HAS, so the ref
+# below is the branch point, not HEAD -- once the Phase 3 schema.sql is
+# committed, HEAD already contains the change and the "migration path" would be
+# migrating a database that never needed migrating. Override for a different base.
+#
 #   bash scripts/phase3-check.sh [<git-ref-for-pre-phase3-schema>]
 set -euo pipefail
 
-BASE_REF="${1:-HEAD}"
+BASE_REF="${1:-origin/dev}"
 PGBIN="${PGBIN:-/usr/lib/postgresql/16/bin}"
 PGPORT="${PGPORT:-5433}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # backend/

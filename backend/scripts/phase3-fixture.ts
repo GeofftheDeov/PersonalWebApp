@@ -69,7 +69,7 @@ export async function buildFixture(client: pg.PoolClient | pg.Client): Promise<v
         api_key_vault, cloud_claw_sessions
       RESTART IDENTITY CASCADE`);
 
-    // ── Landing tables ─────────────────────────────────────────────────────────
+    // ── Landing tables ───────────────────────────────────────────────────────
     // Every row carries a distinct, object-prefixed Salesforce Id. A wrong id
     // has something to contradict it (the Phase 2 lesson).
     await client.query(
@@ -134,7 +134,7 @@ export async function buildFixture(client: pg.PoolClient | pg.Client): Promise<v
         [IDS.L2, pw],
     );
 
-    // ── accounts + links (the Phase 2 output) ──────────────────────────────────
+    // ── accounts + links (the Phase 2 output) ────────────────────────────────
     const acct = async (
         id: string, email: string | null, name: string, handle: string,
         sfObject: string, sfId: string, role: string, roleSource: string,
@@ -236,10 +236,10 @@ export async function buildFixture(client: pg.PoolClient | pg.Client): Promise<v
          VALUES ($1,'system','System','system@geoffthedeov.net','a system message')`,
         [IDS.campaign]);
 
-    // campaign_members: one via a Lead, one via a LOSING Contact, and one
-    // EMAIL-ONLY row — the shape campaignRoutes' `else` branch writes when the
-    // creator is a User. #27 counted zero of these on dev today, but the code
-    // path that makes them is still live.
+    // campaign_members: one via the winning Account, one via a LOSING Contact,
+    // and one EMAIL-ONLY row — the shape campaignRoutes' `else` branch writes
+    // when the creator is a User. #27 counted zero of these on dev today, but
+    // the code path that makes them is still live.
     await client.query(
         `INSERT INTO campaign_members (campaign_id, lead_id, email, first_name, status)
          VALUES ($1,$2,NULL,'Test','Player')`, [IDS.campaign, IDS.L1]);

@@ -9,30 +9,16 @@ import { notify, resolveNotifications } from "../utils/notify.js";
 import { findPersonById, personDisplayName, toPublicPerson } from "../utils/personUtils.js";
 
 /**
- * Anyone can be invited to a campaign, whatever person table they live in.
+ * Anyone can be invited to a campaign.
  *
- * This route used to resolve both sides with User.findById, which made the
- * whole flow User-only: a Lead/Contact/Account could not invite anybody (their
- * own lookup came back null, so the friends check failed with "You can only
- * invite friends"), and inviting a non-User friend 404'd with "User not found".
- * That was never the intent — the invite picker offers your friends list, and
- * `friends` is a polymorphic uuid[] on all four tables, so the picker could
- * always offer someone this route then refused. campaign_members has been
- * polymorphic all along (lead_id / contact_id / account_id) and
- * getAuthorizedCampaignIds already matches on any of them.
- *
- * Every person lookup here goes through personUtils, exactly as friendRoutes
- * does. When Phase 3 (#35) cuts the app over, personUtils starts resolving the
- * unified `accounts` table and this route needs no further change.
+ * This route used to resolve both sides with User.findById, which made the whole
+ * flow User-only: a Lead/Contact/Account could not invite anybody (their own
+ * lookup came back null, so the friends check failed with "You can only invite
+ * friends"), and inviting a non-User friend 404'd. #42 moved the lookups to
+ * personUtils; Phase 3 (#35) finishes the job by removing the type-to-column
+ * mapper that decided which of lead_id / contact_id / account_id to write, and
+ * the email fallback for people who fitted none of them.
  */
-
-/** campaign_members has a column per person type; User members match on email. */
-function memberIdField(type: string): "lead" | "contact" | "account" | null {
-    if (type === "Lead") return "lead";
-    if (type === "Contact") return "contact";
-    if (type === "Account") return "account";
-    return null; // User
-}
 
 const router = express.Router();
 
@@ -57,7 +43,6 @@ router.post("/", auth, async (req: any, res) => {
         if (!campaign) return res.status(404).json({ error: "Campaign not found" });
 
         // Invites go friend-to-friend (the UI offers your friends list), and a
-        // friend may live in any of the four person tables.
         const mePerson = await findPersonById(req.user.id, "name handle friends");
         const me = mePerson?.doc;
         if (!me?.friends?.some((f: any) => String(f) === String(toUserId))) {
@@ -68,17 +53,11 @@ router.post("/", auth, async (req: any, res) => {
         if (!inviteePerson) return res.status(404).json({ error: "Person not found" });
         const invitee = inviteePerson.doc;
 
-        // Already a member? Match on the invitee's own id column where they have
-        // one, and on email either way — a Lead/Contact/Account may have joined
-        // by link (email only) or by a previous invite (id set).
-        const idField = memberIdField(inviteePerson.type);
-        const memberOr: any[] = [];
-        if (idField) memberOr.push({ [idField]: toUserId });
-        if (invitee.email) memberOr.push({ email: invitee.email });
-        if (memberOr.length) {
-            const existingMember = await CampaignMember.findOne({ campaign: campaignId, $or: memberOr });
-            if (existingMember) return res.status(409).json({ error: "Already a member of this campaign" });
-        }
+        // Already a member? One person column, so one comparison. The old
+        // version also matched on email, because a person with no id column of
+        // their own could only be recognised that way.
+        const existingMember = await CampaignMember.findOne({ campaign: campaignId, person: toUserId });
+        if (existingMember) return res.status(409).json({ error: "Already a member of this campaign" });
 
         const existingInvite = await CampaignInvite.findOne({ campaign: campaignId, to: toUserId, status: "pending" });
         if (existingInvite) return res.status(409).json({ error: "Invite already pending" });
@@ -156,23 +135,18 @@ router.put("/:id/respond", auth, async (req: any, res) => {
         const myName = (me ? personDisplayName(me) : null) || req.user.email;
 
         if (action === "accept") {
-            // Membership is polymorphic: campaign_members carries a column per
-            // person type. Stamp the invitee's own id as well as their email, so
-            // getAuthorizedCampaignIds finds them by id — a person with no email
-            // would otherwise accept an invite and still not be a member.
-            const idField = memberIdField(mePerson?.type ?? "User");
+            // Accepting an invite is the only thing that creates a membership,
+            // and it always stamps person_id. The old version had to guess a
+            // column from the person's type and fall back to email for the one
+            // type that had no column — which is how a person with no email
+            // could accept an invite and still not be a member.
             const email = me?.email ?? req.user.email;
-            const matchOr: any[] = [];
-            if (idField) matchOr.push({ [idField]: req.user.id });
-            if (email) matchOr.push({ email });
-
-            const existing = matchOr.length
-                ? await CampaignMember.findOne({ campaign: campaignId, $or: matchOr })
-                : null;
+            const existing = await CampaignMember.findOne({
+                campaign: campaignId, person: req.user.id });
             if (!existing) {
                 await new CampaignMember({
                     campaign: campaignId,
-                    ...(idField ? { [idField]: req.user.id } : {}),
+                    person: req.user.id,
                     email: email || undefined,
                     status: "Player",
                     joinedAt: new Date(),

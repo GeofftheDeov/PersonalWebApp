@@ -1,11 +1,27 @@
 import express from "express";
 const router = express.Router();
-import Lead from "../models/Lead.js";
+import Account from "../models/Account.js";
+import SfLead from "../models/SfLead.js";
+import CampaignInvite from "../models/CampaignInvite.js";
 
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { sendVerificationEmail } from "../services/emailService.js";
 
+/**
+ * Registration lives here, not in userRoutes (#35 and plan §3.2 both file it
+ * under userRoutes; the endpoint the signup form actually posts to is
+ * POST /api/leads).
+ *
+ * It used to create an sf_leads row whose postSave hook fired a Salesforce
+ * create inside the request. Since Phase 3 it creates an `accounts` row with
+ * sf_object = 'Lead' and sf_id NULL — the marker for "app-native, not yet in
+ * the CRM" (§2.8) — and the nightly outbox drain creates the Salesforce Lead and
+ * writes the id back. Nobody's signup waits on Salesforce being reachable.
+ *
+ * The listing handlers below still read the sf_leads landing table, which is
+ * what they were always for.
+ */
 // Create a new lead
 router.post("/", async (req, res) => {
     console.log("!!! [BACKEND/LEADS] RECEIVED REGISTRATION REQUEST:", JSON.stringify(req.body));
@@ -23,21 +39,34 @@ router.post("/", async (req, res) => {
         const isDev = process.env.NODE_ENV === "development" || req.headers.host?.includes("localhost");
         const token = isDev ? undefined : crypto.randomBytes(20).toString("hex");
         
-        console.log(`>>> [BACKEND/LEADS] Saving lead to MongoDB (isDev=${isDev})...`);
-        const lead = new Lead({ 
-            firstName: firstName, 
-            lastName: lastName, 
-            email: email, 
-            password: password,
+        const lead = new Account({
+            firstName,
+            lastName,
+            name: [firstName, lastName].filter(Boolean).join(" "),
+            email,
+            password,
             isVerified: isDev || !email, // Auto-verify if no email (phone verification skipped for now)
             emailVerificationToken: email ? token : undefined,
-            company, 
+            company,
             phone,
-            status: "New",
-            source: "Web App"
+            leadStatus: "New",
+            sfObject: "Lead",
         });
-        
+
         await lead.save();
+
+        // A Game Master may have invited this person by email before they had an
+        // account (plan §3.5). Bind those now so the invites are waiting.
+        if (email) {
+            try {
+                await CampaignInvite.updateMany(
+                    { toEmail: email, to: null, status: "pending" },
+                    { $set: { to: lead._id } },
+                );
+            } catch (err: any) {
+                console.error("[INVITES] binding pending invites failed:", err.message);
+            }
+        }
         
         if (isDev) {
             console.log(">>> [BACKEND/LEADS] Dev mode: Skipping email verification.");
@@ -56,7 +85,7 @@ router.post("/", async (req, res) => {
                 id: lead._id,
                 email: lead.email,
                 phone: lead.phone,
-                status: lead.status,
+                status: lead.leadStatus,
                 isVerified: lead.isVerified
             }
         });
@@ -75,7 +104,7 @@ router.post("/", async (req, res) => {
 // Get all leads
 router.get("/", async (req, res) => {
     try {
-        const leads = await Lead.find().sort({ createdAt: -1 });
+        const leads = await SfLead.find().sort({ createdAt: -1 });
         res.json(leads);
     } catch (error: any) {
         console.error("Error fetching leads:", error);
@@ -86,7 +115,7 @@ router.get("/", async (req, res) => {
 // Get a specific lead
 router.get("/:id", async (req, res) => {
     try {
-        const lead = await Lead.findById(req.params.id);
+        const lead = await SfLead.findById(req.params.id);
         if (!lead) {
             return res.status(404).json({ error: "Lead not found" });
         }

@@ -8,13 +8,24 @@ import AlpacaSnapshot from '../models/AlpacaSnapshot.js';
 import { getDecryptedKeys } from './apiKeyRoutes.js';
 import { evaluateLiveApplyGate } from '../utils/liveApplyGate.js';
 import { pcFetch, paperclipConfigured, PAPERCLIP_COMPANY_ID } from '../services/paperclipClient.js';
+import { requireAdmin } from '../middleware/auth.js';
+import { resolveAccountId } from '../utils/accountRefs.js';
 
 const router = express.Router();
 
-// Middleware to verify token in query param - consistent with dbRoutes
-// Also attaches decoded userId to req.adminUser so personal-key routes can
-// look up vault entries for the requesting admin.
-const verifyToken = (req: any, res: express.Response, next: express.NextFunction) => {
+/**
+ * Identity for the admin portal (#43).
+ *
+ * `verifyToken` checked that the JWT parsed and nothing else — there was no role
+ * check anywhere in this router. Any authenticated person, including a Lead,
+ * could append `?token=` and reach the portal, the Obsidian vault browser, the
+ * Alpaca/trading surfaces and the decrypted-API-key routes. It identifies;
+ * requireAdmin decides.
+ *
+ * req.adminUser is still attached, because the personal-key routes look up vault
+ * entries for the requesting admin.
+ */
+const verifyToken = async (req: any, res: express.Response, next: express.NextFunction) => {
     const token = req.query.token as string;
     const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login`;
 
@@ -25,7 +36,11 @@ const verifyToken = (req: any, res: express.Response, next: express.NextFunction
 
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET || "your-secret-key-change-this") as any;
-        req.adminUser = { id: decoded.id, email: decoded.email };
+        // A token minted before the cutover may name a source row that lost its
+        // merge and is no longer any accounts.id.
+        const id = await resolveAccountId(String(decoded.id));
+        if (!id) return res.redirect(loginUrl);
+        req.adminUser = { id, email: decoded.email };
         next();
     } catch (err: any) {
         console.log(`[AUTH] 401: Invalid token for ${req.originalUrl}. Error: ${err.message}`);
@@ -33,7 +48,7 @@ const verifyToken = (req: any, res: express.Response, next: express.NextFunction
     }
 };
 
-router.use(verifyToken);
+router.use(verifyToken, requireAdmin(true));
 
 // ── Obsidian vault helpers ────────────────────────────────────────────────────
 

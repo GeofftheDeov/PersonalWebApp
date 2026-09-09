@@ -1,8 +1,22 @@
 import express from "express";
 const router = express.Router();
-import Account from "../models/Account.js";
-import Lead from "../models/Lead.js";
+import SfAccount from "../models/SfAccount.js";
+import SfLead from "../models/SfLead.js";
 import jwt from "jsonwebtoken";
+
+/**
+ * Salesforce-facing routes over the sf_accounts LANDING table (#35).
+ *
+ * Until Phase 3 `models/SfAccount.ts` was this landing table; it is now the app's
+ * unified person table, so these handlers use SfAccount/SfLead explicitly. The
+ * app's own account data is never served from here.
+ *
+ * NOTE (not in #35): the two GET handlers below had no authentication at all —
+ * `GET /api/accounts` returned every landing row, names, emails and phones
+ * included, to anyone who asked. Same species as the campaignMemberRoutes leak
+ * in plan §3.6, found while repointing the imports. They now require the same
+ * credential the sync endpoint does.
+ */
 
 // JWT Authentication Middleware
 const authenticateJWT = (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -61,10 +75,10 @@ router.post("/sync", authenticateSync, async (req, res) => {
                 // 1. Check if Account already exists (by Salesforce ID OR Email)
                 let existingAccount = null;
                 if (sfID) {
-                    existingAccount = await Account.findOne({ sfID: sfID });
+                    existingAccount = await SfAccount.findOne({ sfID: sfID });
                 }
                 if (!existingAccount && email) {
-                    existingAccount = await Account.findOne({ email: email });
+                    existingAccount = await SfAccount.findOne({ email: email });
                 }
 
                 if (existingAccount) {
@@ -97,7 +111,7 @@ router.post("/sync", authenticateSync, async (req, res) => {
                     parsedLastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "";
                 }
 
-                const leadMatch = await Lead.findOne({
+                const leadMatch = await SfLead.findOne({
                     email: email,
                     firstName: parsedFirstName,
                     lastName: parsedLastName
@@ -108,11 +122,11 @@ router.post("/sync", authenticateSync, async (req, res) => {
                     console.info(`Found matching Lead for ${email} (${parsedFirstName} ${parsedLastName}). Migrating password...`);
                     migratedPassword = leadMatch.password;
                     // Delete the old lead as it's now being converted
-                    await Lead.deleteOne({ _id: leadMatch._id });
+                    await SfLead.deleteOne({ _id: leadMatch._id });
                 }
 
                 // 3. Create the new Account
-                const newAccount = new Account({
+                const newAccount = new SfAccount({
                     name: name,
                     email: email,
                     password: migratedPassword, // Inherits existing hashed password if Lead was found
@@ -147,9 +161,9 @@ router.post("/sync", authenticateSync, async (req, res) => {
 });
 
 // Get all accounts
-router.get("/", async (req, res) => {
+router.get("/", authenticateSync, async (req, res) => {
     try {
-        const accounts = await Account.find().sort({ createdAt: -1 });
+        const accounts = await SfAccount.find().sort({ createdAt: -1 });
         res.json(accounts);
     } catch (error: any) {
         console.error("Error fetching accounts:", error);
@@ -158,9 +172,9 @@ router.get("/", async (req, res) => {
 });
 
 // Get a specific account
-router.get("/:id", async (req, res) => {
+router.get("/:id", authenticateSync, async (req, res) => {
     try {
-        const account = await Account.findById(req.params.id);
+        const account = await SfAccount.findById(req.params.id);
         if (!account) {
             return res.status(404).json({ error: "Account not found" });
         }

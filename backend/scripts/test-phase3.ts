@@ -303,12 +303,157 @@ async function main() {
         });
 
         // ── S3/S4/S5: application cutover ────────────────────────────────────
-        // Filled in as those slices land; listed here so the gap is visible.
-        section("S3/S4/S5 — application cutover (not yet implemented)");
-        assert("personUtils resolves against accounts", false, "slice not started");
-        assert("login matrix: one query, every source", false, "slice not started");
-        assert("identity gates read app_role / sf_object", false, "slice not started");
-        assert("requireAdmin closes /admin and /db (#43)", false, "slice not started");
+        section("S3/S4/S5 — application cutover");
+
+        const { findPersonById, findPersonByHandle, findPeopleByEmail, toPublicPerson } =
+            await import("../utils/personUtils.js");
+        const Account = (await import("../models/Account.js")).default;
+        const CampaignMember = (await import("../models/CampaignMember.js")).default;
+        const bcrypt = (await import("bcryptjs")).default;
+
+        await check("personUtils resolves against accounts", async () => {
+            const byId = await findPersonById(IDS.acctA);
+            const byHandle = await findPersonByHandle("GEOFF", "0001");   // case-insensitive
+            const byEmail = await findPeopleByEmail(["ashley.early@example.com"]);
+            // A merged-away id is NOT a person any more. That is the whole point
+            // of the slice-1 remap: nothing in the database still says C1, and
+            // anything arriving from outside goes through resolveAccountId first.
+            const losing = await findPersonById(IDS.C1);
+            const ok = byId?.doc?._id === IDS.acctA
+                && byHandle?.doc?._id === IDS.acctA
+                && byEmail.length === 1 && byEmail[0].doc._id === IDS.acctD
+                && losing === null;
+            return [ok, `id=${byId?.doc?._id === IDS.acctA}, handle=${byHandle?.doc?._id === IDS.acctA}, `
+                + `email=${byEmail.length}, losing-id=${losing === null ? "not a person" : "STILL RESOLVES"}`];
+        });
+
+        await check("no vestigial `type` survives on a resolved person", async () => {
+            const person = await findPersonById(IDS.acctA);
+            const pub: any = person ? toPublicPerson(person) : {};
+            // `type` is gone; sf_object survives as provenance under recordType.
+            const ok = person !== null && !("type" in (person as any))
+                && pub.recordType === "User";
+            return [ok, `type present=${person && "type" in (person as any)}, recordType=${pub.recordType}`];
+        });
+
+        await check("login matrix: one query, every source, right answer", async () => {
+            // A person merged from each of the four Salesforce objects. Group C
+            // has no email on any source row, which is true of most of dev, so
+            // it cannot log in at all — that is not a regression, it is the
+            // reason #35's four-source login matrix is not satisfiable as
+            // written and Group C is asserted to fail here on purpose.
+            const cases: Array<[string, string | null, boolean]> = [
+                ["User-sourced", "geoffrey.murray.1995@gmail.com", true],
+                ["Lead-sourced", "gdrumz@momurrays.com", true],
+                ["Contact-sourced", "ashley.early@example.com", true],
+                ["Account-sourced (no email anywhere)", null, false],
+            ];
+            const results: string[] = [];
+            let ok = true;
+            for (const [label, email, shouldSucceed] of cases) {
+                if (email === null) { results.push(`${label}: no email, cannot log in`); continue; }
+                const person: any = await Account.findOne({ email });
+                const matched = person?.password
+                    ? await bcrypt.compare(PASSWORD, person.password) : false;
+                if (matched !== shouldSucceed) ok = false;
+                results.push(`${label}: ${matched ? "ok" : "FAILED"}`);
+            }
+            // Case-insensitivity is the citext column, not a regex scan.
+            const upper = await Account.findOne({ email: "GEOFFREY.MURRAY.1995@GMAIL.COM" });
+            if (upper?._id !== IDS.acctA) ok = false;
+            results.push(`mixed-case lookup: ${upper?._id === IDS.acctA ? "ok" : "FAILED"}`);
+            return [ok, results.join("; ")];
+        });
+
+        await check("identity gates read app_role, never tier or provenance", async () => {
+            const { getAuthorizedCampaignIds, isCampaignGameMaster } =
+                await import("../utils/gameNightPlannerUtils.js");
+
+            // Admin sees everything.
+            const adminScope = await getAuthorizedCampaignIds({ id: IDS.acctA, email: "x" });
+            // A patron who is NOT an admin must not: this is the #28 split. Group
+            // C is account_tier 'patron' and app_role 'user'.
+            const patronScope = await getAuthorizedCampaignIds({ id: IDS.acctC, email: "x" });
+            const leadScope = await getAuthorizedCampaignIds({ id: IDS.acctB, email: "x" });
+
+            const adminIsGm = await isCampaignGameMaster({ id: IDS.acctA }, IDS.campaign);
+            const patronIsGm = await isCampaignGameMaster({ id: IDS.acctC }, IDS.campaign);
+
+            const ok = adminScope === null
+                && Array.isArray(patronScope) && patronScope.length === 1
+                && Array.isArray(leadScope) && leadScope.length === 1
+                && adminIsGm === true && patronIsGm === false;
+            return [ok, `admin=all(${adminScope === null}), patron=${(patronScope as any)?.length} campaign(s), `
+                + `lead=${(leadScope as any)?.length}, adminGM=${adminIsGm}, patronGM=${patronIsGm}`];
+        });
+
+        await check("a tier change never moves access (#28)", async () => {
+            // The whole reason app_role and account_tier are two columns.
+            await Account.findByIdAndUpdate(IDS.acctB, { $set: { accountTier: "patron" } });
+            const stillNotAdmin = await Account.findById(IDS.acctB).select("appRole accountTier");
+            const scope = await (await import("../utils/gameNightPlannerUtils.js"))
+                .getAuthorizedCampaignIds({ id: IDS.acctB, email: "x" });
+            await Account.findByIdAndUpdate(IDS.acctB, { $set: { accountTier: "free" } });
+            const ok = stillNotAdmin?.appRole === "user" && scope !== null;
+            return [ok, `promoted to patron -> app_role=${stillNotAdmin?.appRole}, sees all=${scope === null}`];
+        });
+
+        await check("the Paperclip gate admits admins and Salesforce users, nobody else", async () => {
+            // Mirrors paperclipOnly: app_role = 'admin' OR sf_object = 'User'.
+            const allowed = async (id: string) => {
+                const p = await Account.findById(id).select("appRole sfObject");
+                return Boolean(p && (p.appRole === "admin" || p.sfObject === "User"));
+            };
+            const admin = await allowed(IDS.acctA);        // admin AND User-sourced
+            const lead = await allowed(IDS.acctB);         // neither
+            const patron = await allowed(IDS.acctC);       // patron tier, not admin
+            const ok = admin === true && lead === false && patron === false;
+            return [ok, `admin=${admin}, lead=${lead}, patron(tier only)=${patron}`];
+        });
+
+        await check("requireAdmin closes /admin and /db (#43)", async () => {
+            const { requireAdmin } = await import("../middleware/auth.js");
+            const gate = requireAdmin(false);
+
+            const run = (id: string) => new Promise<number>((resolve) => {
+                const res: any = {
+                    status(code: number) { this.__code = code; return this; },
+                    json() { resolve(this.__code); return this; },
+                    send() { resolve(this.__code); return this; },
+                };
+                gate({ adminUser: { id }, originalUrl: "/db/users" }, res, () => resolve(200));
+            });
+
+            const asAdmin = await run(IDS.acctA);
+            const asLead = await run(IDS.acctB);     // the repro in #43
+            const asPatron = await run(IDS.acctC);   // paid, still not staff
+            const ok = asAdmin === 200 && asLead === 403 && asPatron === 403;
+            return [ok, `admin=${asAdmin}, ordinary user=${asLead}, patron=${asPatron}`];
+        });
+
+        await check("the admin gate rests on the manual pin, and says so", async () => {
+            // Every admin gate in the app depends on one row. sf_profile is NULL
+            // everywhere, so sf_profile_role_map resolves everyone to 'user';
+            // only app_role_source = 'manual' keeps the pin alive through a merge.
+            const { rows } = await client.query(
+                `SELECT count(*)::int AS admins,
+                        count(*) FILTER (WHERE app_role_source = 'manual')::int AS pinned,
+                        count(*) FILTER (WHERE sf_profile IS NOT NULL)::int AS with_profile
+                   FROM accounts WHERE app_role = 'admin'`);
+            const r = rows[0];
+            return [r.admins === 1 && r.pinned === 1 && r.with_profile === 0,
+                `${r.admins} admin(s), ${r.pinned} pinned manually, ${r.with_profile} derived from sf_profile`];
+        });
+
+        await check("campaign membership is one indexed lookup, and complete", async () => {
+            // The old four-way OR included an unindexed email match, and the GM
+            // row it had to find that way was the email-only one.
+            const gm = await CampaignMember.findOne({
+                campaign: IDS.campaign, status: "Game Master" });
+            const mine = await CampaignMember.find({ person: IDS.acctA });
+            const ok = String(gm?.person) === IDS.acctA && mine.length === 1;
+            return [ok, `GM person=${gm?.person}, memberships for Geoff=${mine.length}`];
+        });
 
         console.log(`\n${passed} passed, ${failed} failed`);
         if (failures.length) console.log(`Failing: ${failures.join(" · ")}`);

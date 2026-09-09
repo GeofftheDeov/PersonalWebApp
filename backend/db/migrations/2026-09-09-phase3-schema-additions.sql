@@ -11,7 +11,7 @@
 
 BEGIN;
 
--- ── campaign_members: one person column instead of four ───────────────────────
+-- ── campaign_members: one person column instead of four ─────────────────────
 -- Membership always points at a real account (plan §3.5); the "no account yet"
 -- state moves to campaign_invites.to_email below.
 ALTER TABLE campaign_members
@@ -46,7 +46,7 @@ UPDATE campaign_members m
 CREATE INDEX IF NOT EXISTS idx_campaign_members_person
   ON campaign_members (person_id);
 
--- ── campaign_invites: invites hold the pre-account state ─────────────────────
+-- ── campaign_invites: invites hold the pre-account state ────────────────────
 ALTER TABLE campaign_invites RENAME COLUMN from_user TO from_account_id;
 ALTER TABLE campaign_invites RENAME COLUMN to_user   TO to_account_id;
 
@@ -79,7 +79,7 @@ ALTER TABLE friend_requests
 -- the remap made them consistent, but adding constraints there was not part of
 -- the agreed slice. Revisit once the cutover has soaked.
 
--- ── staff-only integrations: sf_users -> accounts ──────────────────────────
+-- ── staff-only integrations: sf_users -> accounts ───────────────────────────
 -- The two deliberate sf_users FKs. Their owner genuinely is a Salesforce User,
 -- but after the cutover that person is an account like everyone else.
 -- Defensive remap first: on dev the single sf_users row won its group, so its

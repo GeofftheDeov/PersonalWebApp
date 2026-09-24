@@ -536,6 +536,134 @@ async function main() {
             return [before === after, `${after - before} new row(s)`];
         });
 
+        // ── S6b: outbox drain ────────────────────────────────────────────────
+        section("S6b — outbox drain");
+
+        const { drainPersonOutbox } = await import("../jobs/personSync.js");
+
+        /** A stand-in Salesforce: records every call, fails on demand, never talks to the org. */
+        const fakeSf = (failFor: Set<string> = new Set()) => {
+            const calls: Array<{ kind: string; sobject: string; id?: string; fields: any }> = [];
+            let n = 0;
+            return {
+                calls,
+                create: async (sobject: string, fields: any) => {
+                    calls.push({ kind: "create", sobject, fields });
+                    return `00QFAKE0000${String(++n).padStart(4, "0")}`;
+                },
+                update: async (sobject: string, id: string, fields: any) => {
+                    calls.push({ kind: "update", sobject, id, fields });
+                    if (failFor.has(id)) throw new Error(`UNABLE_TO_LOCK_ROW: ${id} (fake)`);
+                },
+            };
+        };
+        const outboxState = async (id: string) => (await client.query(
+            `SELECT status, attempts, last_error FROM person_outbox WHERE account_id = $1 ORDER BY id`,
+            [id])).rows;
+
+        const sf1 = fakeSf();
+        const run1 = await drainPersonOutbox({ sf: sf1 });
+
+        await check("the drain pushes each queued person once", async () => {
+            // Queued by S6a: the signup (create), Zpecterr (email+phone), Ashley (phone).
+            const ok = run1.claimed === 3 && run1.created === 1 && run1.updated === 2
+                && run1.failed === 0 && sf1.calls.length === 3;
+            return [ok, JSON.stringify({ ...run1, errors: run1.errors.length })];
+        });
+
+        await check("a signup is created as a Lead, with a Company it never gave", async () => {
+            const c = sf1.calls.find((x) => x.kind === "create");
+            // The signup form makes Company optional; Salesforce does not. The old
+            // postSave create failed for anyone who left it blank.
+            const f = c?.fields ?? {};
+            const ok = c?.sobject === "Lead" && f.Company === "New N. Comer" && f.FirstName === "New"
+                && f.LastName === "Comer" && f.Email === "newcomer@example.com"
+                && f.Phone === "555-0100" && f.LeadSource === "Web App";
+            return [ok, JSON.stringify(c)];
+        });
+
+        await check("the new Salesforce id is written back without re-queueing it", async () => {
+            const { rows: [a] } = await client.query(
+                `SELECT sf_id, sf_last_pushed_at FROM accounts WHERE id = $1`, [signupId]);
+            const pending = (await client.query(
+                `SELECT count(*)::int n FROM person_outbox WHERE status = 'pending'`)).rows[0].n;
+            const ok = a.sf_id === "00QFAKE00000001" && a.sf_last_pushed_at !== null && pending === 0;
+            return [ok, `sf_id=${a.sf_id}, pushed=${a.sf_last_pushed_at !== null}, pending rows=${pending}`];
+        });
+
+        await check("an update sends only the fields that changed, current values", async () => {
+            const u = sf1.calls.find((x) => x.kind === "update" && x.id === "00Q000000000001AAA");
+            const ok = u?.sobject === "Lead"
+                && JSON.stringify(Object.keys(u.fields).sort()) === JSON.stringify(["Email", "Phone"])
+                && u.fields.Email === "zpecterr@example.com" && u.fields.Phone === "555-0101";
+            return [ok, JSON.stringify(u)];
+        });
+
+        await check("a second drain has nothing to do", async () => {
+            const sf = fakeSf();
+            const r = await drainPersonOutbox({ sf });
+            return [r.claimed === 0 && sf.calls.length === 0, `claimed=${r.claimed}, calls=${sf.calls.length}`];
+        });
+
+        await check("a Salesforce failure retries later, once per run — not five times in a loop", async () => {
+            await client.query(`UPDATE accounts SET phone = '555-0199' WHERE id = $1`, [IDS.acctD]);
+            const sf = fakeSf(new Set(["003000000000003AAA"]));
+            const r = await drainPersonOutbox({ sf });
+            const [row] = await outboxState(IDS.acctD).then((rows) => rows.filter((x: any) => x.status !== "done"));
+            const ok = r.claimed === 1 && r.retrying === 1 && sf.calls.length === 1
+                && row?.status === "pending" && row?.attempts === 1 && /UNABLE_TO_LOCK_ROW/.test(row?.last_error);
+            return [ok, `claimed=${r.claimed}, calls=${sf.calls.length}, row=${JSON.stringify(row)}`];
+        });
+
+        await check("after the last attempt it gives up visibly as 'failed'", async () => {
+            await client.query(
+                `UPDATE person_outbox SET attempts = 4 WHERE account_id = $1 AND status = 'pending'`, [IDS.acctD]);
+            const r = await drainPersonOutbox({ sf: fakeSf(new Set(["003000000000003AAA"])) });
+            const rows = await outboxState(IDS.acctD);
+            const last = rows[rows.length - 1];
+            return [r.failed === 1 && last.status === "failed" && last.attempts === 5,
+                `failed=${r.failed}, row=${JSON.stringify(last)}`];
+        });
+
+        await check("a push interrupted mid-flight folds into the person's newer change", async () => {
+            // A run that died while pushing Zpecterr's phone left the row in_flight;
+            // then Zpecterr changed their name, which queued a new pending row.
+            await client.query(
+                `INSERT INTO person_outbox (account_id, op, payload, status, attempts)
+                 VALUES ($1, 'update', '{"fields":["phone"]}', 'in_flight', 1)`, [IDS.acctB]);
+            await client.query(`UPDATE accounts SET first_name = 'Testy' WHERE id = $1`, [IDS.acctB]);
+            const sf = fakeSf();
+            const r = await drainPersonOutbox({ sf });
+            const mine = sf.calls.filter((c) => c.id === "00Q000000000001AAA");
+            const live = (await outboxState(IDS.acctB)).filter((x: any) => x.status !== "done");
+            const keys = Object.keys(mine[0]?.fields ?? {}).sort();
+            const ok = mine.length === 1 && live.length === 0
+                && JSON.stringify(keys) === JSON.stringify(["FirstName", "Phone"]);
+            return [ok, `pushes=${mine.length}, fields=${keys.join(",")}, left open=${live.length}, run=${r.claimed}`];
+        });
+
+        await check("a queued push for a Salesforce User is skipped, never sent", async () => {
+            await client.query(
+                `INSERT INTO person_outbox (account_id, op, payload) VALUES ($1, 'update', '{"fields":["phone"]}')`,
+                [IDS.acctA]);
+            const sf = fakeSf();
+            const r = await drainPersonOutbox({ sf });
+            return [r.skipped === 1 && sf.calls.length === 0, `skipped=${r.skipped}, calls=${sf.calls.length}`];
+        });
+
+        await check("an Account gets Name/Phone; an email change is reported, not failed", async () => {
+            await client.query(
+                `UPDATE accounts SET email = 'tyler@example.com', phone = '555-0105' WHERE id = $1`, [IDS.acctC]);
+            const sf = fakeSf();
+            const r = await drainPersonOutbox({ sf });
+            const call = sf.calls[0];
+            const [row] = (await outboxState(IDS.acctC)).slice(-1);
+            const ok = r.updated === 1 && call?.sobject === "Account"
+                && JSON.stringify(call.fields) === JSON.stringify({ Phone: "555-0105" })
+                && row.status === "done" && /Email field/.test(row.last_error ?? "");
+            return [ok, `call=${JSON.stringify(call)}, note=${row?.last_error}`];
+        });
+
         console.log(`\n${passed} passed, ${failed} failed`);
         if (failures.length) console.log(`Failing: ${failures.join(" · ")}`);
         console.log(`Password for login tests: ${PASSWORD}`);

@@ -96,50 +96,37 @@ export const loginToSalesforce = async () => {
     }
 };
 
-export const createLeadInSalesforce = async (lead: any) => {
+/**
+ * Generic record writes for the person outbox (#35, plan §2.7).
+ *
+ * These replace createLeadInSalesforce / createLeadFromAccount, whose only
+ * callers were the setImmediate postSave hooks Phase 3 deleted. Those logged a
+ * failure and returned null, which is precisely how a failed push used to
+ * vanish: nothing retried it and nothing showed it. These THROW, so the drain
+ * can record last_error, back off, and surface a 'failed' row in the admin UI.
+ */
+export async function createSalesforceRecord(
+    sobject: string, fields: Record<string, unknown>,
+): Promise<string> {
     await loginToSalesforce();
-    if (!isLoggedIn) {
-        console.warn("Not logged in to Salesforce. Skipping Lead creation.");
-        return;
+    if (!isLoggedIn) throw new Error("Not logged in to Salesforce");
+    const ret: any = await conn.sobject(sobject).create(fields);
+    if (!ret?.success) {
+        throw new Error(`${sobject} create failed: ${JSON.stringify(ret?.errors ?? ret)}`);
     }
+    return String(ret.id);
+}
 
-    try {
-        const ret = await conn.sobject("Lead").create({
-            FirstName: lead.firstName,
-            LastName: lead.lastName,
-            Company: lead.company,
-            Email: lead.email || undefined,
-            Phone: lead.phone || undefined,
-            Status: "Open - Not Contacted",
-            LeadSource: lead.source || "Web App"
-        });
-
-        if (ret.success) {
-            console.log(`Created Lead in Salesforce with ID: ${ret.id}`);
-            console.log(`Here is the full response: `);
-            console.info(ret);
-            return ret;
-        } else {
-            console.error(`Failed to create Lead: ${JSON.stringify(ret.errors)}`);
-            return null;
-        }
-    } catch (err) {
-        console.error("Error creating Salesforce Lead:", err);
-        return null;
+export async function updateSalesforceRecord(
+    sobject: string, id: string, fields: Record<string, unknown>,
+): Promise<void> {
+    await loginToSalesforce();
+    if (!isLoggedIn) throw new Error("Not logged in to Salesforce");
+    const ret: any = await conn.sobject(sobject).update({ Id: id, ...fields });
+    if (!ret?.success) {
+        throw new Error(`${sobject} ${id} update failed: ${JSON.stringify(ret?.errors ?? ret)}`);
     }
-};
-
-// Keep the old function for backward compatibility with Account model
-export const createLeadFromAccount = async (account: any) => {
-    return createLeadInSalesforce({
-        firstName: account.name,
-        lastName: account.name,
-        company: account.name,
-        email: account.email,
-        phone: account.phone,
-        source: "Web App"
-    });
-};
+}
 
 const SF_TASK_OBJECT = process.env.SF_TASK_OBJECT || "Task";
 

@@ -42,7 +42,9 @@ CREATE TABLE sf_users (
   email                     text,
   phone                     text,
   handle                    text,
-  password                  text NOT NULL,
+  -- Nullable since #35: passwords are app-owned and live on accounts. See the
+  -- 2026-09-24 merge-support migration.
+  password                  text,
   reset_password_token      text,
   reset_password_expires    timestamptz,
   is_verified               boolean NOT NULL DEFAULT false,
@@ -116,7 +118,7 @@ CREATE TABLE sf_leads (
   first_name                text NOT NULL,
   last_name                 text NOT NULL,
   email                     text,
-  password                  text NOT NULL,
+  password                  text,          -- nullable since #35, as sf_users
   reset_password_token      text,
   reset_password_expires    timestamptz,
   is_verified               boolean NOT NULL DEFAULT false,

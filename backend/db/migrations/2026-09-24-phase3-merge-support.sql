@@ -33,8 +33,22 @@
 --
 --    (A first draft used "pushed since the last merge". That flickers: two
 --    manual runs between Salesforce pulls revert and then restore the value.)
+--
+-- 3. Landing tables stop holding passwords.
+--
+--    sf_users.password and sf_leads.password were NOT NULL, which is why every
+--    Salesforce sync endpoint invented a "SF_IMPORT_<id>" placeholder for records
+--    arriving from the org. Before the cutover the landing models hashed those on
+--    save; since the cutover they are plain mirrors, so the placeholder would land
+--    in PLAINTEXT — a predictable string in a password column — and the merge
+--    would carry it into accounts when founding a new person. Passwords are
+--    app-owned (§2.6) and live on accounts only. Existing values are left alone:
+--    they are app-era hashes, already copied into accounts by the Phase 2 backfill.
 
 BEGIN;
+
+ALTER TABLE sf_users ALTER COLUMN password DROP NOT NULL;
+ALTER TABLE sf_leads ALTER COLUMN password DROP NOT NULL;
 
 CREATE TABLE IF NOT EXISTS account_merge_exclusions (
   source_table text NOT NULL

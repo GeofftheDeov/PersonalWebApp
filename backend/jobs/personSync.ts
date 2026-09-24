@@ -336,7 +336,12 @@ interface SourceDef {
     shared: Partial<Record<SharedCol, string>>;
     /** account column -> landing column, for Salesforce-owned fields (SF always wins). */
     sfOwned: Partial<Record<SfOwnedCol, string>>;
-    /** App-owned starting values, copied ONLY when a landing row founds a new account. */
+    /**
+     * App-owned starting values, copied ONLY when a landing row founds a new
+     * account. Never the password: landing rows no longer hold one, and the ones
+     * that did were placeholders. A person founded from Salesforce sets theirs
+     * through Forgot Password, as Salesforce-synced people always have.
+     */
     seed: string[];
 }
 
@@ -351,23 +356,23 @@ interface SourceDef {
 const SOURCES: SourceDef[] = [
     { table: "sf_users", sfObject: "User", sfIdCol: "sf_id",
       shared: { name: "name", phone: "phone" }, sfOwned: {},
-      seed: ["handle", "user_number", "user_digit", "password", "is_verified",
+      seed: ["handle", "user_number", "user_digit", "is_verified",
              "profile_picture", "favorite_games", "discord_id", "discord_handle"] },
     { table: "sf_accounts", sfObject: "Account", sfIdCol: "sf_id",
       shared: { name: "name", phone: "phone" },
       sfOwned: { company: "company", industry: "industry", website: "website", address: "address",
                  sf_record_type_id: "sf_record_type_id", sf_record_type_name: "sf_record_type_name" },
-      seed: ["handle", "user_number", "user_digit", "password", "is_verified",
+      seed: ["handle", "user_number", "user_digit", "is_verified",
              "profile_picture", "favorite_games"] },
     { table: "sf_contacts", sfObject: "Contact", sfIdCol: "sf_id",
       shared: { name: "name", phone: "phone" }, sfOwned: {},
-      seed: ["handle", "user_number", "user_digit", "password", "is_verified",
+      seed: ["handle", "user_number", "user_digit", "is_verified",
              "profile_picture", "favorite_games"] },
     { table: "sf_leads", sfObject: "Lead", sfIdCol: "sf_lead_id",
       shared: { first_name: "first_name", last_name: "last_name", phone: "phone" },
       sfOwned: { company: "company", lead_status: "status",
                  sf_record_type_id: "sf_record_type_id", sf_record_type_name: "sf_record_type_name" },
-      seed: ["handle", "user_number", "user_digit", "password", "is_verified",
+      seed: ["handle", "user_number", "user_digit", "is_verified",
              "profile_picture", "favorite_games"] },
 ];
 const RANK: Record<string, number> = { User: 4, Account: 3, Contact: 2, Lead: 1 };
@@ -679,4 +684,121 @@ export async function recordPull(sfObject: string, startedAt: Date, result: unkn
         `INSERT INTO person_sync_runs (step, sf_object, trigger, started_at, ok, result, error)
          VALUES ('pull', $1, 'salesforce', $2, $3, $4, $5)`,
         [sfObject, startedAt, ok, JSON.stringify(result ?? null), error ?? null]);
+}
+
+// ── Orchestration (slice 6d) ────────────────────────────────────────────────
+
+/** Arbitrary but fixed: identifies the person-sync lock among advisory locks. */
+const PERSON_SYNC_LOCK = 350_035;
+
+export interface PersonSyncResult {
+    ran: boolean;
+    reason?: string;
+    drain?: DrainResult;
+    merge?: MergeResult;
+}
+
+/**
+ * The nightly pipeline, and the admin "run now": drain, then merge.
+ *
+ * Plan §2.8's order is push -> pull -> merge. The middle step is not ours to
+ * run: Salesforce's own scheduled Apex (GenericDataSyncBatch / AccountSyncBatch)
+ * POSTs its records to /api/sync/salesforce whenever the org schedules it. So
+ * this runs the two ends, and the merge's shared-field rule is what makes the
+ * order safe regardless of when that pull happens: a change pushed after the
+ * last pull of its object is protected until a pull could have brought it back.
+ *
+ * One run at a time. The lock is a TRANSACTION-level advisory lock held on a
+ * dedicated connection for the length of the run: dev's DATABASE_URL is a
+ * PgBouncer pooler, and behind transaction pooling a session-level lock can
+ * outlive its statement on a backend that someone else is then handed. An open
+ * transaction pins its backend, so the xact lock is held exactly as long as the
+ * run and released however the run ends.
+ */
+export async function runPersonSync(opts: {
+    trigger?: "schedule" | "manual";
+    sf?: SalesforcePersonClient;
+} = {}): Promise<PersonSyncResult> {
+    const trigger = opts.trigger ?? "schedule";
+    const lock = await pool.connect();
+    try {
+        await lock.query("BEGIN");
+        const { rows: [got] } = await lock.query(
+            `SELECT pg_try_advisory_xact_lock($1) AS ok`, [PERSON_SYNC_LOCK]);
+        if (!got?.ok) {
+            await lock.query("ROLLBACK");
+            return { ran: false, reason: "another person-sync run is in progress" };
+        }
+
+        const drainStarted = new Date();
+        let drain: DrainResult;
+        try {
+            drain = await drainPersonOutbox({ sf: opts.sf });
+            await query(
+                `INSERT INTO person_sync_runs (step, trigger, started_at, ok, result)
+                 VALUES ('drain', $1, $2, true, $3)`,
+                [trigger, drainStarted, JSON.stringify(drain)]);
+        } catch (err: any) {
+            await query(
+                `INSERT INTO person_sync_runs (step, trigger, started_at, ok, error)
+                 VALUES ('drain', $1, $2, false, $3)`,
+                [trigger, drainStarted, String(err?.message ?? err).slice(0, 2000)]);
+            throw err;
+        }
+
+        // A failed push does not stop the merge: its fields are protected by the
+        // 'failed' outbox row, so merging cannot clobber them.
+        const merge = await mergeLandingIntoAccounts({ trigger });
+
+        await lock.query("COMMIT");
+        return { ran: true, drain, merge };
+    } catch (err) {
+        await lock.query("ROLLBACK").catch(() => { /* connection may be gone */ });
+        throw err;
+    } finally {
+        lock.release();
+    }
+}
+
+/** What the admin page shows: queue health, the last runs, and what is stuck. */
+export async function personSyncStatus() {
+    const [{ rows: queue }, { rows: runs }, { rows: failed }, { rows: [unsynced] }] = await Promise.all([
+        query(`SELECT status, count(*)::int AS n FROM person_outbox GROUP BY status ORDER BY status`),
+        query(`SELECT step, sf_object, trigger, started_at, finished_at, ok, result, error
+                 FROM person_sync_runs ORDER BY finished_at DESC LIMIT 15`),
+        query(`SELECT o.id, o.account_id, o.op, o.payload, o.attempts, o.last_error, o.created_at,
+                      a.email, a.name, a.sf_object, a.sf_id
+                 FROM person_outbox o JOIN accounts a ON a.id = o.account_id
+                WHERE o.status = 'failed' ORDER BY o.created_at DESC LIMIT 50`),
+        // Plan §2.8: sf_id IS NULL marks "app-native, not in the CRM yet". A count
+        // that keeps growing means the drain has stalled, which should be visible
+        // rather than silent.
+        query(`SELECT count(*)::int AS n FROM accounts WHERE sf_id IS NULL AND sf_object = 'Lead'`),
+    ]);
+    return { queue, runs, failed, awaitingSalesforce: unsynced?.n ?? 0 };
+}
+
+/** Put a failed row back in the queue — the admin "retry". Folds like any retry. */
+export async function retryFailedOutboxRow(id: string): Promise<boolean> {
+    const { rows } = await query(
+        `UPDATE person_outbox SET status = 'pending', attempts = 0, last_error = NULL
+          WHERE id = $1 AND status = 'failed'
+            AND NOT EXISTS (SELECT 1 FROM person_outbox p
+                             WHERE p.account_id = person_outbox.account_id AND p.status = 'pending')
+          RETURNING id`, [id]);
+    if (rows.length) return true;
+    // The person already has a pending row: fold this one's fields into it.
+    const { rows: folded } = await query(
+        `WITH f AS (SELECT account_id, op, payload FROM person_outbox WHERE id = $1 AND status = 'failed')
+         UPDATE person_outbox p
+            SET op = CASE WHEN p.op = 'create' OR f.op = 'create' THEN 'create' ELSE 'update' END,
+                payload = jsonb_build_object('fields', (
+                  SELECT to_jsonb(array_agg(x ORDER BY x)) FROM (
+                    SELECT jsonb_array_elements_text(p.payload -> 'fields') AS x
+                    UNION SELECT jsonb_array_elements_text(f.payload -> 'fields')) u))
+           FROM f WHERE p.account_id = f.account_id AND p.status = 'pending'
+         RETURNING p.id`, [id]);
+    if (!folded.length) return false;
+    await query(`DELETE FROM person_outbox WHERE id = $1 AND status = 'failed'`, [id]);
+    return true;
 }

@@ -5,6 +5,7 @@ export const QUEUE_NAMES = {
     SF_WRITEBACK: "salesforce-writeback",
     NOTION_WRITEBACK: "notion-writeback",
     SF_POLL: "salesforce-poll",
+    PERSON_SYNC: "person-sync",
 } as const;
 
 export const DEFAULT_JOB_OPTS = {
@@ -21,6 +22,29 @@ let _notionQueue: Queue | null = null;
 let _sfQueue: Queue | null = null;
 let _notionWritebackQueue: Queue | null = null;
 let _sfPollQueue: Queue | null = null;
+let _personSyncQueue: Queue | null = null;
+
+/**
+ * Person sync (#35, plan §2.8): nightly drain of person_outbox to Salesforce,
+ * then the merge of Salesforce's landing tables into accounts. 03:00 Central —
+ * after the day's signups and before anyone is up; the Apex pull that lands
+ * Salesforce's records is scheduled in the org, not here.
+ *
+ * attempts: 1, deliberately NOT DEFAULT_JOB_OPTS. The outbox keeps its own
+ * per-row attempt count and gives up after five; a BullMQ retry of the whole run
+ * would re-attempt every failing row immediately and spend all five in a night.
+ */
+export const PERSON_SYNC_SCHEDULE = { pattern: "0 3 * * *", tz: "America/Chicago" };
+const PERSON_SYNC_JOB_OPTS = { attempts: 1, removeOnComplete: { count: 30 }, removeOnFail: { count: 60 } };
+
+export function getPersonSyncQueue(): Queue | null {
+    const opts = getBullConnectionOptions();
+    if (!opts) return null;
+    if (!_personSyncQueue) {
+        _personSyncQueue = new Queue(QUEUE_NAMES.PERSON_SYNC, { connection: opts });
+    }
+    return _personSyncQueue;
+}
 
 /**
  * Returns BullMQ connection options derived from REDIS_URL.
@@ -115,6 +139,16 @@ export async function registerRepeatableJobs(): Promise<void> {
         );
         console.log("[bullmq] Registered repeatable salesforce-poll job (every 15 min)");
     }
+
+    const personQ = getPersonSyncQueue();
+    if (personQ) {
+        await personQ.upsertJobScheduler(
+            "person-sync-nightly",
+            PERSON_SYNC_SCHEDULE,
+            { name: "person-sync", data: { trigger: "schedule" }, opts: PERSON_SYNC_JOB_OPTS }
+        );
+        console.log("[bullmq] Registered nightly person-sync job (03:00 America/Chicago)");
+    }
 }
 
 export async function closeBullConnection(): Promise<void> {
@@ -123,6 +157,7 @@ export async function closeBullConnection(): Promise<void> {
         _sfQueue?.close(),
         _notionWritebackQueue?.close(),
         _sfPollQueue?.close(),
+        _personSyncQueue?.close(),
     ]);
     _notionQueue = null;
     _sfQueue = null;

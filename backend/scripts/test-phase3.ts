@@ -848,6 +848,155 @@ async function main() {
             return [rows[0].merges >= 9 && rows[0].pulls === 2, JSON.stringify(rows[0])];
         });
 
+        // ── S6d: pipeline, sync endpoints, admin ─────────────────────────────
+        section("S6d — pipeline, sync endpoints, admin page");
+
+        const { runPersonSync, personSyncStatus, retryFailedOutboxRow } = await import("../jobs/personSync.js");
+
+        await check("run now: drain then merge, both in the ledger", async () => {
+            await client.query(`UPDATE accounts SET phone = '555-0300' WHERE id = $1`, [IDS.acctB]);
+            const sf = fakeSf();
+            const r = await runPersonSync({ trigger: "manual", sf });
+            const { rows } = await client.query(
+                `SELECT step FROM person_sync_runs WHERE trigger = 'manual' ORDER BY id DESC LIMIT 2`);
+            const ok = r.ran && r.drain!.updated === 1 && sf.calls.length === 1
+                && rows.map((x: any) => x.step).sort().join() === "drain,merge";
+            return [ok, `ran=${r.ran}, pushed=${r.drain?.updated}, ledger=${rows.map((x: any) => x.step)}`];
+        });
+
+        await check("a second run while one is in progress is refused, not overlapped", async () => {
+            await client.query(`UPDATE accounts SET phone = '555-0301' WHERE id = $1`, [IDS.acctB]);
+            let release!: () => void;
+            const gate = new Promise<void>((r) => { release = r; });
+            let entered!: () => void;
+            const inSf = new Promise<void>((r) => { entered = r; });
+            const slowSf = { ...fakeSf(), update: async () => { entered(); await gate; } };
+            const first = runPersonSync({ trigger: "manual", sf: slowSf as any });
+            await inSf;                                  // run 1 now holds the lock, mid-push
+            const second = await runPersonSync({ trigger: "manual", sf: fakeSf() });
+            release();
+            const one = await first;
+            return [one.ran && !second.ran && /in progress/.test(second.reason ?? ""),
+                `first ran=${one.ran}; second ran=${second.ran} (${second.reason})`];
+        });
+
+        // The sync endpoints, over real HTTP, as Salesforce's Apex batches call them.
+        const express = (await import("express")).default;
+        process.env.SYNC_API_KEY = "phase3-test-key";
+        const app = express();
+        app.use(express.json());
+        app.use("/api/sync", (await import("../routes/syncRoutes.js")).default);
+        app.use("/api/accounts", (await import("../routes/accountRoutes.js")).default);
+        app.use("/admin", (await import("../routes/adminRoutes.js")).default);
+        const server = app.listen(0);
+        const base = `http://127.0.0.1:${(server.address() as any).port}`;
+        const post = (path: string, body: unknown) => fetch(base + path, {
+            method: "POST", headers: { "content-type": "application/json", "x-api-key": "phase3-test-key" },
+            body: JSON.stringify(body) }).then((r) => r.json());
+
+        try {
+            await check("two Salesforce records sharing an email stay two landing rows", async () => {
+                // The old endpoints matched on email too, collapsing them into one.
+                await post("/api/sync/salesforce", { object: "Lead", records: [
+                    { Id: "00QPULL000000001", FirstName: "Pulled", LastName: "One", Email: "dup@example.com" },
+                    { Id: "00QPULL000000002", FirstName: "Pulled", LastName: "Two", Email: "dup@example.com" }] });
+                const { rows } = await client.query(
+                    `SELECT sf_lead_id, password FROM sf_leads WHERE email = 'dup@example.com' ORDER BY sf_lead_id`);
+                return [rows.length === 2 && rows.every((r: any) => r.password === null),
+                    `${rows.length} row(s), passwords=${JSON.stringify(rows.map((r: any) => r.password))}`];
+            });
+
+            await check("a legacy row with no Salesforce id is adopted, not duplicated", async () => {
+                await client.query(
+                    `INSERT INTO sf_leads (id, first_name, last_name, email)
+                     VALUES ('0f000000-0000-4000-8000-00000000ab06','Legacy','Row','legacy@example.com')`);
+                await post("/api/sync/salesforce", { object: "Lead", records: [
+                    { Id: "00QPULL000000003", LastName: "Row", Email: "legacy@example.com" }] });
+                const { rows } = await client.query(`SELECT id, sf_lead_id FROM sf_leads WHERE email = 'legacy@example.com'`);
+                return [rows.length === 1 && rows[0].sf_lead_id === "00QPULL000000003",
+                    `${rows.length} row(s), sf_lead_id=${rows[0]?.sf_lead_id}`];
+            });
+
+            await check("an Account sharing a User's email is no longer silently skipped", async () => {
+                const r: any = await post("/api/sync/salesforce", { object: "Account", records: [
+                    { Id: "001PULL000000001", Name: "Geoffrey Murray", PersonEmail: "geoffrey.murray.1995@gmail.com" }] });
+                const { rows } = await client.query(`SELECT password FROM sf_accounts WHERE sf_id = '001PULL000000001'`);
+                return [rows.length === 1 && rows[0].password === null && r.results.skipped === 0,
+                    `landed=${rows.length}, skipped=${r.results.skipped}, password=${rows[0]?.password}`];
+            });
+
+            await check("accounts/sync no longer deletes a Lead it thinks converted", async () => {
+                await client.query(
+                    `INSERT INTO sf_leads (id, first_name, last_name, email, sf_lead_id)
+                     VALUES ('0f000000-0000-4000-8000-00000000ab07','Lead','Convert','convert@example.com','00QPULL000000004')`);
+                await post("/api/accounts/sync", { accounts: [
+                    { sfID: "001PULL000000002", name: "Lead Convert", email: "convert@example.com" }] });
+                const { rows: [c] } = await client.query(
+                    `SELECT (SELECT count(*) FROM sf_leads WHERE id = '0f000000-0000-4000-8000-00000000ab07')::int lead,
+                            (SELECT count(*) FROM sf_accounts WHERE sf_id = '001PULL000000002' AND password IS NULL)::int acct`);
+                return [c.lead === 1 && c.acct === 1, `lead kept=${c.lead}, account landed=${c.acct}`];
+            });
+
+            await check("every person pull is recorded per object", async () => {
+                const { rows } = await client.query(
+                    `SELECT sf_object, count(*)::int n FROM person_sync_runs
+                      WHERE step = 'pull' AND trigger = 'salesforce' AND result IS NOT NULL
+                      GROUP BY 1 ORDER BY 1`);
+                const by = Object.fromEntries(rows.map((r: any) => [r.sf_object, r.n]));
+                return [by.Lead >= 2 && by.Account >= 2, JSON.stringify(by)];
+            });
+
+            await check("the merge, not the mirror, decides those shared-email records are one person", async () => {
+                const m = await mergeLandingIntoAccounts();
+                const { rows } = await client.query(
+                    `SELECT a.id, count(l.*)::int links FROM accounts a
+                       JOIN account_source_links l ON l.account_id = a.id
+                      WHERE a.email = 'dup@example.com' GROUP BY a.id`);
+                return [rows.length === 1 && rows[0].links === 2,
+                    `accounts for dup@=${rows.length}, links=${rows[0]?.links}; merge created=${m.created}, byEmail=${m.linked.byEmail}`];
+            });
+
+            // ── admin page ───────────────────────────────────────────────────
+            const jwt = (await import("jsonwebtoken")).default;
+            const adminToken = jwt.sign({ id: IDS.acctA, email: "geoffrey.murray.1995@gmail.com" },
+                process.env.JWT_SECRET || "your-secret-key-change-this", { expiresIn: "5m" });
+            const leadToken = jwt.sign({ id: IDS.acctB, email: "gdrumz@momurrays.com" },
+                process.env.JWT_SECRET || "your-secret-key-change-this", { expiresIn: "5m" });
+
+            await check("the Person Sync page is admin-only", async () => {
+                const admin = await fetch(`${base}/admin/person-sync?token=${adminToken}`);
+                const lead = await fetch(`${base}/admin/person-sync?token=${leadToken}`);
+                return [admin.status === 200 && lead.status === 403, `admin=${admin.status}, ordinary user=${lead.status}`];
+            });
+
+            await check("a hostile name in a failed row renders as text, not markup", async () => {
+                await client.query("BEGIN");
+                await client.query("SET LOCAL app.sync_in_progress = 'on'");
+                await client.query(`UPDATE accounts SET name = '<script>alert(1)</script>' WHERE id = $1`, [IDS.acctD]);
+                await client.query("COMMIT");
+                const html = await (await fetch(`${base}/admin/person-sync?token=${adminToken}`)).text();
+                const ok = html.includes("&lt;script&gt;alert(1)&lt;/script&gt;") && !html.includes("<script>alert(1)");
+                await client.query("BEGIN");
+                await client.query("SET LOCAL app.sync_in_progress = 'on'");
+                await client.query(`UPDATE accounts SET name = 'Ashley Early' WHERE id = $1`, [IDS.acctD]);
+                await client.query("COMMIT");
+                return [ok, ok ? "escaped" : "RAW MARKUP IN THE ADMIN PAGE"];
+            });
+
+            await check("status shows the failed push, and retry re-queues it", async () => {
+                const before = await personSyncStatus();
+                const row = before.failed.find((f: any) => f.account_id === IDS.acctD);
+                const res = await fetch(`${base}/admin/person-sync/retry/${row?.id}?token=${adminToken}`,
+                    { method: "POST", redirect: "manual" });
+                const { rows: [after] } = await client.query(
+                    `SELECT status, attempts FROM person_outbox WHERE id = $1`, [row?.id]);
+                return [Boolean(row) && res.status === 303 && after?.status === "pending" && after?.attempts === 0,
+                    `failed listed=${Boolean(row)}, POST=${res.status}, now ${after?.status}/${after?.attempts}`];
+            });
+        } finally {
+            server.close();
+        }
+
         console.log(`\n${passed} passed, ${failed} failed`);
         if (failures.length) console.log(`Failing: ${failures.join(" · ")}`);
         console.log(`Password for login tests: ${PASSWORD}`);

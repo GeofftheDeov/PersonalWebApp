@@ -9,6 +9,7 @@ import { getDecryptedKeys } from './apiKeyRoutes.js';
 import { evaluateLiveApplyGate } from '../utils/liveApplyGate.js';
 import { pcFetch, paperclipConfigured, PAPERCLIP_COMPANY_ID } from '../services/paperclipClient.js';
 import { requireAdmin } from '../middleware/auth.js';
+import { runPersonSync, personSyncStatus, retryFailedOutboxRow } from '../jobs/personSync.js';
 import { resolveAccountId } from '../utils/accountRefs.js';
 
 const router = express.Router();
@@ -49,6 +50,104 @@ const verifyToken = async (req: any, res: express.Response, next: express.NextFu
 };
 
 router.use(verifyToken, requireAdmin(true));
+
+// ── Person sync (#35, plan §2.7–2.8) ──────────────────────────────────────────
+//
+// The nightly drain of person_outbox to Salesforce and the merge of Salesforce's
+// landing tables into accounts, with a "run now" — waiting until tomorrow to
+// learn whether a push works is a miserable way to develop this. Failed pushes
+// are listed with their error rather than logged and forgotten, which is the
+// whole point of replacing the old setImmediate hooks.
+//
+// Everything user-derived is escaped: names are typed by users and error text
+// comes from Salesforce, and this page is rendered for the one person with admin.
+
+const esc = (v: unknown) => String(v ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+const fmtTime = (d: unknown) => d ? new Date(d as any).toISOString().replace('T', ' ').slice(0, 19) + 'Z' : '—';
+
+router.get('/person-sync', async (req, res) => {
+    const token = req.query.token as string;
+    const t = encodeURIComponent(token);
+    try {
+        const s = await personSyncStatus();
+        const flash = typeof req.query.flash === 'string' ? req.query.flash : '';
+        const count = (status: string) => s.queue.find((q: any) => q.status === status)?.n ?? 0;
+
+        const runs = s.runs.map((r: any) => {
+            const res = r.result ?? {};
+            const summary = r.step === 'drain'
+                ? `claimed ${res.claimed ?? 0} · created ${res.created ?? 0} · updated ${res.updated ?? 0} · failed ${res.failed ?? 0}`
+                : r.step === 'merge'
+                ? `updated ${res.updated ?? 0} · created ${res.created ?? 0} · protected ${res.protectedFields ?? 0} · conflicts ${(res.conflicts ?? []).length}`
+                : `${esc(r.sf_object)} · ${(res.success ?? 0) + (res.updated ?? 0)} records`;
+            return `<tr>
+                <td>${fmtTime(r.finished_at)}</td><td>${esc(r.step)}</td><td>${esc(r.trigger)}</td>
+                <td style="color:${r.ok ? '#0d9488' : '#e11d48'}">${r.ok ? 'OK' : 'FAILED'}</td>
+                <td>${r.ok ? summary : esc(r.error)}</td></tr>`;
+        }).join('') || '<tr><td colspan="5" style="color:#666">No runs yet.</td></tr>';
+
+        const failed = s.failed.map((f: any) => `<tr>
+                <td>${esc(f.name || f.email || f.account_id)}</td>
+                <td>${esc(f.sf_object)} ${esc(f.sf_id || '(not in Salesforce)')}</td>
+                <td>${esc(f.op)}: ${esc((f.payload?.fields ?? []).join(', '))}</td>
+                <td>${esc(f.attempts)}</td>
+                <td style="max-width:420px;word-break:break-word">${esc(f.last_error)}</td>
+                <td><form method="POST" action="/admin/person-sync/retry/${encodeURIComponent(f.id)}?token=${t}" style="margin:0">
+                    <button class="nav-btn" style="padding:0.3rem 0.8rem">Retry</button></form></td>
+            </tr>`).join('') || '<tr><td colspan="6" style="color:#666">Nothing has failed.</td></tr>';
+
+        const content = `
+            <div class="admin-panel" style="max-width:1100px;width:95%">
+                <h1>Person Sync</h1>
+                ${flash ? `<div class="status" style="margin-bottom:1rem">${esc(flash)}</div>` : ''}
+                <div class="nav-grid" style="grid-template-columns:repeat(4,1fr)">
+                    <div class="nav-btn">PENDING<br><b style="font-size:1.6rem">${count('pending')}</b></div>
+                    <div class="nav-btn">IN FLIGHT<br><b style="font-size:1.6rem">${count('in_flight')}</b></div>
+                    <div class="nav-btn" style="${count('failed') ? 'border-color:#e11d48' : ''}">FAILED<br><b style="font-size:1.6rem">${count('failed')}</b></div>
+                    <div class="nav-btn" title="App signups with no Salesforce id yet. A number that keeps growing means the drain has stalled.">
+                        AWAITING SALESFORCE<br><b style="font-size:1.6rem">${s.awaitingSalesforce}</b></div>
+                </div>
+                <form method="POST" action="/admin/person-sync/run?token=${t}" style="margin:1.5rem 0">
+                    <button class="nav-btn nav-btn-action">Run now: push to Salesforce, then merge</button>
+                </form>
+                <p style="color:#888;font-size:0.8rem">Nightly at 03:00 America/Chicago. Salesforce's own records arrive
+                    when the org's Apex batches post them; the merge protects any change pushed since the last such pull.</p>
+                <h2 style="font-size:1rem;letter-spacing:2px;margin-top:2rem">FAILED PUSHES</h2>
+                <table style="width:100%;font-size:0.8rem"><tr><th>Person</th><th>Salesforce</th><th>Change</th><th>Tries</th><th>Error</th><th></th></tr>${failed}</table>
+                <h2 style="font-size:1rem;letter-spacing:2px;margin-top:2rem">RECENT RUNS</h2>
+                <table style="width:100%;font-size:0.8rem"><tr><th>Finished</th><th>Step</th><th>By</th><th></th><th>Result</th></tr>${runs}</table>
+            </div>`;
+        res.send(renderPage({ token, title: 'Person Sync', activePage: 'person-sync', content }));
+    } catch (err: any) {
+        res.status(500).send(renderPage({ token, title: 'Person Sync', activePage: 'person-sync',
+            content: `<div class="admin-panel"><h1>Person Sync</h1><p>${esc(err.message)}</p></div>` }));
+    }
+});
+
+router.post('/person-sync/run', async (req, res) => {
+    const t = encodeURIComponent(req.query.token as string);
+    let flash: string;
+    try {
+        const r = await runPersonSync({ trigger: 'manual' });
+        flash = !r.ran ? `Not run: ${r.reason}.`
+            : `Pushed ${r.drain!.created + r.drain!.updated} (failed ${r.drain!.failed}, retrying ${r.drain!.retrying}); `
+              + `merge updated ${r.merge!.updated}, founded ${r.merge!.created}, `
+              + `${r.merge!.conflicts.length} conflict(s).`;
+    } catch (err: any) {
+        flash = `Run failed: ${err.message}`;
+    }
+    res.redirect(303, `/admin/person-sync?token=${t}&flash=${encodeURIComponent(flash)}`);
+});
+
+router.post('/person-sync/retry/:id', async (req, res) => {
+    const t = encodeURIComponent(req.query.token as string);
+    const ok = await retryFailedOutboxRow(req.params.id).catch(() => false);
+    const flash = ok ? 'Queued for the next run.' : 'That row is no longer failed.';
+    res.redirect(303, `/admin/person-sync?token=${t}&flash=${encodeURIComponent(flash)}`);
+});
 
 // ── Obsidian vault helpers ────────────────────────────────────────────────────
 
@@ -103,6 +202,9 @@ router.get('/', (req, res) => {
                 </a>
                 <a href="/admin/profile?token=${token}" class="nav-btn">
                     Profile &amp; API Keys
+                </a>
+                <a href="/admin/person-sync?token=${token}" class="nav-btn">
+                    Person Sync (Salesforce)
                 </a>
                 <button class="nav-btn nav-btn-action" onclick="openNewProfileModal()">
                     + Add API Key Profile

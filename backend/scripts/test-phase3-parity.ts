@@ -25,7 +25,7 @@ const TABLES = [
     "campaign_members", "campaign_invites", "friend_requests",
     "api_key_vault", "cloud_claw_sessions",
     "characters", "player_sessions", "notifications", "messages", "game_sessions",
-    "account_merge_exclusions", "person_sync_runs",
+    "account_merge_exclusions", "person_sync_runs", "sf_users", "sf_leads",
 ];
 
 const COLUMNS_SQL = `

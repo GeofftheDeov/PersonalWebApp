@@ -664,6 +664,190 @@ async function main() {
             return [ok, `call=${JSON.stringify(call)}, note=${row?.last_error}`];
         });
 
+        // ── S6c: nightly merge ───────────────────────────────────────────────
+        section("S6c — nightly merge, landing -> accounts");
+
+        const mergeErr = await applyMigration(client, "2026-09-24-phase3-merge-support.sql");
+        assert("the merge-support migration applies", mergeErr === null, mergeErr ?? "clean");
+        const { mergeLandingIntoAccounts, recordPull } = await import("../jobs/personSync.js");
+        const acct = async (id: string) => (await client.query(`SELECT * FROM accounts WHERE id = $1`, [id])).rows[0];
+        const outboxCount = async () => (await client.query(`SELECT count(*)::int n FROM person_outbox`)).rows[0].n;
+
+        await check("the #27 exclusion seed matches exactly the adjudicated row", async () => {
+            // Nothing in the fixture has JOHNNY's real id, so the seed found nothing.
+            const before = (await client.query(`SELECT count(*)::int n FROM account_merge_exclusions`)).rows[0].n;
+            // Right email + right id prefix, and right email + WRONG prefix.
+            await client.query(
+                `INSERT INTO sf_leads (id, first_name, last_name, email, password)
+                 VALUES ('2576df7b-0000-4000-8000-000000000001','JOHNNY','SILVERHAND','name@example.com','x'),
+                        ('11111111-0000-4000-8000-000000000001','Other','Person','name@example.com','x')`);
+            await applyMigration(client, "2026-09-24-phase3-merge-support.sql");   // idempotent re-run
+            const { rows } = await client.query(`SELECT source_id FROM account_merge_exclusions`);
+            await client.query(`DELETE FROM account_merge_exclusions`);
+            await client.query(`DELETE FROM sf_leads WHERE email = 'name@example.com' AND id::text NOT LIKE '0e%'`);
+            const ok = before === 0 && rows.length === 1 && rows[0].source_id === "2576df7b-0000-4000-8000-000000000001";
+            return [ok, `seeded before=${before}; after inserting both, excluded=[${rows.map((r: any) => r.source_id).join(", ")}]`];
+        });
+
+        // The fixture's JOHNNY stands in for the real one.
+        await client.query(
+            `INSERT INTO account_merge_exclusions (source_table, source_id, reason) VALUES ('sf_leads', $1, 'fixture')`,
+            [IDS.L2]);
+        const outboxBefore = await outboxCount();
+        const m1 = await mergeLandingIntoAccounts({ trigger: "manual" });
+
+        await check("an excluded landing row never gets an account", async () => {
+            const { rows } = await client.query(
+                `SELECT (SELECT count(*) FROM accounts WHERE id = $1)::int a,
+                        (SELECT count(*) FROM account_source_links WHERE source_id = $1)::int l`, [IDS.L2]);
+            return [m1.excluded === 1 && m1.created === 0 && rows[0].a === 0 && rows[0].l === 0,
+                `excluded=${m1.excluded}, created=${m1.created}, account=${rows[0].a}, link=${rows[0].l}`];
+        });
+
+        await check("a Salesforce User's name and phone are Salesforce's outright", async () => {
+            const a = await acct(IDS.acctA);
+            // Set to 'G. Murray' / 555-0102 by a direct write in S6a; Salesforce says otherwise.
+            const ok = a.name === "Geoffrey Murray" && a.phone === null && a.company === "Murray LLC"
+                && a.app_role === "admin" && a.app_role_source === "manual";
+            return [ok, `name=${a.name}, phone=${a.phone}, company=${a.company}, role=${a.app_role}/${a.app_role_source}`];
+        });
+
+        await check("shared fields the app pushed are protected until Salesforce is pulled again", async () => {
+            const b = await acct(IDS.acctB);
+            // first_name and phone were pushed by the drain and no Lead pull has
+            // happened since, so the landing row cannot reflect them yet.
+            // last_name was never changed in the app, so Salesforce's value lands.
+            const ok = b.first_name === "Testy" && b.phone === "555-0101"
+                && b.last_name === "Player" && b.lead_status === "New"
+                && b.email === "zpecterr@example.com";
+            return [ok, `first=${b.first_name}, phone=${b.phone}, last=${b.last_name}, `
+                + `lead_status=${b.lead_status}, email=${b.email}`];
+        });
+
+        await check("a failed push stays protected; an unrecorded app edit does not", async () => {
+            const d = await acct(IDS.acctD);
+            // phone has a 'failed' outbox row: Salesforce never got it, so it holds.
+            // name was written under the sync guard in S6a, so no outbox row: SF wins.
+            return [d.phone === "555-0199" && d.name === "Ashley Early", `phone=${d.phone}, name=${d.name}`];
+        });
+
+        await check("Salesforce-owned fields always follow Salesforce; email never does", async () => {
+            const c = await acct(IDS.acctC);
+            // company was written directly in S6a; Salesforce's landing row says NULL.
+            return [c.company === null && c.email === "tyler@example.com" && c.phone === "555-0105",
+                `company=${c.company}, email=${c.email}, phone=${c.phone}`];
+        });
+
+        await check("the merge queues nothing back to Salesforce", async () => {
+            const after = await outboxCount();
+            return [after === outboxBefore, `${after - outboxBefore} new outbox row(s) across the merge`];
+        });
+
+        await check("a second merge with no new Salesforce data changes nothing", async () => {
+            const m2 = await mergeLandingIntoAccounts();
+            const linked = m2.linked.bySalesforceId + m2.linked.byEmail + m2.linked.byContactAccount;
+            const ok = m2.updated === 0 && linked === 0 && m2.created === 0 && m2.promoted === 0
+                && m2.roleChanges === 0 && m2.tierChanges === 0;
+            return [ok, JSON.stringify({ updated: m2.updated, linked, created: m2.created,
+                roles: m2.roleChanges, tiers: m2.tierChanges })];
+        });
+
+        await check("after a pull that reflects the push, nothing flips", async () => {
+            // What Salesforce's nightly pull brings back after our push landed.
+            await client.query(
+                `UPDATE sf_leads SET first_name = 'Testy', phone = '555-0101' WHERE id = $1`, [IDS.L1]);
+            await recordPull("Lead", new Date(), { records: 1 });
+            const m = await mergeLandingIntoAccounts();
+            const b = await acct(IDS.acctB);
+            return [b.first_name === "Testy" && b.phone === "555-0101" && !m.fieldsChanged.first_name,
+                `first=${b.first_name}, phone=${b.phone}, changed=${JSON.stringify(m.fieldsChanged)}`];
+        });
+
+        await check("after a pull, a later Salesforce edit wins", async () => {
+            await client.query(`UPDATE sf_leads SET phone = '555-0999' WHERE id = $1`, [IDS.L1]);
+            await recordPull("Lead", new Date(), { records: 1 });
+            await mergeLandingIntoAccounts();
+            const b = await acct(IDS.acctB);
+            return [b.phone === "555-0999", `phone=${b.phone}`];
+        });
+
+        await check("an app signup comes home by its Salesforce id, not as a duplicate", async () => {
+            // The drain created Lead 00QFAKE00000001 for the signup; now it arrives
+            // in the pull like any other Lead.
+            await client.query(
+                `INSERT INTO sf_leads (id, first_name, last_name, email, password, sf_lead_id)
+                 VALUES ('0f000000-0000-4000-8000-00000000ab01','New','Comer','newcomer@example.com','x','00QFAKE00000001')`);
+            const m = await mergeLandingIntoAccounts();
+            const { rows } = await client.query(
+                `SELECT account_id FROM account_source_links WHERE source_id = '0f000000-0000-4000-8000-00000000ab01'`);
+            return [m.linked.bySalesforceId === 1 && m.created === 0 && rows[0]?.account_id === signupId,
+                `bySalesforceId=${m.linked.bySalesforceId}, created=${m.created}, linked to signup=${rows[0]?.account_id === signupId}`];
+        });
+
+        await check("a converted Lead arriving as a Contact links by email and promotes", async () => {
+            await client.query(
+                `INSERT INTO sf_contacts (id, name, email, sf_id)
+                 VALUES ('0f000000-0000-4000-8000-00000000ab02','New Comer','newcomer@example.com','003NEW000000001')`);
+            const m = await mergeLandingIntoAccounts();
+            const a = await acct(signupId);
+            // Its identity moves to the Contact — a converted Lead can no longer
+            // be updated in Salesforce — and the tier follows the object map.
+            const ok = m.linked.byEmail === 1 && m.promoted === 1 && a.sf_object === "Contact"
+                && a.sf_id === "003NEW000000001" && a.account_tier === "member";
+            return [ok, `byEmail=${m.linked.byEmail}, promoted=${m.promoted}, now ${a.sf_object} ${a.sf_id}, tier=${a.account_tier}`];
+        });
+
+        await check("a new Salesforce Account founds a person; its Contact joins it", async () => {
+            await client.query(
+                `INSERT INTO sf_accounts (id, name, sf_id) VALUES ('0f000000-0000-4000-8000-00000000ab03','Fresh Org','001NEW000000001')`);
+            await client.query(
+                `INSERT INTO sf_contacts (id, name, account_id, sf_id)
+                 VALUES ('0f000000-0000-4000-8000-00000000ab04','Fresh Person','0f000000-0000-4000-8000-00000000ab03','003NEW000000002')`);
+            const m = await mergeLandingIntoAccounts();
+            const a = await acct("0f000000-0000-4000-8000-00000000ab03");
+            const { rows } = await client.query(
+                `SELECT account_id FROM account_source_links WHERE source_id = '0f000000-0000-4000-8000-00000000ab04'`);
+            const ok = m.created === 1 && m.linked.byContactAccount === 1 && a?.sf_object === "Account"
+                && a?.account_tier === "patron" && a?.app_role === "user"
+                && rows[0]?.account_id === "0f000000-0000-4000-8000-00000000ab03";
+            return [ok, `created=${m.created}, byContactAccount=${m.linked.byContactAccount}, `
+                + `donated id=${Boolean(a)}, tier=${a?.account_tier}, role=${a?.app_role}`];
+        });
+
+        await check("a new person whose handle is taken is kept, without the handle", async () => {
+            // Every fixture account is #0001; 'ashley' already belongs to Group D.
+            await client.query(
+                `INSERT INTO sf_leads (id, first_name, last_name, password, handle, user_number, sf_lead_id)
+                 VALUES ('0f000000-0000-4000-8000-00000000ab05','Second','Ashley','x','ashley','0001','00QNEW000000003')`);
+            const m = await mergeLandingIntoAccounts();
+            const a = await acct("0f000000-0000-4000-8000-00000000ab05");
+            return [m.created === 1 && a?.handle === null && m.conflicts.some((c) => /handle/.test(c.problem)),
+                `created=${m.created}, handle=${a?.handle}, conflicts=${JSON.stringify(m.conflicts)}`];
+        });
+
+        await check("app_role follows the profile map only where the merge owns it", async () => {
+            // The manual pin survives a Profile that maps to 'user'...
+            await client.query(`UPDATE accounts SET sf_profile = 'Standard User' WHERE id = $1`, [IDS.acctA]);
+            await mergeLandingIntoAccounts();
+            const pinned = (await acct(IDS.acctA)).app_role;
+            // ...and when the merge DOES own the column, the map decides.
+            await client.query(`UPDATE accounts SET app_role_source = 'sf' WHERE id = $1`, [IDS.acctA]);
+            const m = await mergeLandingIntoAccounts();
+            const derived = (await acct(IDS.acctA)).app_role;
+            await client.query(
+                `UPDATE accounts SET app_role = 'admin', app_role_source = 'manual', sf_profile = NULL WHERE id = $1`,
+                [IDS.acctA]);
+            return [pinned === "admin" && derived === "user" && m.roleChanges === 1,
+                `manual pin -> ${pinned}; merge-owned -> ${derived} (roleChanges=${m.roleChanges}); pin restored`];
+        });
+
+        await check("every merge is in the ledger", async () => {
+            const { rows } = await client.query(
+                `SELECT count(*) FILTER (WHERE step = 'merge' AND ok)::int merges,
+                        count(*) FILTER (WHERE step = 'pull')::int pulls FROM person_sync_runs`);
+            return [rows[0].merges >= 9 && rows[0].pulls === 2, JSON.stringify(rows[0])];
+        });
+
         console.log(`\n${passed} passed, ${failed} failed`);
         if (failures.length) console.log(`Failing: ${failures.join(" · ")}`);
         console.log(`Password for login tests: ${PASSWORD}`);

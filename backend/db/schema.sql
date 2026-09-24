@@ -341,6 +341,34 @@ CREATE TRIGGER trg_accounts_outbox
 COMMENT ON COLUMN person_outbox.payload IS
   '{"fields": [...]}: names of changed pushable columns. The drain reads current values.';
 
+-- Landing rows the nightly merge must never link or give an account (#27's test
+-- lead). Rationale in db/migrations/2026-09-24-phase3-merge-support.sql.
+CREATE TABLE account_merge_exclusions (
+  source_table text NOT NULL
+    CHECK (source_table IN ('sf_users','sf_leads','sf_contacts','sf_accounts')),
+  source_id    uuid NOT NULL,
+  reason       text NOT NULL,
+  excluded_at  timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (source_table, source_id)
+);
+
+-- Ledger of person-sync runs: the admin UI's "last run", and the merge's
+-- "since the last merge" cutoff for shared fields. Rationale in the same file.
+CREATE TABLE person_sync_runs (
+  id          bigserial PRIMARY KEY,
+  step        text NOT NULL CHECK (step IN ('drain','pull','merge')),
+  sf_object   text,          -- pull only: which object's records landed
+  trigger     text NOT NULL DEFAULT 'schedule'
+                CHECK (trigger IN ('schedule','manual','salesforce')),
+  started_at  timestamptz NOT NULL,
+  finished_at timestamptz NOT NULL DEFAULT now(),
+  ok          boolean NOT NULL,
+  result      jsonb,
+  error       text
+);
+CREATE INDEX idx_person_sync_runs_step
+  ON person_sync_runs (step, finished_at DESC);
+
 -- ---------- the two source maps (GitHub #28 / Paperclip MUR-321) ----------
 
 -- Salesforce Profile -> app_role. A table, not an inline string comparison:

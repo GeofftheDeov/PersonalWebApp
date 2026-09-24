@@ -318,3 +318,365 @@ export async function drainPersonOutbox(opts: {
 
     return result;
 }
+
+// ── Merge: landing tables -> accounts (slice 6c) ────────────────────────────
+
+type LandingTable = "sf_users" | "sf_accounts" | "sf_contacts" | "sf_leads";
+type SfObject = "User" | "Account" | "Contact" | "Lead";
+type SharedCol = "name" | "first_name" | "last_name" | "phone";
+type SfOwnedCol = "company" | "industry" | "website" | "address" | "lead_status"
+    | "sf_record_type_id" | "sf_record_type_name";
+
+interface SourceDef {
+    table: LandingTable;
+    sfObject: SfObject;
+    /** Salesforce identity column: sf_leads alone calls it sf_lead_id. */
+    sfIdCol: "sf_id" | "sf_lead_id";
+    /** account column -> landing column, for shared fields (last writer wins). */
+    shared: Partial<Record<SharedCol, string>>;
+    /** account column -> landing column, for Salesforce-owned fields (SF always wins). */
+    sfOwned: Partial<Record<SfOwnedCol, string>>;
+    /** App-owned starting values, copied ONLY when a landing row founds a new account. */
+    seed: string[];
+}
+
+/**
+ * Rank, highest first, is the plan's tie-break (§2.4): a User outranks an
+ * Account outranks a Contact outranks a Lead. It decides whose value speaks for
+ * Salesforce when a person has several linked rows, and it decides promotion —
+ * a Lead who converts arrives as a Contact, and the person's Salesforce identity
+ * should move up with them rather than keep pointing at a converted Lead that
+ * Salesforce will no longer let anyone update.
+ */
+const SOURCES: SourceDef[] = [
+    { table: "sf_users", sfObject: "User", sfIdCol: "sf_id",
+      shared: { name: "name", phone: "phone" }, sfOwned: {},
+      seed: ["handle", "user_number", "user_digit", "password", "is_verified",
+             "profile_picture", "favorite_games", "discord_id", "discord_handle"] },
+    { table: "sf_accounts", sfObject: "Account", sfIdCol: "sf_id",
+      shared: { name: "name", phone: "phone" },
+      sfOwned: { company: "company", industry: "industry", website: "website", address: "address",
+                 sf_record_type_id: "sf_record_type_id", sf_record_type_name: "sf_record_type_name" },
+      seed: ["handle", "user_number", "user_digit", "password", "is_verified",
+             "profile_picture", "favorite_games"] },
+    { table: "sf_contacts", sfObject: "Contact", sfIdCol: "sf_id",
+      shared: { name: "name", phone: "phone" }, sfOwned: {},
+      seed: ["handle", "user_number", "user_digit", "password", "is_verified",
+             "profile_picture", "favorite_games"] },
+    { table: "sf_leads", sfObject: "Lead", sfIdCol: "sf_lead_id",
+      shared: { first_name: "first_name", last_name: "last_name", phone: "phone" },
+      sfOwned: { company: "company", lead_status: "status",
+                 sf_record_type_id: "sf_record_type_id", sf_record_type_name: "sf_record_type_name" },
+      seed: ["handle", "user_number", "user_digit", "password", "is_verified",
+             "profile_picture", "favorite_games"] },
+];
+const RANK: Record<string, number> = { User: 4, Account: 3, Contact: 2, Lead: 1 };
+const SOURCE_BY_TABLE = new Map(SOURCES.map((s) => [s.table, s]));
+
+export interface MergeResult {
+    linked: { bySalesforceId: number; byEmail: number; byContactAccount: number };
+    created: number;
+    /** An existing person whose Salesforce identity moved up (e.g. Lead -> Contact). */
+    promoted: number;
+    excluded: number;
+    /** Accounts whose Salesforce-derived fields changed. */
+    updated: number;
+    fieldsChanged: Record<string, number>;
+    /** Shared fields left alone because the app holds a change Salesforce hasn't seen. */
+    protectedFields: number;
+    roleChanges: number;
+    tierChanges: number;
+    conflicts: Array<{ source: string; problem: string }>;
+}
+
+const same = (a: unknown, b: unknown) =>
+    (a ?? null) === (b ?? null)
+    || (a instanceof Date && b instanceof Date && a.getTime() === b.getTime());
+
+/**
+ * Merge the Salesforce landing tables into accounts, in one transaction.
+ *
+ *   1. Link every landing row with no account_source_links entry — by Salesforce
+ *      id (how an app signup the drain created comes home), then email, then a
+ *      Contact's parent Account. What matches nothing founds a new account, and
+ *      donates its UUID. Rows in account_merge_exclusions are never touched.
+ *   2. Apply field ownership (§2.6) to every linked person:
+ *        Salesforce-owned  company, industry, website, address, lead_status,
+ *                          sf_record_type_*: Salesforce always wins.
+ *        shared            name, first_name, last_name, phone: Salesforce wins
+ *                          unless the app holds a change to THAT field that
+ *                          Salesforce has not seen — unsent, or pushed after the
+ *                          last pull of that object. See the merge-support
+ *                          migration for why this replaces §2.6's timestamps.
+ *        email             app-owned: never overwritten. Except for a person who
+ *                          IS a Salesforce User, whose name, email and phone are
+ *                          Salesforce's outright (§2.6).
+ *        everything else   app-owned: never read from landing after creation.
+ *   3. app_role from sf_profile_role_map, for User-sourced people only, and only
+ *      where app_role_source = 'sf' — the manual admin pin is never touched.
+ *   4. account_tier from sf_object_tier_map, where account_tier_source = 'sf'.
+ *
+ * Everything runs under app.sync_in_progress, so none of it is queued back to
+ * Salesforce. Only values that differ are written, so a second run with no new
+ * Salesforce data changes nothing at all.
+ */
+export async function mergeLandingIntoAccounts(
+    opts: { trigger?: "schedule" | "manual" } = {},
+): Promise<MergeResult> {
+    const startedAt = new Date();
+    const result: MergeResult = {
+        linked: { bySalesforceId: 0, byEmail: 0, byContactAccount: 0 },
+        created: 0, promoted: 0, excluded: 0, updated: 0, fieldsChanged: {},
+        protectedFields: 0, roleChanges: 0, tierChanges: 0, conflicts: [],
+    };
+
+    const client = await pool.connect();
+    try {
+        await client.query("BEGIN");
+        await client.query("SET LOCAL app.sync_in_progress = 'on'");
+
+        // ── load: these tables are CRM-sized, tens to hundreds of rows ──────
+        const landing: Array<{ src: SourceDef; row: any }> = [];
+        for (const src of SOURCES) {
+            const { rows } = await client.query(`SELECT * FROM ${src.table}`);
+            for (const row of rows) landing.push({ src, row });
+        }
+        const linkKey = (t: string, id: string) => `${t}:${id}`;
+        const { rows: linkRows } = await client.query(
+            `SELECT source_table, source_id, account_id FROM account_source_links`);
+        const linkedTo = new Map<string, string>(
+            linkRows.map((l: any) => [linkKey(l.source_table, l.source_id), l.account_id]));
+        const { rows: exclRows } = await client.query(
+            `SELECT source_table, source_id FROM account_merge_exclusions`);
+        const excluded = new Set(exclRows.map((e: any) => linkKey(e.source_table, e.source_id)));
+
+        // ── 1. link or found ────────────────────────────────────────────────
+        for (const { src, row } of landing) {
+            const key = linkKey(src.table, row.id);
+            if (linkedTo.has(key)) continue;
+            if (excluded.has(key)) { result.excluded++; continue; }
+
+            const sfId: string | null = row[src.sfIdCol] ?? null;
+            let target: string | null = null;
+
+            if (sfId) {
+                const { rows } = await client.query(
+                    `SELECT id FROM accounts WHERE sf_object = $1 AND sf_id = $2
+                     UNION
+                     SELECT account_id FROM account_source_links WHERE sf_object = $1 AND sf_id = $2
+                     LIMIT 1`, [src.sfObject, sfId]);
+                target = rows[0]?.id ?? null;
+                if (target) result.linked.bySalesforceId++;
+            }
+            if (!target && row.email) {
+                const { rows } = await client.query(
+                    `SELECT id FROM accounts WHERE email = $1::citext`, [row.email]);
+                target = rows[0]?.id ?? null;
+                if (target) result.linked.byEmail++;
+            }
+            if (!target && src.table === "sf_contacts" && row.account_id) {
+                target = linkedTo.get(linkKey("sf_accounts", row.account_id)) ?? null;
+                if (target) result.linked.byContactAccount++;
+            }
+
+            if (target) {
+                await client.query(
+                    `INSERT INTO account_source_links (source_table, source_id, account_id, sf_object, sf_id, is_primary)
+                     VALUES ($1, $2, $3, $4, $5, false)`,
+                    [src.table, row.id, target, src.sfObject, sfId]);
+                linkedTo.set(key, target);
+
+                // Promotion: the person's Salesforce identity moves up, never down.
+                if (sfId) {
+                    const { rows: [acct] } = await client.query(
+                        `SELECT sf_object FROM accounts WHERE id = $1`, [target]);
+                    if ((RANK[src.sfObject] ?? 0) > (RANK[acct?.sf_object] ?? 0)) {
+                        const { rows: taken } = await client.query(
+                            `SELECT 1 FROM accounts WHERE sf_object = $1 AND sf_id = $2 AND id <> $3`,
+                            [src.sfObject, sfId, target]);
+                        if (taken.length) {
+                            result.conflicts.push({ source: key,
+                                problem: `${src.sfObject} ${sfId} already belongs to another account; not promoted` });
+                        } else {
+                            await client.query(
+                                `UPDATE accounts SET sf_object = $2, sf_id = $3, sf_last_synced_at = now() WHERE id = $1`,
+                                [target, src.sfObject, sfId]);
+                            result.promoted++;
+                        }
+                    }
+                }
+                continue;
+            }
+
+            // Nothing matched: this landing row founds a new person, donating its UUID.
+            const cols: Record<string, unknown> = {
+                id: row.id, sf_object: src.sfObject, sf_id: sfId, email: row.email ?? null,
+                app_role: "user", app_role_source: "sf", account_tier_source: "sf",
+                sf_last_synced_at: new Date(),
+            };
+            for (const [acctCol, landCol] of Object.entries({ ...src.shared, ...src.sfOwned })) {
+                cols[acctCol] = row[landCol!] ?? null;
+            }
+            if (src.table === "sf_leads") {
+                cols.name = [row.first_name, row.last_name].filter(Boolean).join(" ") || null;
+            }
+            for (const c of src.seed) if (row[c] !== undefined) cols[c] = row[c];
+
+            const insert = async (values: Record<string, unknown>) => {
+                const names = Object.keys(values);
+                await client.query(
+                    `INSERT INTO accounts (${names.join(", ")})
+                     VALUES (${names.map((_, i) => `$${i + 1}`).join(", ")})`,
+                    names.map((n) => values[n]));
+            };
+
+            await client.query("SAVEPOINT found_account");
+            try {
+                await insert(cols);
+            } catch (err: any) {
+                await client.query("ROLLBACK TO SAVEPOINT found_account");
+                // A handle#number another person already holds is the one collision
+                // worth recovering from: keep the person, drop the claim on the handle.
+                if (err?.code === "23505" && /handle/.test(String(err?.constraint ?? err?.message))) {
+                    await insert({ ...cols, handle: null });
+                    result.conflicts.push({ source: key,
+                        problem: `handle "${row.handle}#${row.user_number}" already taken; account created without it` });
+                } else {
+                    result.conflicts.push({ source: key, problem: `not created: ${err?.message ?? err}` });
+                    continue;
+                }
+            }
+            await client.query("RELEASE SAVEPOINT found_account");
+            await client.query(
+                `INSERT INTO account_source_links (source_table, source_id, account_id, sf_object, sf_id, is_primary)
+                 VALUES ($1, $2, $2, $3, $4, true)`, [src.table, row.id, src.sfObject, sfId]);
+            linkedTo.set(key, row.id);
+            result.created++;
+        }
+
+        // ── 2. field ownership ──────────────────────────────────────────────
+        // Which (person, field) pairs the app holds a change to that Salesforce
+        // has not seen: unsent, or pushed after the last pull of that object.
+        const { rows: protectedRows } = await client.query(`
+            WITH last_pull AS (
+              SELECT sf_object, max(finished_at) AS at FROM person_sync_runs
+               WHERE step = 'pull' AND ok GROUP BY sf_object)
+            SELECT DISTINCT o.account_id, f.field
+              FROM person_outbox o
+              JOIN accounts a ON a.id = o.account_id
+              LEFT JOIN last_pull lp ON lp.sf_object = a.sf_object
+              CROSS JOIN LATERAL jsonb_array_elements_text(o.payload -> 'fields') AS f(field)
+             WHERE o.status IN ('pending', 'in_flight', 'failed')
+                OR (o.status = 'done' AND o.processed_at > coalesce(lp.at, '-infinity'::timestamptz))`);
+        const appHolds = new Set(protectedRows.map((r: any) => `${r.account_id}:${r.field}`));
+
+        const byAccount = new Map<string, Array<{ src: SourceDef; row: any }>>();
+        for (const item of landing) {
+            const acct = linkedTo.get(linkKey(item.src.table, item.row.id));
+            if (!acct) continue;
+            if (!byAccount.has(acct)) byAccount.set(acct, []);
+            byAccount.get(acct)!.push(item);
+        }
+
+        for (const [accountId, items] of byAccount) {
+            const { rows: [account] } = await client.query(`SELECT * FROM accounts WHERE id = $1`, [accountId]);
+            if (!account) continue;
+            const isUser = account.sf_object === "User";
+
+            // Salesforce's view of this person: per column, the first non-null
+            // value in rank order among the linked rows whose table HAS the
+            // column. A column no linked table carries is no opinion at all.
+            items.sort((a, b) => (RANK[b.src.sfObject] ?? 0) - (RANK[a.src.sfObject] ?? 0));
+            const view = new Map<string, unknown>();
+            const consider = (col: string, value: unknown) => {
+                if (!view.has(col)) view.set(col, value ?? null);
+                else if (view.get(col) == null && value != null) view.set(col, value);
+            };
+            for (const { src, row } of items) {
+                for (const [a, l] of Object.entries(src.shared)) consider(a, row[l!]);
+                for (const [a, l] of Object.entries(src.sfOwned)) consider(a, row[l!]);
+                consider("email", row.email);
+            }
+
+            const set: Record<string, unknown> = {};
+            for (const [col, sfValue] of view) {
+                if (same(account[col], sfValue)) continue;
+                if (col === "email") {
+                    if (!isUser) continue;                      // app-owned for everyone else
+                    if (sfValue) {
+                        const { rows: taken } = await client.query(
+                            `SELECT 1 FROM accounts WHERE email = $1::citext AND id <> $2`, [sfValue, accountId]);
+                        if (taken.length) {
+                            result.conflicts.push({ source: `account:${accountId}`,
+                                problem: `Salesforce email ${sfValue} is already another account's login; not applied` });
+                            continue;
+                        }
+                    }
+                } else if ((["name", "first_name", "last_name", "phone"] as string[]).includes(col)) {
+                    // A Salesforce User's shared fields are Salesforce's outright.
+                    if (!isUser && appHolds.has(`${accountId}:${col}`)) { result.protectedFields++; continue; }
+                }
+                set[col] = sfValue;
+            }
+
+            const names = Object.keys(set);
+            if (names.length) {
+                await client.query(
+                    `UPDATE accounts SET ${names.map((n, i) => `${n} = $${i + 2}`).join(", ")},
+                            sf_last_synced_at = now()
+                      WHERE id = $1`, [accountId, ...names.map((n) => set[n])]);
+                result.updated++;
+                for (const n of names) result.fieldsChanged[n] = (result.fieldsChanged[n] ?? 0) + 1;
+            }
+        }
+
+        // ── 3. app_role, User-sourced only, never the manual pin ────────────
+        const roles = await client.query(`
+            UPDATE accounts a
+               SET app_role = coalesce(
+                     (SELECT m.app_role FROM sf_profile_role_map m WHERE m.sf_profile = a.sf_profile), 'user')
+             WHERE a.app_role_source = 'sf'
+               AND EXISTS (SELECT 1 FROM account_source_links l
+                            WHERE l.account_id = a.id AND l.source_table = 'sf_users')
+               AND a.app_role IS DISTINCT FROM coalesce(
+                     (SELECT m.app_role FROM sf_profile_role_map m WHERE m.sf_profile = a.sf_profile), 'user')`);
+        result.roleChanges = roles.rowCount ?? 0;
+
+        // ── 4. account_tier from the object map ─────────────────────────────
+        const tiers = await client.query(`
+            UPDATE accounts a SET account_tier = t.account_tier
+              FROM sf_object_tier_map t
+             WHERE t.sf_object = a.sf_object
+               AND a.account_tier_source = 'sf'
+               AND a.account_tier IS DISTINCT FROM t.account_tier`);
+        result.tierChanges = tiers.rowCount ?? 0;
+
+        await client.query(
+            `INSERT INTO person_sync_runs (step, trigger, started_at, ok, result)
+             VALUES ('merge', $1, $2, true, $3)`,
+            [opts.trigger ?? "schedule", startedAt, JSON.stringify(result)]);
+        await client.query("COMMIT");
+        return result;
+    } catch (err: any) {
+        await client.query("ROLLBACK");
+        await query(
+            `INSERT INTO person_sync_runs (step, trigger, started_at, ok, error)
+             VALUES ('merge', $1, $2, false, $3)`,
+            [opts.trigger ?? "schedule", startedAt, String(err?.message ?? err).slice(0, 2000)]);
+        throw err;
+    } finally {
+        client.release();
+    }
+}
+
+/**
+ * Record that Salesforce's records of one object type landed. Called by
+ * POST /api/sync/salesforce; the merge uses the latest per object to decide
+ * whether a pushed change can have come back yet.
+ */
+export async function recordPull(sfObject: string, startedAt: Date, result: unknown, ok = true, error?: string) {
+    await query(
+        `INSERT INTO person_sync_runs (step, sf_object, trigger, started_at, ok, result, error)
+         VALUES ('pull', $1, 'salesforce', $2, $3, $4, $5)`,
+        [sfObject, startedAt, ok, JSON.stringify(result ?? null), error ?? null]);
+}

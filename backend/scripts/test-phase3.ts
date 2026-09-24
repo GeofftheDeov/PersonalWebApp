@@ -651,16 +651,42 @@ async function main() {
             return [r.skipped === 1 && sf.calls.length === 0, `skipped=${r.skipped}, calls=${sf.calls.length}`];
         });
 
-        await check("an Account gets Name/Phone; an email change is reported, not failed", async () => {
+        await check("a Person Account gets PersonEmail and First/Last — never Name", async () => {
+            // The org has Person Accounts; Salesforce rejects writes to a Person
+            // Account's Name, which is derived. Group C has no record type, so it
+            // is treated as one.
             await client.query(
-                `UPDATE accounts SET email = 'tyler@example.com', phone = '555-0105' WHERE id = $1`, [IDS.acctC]);
+                `UPDATE accounts SET email = 'tyler@example.com', phone = '555-0105', name = 'Tyler J Campbell'
+                  WHERE id = $1`, [IDS.acctC]);
             const sf = fakeSf();
             const r = await drainPersonOutbox({ sf });
             const call = sf.calls[0];
             const [row] = (await outboxState(IDS.acctC)).slice(-1);
-            const ok = r.updated === 1 && call?.sobject === "Account"
-                && JSON.stringify(call.fields) === JSON.stringify({ Phone: "555-0105" })
-                && row.status === "done" && /Email field/.test(row.last_error ?? "");
+            const ok = r.updated === 1 && call?.sobject === "Account" && !("Name" in (call?.fields ?? {}))
+                && call.fields.PersonEmail === "tyler@example.com" && call.fields.Phone === "555-0105"
+                && call.fields.FirstName === "Tyler J" && call.fields.LastName === "Campbell"
+                && row.status === "done" && row.last_error === null;
+            return [ok, `call=${JSON.stringify(call)}, note=${row?.last_error}`];
+        });
+
+        await check("a business Account gets Name/Phone; its email change is reported, not failed", async () => {
+            await client.query(
+                `UPDATE accounts SET sf_record_type_name = 'Business Account' WHERE id = $1`, [IDS.acctC]);
+            await client.query(
+                `UPDATE accounts SET email = 'tyler2@example.com', name = 'Campbell Holdings' WHERE id = $1`, [IDS.acctC]);
+            const sf = fakeSf();
+            await drainPersonOutbox({ sf });
+            const call = sf.calls[0];
+            const [row] = (await outboxState(IDS.acctC)).slice(-1);
+            const ok = call?.fields?.Name === "Campbell Holdings" && !("PersonEmail" in (call?.fields ?? {}))
+                && row.status === "done" && /no email field/.test(row.last_error ?? "");
+            // Put Group C back the way the fixture had it for the merge section.
+            await client.query("BEGIN");
+            await client.query("SET LOCAL app.sync_in_progress = 'on'");
+            await client.query(
+                `UPDATE accounts SET sf_record_type_name = NULL, email = 'tyler@example.com', name = 'Tyler Campbell'
+                  WHERE id = $1`, [IDS.acctC]);
+            await client.query("COMMIT");
             return [ok, `call=${JSON.stringify(call)}, note=${row?.last_error}`];
         });
 

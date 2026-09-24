@@ -46,6 +46,7 @@ interface AccountRow {
     company: string | null;
     sf_object: string | null;
     sf_id: string | null;
+    sf_record_type_name: string | null;
 }
 
 /** "Ada King Lovelace" -> { first: "Ada King", last: "Lovelace" }. */
@@ -54,6 +55,20 @@ function splitName(full: string | null): { first: string | null; last: string | 
     if (!parts.length) return { first: null, last: null };
     if (parts.length === 1) return { first: null, last: parts[0] };
     return { first: parts.slice(0, -1).join(" "), last: parts[parts.length - 1] };
+}
+
+/**
+ * Person Account or business Account? Nothing the app stores says so directly
+ * (Salesforce's IsPersonAccount is not in the landing tables), so the record type
+ * decides: a business Account only when its record type is KNOWN and is not a
+ * person type. Unknown means Person Account, because the org has them enabled and
+ * every Account here is a human. If that is ever wrong for a record, its push
+ * fails with Salesforce's error and shows on the admin Person Sync page — it does
+ * not fail silently.
+ */
+function isPersonAccount(account: AccountRow): boolean {
+    const rt = account.sf_record_type_name;
+    return !rt || /person/i.test(rt);
 }
 
 /**
@@ -86,15 +101,22 @@ export function toSalesforceFields(
         if (want.has("phone")) fields.Phone = account.phone;
         if (want.has("first_name") || want.has("name")) fields.FirstName = first;
         if (want.has("last_name") || want.has("name")) fields.LastName = last ?? "Unknown";
+    } else if (sobject === "Account" && isPersonAccount(account)) {
+        // The org has Person Accounts enabled (Geoff, 2026-09-24), and every
+        // Account in this app is a human. A Person Account's Name is DERIVED from
+        // FirstName/LastName and Salesforce rejects writes to it, so a name change
+        // goes out as First/Last; email is PersonEmail.
+        if (want.has("email")) fields.PersonEmail = account.email;
+        if (want.has("phone")) fields.Phone = account.phone;
+        if (want.has("first_name") || want.has("name")) fields.FirstName = first;
+        if (want.has("last_name") || want.has("name")) fields.LastName = last ?? "Unknown";
     } else if (sobject === "Account") {
-        // A business Account has Name and Phone. It has no Email, FirstName or
-        // LastName unless Person Accounts are enabled in the org — which this
-        // repo cannot see — so those changes are reported, not pushed.
+        // A business Account has Name and Phone, and no email of its own.
         if (want.has("name") || want.has("first_name") || want.has("last_name")) {
             fields.Name = account.name ?? [first, last].filter(Boolean).join(" ");
         }
         if (want.has("phone")) fields.Phone = account.phone;
-        if (want.has("email")) notPushed.push("email (Account has no standard Email field)");
+        if (want.has("email")) notPushed.push("email (a business Account has no email field)");
     } else {
         notPushed.push(...[...want].map((f) => `${f} (no mapping for ${sobject})`));
     }
@@ -269,7 +291,8 @@ export async function drainPersonOutbox(opts: {
             result.claimed++;
             try {
                 const { rows: [account] } = await query<AccountRow>(
-                    `SELECT id, email, name, first_name, last_name, phone, company, sf_object, sf_id
+                    `SELECT id, email, name, first_name, last_name, phone, company, sf_object, sf_id,
+                            sf_record_type_name
                        FROM accounts WHERE id = $1`, [row.account_id]);
 
                 // Deleting an account cascades to its outbox rows, so this is a race

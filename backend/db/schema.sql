@@ -240,15 +240,15 @@ CREATE TABLE account_source_links (
 CREATE INDEX idx_asl_account       ON account_source_links (account_id);
 CREATE UNIQUE INDEX ux_asl_primary ON account_source_links (account_id) WHERE is_primary;
 
--- Salesforce write-back queue. The enqueue trigger on accounts and the BullMQ
--- drain arrive in Phase 3; the table lands now so Phase 2 can target it.
--- Poll, don't LISTEN -- the dev DATABASE_URL is a PgBouncer pooler and
--- LISTEN/NOTIFY is session-scoped.
+-- Salesforce write-back queue (#35, plan §2.7). trg_accounts_outbox below
+-- enqueues a row whenever a pushable column changes; the nightly drain in
+-- jobs/personSync.ts works through them. Poll, don't LISTEN -- the dev
+-- DATABASE_URL is a PgBouncer pooler and LISTEN/NOTIFY is session-scoped.
 CREATE TABLE person_outbox (
   id           bigserial PRIMARY KEY,
   account_id   uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   op           text NOT NULL CHECK (op IN ('create','update')),
-  payload      jsonb NOT NULL,        -- changed app/shared fields only, SF API names
+  payload      jsonb NOT NULL,        -- {"fields": [...]} changed pushable columns; values read at drain time
   status       text NOT NULL DEFAULT 'pending'
                  CHECK (status IN ('pending','in_flight','done','failed')),
   attempts     integer NOT NULL DEFAULT 0,
@@ -258,6 +258,88 @@ CREATE TABLE person_outbox (
 );
 CREATE INDEX idx_person_outbox_pending ON person_outbox (created_at)
   WHERE status = 'pending';
+
+-- At most one PENDING row per person, so enqueues coalesce (see the function).
+CREATE UNIQUE INDEX ux_person_outbox_one_pending
+  ON person_outbox (account_id) WHERE status = 'pending';
+
+-- Enqueue on a change to one of the five pushable columns (§2.6). Never for
+-- sf_object = 'User' (pull-only), never while app.sync_in_progress = 'on' (the
+-- merge and the drain's own write-back). Full rationale in
+-- db/migrations/2026-09-24-phase3-person-outbox-trigger.sql.
+CREATE OR REPLACE FUNCTION enqueue_person_outbox() RETURNS trigger AS $$
+DECLARE
+  changed text[] := ARRAY[]::text[];
+  new_op  text;
+BEGIN
+  -- Salesforce's own values arriving through the merge, or the drain writing an
+  -- sf_id back. Re-queueing either would be a loop.
+  IF coalesce(current_setting('app.sync_in_progress', true), '') = 'on' THEN
+    RETURN NEW;
+  END IF;
+
+  -- Pull-only. Never create, never update.
+  IF NEW.sf_object = 'User' THEN
+    RETURN NEW;
+  END IF;
+
+  IF TG_OP = 'INSERT' THEN
+    -- Only app-native people are created in Salesforce, and only as Leads
+    -- (§2.8). A row that arrives with an sf_id already exists there.
+    IF NEW.sf_id IS NOT NULL OR NEW.sf_object IS DISTINCT FROM 'Lead' THEN
+      RETURN NEW;
+    END IF;
+    changed := ARRAY['email', 'first_name', 'last_name', 'name', 'phone'];
+    new_op := 'create';
+  ELSE
+    IF NEW.email      IS DISTINCT FROM OLD.email      THEN changed := changed || 'email'::text;      END IF;
+    IF NEW.first_name IS DISTINCT FROM OLD.first_name THEN changed := changed || 'first_name'::text; END IF;
+    IF NEW.last_name  IS DISTINCT FROM OLD.last_name  THEN changed := changed || 'last_name'::text;  END IF;
+    IF NEW.name       IS DISTINCT FROM OLD.name       THEN changed := changed || 'name'::text;       END IF;
+    IF NEW.phone      IS DISTINCT FROM OLD.phone      THEN changed := changed || 'phone'::text;      END IF;
+    IF cardinality(changed) = 0 THEN
+      RETURN NEW;
+    END IF;
+
+    IF NEW.sf_id IS NULL THEN
+      -- Not in Salesforce yet. Contacts and Accounts are update-only (§2.6), so
+      -- a non-Lead with no sf_id has nowhere to go; do not queue a push that
+      -- can only fail. For a Lead, this folds into its pending create.
+      IF NEW.sf_object IS DISTINCT FROM 'Lead' THEN
+        RETURN NEW;
+      END IF;
+      new_op := 'create';
+    ELSE
+      new_op := 'update';
+    END IF;
+  END IF;
+
+  INSERT INTO person_outbox (account_id, op, payload)
+  VALUES (NEW.id, new_op, jsonb_build_object('fields', to_jsonb(changed)))
+  ON CONFLICT (account_id) WHERE status = 'pending'
+  DO UPDATE SET
+    -- A pending create stays a create: the person is still not in Salesforce.
+    op = CASE WHEN person_outbox.op = 'create' OR EXCLUDED.op = 'create'
+              THEN 'create' ELSE 'update' END,
+    payload = jsonb_build_object('fields', (
+      SELECT to_jsonb(array_agg(f ORDER BY f))
+        FROM (SELECT jsonb_array_elements_text(person_outbox.payload -> 'fields') AS f
+              UNION
+              SELECT jsonb_array_elements_text(EXCLUDED.payload -> 'fields')) merged));
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- UPDATE OF limits invocation to statements that target a pushable column, so a
+-- friend request, a login or a profile-picture change never even calls the
+-- function. The IS DISTINCT FROM checks inside handle "targeted but unchanged".
+CREATE TRIGGER trg_accounts_outbox
+  AFTER INSERT OR UPDATE OF email, name, first_name, last_name, phone ON accounts
+  FOR EACH ROW EXECUTE FUNCTION enqueue_person_outbox();
+
+COMMENT ON COLUMN person_outbox.payload IS
+  '{"fields": [...]}: names of changed pushable columns. The drain reads current values.';
 
 -- ---------- the two source maps (GitHub #28 / Paperclip MUR-321) ----------
 

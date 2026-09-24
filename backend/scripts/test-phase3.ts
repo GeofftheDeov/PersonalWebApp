@@ -455,6 +455,87 @@ async function main() {
             return [ok, `GM person=${gm?.person}, memberships for Geoff=${mine.length}`];
         });
 
+        // ── S6a: outbox enqueue trigger ──────────────────────────────────────
+        section("S6a — outbox enqueue trigger");
+
+        const trigErr = await applyMigration(client, "2026-09-24-phase3-person-outbox-trigger.sql");
+        assert("the outbox trigger migration applies", trigErr === null, trigErr ?? "clean");
+
+        const outboxFor = async (id: string) => (await client.query(
+            `SELECT op, status, payload->'fields' AS fields FROM person_outbox
+              WHERE account_id = $1 ORDER BY id`, [id])).rows;
+
+        // A signup through the real app path: models/Account.ts, exactly as
+        // leadRoutes registers people. New to Salesforce, so it must be created.
+        const signup = new Account({
+            email: "newcomer@example.com", password: "pw-for-test",
+            firstName: "New", lastName: "Comer", name: "New Comer", sfObject: "Lead",
+        });
+        await signup.save();
+        const signupId = String(signup._id);
+
+        await check("an app signup enqueues one Salesforce create", async () => {
+            const rows = await outboxFor(signupId);
+            const ok = rows.length === 1 && rows[0].op === "create" && rows[0].status === "pending"
+                && ["email", "first_name", "last_name", "name", "phone"].every((f) => rows[0].fields.includes(f));
+            return [ok, JSON.stringify(rows)];
+        });
+
+        await check("editing before the drain folds into the pending create", async () => {
+            await Account.findByIdAndUpdate(signupId, { $set: { name: "New N. Comer", phone: "555-0100" } });
+            const rows = await outboxFor(signupId);
+            return [rows.length === 1 && rows[0].op === "create", `${rows.length} row(s), op=${rows[0]?.op}`];
+        });
+
+        await check("an existing Salesforce person enqueues an update, coalesced per person", async () => {
+            // Zpecterr: a Lead that already has an sf_id.
+            await client.query(`UPDATE accounts SET phone = '555-0101' WHERE id = $1`, [IDS.acctB]);
+            await client.query(`UPDATE accounts SET email = 'zpecterr@example.com' WHERE id = $1`, [IDS.acctB]);
+            const rows = await outboxFor(IDS.acctB);
+            const ok = rows.length === 1 && rows[0].op === "update"
+                && JSON.stringify(rows[0].fields) === JSON.stringify(["email", "phone"]);
+            return [ok, `${rows.length} row(s): ${JSON.stringify(rows.map((r: any) => [r.op, r.fields]))}`];
+        });
+
+        await check("a Salesforce User is never pushed (pull-only)", async () => {
+            await client.query(`UPDATE accounts SET name = 'G. Murray', phone = '555-0102' WHERE id = $1`, [IDS.acctA]);
+            const rows = await outboxFor(IDS.acctA);
+            return [rows.length === 0, `${rows.length} row(s) for the User-sourced account`];
+        });
+
+        await check("writes under app.sync_in_progress never enqueue (the loop guard)", async () => {
+            await client.query("BEGIN");
+            await client.query("SET LOCAL app.sync_in_progress = 'on'");
+            await client.query(`UPDATE accounts SET name = 'Ashley E.', phone = '555-0103' WHERE id = $1`, [IDS.acctD]);
+            await client.query("COMMIT");
+            const inside = (await outboxFor(IDS.acctD)).length;
+            // ...and the guard is transaction-scoped: the next write outside it counts.
+            await client.query(`UPDATE accounts SET phone = '555-0104' WHERE id = $1`, [IDS.acctD]);
+            const after = await outboxFor(IDS.acctD);
+            return [inside === 0 && after.length === 1,
+                `inside the guard: ${inside} row(s); after it: ${after.length} row(s)`];
+        });
+
+        await check("app-only and Salesforce-owned columns never enqueue", async () => {
+            // Group C has no pending row. Touch everything that must NOT travel:
+            // app-owned identity, capability, and a Salesforce-owned field.
+            await client.query(
+                `UPDATE accounts SET handle = 'tyler2', friends = ARRAY[$2]::uuid[], app_role = 'user',
+                                     account_tier = 'member', profile_picture = '/x.png',
+                                     company = 'Campbell Co', is_active = true
+                  WHERE id = $1`, [IDS.acctC, IDS.acctA]);
+            const rows = await outboxFor(IDS.acctC);
+            return [rows.length === 0, `${rows.length} row(s) after touching 7 non-pushable columns`];
+        });
+
+        await check("accepting a friend request enqueues nothing", async () => {
+            // friendRoutes' accept path: $addToSet on friends for both parties.
+            const before = (await client.query(`SELECT count(*)::int n FROM person_outbox`)).rows[0].n;
+            await Account.findByIdAndUpdate(IDS.acctD, { $addToSet: { friends: IDS.acctC } });
+            const after = (await client.query(`SELECT count(*)::int n FROM person_outbox`)).rows[0].n;
+            return [before === after, `${after - before} new row(s)`];
+        });
+
         console.log(`\n${passed} passed, ${failed} failed`);
         if (failures.length) console.log(`Failing: ${failures.join(" · ")}`);
         console.log(`Password for login tests: ${PASSWORD}`);

@@ -13,15 +13,18 @@
 # every port; no DNS on the desktop shell), so this proves LOGIC ONLY. Anything
 # depending on real dev rows has to be run against dev by hand.
 #
-# The first database must start from the schema DEV ACTUALLY HAS, so the ref
-# below is the branch point, not HEAD -- once the Phase 3 schema.sql is
-# committed, HEAD already contains the change and the "migration path" would be
-# migrating a database that never needed migrating. Override for a different base.
+# The first database must start from the schema as it was BEFORE Phase 3, so
+# the migrations have something to migrate. That base is pinned to b18fa67 (the
+# Phase 2 merge, PR #50) because every moving ref goes stale: HEAD contains
+# Phase 3 once it is committed, and origin/dev contains it since PR #51 merged.
+# Either one silently builds the "pre-Phase-3" database from a schema that
+# already has the change, and the migration path then migrates nothing and
+# passes. Both have happened. Override only for a deliberately different base.
 #
 #   bash scripts/phase3-check.sh [<git-ref-for-pre-phase3-schema>]
 set -euo pipefail
 
-BASE_REF="${1:-origin/dev}"
+BASE_REF="${1:-b18fa67}"
 PGBIN="${PGBIN:-/usr/lib/postgresql/16/bin}"
 PGPORT="${PGPORT:-5433}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # backend/

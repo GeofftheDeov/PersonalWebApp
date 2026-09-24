@@ -43,6 +43,28 @@ const CONSTRAINTS_SQL = `
    WHERE n.nspname = 'public' AND t.relname = ANY($1)
    ORDER BY 1, 2, 3`;
 
+// Triggers and functions were invisible to the first version of this check,
+// which compared only columns, constraints and indexes. A trigger present in the
+// migration and missing from schema.sql — the #46 failure again, one layer down —
+// would have passed. Trigger definitions are compared whole; function bodies by
+// a whitespace-normalised hash, so reformatting is noise-free but any real edit
+// to one copy and not the other fails.
+const TRIGGERS_SQL = `
+  SELECT c.relname AS table_name, pg_get_triggerdef(t.oid) AS def
+    FROM pg_trigger t
+    JOIN pg_class c ON c.oid = t.tgrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = 'public' AND NOT t.tgisinternal AND c.relname = ANY($1)
+   ORDER BY 1, 2`;
+
+const FUNCTIONS_SQL = `
+  SELECT p.proname,
+         md5(regexp_replace(p.prosrc, '\\s+', ' ', 'g')) AS body_hash
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+   WHERE n.nspname = 'public' AND p.prokind = 'f'
+     AND p.prolang = (SELECT oid FROM pg_language WHERE lanname = 'plpgsql')
+   ORDER BY 1`;
+
 const INDEXES_SQL = `
   SELECT tablename, indexdef FROM pg_indexes
    WHERE schemaname = 'public' AND tablename = ANY($1)
@@ -61,6 +83,8 @@ async function introspect(url: string) {
         const cols = await client.query(COLUMNS_SQL, [TABLES]);
         const cons = await client.query(CONSTRAINTS_SQL, [TABLES]);
         const idx = await client.query(INDEXES_SQL, [TABLES]);
+        const trg = await client.query(TRIGGERS_SQL, [TABLES]);
+        const fns = await client.query(FUNCTIONS_SQL);
         return {
             columns: cols.rows.map((r) =>
                 `${r.table_name}.${r.column_name} ${r.data_type} ` +
@@ -70,6 +94,8 @@ async function introspect(url: string) {
             // Postgres' own. A difference in definition is the real signal.
             constraints: cons.rows.map((r) => `${r.table_name} [${r.contype}] ${normalise(r.def)}`),
             indexes: idx.rows.map((r) => `${r.tablename} ${normalise(r.indexdef)}`),
+            triggers: trg.rows.map((r) => `${r.table_name} ${normalise(r.def)}`),
+            functions: fns.rows.map((r) => `${r.proname}() body#${r.body_hash.slice(0, 12)}`),
         };
     } finally {
         await client.end();
@@ -99,12 +125,15 @@ async function main() {
         ...diff("column", migrated.columns, fresh.columns),
         ...diff("constraint", migrated.constraints, fresh.constraints),
         ...diff("index", migrated.indexes, fresh.indexes),
+        ...diff("trigger", migrated.triggers, fresh.triggers),
+        ...diff("function", migrated.functions, fresh.functions),
     ];
 
     if (problems.length === 0) {
         console.log(`  PASS  schema.sql matches the migrated schema ` +
             `(${migrated.columns.length} columns, ${migrated.constraints.length} constraints, ` +
-            `${migrated.indexes.length} indexes across ${TABLES.length} tables)`);
+            `${migrated.indexes.length} indexes, ${migrated.triggers.length} triggers, ` +
+            `${migrated.functions.length} plpgsql functions across ${TABLES.length} tables)`);
         return;
     }
 

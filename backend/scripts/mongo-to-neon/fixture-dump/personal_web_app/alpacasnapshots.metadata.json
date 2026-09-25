@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"ts":{"$numberInt":"1"}},"name":"ts_1"}],"uuid":"0c5aa030f1ae4f108f365b9e3556a2ba","collectionName":"alpacasnapshots","type":"collection"}

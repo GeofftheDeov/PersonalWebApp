@@ -44,11 +44,22 @@ Not proven, and only the real dump can prove it:
 
 ## Runbook
 
-**0. Decide about what's already on `production`.** As of 2026-09-25 it holds about 74 rows that the Salesforce sync put there before dev branched off in August: 16 accounts, 18 contacts, 2 leads, 1 user, 5 campaigns, 27 members and 5 sessions. They are not prod's data (Mongo is), and the load refuses a non-empty target. The expected answer is `--replace`, which truncates the target tables inside the same transaction. Take a Neon branch of `production` first, as the undo.
+**0. Decide about what's already on `production`.** As of 2026-09-25 it holds about 74 rows that the Salesforce sync put there before dev branched off in August: 16 accounts, 18 contacts, 2 leads, 1 user, 5 campaigns, 27 members and 5 sessions. They are not prod's data (Mongo is), and the load refuses a non-empty target. Decided (2026-09-25): use `--replace`, which truncates the target tables inside the same transaction, after taking a Neon branch of `production` as the undo.
 
-**1. Freeze and dump.** Stop writes to prod first: scale the service to 0 or put the site in maintenance. Anything written after the dump is lost. Then dump `personal_web_app` from the Mongo sidecar in task definition `:79`. #49 lists three ways to get the dump off the task, and none of them has been tried yet. Keep this dump: it is also the rollback.
+**1. Dump, as late as possible.** The dump has to come from the running prod task: the Mongo sidecar lives inside it, so scaling the service down would stop Mongo too. Checked on 2026-09-25:
 
-**2. Verify the dump.** Restore it into a local `mongo:5.0`, which also shows it is readable, and re-dump in directory form. The load reads directories, not `--archive`:
+- the prod service has ECS Exec enabled;
+- in the live task definition (`:79`) Mongo runs **without auth** (`MONGO_URI` is plain env, and the `mongodb` container has no secrets). The auth setup in the repo's task definition was never deployed.
+
+Stream the archive out as base64 through ECS Exec. You need the AWS CLI plus the Session Manager plugin. This has not been tried yet.
+
+    aws ecs execute-command --cluster artistic-hippopotamus-hw7oq2 --task <prod-task-id> \
+      --container mongodb --interactive \
+      --command "sh -c 'mongodump --db personal_web_app --archive --gzip --quiet | base64 -w0'" > pwa.b64
+
+Strip the Session Manager banner lines from `pwa.b64`, then `base64 -d` it into `pwa.archive.gz`. Everything written to prod after this moment is lost at cutover, so do it at a quiet hour. The cutover deploy itself (#45) takes about 45 minutes of image builds. Keep this dump: together with task definition `:79` and the untouched EFS volume, it is the rollback.
+
+**2. Verify the dump.** Restore it into a local `mongo:5.0` (Docker Desktop), which also shows it is readable, and re-dump in directory form. The load reads directories, not `--archive`:
 
     docker run -d --name pwa-mongo -p 27017:27017 mongo:5.0
     mongorestore --gzip --archive=pwa.archive.gz

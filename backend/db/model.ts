@@ -433,7 +433,8 @@ async function populateDocs(M: any, docs: any[], specsIn: Array<string | { path:
   // dungeon") — and the character and encounter routes use exactly that. Treated
   // as one path it matched no ref and was skipped, so those endpoints returned
   // bare ids where the July build returned campaign and dungeon objects.
-  const specs = specsIn.flatMap((s) => (typeof s === "string" ? s.split(/\s+/).filter(Boolean) : [s]));
+  type Spec = string | { path: string; select?: string };
+  const specs: Spec[] = specsIn.flatMap((s): Spec[] => (typeof s === "string" ? s.split(/\s+/).filter(Boolean) : [s]));
   for (const spec of specs) {
     const path = typeof spec === "string" ? spec : spec.path;
     const select = typeof spec === "string" ? undefined : spec.select;

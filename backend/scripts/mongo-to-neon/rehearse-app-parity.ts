@@ -106,14 +106,14 @@ function diff(a: any, b: any, path = "$", out: string[] = []): string[] {
 }
 
 const personas = [
-    { label: "admin (User, mixed-case stored email)", email: "geoff.admin@example.test", password: "Admin-Pass-1!" },
-    { label: "user2 (User; same email also on a Lead)", email: "sam@example.test", password: "second user pw" },
-    { label: "lead (non-ASCII password)", email: "lena@example.test", password: "lead-pässwörd-ü" },
-    { label: "contact", email: "casey@example.test", password: "contact-pw-42" },
-    { label: "account (converted from a deleted Lead)", email: "morgan@example.test", password: "was-a-lead-first" },
-    { label: "legacy user (raw doc, no createdAt)", email: "legacy.larry@example.test", password: "legacy-pw" },
-    { label: "business account, no password", email: "hello@dragondice.test", password: "anything" },
-    { label: "wrong password", email: "lena@example.test", password: "not-it" },
+    { label: "admin (User, mixed-case stored email)", email: "geoff.admin@example.test", password: "Admin-Pass-1!", expect: 200 },
+    { label: "user2 (User; same email also on a Lead)", email: "sam@example.test", password: "second user pw", expect: 200 },
+    { label: "lead (non-ASCII password)", email: "lena@example.test", password: "lead-pässwörd-ü", expect: 200 },
+    { label: "contact", email: "casey@example.test", password: "contact-pw-42", expect: 200 },
+    { label: "account (converted from a deleted Lead)", email: "morgan@example.test", password: "was-a-lead-first", expect: 200 },
+    { label: "legacy user (raw doc, no createdAt)", email: "legacy.larry@example.test", password: "legacy-pw", expect: 200 },
+    { label: "business account, no password", email: "hello@dragondice.test", password: "anything", expect: 403 },
+    { label: "wrong password", email: "lena@example.test", password: "not-it", expect: 401 },
 ];
 
 let failures = 0;
@@ -123,9 +123,11 @@ for (const p of personas) {
         call(OLD, "POST", "/api/users/login", undefined, { email: p.email, password: p.password }),
         call(NEW, "POST", "/api/users/login", undefined, { email: p.email, password: p.password }),
     ]);
-    const same = o.status === n.status;
-    if (!same) failures++;
-    console.log(`\n${same ? "PASS" : "FAIL"}  login ${p.label}: OLD ${o.status} NEW ${n.status}`);
+    // Both builds must give the EXPECTED answer, not merely the same one: two
+    // 500s agree with each other and prove nothing.
+    const ok = o.status === p.expect && n.status === p.expect;
+    if (!ok) failures++;
+    console.log(`\n${ok ? "PASS" : "FAIL"}  login ${p.label}: OLD ${o.status} NEW ${n.status} (want ${p.expect})`);
     if (o.status !== 200 || n.status !== 200) continue;
 
     const me = person(p.email);

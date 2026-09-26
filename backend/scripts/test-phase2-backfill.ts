@@ -18,6 +18,9 @@ import path from "path";
 import pool from "../db/index.js";
 import { parseCsv, runBackfill, validate, type MergeRow } from "./phase2-backfill.js";
 
+/** The System Administrator persona in the dev sheet — the account the backfill pins admin/manual. */
+const DEV_ADMIN = "62320595-fc13-5112-9cbb-25f094e08c0a";
+
 let pass = 0, fail = 0;
 function check(name: string, ok: boolean, detail = "") {
   console.log(`  ${ok ? "PASS" : "FAIL"}  ${name}${ok || !detail ? "" : `\n          ${detail}`}`);
@@ -81,7 +84,7 @@ async function main() {
 
     await client.query("BEGIN");
     await seed(client, rows);
-    const r = await runBackfill(client, rows);
+    const r = await runBackfill(client, rows, { adminId: DEV_ADMIN });
 
     // ---- the counts #34 committed to
     check("19 accounts (not 20 — JOHNNY SILVERHAND never graduates)", r.accounts === 19, `got ${r.accounts}`);
@@ -129,7 +132,7 @@ async function main() {
 
     // ---- re-running must be idempotent; #34 expects it to be re-run
     const first = await client.query(`SELECT id, app_role, account_tier FROM accounts ORDER BY id`);
-    await runBackfill(client, rows);
+    await runBackfill(client, rows, { adminId: DEV_ADMIN });
     const second = await client.query(`SELECT id, app_role, account_tier FROM accounts ORDER BY id`);
     check("re-running produces an identical result",
       JSON.stringify(first.rows) === JSON.stringify(second.rows), "second run differed");

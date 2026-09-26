@@ -180,9 +180,12 @@ jobs:
         task-definition: ${{ env.ECS_TASK_DEFINITION }}
         container-name: ${{ env.CONTAINER_BACKEND }}
         image: ${{ steps.build-backend-image.outputs.image }}
-        # NOTE: ANTHROPIC_API_KEY, ALPACA_API_KEY, ALPACA_SECRET_KEY are now injected
-        # via the task-def `secrets` block (AWS Secrets Manager), not as plaintext env.
-        # Do not re-add them here — doing so re-exposes them as plaintext task-def env.
+        # NOTE: ANTHROPIC_API_KEY, ALPACA_API_KEY, ALPACA_SECRET_KEY and VAULT_TOKEN are
+        # now injected via the task-def `secrets` block (AWS Secrets Manager), not as
+        # plaintext env. Do not re-add them here — doing so re-exposes them as plaintext
+        # task-def env, and ECS rejects a task definition where the same name appears in
+        # both `environment` and `secrets` (this exact duplicate broke the 2026-07-20 dev
+        # deploy).
         environment-variables: |
           SYNC_API_KEY=${{ secrets.SYNC_API_KEY }}
           EMAIL_PASS=${{ secrets.EMAIL_PASS }}
@@ -190,7 +193,6 @@ jobs:
           SF_CLIENT_ID=${{ secrets.SF_CLIENT_ID }}
           SF_PRIVATE_KEY_CONTENT=${{ secrets.SF_PRIVATE_KEY_CONTENT }}
           GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
-          VAULT_TOKEN=${{ secrets.VAULT_TOKEN }}
 
     - name: Fill in the new frontend image ID in the Amazon ECS task definition
       id: frontend-task-def

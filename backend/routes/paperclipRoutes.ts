@@ -147,21 +147,30 @@ router.get('/issues', async (req: any, res: Response) => {
   res.json(result.data);
 });
 
-// POST /api/paperclip/issues  — body: { title, description?, assigneeAgentId? }
+// Verified upstream enum; Paperclip defaults to 'medium' when omitted.
+const ISSUE_PRIORITIES = ['critical', 'high', 'medium', 'low'];
+
+// POST /api/paperclip/issues  — body: { title, description?, assigneeAgentId?, priority? }
+// (verified: with an assignee and no explicit status, Paperclip creates the
+// issue as 'todo' and queues an assignment wakeup run for that agent)
 router.post('/issues', async (req: any, res: Response) => {
   const cid = requireCompanyId(res);
   if (!cid) return;
-  const { title, description, assigneeAgentId } = req.body as {
+  const { title, description, assigneeAgentId, priority } = req.body as {
     title?: string;
     description?: string;
     assigneeAgentId?: string;
+    priority?: string;
   };
   if (!title?.trim()) {
     return res.status(400).json({ error: 'title is required' });
   }
+  if (priority !== undefined && !ISSUE_PRIORITIES.includes(priority)) {
+    return res.status(400).json({ error: `priority must be one of ${ISSUE_PRIORITIES.join(', ')}` });
+  }
   const result = await pcFetch(`/api/companies/${cid}/issues`, {
     method: 'POST',
-    body: JSON.stringify({ title, description, assigneeAgentId }),
+    body: JSON.stringify({ title, description, assigneeAgentId, priority }),
   });
   if (result.error) return res.status(result.status).json({ error: result.error });
   res.status(201).json(result.data);
@@ -171,6 +180,16 @@ router.post('/issues', async (req: any, res: Response) => {
 router.get('/issues/:id', async (req: any, res: Response) => {
   if (!requireBaseUrl(res)) return;
   const result = await pcFetch(`/api/issues/${req.params.id}`);
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.json(result.data);
+});
+
+// GET /api/paperclip/issues/:id/runs
+// (verified: newest-first array of { runId, status, agentId, createdAt, ... };
+// includes the assignment wakeup run queued when the issue was created)
+router.get('/issues/:id/runs', async (req: any, res: Response) => {
+  if (!requireBaseUrl(res)) return;
+  const result = await pcFetch(`/api/issues/${encodeURIComponent(req.params.id)}/runs`);
   if (result.error) return res.status(result.status).json({ error: result.error });
   res.json(result.data);
 });

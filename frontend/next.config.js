@@ -4,6 +4,12 @@ const nextConfig = {
     typescript: { ignoreBuildErrors: true },
     // output: 'standalone',
     experimental: { proxyTimeout: 300_000 },
+    async redirects() {
+        return [
+            // The Paperclip "CFO" console became the issue desk.
+            { source: '/paperclip/cfo', destination: '/paperclip/issues', permanent: true },
+        ];
+    },
     async rewrites() {
         const backendUrl = process.env.BACKEND_URL || 'http://localhost:5000';
         return {

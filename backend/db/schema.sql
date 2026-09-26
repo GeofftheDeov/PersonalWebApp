@@ -42,7 +42,9 @@ CREATE TABLE sf_users (
   email                     text,
   phone                     text,
   handle                    text,
-  password                  text NOT NULL,
+  -- Nullable since #35: passwords are app-owned and live on accounts. See the
+  -- 2026-09-24 merge-support migration.
+  password                  text,
   reset_password_token      text,
   reset_password_expires    timestamptz,
   is_verified               boolean NOT NULL DEFAULT false,
@@ -116,7 +118,7 @@ CREATE TABLE sf_leads (
   first_name                text NOT NULL,
   last_name                 text NOT NULL,
   email                     text,
-  password                  text NOT NULL,
+  password                  text,          -- nullable since #35, as sf_users
   reset_password_token      text,
   reset_password_expires    timestamptz,
   is_verified               boolean NOT NULL DEFAULT false,
@@ -240,15 +242,15 @@ CREATE TABLE account_source_links (
 CREATE INDEX idx_asl_account       ON account_source_links (account_id);
 CREATE UNIQUE INDEX ux_asl_primary ON account_source_links (account_id) WHERE is_primary;
 
--- Salesforce write-back queue. The enqueue trigger on accounts and the BullMQ
--- drain arrive in Phase 3; the table lands now so Phase 2 can target it.
--- Poll, don't LISTEN -- the dev DATABASE_URL is a PgBouncer pooler and
--- LISTEN/NOTIFY is session-scoped.
+-- Salesforce write-back queue (#35, plan §2.7). trg_accounts_outbox below
+-- enqueues a row whenever a pushable column changes; the nightly drain in
+-- jobs/personSync.ts works through them. Poll, don't LISTEN -- the dev
+-- DATABASE_URL is a PgBouncer pooler and LISTEN/NOTIFY is session-scoped.
 CREATE TABLE person_outbox (
   id           bigserial PRIMARY KEY,
   account_id   uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   op           text NOT NULL CHECK (op IN ('create','update')),
-  payload      jsonb NOT NULL,        -- changed app/shared fields only, SF API names
+  payload      jsonb NOT NULL,        -- {"fields": [...]} changed pushable columns; values read at drain time
   status       text NOT NULL DEFAULT 'pending'
                  CHECK (status IN ('pending','in_flight','done','failed')),
   attempts     integer NOT NULL DEFAULT 0,
@@ -258,6 +260,116 @@ CREATE TABLE person_outbox (
 );
 CREATE INDEX idx_person_outbox_pending ON person_outbox (created_at)
   WHERE status = 'pending';
+
+-- At most one PENDING row per person, so enqueues coalesce (see the function).
+CREATE UNIQUE INDEX ux_person_outbox_one_pending
+  ON person_outbox (account_id) WHERE status = 'pending';
+
+-- Enqueue on a change to one of the five pushable columns (§2.6). Never for
+-- sf_object = 'User' (pull-only), never while app.sync_in_progress = 'on' (the
+-- merge and the drain's own write-back). Full rationale in
+-- db/migrations/2026-09-24-phase3-person-outbox-trigger.sql.
+CREATE OR REPLACE FUNCTION enqueue_person_outbox() RETURNS trigger AS $$
+DECLARE
+  changed text[] := ARRAY[]::text[];
+  new_op  text;
+BEGIN
+  -- Salesforce's own values arriving through the merge, or the drain writing an
+  -- sf_id back. Re-queueing either would be a loop.
+  IF coalesce(current_setting('app.sync_in_progress', true), '') = 'on' THEN
+    RETURN NEW;
+  END IF;
+
+  -- Pull-only. Never create, never update.
+  IF NEW.sf_object = 'User' THEN
+    RETURN NEW;
+  END IF;
+
+  IF TG_OP = 'INSERT' THEN
+    -- Only app-native people are created in Salesforce, and only as Leads
+    -- (§2.8). A row that arrives with an sf_id already exists there.
+    IF NEW.sf_id IS NOT NULL OR NEW.sf_object IS DISTINCT FROM 'Lead' THEN
+      RETURN NEW;
+    END IF;
+    changed := ARRAY['email', 'first_name', 'last_name', 'name', 'phone'];
+    new_op := 'create';
+  ELSE
+    IF NEW.email      IS DISTINCT FROM OLD.email      THEN changed := changed || 'email'::text;      END IF;
+    IF NEW.first_name IS DISTINCT FROM OLD.first_name THEN changed := changed || 'first_name'::text; END IF;
+    IF NEW.last_name  IS DISTINCT FROM OLD.last_name  THEN changed := changed || 'last_name'::text;  END IF;
+    IF NEW.name       IS DISTINCT FROM OLD.name       THEN changed := changed || 'name'::text;       END IF;
+    IF NEW.phone      IS DISTINCT FROM OLD.phone      THEN changed := changed || 'phone'::text;      END IF;
+    IF cardinality(changed) = 0 THEN
+      RETURN NEW;
+    END IF;
+
+    IF NEW.sf_id IS NULL THEN
+      -- Not in Salesforce yet. Contacts and Accounts are update-only (§2.6), so
+      -- a non-Lead with no sf_id has nowhere to go; do not queue a push that
+      -- can only fail. For a Lead, this folds into its pending create.
+      IF NEW.sf_object IS DISTINCT FROM 'Lead' THEN
+        RETURN NEW;
+      END IF;
+      new_op := 'create';
+    ELSE
+      new_op := 'update';
+    END IF;
+  END IF;
+
+  INSERT INTO person_outbox (account_id, op, payload)
+  VALUES (NEW.id, new_op, jsonb_build_object('fields', to_jsonb(changed)))
+  ON CONFLICT (account_id) WHERE status = 'pending'
+  DO UPDATE SET
+    -- A pending create stays a create: the person is still not in Salesforce.
+    op = CASE WHEN person_outbox.op = 'create' OR EXCLUDED.op = 'create'
+              THEN 'create' ELSE 'update' END,
+    payload = jsonb_build_object('fields', (
+      SELECT to_jsonb(array_agg(f ORDER BY f))
+        FROM (SELECT jsonb_array_elements_text(person_outbox.payload -> 'fields') AS f
+              UNION
+              SELECT jsonb_array_elements_text(EXCLUDED.payload -> 'fields')) merged));
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- UPDATE OF limits invocation to statements that target a pushable column, so a
+-- friend request, a login or a profile-picture change never even calls the
+-- function. The IS DISTINCT FROM checks inside handle "targeted but unchanged".
+CREATE TRIGGER trg_accounts_outbox
+  AFTER INSERT OR UPDATE OF email, name, first_name, last_name, phone ON accounts
+  FOR EACH ROW EXECUTE FUNCTION enqueue_person_outbox();
+
+COMMENT ON COLUMN person_outbox.payload IS
+  '{"fields": [...]}: names of changed pushable columns. The drain reads current values.';
+
+-- Landing rows the nightly merge must never link or give an account (#27's test
+-- lead). Rationale in db/migrations/2026-09-24-phase3-merge-support.sql.
+CREATE TABLE account_merge_exclusions (
+  source_table text NOT NULL
+    CHECK (source_table IN ('sf_users','sf_leads','sf_contacts','sf_accounts')),
+  source_id    uuid NOT NULL,
+  reason       text NOT NULL,
+  excluded_at  timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (source_table, source_id)
+);
+
+-- Ledger of person-sync runs: the admin UI's "last run", and the merge's
+-- "since the last merge" cutoff for shared fields. Rationale in the same file.
+CREATE TABLE person_sync_runs (
+  id          bigserial PRIMARY KEY,
+  step        text NOT NULL CHECK (step IN ('drain','pull','merge')),
+  sf_object   text,          -- pull only: which object's records landed
+  trigger     text NOT NULL DEFAULT 'schedule'
+                CHECK (trigger IN ('schedule','manual','salesforce')),
+  started_at  timestamptz NOT NULL,
+  finished_at timestamptz NOT NULL DEFAULT now(),
+  ok          boolean NOT NULL,
+  result      jsonb,
+  error       text
+);
+CREATE INDEX idx_person_sync_runs_step
+  ON person_sync_runs (step, finished_at DESC);
 
 -- ---------- the two source maps (GitHub #28 / Paperclip MUR-321) ----------
 
@@ -308,10 +420,11 @@ INSERT INTO sf_object_tier_map (sf_object, account_tier, note) VALUES
 
 CREATE TABLE friend_requests (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  -- Polymorphic person ref: User | Lead | Contact | Account (see personUtils.ts).
-  -- No FK is possible; existence is enforced in the data layer. GitHub #42.
-  from_user   uuid NOT NULL,
-  to_user     uuid NOT NULL,
+  -- #42 dropped these FKs because a person could live in any of four tables and
+  -- no constraint could name them all. Phase 3 (#35) unified those into
+  -- `accounts`, so the database can enforce existence again.
+  from_user   uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  to_user     uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   status      text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','rejected')),
   created_at  timestamptz NOT NULL DEFAULT now()
 );
@@ -338,6 +451,11 @@ CREATE TABLE campaigns (
 CREATE TABLE campaign_members (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  -- Membership always points at a real account (#35, plan §3.5). The
+  -- "invited but has no account yet" state lives on campaign_invites.to_email.
+  person_id   uuid REFERENCES accounts(id) ON DELETE CASCADE,
+  -- Superseded by person_id, kept until the cutover has soaked. Dropped, along
+  -- with person_id's NOT NULL, in the final Phase 3 migration.
   lead_id     uuid REFERENCES sf_leads(id)    ON DELETE SET NULL,
   contact_id  uuid REFERENCES sf_contacts(id) ON DELETE SET NULL,
   account_id  uuid REFERENCES sf_accounts(id) ON DELETE SET NULL,
@@ -351,20 +469,28 @@ CREATE TABLE campaign_members (
   created_at  timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_campaign_members_campaign ON campaign_members (campaign_id);
+CREATE INDEX idx_campaign_members_person ON campaign_members (person_id);
 
 CREATE TABLE campaign_invites (
-  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
-  -- Polymorphic person ref: User | Lead | Contact | Account (see personUtils.ts).
-  -- Anyone can be invited to a campaign, whatever table they live in, so no FK
-  -- is possible; existence is enforced in the data layer. GitHub #42.
-  from_user   uuid NOT NULL,
-  to_user     uuid NOT NULL,
-  status      text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','declined')),
-  created_at  timestamptz NOT NULL DEFAULT now()
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  campaign_id     uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  -- Anyone can be invited to a campaign (#42). Since #35 everyone is an account,
+  -- so the sender always has one and the FKs are back.
+  from_account_id uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  -- ...but the invitee may not exist yet. Invite by handle sets to_account_id;
+  -- invite by email for someone with no account sets to_email, and registration
+  -- binds it. Exactly one of the two is required.
+  to_account_id   uuid REFERENCES accounts(id) ON DELETE CASCADE,
+  to_email        citext,
+  status          text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','declined')),
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT campaign_invites_target
+    CHECK (to_account_id IS NOT NULL OR to_email IS NOT NULL)
 );
-CREATE INDEX idx_campaign_invites_to ON campaign_invites (to_user);
-CREATE INDEX idx_campaign_invites_lookup ON campaign_invites (campaign_id, to_user, status);
+CREATE INDEX idx_campaign_invites_to ON campaign_invites (to_account_id);
+CREATE INDEX idx_campaign_invites_lookup ON campaign_invites (campaign_id, to_account_id, status);
+CREATE INDEX idx_campaign_invites_email ON campaign_invites (to_email)
+  WHERE to_account_id IS NULL AND status = 'pending';
 
 CREATE TABLE dungeons (
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -529,7 +655,9 @@ CREATE INDEX idx_notifications_dedupe ON notifications (user_id, type, source_ke
 -- at accounts(id) along with the rest of the app-facing references.
 CREATE TABLE api_key_vault (
   id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id          uuid NOT NULL REFERENCES sf_users(id) ON DELETE CASCADE,
+  -- Staff-only integration. Its owner genuinely is a Salesforce User, but
+  -- since #35 that person is an account like everyone else.
+  user_id          uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   provider         text NOT NULL,
   label            text NOT NULL DEFAULT '',
   encrypted_key_id text NOT NULL,
@@ -556,7 +684,8 @@ CREATE INDEX idx_alpaca_snapshots_ts ON alpaca_snapshots (ts);
 
 CREATE TABLE cloud_claw_sessions (
   id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id    uuid NOT NULL UNIQUE REFERENCES sf_users(id) ON DELETE CASCADE,
+  -- Staff-only integration; see api_key_vault above. Repointed by #35.
+  user_id    uuid NOT NULL UNIQUE REFERENCES accounts(id) ON DELETE CASCADE,
   -- [{ role: 'user'|'assistant', content }]
   messages   jsonb NOT NULL DEFAULT '[]',
   created_at timestamptz NOT NULL DEFAULT now(),

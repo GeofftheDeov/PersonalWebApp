@@ -1,30 +1,36 @@
 import CampaignMember from "../models/CampaignMember.js";
-import User from "../models/User.js";
+import Account from "../models/Account.js";
 
 /**
- * Gets the list of campaign IDs that the user is authorized to view.
- * If the user is an admin, it returns null (meaning all campaigns).
+ * Campaign authorization (#35, plan §3.4).
+ *
+ * Both functions used to open with `if (user.type === "User")` before looking
+ * up a role — the type standing in for "staff". After the merge everyone is an
+ * account, so that check would have been false for every person alive and
+ * silently removed admin bypass from the only admin. The replacement is the
+ * column that actually means it: `accounts.app_role`.
+ *
+ * `app_role` is authorization and `account_tier` is entitlement (#28). A tier
+ * change must never move somebody's access, so nothing here may read the tier.
+ */
+
+/** True when this person is an app admin. One indexed lookup. */
+async function isAdmin(user: any): Promise<boolean> {
+    if (!user?.id) return false;
+    const doc = await Account.findById(user.id).select("appRole");
+    return doc?.appRole === "admin";
+}
+
+/**
+ * Campaign ids this person may view, or null for "all" (admins).
  * @param user The user object from req.user
- * @returns Array of campaign IDs or null
  */
 export async function getAuthorizedCampaignIds(user: any) {
-    // 1. Check if user is admin
-    if (user.type === "User") {
-        const dbUser = await User.findById(user.id);
-        if (dbUser?.role === "admin") return null; // Admin sees all
-    }
+    if (await isAdmin(user)) return null;
 
-    // 2. Find campaigns where user is a member
-    const membershipQuery: any = {
-        $or: [
-            { email: user.email },
-            { lead: user.id },
-            { contact: user.id },
-            { account: user.id }
-        ]
-    };
-
-    const memberships = await CampaignMember.find(membershipQuery).select("campaign");
+    // Membership was a four-way OR across { email, lead, contact, account },
+    // including an unindexed email match. One person column, one indexed lookup.
+    const memberships = await CampaignMember.find({ person: user.id }).select("campaign");
     return memberships.map((m: any) => m.campaign);
 }
 
@@ -34,22 +40,12 @@ export async function getAuthorizedCampaignIds(user: any) {
  */
 export async function isCampaignGameMaster(user: any, campaignId: string): Promise<boolean> {
     if (!campaignId) return false;
-
-    // Admins bypass (mirrors getAuthorizedCampaignIds)
-    if (user.type === "User") {
-        const dbUser = await User.findById(user.id).select("role");
-        if (dbUser?.role === "admin") return true;
-    }
+    if (await isAdmin(user)) return true;
 
     const gm = await CampaignMember.findOne({
         campaign: campaignId,
         status: "Game Master",
-        $or: [
-            { email: user.email },
-            { lead: user.id },
-            { contact: user.id },
-            { account: user.id },
-        ],
+        person: user.id,
     }).select("_id");
 
     return Boolean(gm);

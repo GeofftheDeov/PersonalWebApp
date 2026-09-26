@@ -475,13 +475,13 @@ export default function ProfilePage() {
                         ) : (
                             <div className="text-xl md:text-2xl font-permanent leading-tight text-yellow-400 drop-shadow-[3px_3px_0px_rgba(0,0,0,1)] tracking-tight space-y-3">
                                 <p><span className="text-teal dark:text-orange-400">NAME:</span> {displayName.toUpperCase()}</p>
-                                {user.type === 'User' && (
+                                {user.recordType === 'User' && (
                                     <p><span className="text-teal dark:text-orange-400">INTERNAL ID:</span> {user.userDigit || 'N/A'}</p>
                                 )}
                                 <p><span className="text-teal dark:text-orange-400">HANDLE:</span> {user.handle ? `@${user.handle.toUpperCase()}` : 'N/A'}</p>
                                 <p><span className="text-teal dark:text-orange-400">UNIQUE ID:</span> {user.handle && user.userNumber ? `@${user.handle.toUpperCase()}#${user.userNumber}` : 'N/A'}</p>
                                 <p><span className="text-teal dark:text-orange-400">EMAIL:</span> {user.email?.toUpperCase() || 'N/A'}</p>
-                                <p><span className="text-teal dark:text-orange-400">TYPE:</span> {user.type?.toUpperCase() || 'N/A'}</p>
+                                <p><span className="text-teal dark:text-orange-400">TYPE:</span> {user.recordType?.toUpperCase() || 'N/A'}</p>
                                 <p><span className="text-teal dark:text-orange-400">PHONE:</span> {user.phone?.toUpperCase() || 'N/A'}</p>
                                 <p><span className="text-teal dark:text-orange-400">DISCORD:</span> {user.discordHandle ? user.discordHandle.toUpperCase() : 'NOT LINKED'}</p>
                             </div>

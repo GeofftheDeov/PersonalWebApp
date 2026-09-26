@@ -8,13 +8,15 @@ import crypto from "crypto";
 import { sendResetPasswordEmail } from "../services/emailService.js";
 import { renderPage } from '../utils/adminUi.js';
 import { requireAdmin } from '../middleware/auth.js';
+import { resolveAccountId } from '../utils/accountRefs.js';
 import { toCsv } from '../utils/csv.js';
 import { workshopClientJs } from '../utils/workshopClient.js';
 import { listViews, createView, updateView, deleteView, ListViewError } from '../services/listViews.js';
-import User from "../models/User.js";
 import Account from "../models/Account.js";
-import Contact from "../models/Contact.js";
-import Lead from "../models/Lead.js";
+import SfUser from "../models/SfUser.js";
+import SfAccount from "../models/SfAccount.js";
+import SfContact from "../models/SfContact.js";
+import SfLead from "../models/SfLead.js";
 import Campaign from "../models/Campaign.js";
 import CampaignMember from "../models/CampaignMember.js";
 import CampaignInvite from "../models/CampaignInvite.js";
@@ -42,8 +44,15 @@ const router = express.Router();
  * It now routes through the model registry so field names stay camelCase and
  * model hooks (hashing, defaults) still apply.
  */
+/**
+ * Phase 3 (#35). `accounts` used to be a label for the Salesforce Account
+ * LANDING table, because models/Account.ts pointed there. It now means the
+ * app's unified person table, and the four landing tables are listed under
+ * their real names — so a row edited here goes where the label says.
+ */
 const COLLECTIONS: Record<string, any> = {
-    users: User, accounts: Account, contacts: Contact, leads: Lead,
+    accounts: Account,
+    sf_users: SfUser, sf_accounts: SfAccount, sf_contacts: SfContact, sf_leads: SfLead,
     campaigns: Campaign, campaign_members: CampaignMember, campaign_invites: CampaignInvite,
     characters: Character, dungeons: Dungeon, encounters: Encounter, events: Event,
     friend_requests: FriendRequest, game_sessions: Session, player_sessions: PlayerSession,
@@ -93,7 +102,7 @@ const scriptJson = (v: unknown) => JSON.stringify(v)
  *
  * The token still identifies; requireAdmin below decides.
  */
-const verifyToken = (req: any, res: express.Response, next: express.NextFunction) => {
+const verifyToken = async (req: any, res: express.Response, next: express.NextFunction) => {
     const token = req.query.token as string;
     const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login`;
 
@@ -104,7 +113,10 @@ const verifyToken = (req: any, res: express.Response, next: express.NextFunction
 
     try {
         const decoded: any = jwt.verify(token, process.env.JWT_SECRET || "your-secret-key-change-this");
-        req.adminUser = { id: decoded.id, email: decoded.email };
+        // Pre-cutover tokens may name a source row that lost its merge.
+        const id = await resolveAccountId(String(decoded.id));
+        if (!id) return res.redirect(loginUrl);
+        req.adminUser = { id, email: decoded.email };
         next();
     } catch (err: any) {
         console.log(`[AUTH] 401: Invalid token for ${req.originalUrl}. Error: ${err.message}`);

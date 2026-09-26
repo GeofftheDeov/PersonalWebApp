@@ -1,10 +1,11 @@
 import express from "express";
 const router = express.Router();
 
-import User from "../models/User.js";
-import Lead from "../models/Lead.js";
-import Contact from "../models/Contact.js";
-import Account from "../models/Account.js";
+import SfUser from "../models/SfUser.js";
+import SfLead from "../models/SfLead.js";
+import SfContact from "../models/SfContact.js";
+import SfAccount from "../models/SfAccount.js";
+import { recordPull } from "../jobs/personSync.js";
 import Campaign from "../models/Campaign.js";
 import Session from "../models/Session.js";
 import Character from "../models/Character.js";
@@ -32,12 +33,62 @@ const authenticateSync = (req: express.Request, res: express.Response, next: exp
 // ─────────────────────────────────────────────
 const makeResults = () => ({ success: 0, updated: 0, skipped: 0, failed: 0, errors: [] as any[] });
 
+/*
+ * Person endpoints write the Salesforce LANDING tables and nothing else (#35,
+ * plan §2.8). A landing table is a mirror of Salesforce records, so:
+ *
+ *  - a row is found by its Salesforce Id. These endpoints used to match on email
+ *    as well, which collapsed two distinct Salesforce records sharing an address
+ *    into one landing row, and let a new record overwrite another's. Deciding
+ *    that two records are the same PERSON is the merge's job
+ *    (jobs/personSync.ts), done against accounts, with the evidence recorded in
+ *    account_source_links. The one email fallback kept is for a legacy row that
+ *    never received an Id — what a failed pre-cutover postSave push left behind.
+ *
+ *  - nothing here invents a password. The "SF_IMPORT_<id>" placeholders existed
+ *    only to satisfy a NOT NULL, and without the old hashing models they would
+ *    have landed in plaintext. Passwords are app-owned and live on accounts.
+ *
+ *  - nothing here decides identity: no skipping a record because a User has the
+ *    same email, no deleting a Lead because an Account arrived. Those were the
+ *    app's person logic running inside a mirror; conversion is now handled by the
+ *    merge, which links the new record and promotes the person.
+ *
+ *  - every person pull is recorded (person_sync_runs, step 'pull'). The merge
+ *    uses the latest pull per object to know whether a change the app pushed
+ *    can have come back yet.
+ */
+async function findLanding(Model: any, idField: string, sfId: string | undefined, email: string | undefined) {
+    if (sfId) {
+        const byId = await Model.findOne({ [idField]: sfId });
+        if (byId) return byId;
+    }
+    if (email) {
+        const legacy = await Model.findOne({ email, [idField]: null });
+        if (legacy) return legacy;
+    }
+    return null;
+}
+
+const PERSON_OBJECTS = new Set(["User", "Lead", "Contact", "Account"]);
+
+/** Record a person pull; never let bookkeeping fail the sync response. */
+async function notePull(sfObject: string, startedAt: Date, results: any) {
+    try {
+        await recordPull(sfObject, startedAt, results, results.failed === 0,
+            results.failed ? `${results.failed} record(s) failed` : undefined);
+    } catch (err: any) {
+        console.error(`[SYNC] could not record the ${sfObject} pull:`, err.message);
+    }
+}
+
 // ─────────────────────────────────────────────
 // POST /api/sync/users
 // Payload: { users: [{ sfID, name, email, phone, role, userNumber }] }
 // ─────────────────────────────────────────────
 router.post("/users", authenticateSync, async (req, res) => {
     try {
+        const startedAt = new Date();
         const { users } = req.body;
         if (!Array.isArray(users)) return res.status(400).json({ error: "'users' must be an array" });
 
@@ -45,12 +96,7 @@ router.post("/users", authenticateSync, async (req, res) => {
 
         for (const u of users) {
             try {
-                const existing = await User.findOne({
-                    $or: [
-                        ...(u.sfID ? [{ sfID: u.sfID }] : []),
-                        ...(u.email ? [{ email: u.email }] : []),
-                    ]
-                }) as any;
+                const existing = await findLanding(SfUser, "sfID", u.sfID, u.email) as any;
 
                 if (existing) {
                     // Update non-auth fields only — never overwrite hashed password from SF
@@ -59,13 +105,10 @@ router.post("/users", authenticateSync, async (req, res) => {
                     existing.role = u.role || existing.role;
                     existing.userNumber = u.userNumber || existing.userNumber;
                     if (u.sfID) existing.sfID = u.sfID;
-                    existing.updatedAt = new Date();
                     await existing.save();
                     results.updated++;
                 } else {
-                    // Create new user — password will be hashed by pre-save hook
-                    const tempPassword = u.password || `SF_IMPORT_${u.sfID || Date.now()}`;
-                    await User.create({
+                    await SfUser.create({
                         name: u.name,
                         email: u.email,
                         phone: u.phone,
@@ -73,7 +116,6 @@ router.post("/users", authenticateSync, async (req, res) => {
                         userNumber: u.userNumber,
                         sfID: u.sfID,
                         isVerified: true, // SF accounts are considered verified
-                        password: tempPassword,
                     });
                     results.success++;
                 }
@@ -83,6 +125,7 @@ router.post("/users", authenticateSync, async (req, res) => {
             }
         }
 
+        await notePull("User", startedAt, results);
         res.json({ message: "User sync completed", results });
     } catch (err: any) {
         res.status(500).json({ error: "User sync failed", details: err.message });
@@ -95,6 +138,7 @@ router.post("/users", authenticateSync, async (req, res) => {
 // ─────────────────────────────────────────────
 router.post("/leads", authenticateSync, async (req, res) => {
     try {
+        const startedAt = new Date();
         const { leads } = req.body;
         if (!Array.isArray(leads)) return res.status(400).json({ error: "'leads' must be an array" });
 
@@ -102,12 +146,7 @@ router.post("/leads", authenticateSync, async (req, res) => {
 
         for (const l of leads) {
             try {
-                const existing = await Lead.findOne({
-                    $or: [
-                        ...(l.sfLeadId ? [{ sfLeadId: l.sfLeadId }] : []),
-                        ...(l.email ? [{ email: l.email }] : []),
-                    ]
-                }) as any;
+                const existing = await findLanding(SfLead, "sfLeadId", l.sfLeadId, l.email) as any;
 
                 if (existing) {
                     existing.firstName = l.firstName || existing.firstName;
@@ -122,8 +161,7 @@ router.post("/leads", authenticateSync, async (req, res) => {
                     await existing.save();
                     results.updated++;
                 } else {
-                    const tempPassword = l.password || `SF_IMPORT_${l.sfLeadId || Date.now()}`;
-                    await Lead.create({
+                    await SfLead.create({
                         firstName: l.firstName,
                         lastName: l.lastName,
                         email: l.email,
@@ -135,7 +173,6 @@ router.post("/leads", authenticateSync, async (req, res) => {
                         sfRecordTypeId: l.sfRecordTypeId,
                         sfRecordTypeName: l.sfRecordTypeName,
                         isVerified: true,
-                        password: tempPassword,
                     });
                     results.success++;
                 }
@@ -145,6 +182,7 @@ router.post("/leads", authenticateSync, async (req, res) => {
             }
         }
 
+        await notePull("Lead", startedAt, results);
         res.json({ message: "Lead sync completed", results });
     } catch (err: any) {
         res.status(500).json({ error: "Lead sync failed", details: err.message });
@@ -157,6 +195,7 @@ router.post("/leads", authenticateSync, async (req, res) => {
 // ─────────────────────────────────────────────
 router.post("/contacts", authenticateSync, async (req, res) => {
     try {
+        const startedAt = new Date();
         const { contacts } = req.body;
         if (!Array.isArray(contacts)) return res.status(400).json({ error: "'contacts' must be an array" });
 
@@ -167,16 +206,11 @@ router.post("/contacts", authenticateSync, async (req, res) => {
                 // Resolve account reference from sfID if provided
                 let accountId = null;
                 if (c.accountSfID) {
-                    const account = await Account.findOne({ sfID: c.accountSfID }) as any;
+                    const account = await SfAccount.findOne({ sfID: c.accountSfID }) as any;
                     if (account) accountId = account._id;
                 }
 
-                const existing = await Contact.findOne({
-                    $or: [
-                        ...(c.sfID ? [{ sfID: c.sfID }] : []),
-                        ...(c.email ? [{ email: c.email }] : []),
-                    ]
-                }) as any;
+                const existing = await findLanding(SfContact, "sfID", c.sfID, c.email) as any;
 
                 if (existing) {
                     existing.name = c.name || existing.name;
@@ -188,7 +222,7 @@ router.post("/contacts", authenticateSync, async (req, res) => {
                     await existing.save();
                     results.updated++;
                 } else {
-                    await Contact.create({
+                    await SfContact.create({
                         name: c.name,
                         email: c.email,
                         phone: c.phone,
@@ -197,7 +231,6 @@ router.post("/contacts", authenticateSync, async (req, res) => {
                         accountId: accountId,
                         sfID: c.sfID,
                         isVerified: true,
-                        password: c.password || `SF_IMPORT_${c.sfID || Date.now()}`,
                     });
                     results.success++;
                 }
@@ -207,6 +240,7 @@ router.post("/contacts", authenticateSync, async (req, res) => {
             }
         }
 
+        await notePull("Contact", startedAt, results);
         res.json({ message: "Contact sync completed", results });
     } catch (err: any) {
         res.status(500).json({ error: "Contact sync failed", details: err.message });
@@ -292,7 +326,7 @@ router.post("/characters", authenticateSync, async (req, res) => {
                 // Resolve player Account reference
                 let playerId = null;
                 if (c.playerSfID) {
-                    const account = await Account.findOne({ sfID: c.playerSfID }) as any;
+                    const account = await SfAccount.findOne({ sfID: c.playerSfID }) as any;
                     if (account) playerId = account._id;
                 }
 
@@ -405,6 +439,7 @@ import PlayerSession from "../models/PlayerSession.js";
 
 router.post("/salesforce", authenticateSync, async (req, res) => {
     try {
+        const startedAt = new Date();
         const { object, records } = req.body;
         if (!object || !Array.isArray(records)) {
             return res.status(400).json({ error: "'object' must be provided and 'records' must be an array" });
@@ -419,23 +454,7 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
                     const sfID = r.Id;
                     const email = r.PersonEmail || r.Email;
                     
-                    // Check for existing Account or User with this email/sfID
-                    let existing = await Account.findOne({
-                        $or: [
-                            ...(sfID ? [{ sfID }] : []),
-                            ...(email ? [{ email }] : []),
-                        ]
-                    }) as any;
-
-                    // Also check Users collection to prevent duplicates for converted leads/users
-                    if (!existing && email) {
-                        const existingUser = await User.findOne({ email });
-                        if (existingUser) {
-                            console.log(`[SYNC] Found existing User for email ${email}, skipping Account creation.`);
-                            results.skipped++;
-                            continue;
-                        }
-                    }
+                    const existing = await findLanding(SfAccount, "sfID", sfID, email) as any;
 
                     if (existing) {
                         existing.name = r.Name || existing.name;
@@ -444,12 +463,10 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
                         existing.industry = r.Industry || existing.industry;
                         existing.website = r.Website || existing.website;
                         if (sfID) existing.sfID = sfID;
-                        existing.updatedAt = new Date();
                         await existing.save();
                         results.updated++;
                     } else {
-                        const tempPassword = `SF_IMPORT_${sfID || Date.now()}`;
-                        await Account.create({
+                        await SfAccount.create({
                             name: r.Name,
                             email: email,
                             phone: r.Phone,
@@ -457,7 +474,6 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
                             website: r.Website,
                             sfID: sfID,
                             isVerified: true,
-                            password: tempPassword,
                         });
                         results.success++;
                     }
@@ -472,12 +488,7 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
                     const sfID = r.Id;
                     const email = r.Email;
                     
-                    const existing = await Lead.findOne({
-                        $or: [
-                            ...(sfID ? [{ sfLeadId: sfID }] : []),
-                            ...(email ? [{ email }] : []),
-                        ]
-                    }) as any;
+                    const existing = await findLanding(SfLead, "sfLeadId", sfID, email) as any;
 
                     if (existing) {
                         existing.firstName = r.FirstName || existing.firstName;
@@ -490,8 +501,7 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
                         await existing.save();
                         results.updated++;
                     } else {
-                        const tempPassword = `SF_IMPORT_${sfID || Date.now()}`;
-                        await Lead.create({
+                        await SfLead.create({
                             firstName: r.FirstName,
                             lastName: r.LastName,
                             email: email,
@@ -501,7 +511,6 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
                             source: "Salesforce",
                             sfLeadId: sfID,
                             isVerified: true,
-                            password: tempPassword,
                         });
                         results.success++;
                     }
@@ -517,16 +526,11 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
                     const email = r.Email;
                     let accountId = null;
                     if (r.AccountId) {
-                        const account = await Account.findOne({ sfID: r.AccountId }) as any;
+                        const account = await SfAccount.findOne({ sfID: r.AccountId }) as any;
                         if (account) accountId = account._id;
                     }
 
-                    const existing = await Contact.findOne({
-                        $or: [
-                            ...(sfID ? [{ sfID }] : []),
-                            ...(email ? [{ email }] : []),
-                        ]
-                    }) as any;
+                    const existing = await findLanding(SfContact, "sfID", sfID, email) as any;
 
                     if (existing) {
                         existing.name = r.Name || existing.name;
@@ -537,15 +541,13 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
                         await existing.save();
                         results.updated++;
                     } else {
-                        const tempPassword = `SF_IMPORT_${sfID || Date.now()}`;
-                        await Contact.create({
+                        await SfContact.create({
                             name: r.Name,
                             email: email,
                             phone: r.Phone,
                             accountId: accountId,
                             sfID: sfID,
                             isVerified: true,
-                            password: tempPassword,
                         });
                         results.success++;
                     }
@@ -644,7 +646,7 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
                     
                     let playerId = null;
                     if (r.Player__c) { // Note: Player__c is Account
-                        const account = await User.findOne({ sfID: r.Player__c }) as any;
+                        const account = await SfUser.findOne({ sfID: r.Player__c }) as any;
                         if (account) playerId = account._id;
                     }
                     
@@ -697,20 +699,20 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
 
                     let leadId = null;
                     if (r.LeadId) {
-                        const leadDoc = await Lead.findOne({ sfLeadId: r.LeadId }) as any;
+                        const leadDoc = await SfLead.findOne({ sfLeadId: r.LeadId }) as any;
                         if (leadDoc) leadId = leadDoc._id;
                     }
 
                     let contactId = null;
                     if (r.ContactId) {
-                        const contactDoc = await Contact.findOne({ sfID: r.ContactId }) as any;
+                        const contactDoc = await SfContact.findOne({ sfID: r.ContactId }) as any;
                         if (contactDoc) contactId = contactDoc._id;
                     }
 
                     // Account ref is derived from Contact in Salesforce
                     let accountId = null; 
                     if (contactId) {
-                        const contactDoc = await Contact.findById(contactId) as any;
+                        const contactDoc = await SfContact.findById(contactId) as any;
                         if (contactDoc) accountId = contactDoc.accountId;
                     }
 
@@ -755,6 +757,7 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
             return res.status(400).json({ error: `Unsupported object type: ${object}` });
         }
 
+        if (PERSON_OBJECTS.has(object)) await notePull(object, startedAt, results);
         res.json({ message: `${object} sync completed`, results });
     } catch (err: any) {
         res.status(500).json({ error: `Sync failed for ${req.body.object}`, details: err.message });

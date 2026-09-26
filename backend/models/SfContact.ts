@@ -1,10 +1,11 @@
 import { defineModel } from "../db/model.js";
-import { hashPasswordHook, fourDigit, digitTag } from "./_shared.js";
 
-// Phase 1 of the unified account model (#33) renamed this table to sf_contacts.
-// It is now a Salesforce landing table. account_id still points at sf_accounts,
-// which is Salesforce's own Contact -> Account relationship and stays that way.
-const Contact = defineModel({
+/**
+ * Salesforce Contact landing table (see models/SfUser.ts).
+ * `accountId` is Salesforce's own Contact -> Account relationship and keeps
+ * pointing at sf_accounts.
+ */
+const SfContact = defineModel({
   table: "sf_contacts",
   fields: {
     name: "name", email: "email", password: "password",
@@ -18,7 +19,5 @@ const Contact = defineModel({
     friends: { col: "friends", type: "uuid[]" },
     createdAt: { col: "created_at", type: "date" },
   },
-  defaults: { userNumber: fourDigit, userDigit: digitTag("CON") },
-  preSave: hashPasswordHook,
 });
-export default Contact;
+export default SfContact;

@@ -4,6 +4,10 @@ import fs from 'fs';
 import path from 'path';
 import { execFile } from 'child_process';
 import { pullVault, vaultSyncStatus } from '../services/vaultSync.js';
+import {
+    watchWallet, resyncWallet, alpacaRest, restBase, AlpacaError, WALLET_IDS,
+    type AlpacaCreds, type WalletId,
+} from '../services/alpacaStream.js';
 import { renderPage } from '../utils/adminUi.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import AlpacaSnapshot from '../models/AlpacaSnapshot.js';
@@ -1107,51 +1111,93 @@ router.get('/obsidian', (req, res) => {
     }));
 });
 
-// ── Alpaca API proxy (JSON, protected by verifyToken above) ──────────────────
+// ── Alpaca wallets (JSON + SSE, protected by verifyToken above) ──────────────
+// What a wallet is, and how the live stream works: services/alpacaStream.ts.
 
-const ALPACA_BASE = 'https://paper-api.alpaca.markets/v2';
+const WALLET_META: Record<WalletId, { label: string; live: boolean; provider?: string }> = {
+    cloudclaw: { label: 'Cloud-Claw paper', live: false },
+    paper:     { label: 'My paper', live: false, provider: 'alpaca_paper' },
+    live:      { label: 'My live', live: true, provider: 'alpaca_live' },
+};
 
-function alpacaHeaders() {
-    return {
-        'APCA-API-KEY-ID': process.env.ALPACA_API_KEY || '',
-        'APCA-API-SECRET-KEY': process.env.ALPACA_SECRET_KEY || '',
-        'Content-Type': 'application/json',
-    };
+const envPaperCreds = (): AlpacaCreds | null =>
+    process.env.ALPACA_API_KEY && process.env.ALPACA_SECRET_KEY
+        ? { keyId: process.env.ALPACA_API_KEY, secret: process.env.ALPACA_SECRET_KEY, live: false }
+        : null;
+
+type ResolvedWallet = { wallet: WalletId; creds: AlpacaCreds; hubKey: string };
+
+/** This admin's credentials for one wallet, or why there are none. */
+async function resolveWallet(userId: string, raw: unknown): Promise<ResolvedWallet | { error: string; status: number }> {
+    const wallet = String(raw) as WalletId;
+    if (!WALLET_IDS.includes(wallet)) return { error: `Unknown wallet "${String(raw)}"`, status: 400 };
+    if (wallet === 'cloudclaw') {
+        const creds = envPaperCreds();
+        if (!creds) return { error: 'ALPACA_API_KEY / ALPACA_SECRET_KEY are not set on this server.', status: 503 };
+        return { wallet, creds, hubKey: `cloudclaw:${creds.keyId}` };
+    }
+    const meta = WALLET_META[wallet];
+    const keys = await getDecryptedKeys(userId, meta.provider!);
+    if (!keys) return { error: `No ${meta.live ? 'live' : 'paper'} Alpaca keys on your Profile page yet.`, status: 404 };
+    // The key id is part of the hub key, so re-saving keys on the Profile page
+    // opens fresh upstream connections instead of reusing the old login.
+    return { wallet, creds: { ...keys, live: meta.live }, hubKey: `${wallet}:${userId}:${keys.keyId}` };
 }
 
-async function alpacaGet(path: string): Promise<unknown> {
-    const r = await fetch(`${ALPACA_BASE}${path}`, { headers: alpacaHeaders() });
-    if (!r.ok) throw new Error(`Alpaca error (${path}): ${await r.text()}`);
-    return r.json();
-}
-
-router.get('/alpaca/api/account', async (_req, res) => {
-    try { res.json(await alpacaGet('/account')); }
-    catch (err: any) { res.status(500).json({ error: err.message }); }
+router.get('/alpaca/api/wallets', async (req: any, res) => {
+    const userId = String(req.adminUser.id);
+    const list = await Promise.all(WALLET_IDS.map(async (id) => {
+        const r = await resolveWallet(userId, id).catch((err: any) => ({ error: err.message as string, status: 500 }));
+        const missing = 'error' in r;
+        return { id, label: WALLET_META[id].label, live: WALLET_META[id].live, available: !missing, reason: missing ? r.error : null };
+    }));
+    res.json(list);
 });
 
-router.get('/alpaca/api/positions', async (_req, res) => {
-    try { res.json(await alpacaGet('/positions')); }
-    catch (err: any) { res.status(500).json({ error: err.message }); }
+// Server-sent events: a full snapshot of the wallet on connect and on every
+// change (price prints, fills, REST resyncs). EventSource reconnects by itself,
+// which also covers the Next.js rewrite proxy's 5-minute request timeout.
+router.get('/alpaca/api/stream', async (req: any, res) => {
+    const w = await resolveWallet(String(req.adminUser.id), req.query.wallet);
+    if ('error' in w) return res.status(w.status).json({ error: w.error });
+    res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+    });
+    res.write('retry: 3000\n\n');
+    const unwatch = watchWallet(w.hubKey, w.wallet, w.creds, (snap) => {
+        res.write(`event: snapshot\ndata: ${JSON.stringify(snap)}\n\n`);
+    });
+    const ping = setInterval(() => res.write(': ping\n\n'), 15_000);
+    // res, not req: since Node 16 req 'close' fires once the (empty) body is read.
+    res.on('close', () => { clearInterval(ping); unwatch(); });
 });
 
-router.get('/alpaca/api/orders', async (_req, res) => {
-    try { res.json(await alpacaGet('/orders?limit=20&status=all')); }
-    catch (err: any) { res.status(500).json({ error: err.message }); }
+const WALLET_READS: Record<string, (q: any) => string> = {
+    account: () => '/account',
+    positions: () => '/positions',
+    orders: () => '/orders?limit=25&status=all&direction=desc',
+    // Equity + P&L timeseries. Defaults match the dashboard's 1D / 15-min view.
+    history: (q) => '/account/portfolio/history?' + new URLSearchParams({
+        period: String(q.period || '1D'),
+        timeframe: String(q.timeframe || '15Min'),
+        intraday_reporting: 'market_hours',
+    }).toString(),
+};
+
+router.get('/alpaca/api/w/:wallet/:resource', async (req: any, res) => {
+    const read = WALLET_READS[req.params.resource];
+    if (!read) return res.status(404).json({ error: `Unknown resource "${req.params.resource}"` });
+    const w = await resolveWallet(String(req.adminUser.id), req.params.wallet);
+    if ('error' in w) return res.status(w.status).json({ error: w.error });
+    try { res.json(await alpacaRest(w.creds, read(req.query))); }
+    catch (err: any) { res.status(err instanceof AlpacaError ? err.status : 500).json({ error: err.message }); }
 });
 
-// Portfolio history (equity + P&L timeseries) — proxied straight from Alpaca.
-// Defaults match the dashboard's "1D" range with 15-min resolution.
-router.get('/alpaca/api/history', async (req, res) => {
-    try {
-        const period    = (req.query.period as string)    || '1D';
-        const timeframe = (req.query.timeframe as string) || '15Min';
-        const qs = new URLSearchParams({ period, timeframe, intraday_reporting: 'market_hours' });
-        res.json(await alpacaGet(`/account/portfolio/history?${qs.toString()}`));
-    } catch (err: any) { res.status(500).json({ error: err.message }); }
-});
-
-// Per-position value timeseries from our own snapshot collection.
+// Per-position value timeseries from our own snapshot table (Cloud-Claw paper
+// wallet only — that is what snapshotAlpacaNow records).
 // period accepted as 1D / 1W / 1M / 3M / ALL.
 router.get('/alpaca/api/snapshots', async (req, res) => {
     try {
@@ -1170,45 +1216,6 @@ router.get('/alpaca/api/snapshots', async (req, res) => {
             .sort({ ts: 1 })
             .lean();
         res.json(docs);
-    } catch (err: any) { res.status(500).json({ error: err.message }); }
-});
-
-// ── Personal (live) Alpaca proxy ─────────────────────────────────────────────
-// These routes use the requesting admin's vault keys (provider: 'alpaca_live')
-// rather than the shared env-var paper keys.
-
-async function personalAlpacaFetch(userId: string, urlPath: string, opts?: RequestInit): Promise<unknown> {
-    const keys = await getDecryptedKeys(userId, 'alpaca_live');
-    if (!keys) throw new Error('No personal Alpaca keys found. Add them on the Profile page.');
-    const base = 'https://api.alpaca.markets/v2';
-    const headers: Record<string, string> = {
-        'APCA-API-KEY-ID': keys.keyId,
-        'APCA-API-SECRET-KEY': keys.secret,
-        'Content-Type': 'application/json',
-    };
-    const r = await fetch(`${base}${urlPath}`, { ...opts, headers });
-    if (!r.ok) throw new Error(`Alpaca personal error (${urlPath}): ${await r.text()}`);
-    return r.json();
-}
-
-router.get('/alpaca/api/personal/account', async (req: any, res) => {
-    try {
-        const userId = String(req.adminUser.id);
-        res.json(await personalAlpacaFetch(userId, '/account'));
-    } catch (err: any) { res.status(500).json({ error: err.message }); }
-});
-
-router.get('/alpaca/api/personal/positions', async (req: any, res) => {
-    try {
-        const userId = String(req.adminUser.id);
-        res.json(await personalAlpacaFetch(userId, '/positions'));
-    } catch (err: any) { res.status(500).json({ error: err.message }); }
-});
-
-router.get('/alpaca/api/personal/orders', async (req: any, res) => {
-    try {
-        const userId = String(req.adminUser.id);
-        res.json(await personalAlpacaFetch(userId, '/orders?limit=20&status=all'));
     } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1239,7 +1246,7 @@ router.post('/alpaca/api/apply-to-personal', async (req: any, res) => {
         const keys = await getDecryptedKeys(userId, 'alpaca_live');
         if (!keys) return res.status(400).json({ error: 'No personal Alpaca keys found. Add them on the Profile page.' });
 
-        const base = 'https://api.alpaca.markets/v2';
+        const base = restBase(true);
         const headers: Record<string, string> = {
             'APCA-API-KEY-ID': keys.keyId,
             'APCA-API-SECRET-KEY': keys.secret,
@@ -1270,20 +1277,24 @@ router.post('/alpaca/api/apply-to-personal', async (req: any, res) => {
                 results.push({ symbol: o.symbol, ok: false, error: err.message });
             }
         }
+        // Anyone watching the live wallet sees the new orders without waiting for the next resync.
+        resyncWallet(`live:${userId}:${keys.keyId}`);
         res.json({ results });
     } catch (err: any) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// Capture a single snapshot of account + positions to Mongo.
+// Capture a single snapshot of the Cloud-Claw paper account + positions.
 // Exported so server.ts can call it on an interval. Errors are swallowed
 // (Alpaca outages / API key issues shouldn't crash the snapshot loop).
 export async function snapshotAlpacaNow(): Promise<void> {
+    const creds = envPaperCreds();
+    if (!creds) return;
     try {
         const [acct, positions] = await Promise.all([
-            alpacaGet('/account') as Promise<any>,
-            alpacaGet('/positions') as Promise<any[]>,
+            alpacaRest(creds, '/account'),
+            alpacaRest(creds, '/positions') as Promise<any[]>,
         ]);
         const equity      = parseFloat(acct.equity);
         const last_equity = parseFloat(acct.last_equity);
@@ -1317,17 +1328,17 @@ router.get('/alpaca', (req, res) => {
         <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
         <div class="alpaca-layout">
             <div class="alpaca-header">
-                <div class="alpaca-title" id="alpaca-title">CLOUD-CLAW // ALPACA PAPER TRADING</div>
+                <div class="alpaca-title" id="alpaca-title">ALPACA // WALLETS</div>
                 <div class="alpaca-controls">
-                    <div class="profile-toggle">
-                        <button id="btn-paper"   class="profile-btn active" onclick="switchProfile('paper')">PAPER</button>
-                        <button id="btn-personal" class="profile-btn"        onclick="switchProfile('personal')">PERSONAL</button>
-                    </div>
+                    <div class="profile-toggle" id="wallet-tabs"></div>
+                    <span id="live-pill" class="live-pill" title="">&#9679; CONNECTING</span>
                     <span id="last-updated" class="last-updated">Loading...</span>
-                    <button class="refresh-btn" onclick="loadAll()">&#8635; REFRESH</button>
-                    <button id="apply-btn" class="apply-btn" onclick="openApplyModal()" style="display:none;">&#9654; APPLY TO PERSONAL</button>
+                    <button class="refresh-btn" onclick="reconnect()" title="Reconnect the live stream and reload the charts">&#8635; REFRESH</button>
+                    <button id="apply-btn" class="apply-btn" onclick="openApplyModal()" style="display:none;">&#9654; APPLY TO LIVE</button>
                 </div>
             </div>
+
+            <div id="alpaca-banner" class="alpaca-banner" style="display:none;"></div>
 
             <div class="stats-row">
                 <div class="stat-box">
@@ -1411,7 +1422,7 @@ router.get('/alpaca', (req, res) => {
         <div id="apply-modal" class="modal-overlay" style="display:none;">
             <div class="modal-box">
                 <div class="modal-header">
-                    <span>APPLY PAPER STRATEGY TO PERSONAL ACCOUNT</span>
+                    <span>APPLY PAPER POSITIONS TO YOUR LIVE ACCOUNT</span>
                     <button class="modal-close" onclick="closeApplyModal()">&#10005;</button>
                 </div>
                 <div class="modal-warning">
@@ -1419,11 +1430,11 @@ router.get('/alpaca', (req, res) => {
                     Review carefully before confirming.
                 </div>
                 <div id="modal-paper-summary" class="modal-section">
-                    <div class="modal-section-title">PAPER POSITIONS (SOURCE)</div>
+                    <div class="modal-section-title">PAPER POSITIONS (SOURCE: THE WALLET ON SCREEN)</div>
                     <div id="modal-paper-rows"></div>
                 </div>
                 <div id="modal-personal-summary" class="modal-section">
-                    <div class="modal-section-title">PERSONAL ACCOUNT BALANCE</div>
+                    <div class="modal-section-title">LIVE ACCOUNT BALANCE</div>
                     <div id="modal-personal-balance"></div>
                 </div>
                 <div class="modal-section">
@@ -1440,139 +1451,7 @@ router.get('/alpaca', (req, res) => {
 
         <script>
         const TOKEN = '${token}';
-
-        // ── Profile switcher ──────────────────────────────────────────────────
-        let currentProfile = 'paper'; // 'paper' | 'personal'
-
-        function switchProfile(profile) {
-            currentProfile = profile;
-            document.getElementById('btn-paper').classList.toggle('active', profile === 'paper');
-            document.getElementById('btn-personal').classList.toggle('active', profile === 'personal');
-            document.getElementById('alpaca-title').textContent =
-                profile === 'paper' ? 'CLOUD-CLAW // ALPACA PAPER TRADING' : 'PERSONAL // ALPACA LIVE TRADING';
-            document.getElementById('apply-btn').style.display = profile === 'paper' ? 'inline-block' : 'none';
-            loadAll();
-        }
-
-        function profileApiUrl(path) {
-            if (currentProfile === 'personal') {
-                return '/admin/alpaca/api/personal' + path + '?token=' + TOKEN;
-            }
-            return '/admin/alpaca/api' + path + '?token=' + TOKEN;
-        }
-
-        // ── Apply to personal modal ───────────────────────────────────────────
-        let pendingOrders = [];
-
-        async function openApplyModal() {
-            document.getElementById('apply-modal').style.display = 'flex';
-            document.getElementById('modal-result').style.display = 'none';
-            document.getElementById('modal-confirm-btn').disabled = false;
-            document.getElementById('modal-confirm-btn').textContent = 'CONFIRM — PLACE ORDERS';
-            document.getElementById('modal-paper-rows').innerHTML = 'Loading...';
-            document.getElementById('modal-personal-balance').innerHTML = 'Loading...';
-            document.getElementById('modal-orders-rows').innerHTML = '';
-            pendingOrders = [];
-
-            const [posRes, personalAccRes] = await Promise.all([
-                fetch('/admin/alpaca/api/positions?token=' + TOKEN),
-                fetch('/admin/alpaca/api/personal/account?token=' + TOKEN),
-            ]);
-
-            const positions = posRes.ok ? await posRes.json() : [];
-            const personalAcct = personalAccRes.ok ? await personalAccRes.json() : null;
-
-            if (!Array.isArray(positions) || positions.length === 0) {
-                document.getElementById('modal-paper-rows').innerHTML = '<span class="modal-none">No open paper positions.</span>';
-                document.getElementById('modal-orders-rows').innerHTML = '<span class="modal-none">Nothing to apply.</span>';
-                document.getElementById('modal-confirm-btn').disabled = true;
-                return;
-            }
-
-            // Paper positions table
-            document.getElementById('modal-paper-rows').innerHTML = \`
-                <table>
-                    <thead><tr><th>SYMBOL</th><th>QTY</th><th>MKT VALUE</th><th>UNREAL P&L</th></tr></thead>
-                    <tbody>\${positions.map(p => \`<tr>
-                        <td class="sym">\${p.symbol}</td>
-                        <td>\${p.qty}</td>
-                        <td>\${fmt$(p.market_value)}</td>
-                        <td class="\${parseFloat(p.unrealized_pl) >= 0 ? 'pos' : 'neg'}">\${fmt$(p.unrealized_pl)}</td>
-                    </tr>\`).join('')}</tbody>
-                </table>\`;
-
-            // Personal account balance
-            if (personalAcct && !personalAcct.error) {
-                document.getElementById('modal-personal-balance').innerHTML =
-                    \`Equity: <strong>\${fmt$(personalAcct.equity)}</strong> &nbsp;|&nbsp; Buying Power: <strong>\${fmt$(personalAcct.buying_power)}</strong>\`;
-            } else {
-                document.getElementById('modal-personal-balance').innerHTML =
-                    \`<span class="modal-err">\${personalAcct?.error || 'Could not load personal account. Check your API keys on the Profile page.'}</span>\`;
-            }
-
-            // Build proposed orders (market buy, notional = paper market value)
-            pendingOrders = positions.map(p => ({
-                symbol: p.symbol,
-                notional: Math.abs(parseFloat(p.market_value)),
-            }));
-
-            document.getElementById('modal-orders-rows').innerHTML = \`
-                <table>
-                    <thead><tr><th>SYMBOL</th><th>SIDE</th><th>NOTIONAL</th></tr></thead>
-                    <tbody>\${pendingOrders.map(o => \`<tr>
-                        <td class="sym">\${o.symbol}</td>
-                        <td class="side-buy">BUY</td>
-                        <td>\${fmt$(o.notional)}</td>
-                    </tr>\`).join('')}</tbody>
-                </table>\`;
-        }
-
-        function closeApplyModal() {
-            document.getElementById('apply-modal').style.display = 'none';
-        }
-
-        async function confirmApply() {
-            if (!pendingOrders.length) return;
-
-            // MUR-62: real-money orders require an explicit, per-trade interactive
-            // confirmation typed by the board member. The phrase is also sent as a
-            // header so the server can reject non-interactive / agent callers.
-            const CONFIRM_PHRASE = 'I CONFIRM LIVE ORDERS';
-            const typed = window.prompt(
-                'LIVE REAL-MONEY ORDERS\\n\\nThis places real orders on your live Alpaca account.\\nType exactly the following to confirm:\\n\\n' + CONFIRM_PHRASE
-            );
-            if (typed !== CONFIRM_PHRASE) {
-                const resultEl = document.getElementById('modal-result');
-                resultEl.style.display = 'block';
-                resultEl.innerHTML = \`<span class="modal-err">Cancelled — confirmation phrase not entered.</span>\`;
-                return;
-            }
-
-            const btn = document.getElementById('modal-confirm-btn');
-            btn.disabled = true;
-            btn.textContent = 'Placing orders...';
-
-            const r = await fetch('/admin/alpaca/api/apply-to-personal?token=' + TOKEN, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Live-Apply-Confirm': CONFIRM_PHRASE },
-                body: JSON.stringify({ orders: pendingOrders, confirmation: CONFIRM_PHRASE }),
-            });
-            const data = await r.json();
-
-            const resultEl = document.getElementById('modal-result');
-            resultEl.style.display = 'block';
-
-            if (!r.ok || data.error) {
-                resultEl.innerHTML = \`<span class="modal-err">Error: \${data.error || r.status}</span>\`;
-                return;
-            }
-
-            const rows = data.results.map(res =>
-                \`<div class="\${res.ok ? 'modal-ok' : 'modal-err'}">\${res.ok ? '✓' : '✗'} \${res.symbol} — \${res.ok ? 'Order ' + res.orderId : res.error}</div>\`
-            ).join('');
-            resultEl.innerHTML = rows;
-            btn.textContent = 'Done';
-        }
+        const q = function (id) { return document.getElementById(id); };
 
         // ── Formatting helpers ────────────────────────────────────────────────
 
@@ -1602,63 +1481,336 @@ router.get('/alpaca', (req, res) => {
                    d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
         }
 
-        async function loadAccount() {
-            const r = await fetch(profileApiUrl('/account'));
-            const a = await r.json();
-            if (a.error) return;
-            document.getElementById('stat-equity').textContent = fmt$(a.equity);
-            document.getElementById('stat-buying-power').textContent = fmt$(a.buying_power);
-            document.getElementById('stat-cash').textContent = fmt$(a.cash);
-            const dayPl = parseFloat(a.equity) - parseFloat(a.last_equity || a.equity);
-            const dayPlPct = parseFloat(a.last_equity) > 0 ? dayPl / parseFloat(a.last_equity) : 0;
-            const plEl = document.getElementById('stat-day-pl');
-            plEl.textContent = fmt$(dayPl);
-            plEl.className = 'stat-value ' + (dayPl >= 0 ? 'pos' : 'neg');
-            document.getElementById('stat-day-pl-pct').textContent = fmtPct(dayPlPct);
+        // ── Wallets ───────────────────────────────────────────────────────────
+        // Each wallet is one Alpaca account; the server streams it to this page.
+        let wallets = [];
+        let currentWallet = null;
+        let stream = null;
+        const prevPrice = {};
+
+        function walletApi(wallet, path) {
+            return '/admin/alpaca/api/w/' + encodeURIComponent(wallet) + path + (path.indexOf('?') === -1 ? '?' : '&') + 'token=' + TOKEN;
+        }
+        function walletById(id) { return wallets.find(function (w) { return w.id === id; }); }
+
+        function showBanner(msg, isErr, profileLink) {
+            const b = q('alpaca-banner');
+            if (!msg) { b.style.display = 'none'; b.textContent = ''; return; }
+            b.style.display = 'block';
+            b.className = 'alpaca-banner' + (isErr ? ' err' : '');
+            b.textContent = msg;
+            if (profileLink) {
+                const a = document.createElement('a');
+                a.href = '/admin/profile?token=' + TOKEN;
+                a.textContent = 'Open Profile & API keys →';
+                b.appendChild(document.createTextNode(' '));
+                b.appendChild(a);
+            }
         }
 
-        async function loadPositions() {
-            const r = await fetch(profileApiUrl('/positions'));
-            const data = await r.json();
-            const tbody = document.getElementById('positions-body');
+        function setPill(state, text, title) {
+            const p = q('live-pill');
+            p.className = 'live-pill pill-' + state;
+            p.textContent = '● ' + text;
+            p.title = title || '';
+        }
+
+        function renderWalletTabs() {
+            const box = q('wallet-tabs');
+            box.innerHTML = '';
+            wallets.forEach(function (w) {
+                const b = document.createElement('button');
+                b.className = 'profile-btn' + (w.id === currentWallet ? ' active' : '') + (w.available ? '' : ' unavailable');
+                b.textContent = w.label.toUpperCase() + ' ';
+                const badge = document.createElement('span');
+                badge.className = 'wallet-mode ' + (w.live ? 'mode-live' : 'mode-paper');
+                badge.textContent = w.live ? 'LIVE' : 'PAPER';
+                b.appendChild(badge);
+                b.title = w.available ? (w.live ? 'Real-money account' : 'Paper account') : w.reason;
+                b.onclick = function () {
+                    if (!w.available) { showBanner(w.reason, true, w.id !== 'cloudclaw'); return; }
+                    if (w.id !== currentWallet) switchWallet(w.id);
+                };
+                box.appendChild(b);
+            });
+        }
+
+        function pickInitialWallet() {
+            const ok = function (id) { const w = walletById(id); return !!(w && w.available); };
+            const fromUrl = new URL(location.href).searchParams.get('wallet');
+            let saved = null;
+            try { saved = localStorage.getItem('alpaca.wallet'); } catch (e) { /* storage blocked */ }
+            if (fromUrl && ok(fromUrl)) return fromUrl;
+            if (saved && ok(saved)) return saved;
+            const first = wallets.find(function (w) { return w.available; });
+            return first ? first.id : null;
+        }
+
+        async function loadWallets() {
+            try {
+                const r = await fetch('/admin/alpaca/api/wallets?token=' + TOKEN);
+                wallets = await r.json();
+                if (!Array.isArray(wallets)) throw new Error(wallets.error || 'bad response');
+            } catch (e) {
+                showBanner('Could not list Alpaca wallets: ' + e.message, true);
+                setPill('error', 'ERROR');
+                return;
+            }
+            currentWallet = pickInitialWallet();
+            renderWalletTabs();
+            if (!currentWallet) {
+                showBanner('No Alpaca wallet is available: the server has no Cloud-Claw keys and your Profile page has no Alpaca keys.', true, true);
+                setPill('error', 'NO WALLET');
+                q('last-updated').textContent = '';
+                return;
+            }
+            switchWallet(currentWallet);
+        }
+
+        function switchWallet(id) {
+            currentWallet = id;
+            try { localStorage.setItem('alpaca.wallet', id); } catch (e) { /* storage blocked */ }
+            const u = new URL(location.href);
+            u.searchParams.set('wallet', id);
+            history.replaceState(null, '', u.toString());
+            renderWalletTabs();
+            const w = walletById(id);
+            q('alpaca-title').textContent = 'ALPACA // ' + w.label.toUpperCase() + (w.live ? ' — REAL MONEY' : '');
+            const live = walletById('live');
+            q('apply-btn').style.display = (!w.live && live && live.available) ? 'inline-block' : 'none';
+            resetView();
+            connectStream();
+            loadCharts();
+        }
+
+        function resetView() {
+            for (const k in prevPrice) delete prevPrice[k];
+            ['stat-equity', 'stat-buying-power', 'stat-day-pl', 'stat-cash'].forEach(function (id) {
+                q(id).textContent = '—';
+                q(id).className = 'stat-value';
+            });
+            q('stat-day-pl-pct').textContent = '';
+            q('positions-body').innerHTML = '<tr><td colspan="7" class="loading-row">Loading...</td></tr>';
+            q('orders-body').innerHTML = '<tr><td colspan="7" class="loading-row">Loading...</td></tr>';
+            q('last-updated').textContent = 'Loading...';
+            showBanner('');
+        }
+
+        // ── Live stream (server-sent events) ─────────────────────────────────
+        function connectStream() {
+            if (stream) stream.close();
+            setPill('connecting', 'CONNECTING');
+            const wallet = currentWallet;
+            const es = new EventSource('/admin/alpaca/api/stream?wallet=' + encodeURIComponent(wallet) + '&token=' + TOKEN);
+            stream = es;
+            es.addEventListener('snapshot', function (e) {
+                if (stream !== es) return;
+                let snap;
+                try { snap = JSON.parse(e.data); } catch (err) { return; }
+                renderSnapshot(snap);
+            });
+            es.onerror = function () {
+                if (stream !== es) return;
+                if (es.readyState === EventSource.CLOSED) setPill('error', 'DISCONNECTED', 'The server refused the stream. Press REFRESH to try again.');
+                else setPill('reconnecting', 'RECONNECTING', 'Lost the stream; the browser is reconnecting.');
+            };
+        }
+
+        function reconnect() {
+            if (!currentWallet) { loadWallets(); return; }
+            connectStream();
+            loadCharts();
+        }
+
+        function renderSnapshot(snap) {
+            const cloud = snap.wallet === 'cloudclaw';
+            if (snap.error) {
+                showBanner(snap.error + (cloud
+                    ? ' — the server\\'s ALPACA_API_KEY / ALPACA_SECRET_KEY need replacing in Secrets Manager, or add your own paper keys on the Profile page.'
+                    : ' — update these keys on the Profile page.'), true, true);
+            } else {
+                showBanner('');
+            }
+
+            const t = snap.streams.trading, d = snap.streams.data;
+            const detail = 'Orders: ' + t.state + (t.message ? ' (' + t.message + ')' : '') +
+                ' · Prices: ' + d.state + (d.message ? ' (' + d.message + ')' : '');
+            if (snap.error && !snap.account) setPill('error', 'ERROR', snap.error);
+            else if (t.state === 'live' && (d.state === 'live' || d.state === 'idle')) setPill('live', 'LIVE', detail);
+            else if (t.state === 'error' || d.state === 'error') setPill('degraded', 'PARTIAL', detail + ' — values still refresh every 20s');
+            else setPill('connecting', (t.state === 'reconnecting' || d.state === 'reconnecting') ? 'RECONNECTING' : 'CONNECTING', detail);
+
+            const at = [snap.tickAt, snap.syncedAt].filter(Boolean).sort().pop();
+            if (at) q('last-updated').textContent = 'Updated ' + new Date(at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            else if (snap.error) q('last-updated').textContent = '';
+
+            if (snap.account) {
+                renderAccount(snap.account);
+                renderPositions(snap.positions);
+                renderOrders(snap.orders);
+            } else if (snap.error) {
+                q('positions-body').innerHTML = '<tr><td colspan="7" class="loading-row">Unavailable.</td></tr>';
+                q('orders-body').innerHTML = '<tr><td colspan="7" class="loading-row">Unavailable.</td></tr>';
+            }
+        }
+
+        function renderAccount(a) {
+            q('stat-equity').textContent = fmt$(a.equity);
+            q('stat-buying-power').textContent = fmt$(a.buying_power);
+            q('stat-cash').textContent = fmt$(a.cash);
+            const dayPl = parseFloat(a.equity) - parseFloat(a.last_equity || a.equity);
+            const dayPlPct = parseFloat(a.last_equity) > 0 ? dayPl / parseFloat(a.last_equity) : 0;
+            const plEl = q('stat-day-pl');
+            plEl.textContent = fmt$(dayPl);
+            plEl.className = 'stat-value ' + (dayPl >= 0 ? 'pos' : 'neg');
+            q('stat-day-pl-pct').textContent = fmtPct(dayPlPct);
+        }
+
+        function renderPositions(data) {
+            const tbody = q('positions-body');
             if (!Array.isArray(data) || data.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="7" class="loading-row">No open positions.</td></tr>';
                 return;
             }
-            tbody.innerHTML = data.map(function(p) {
+            tbody.innerHTML = data.map(function (p) {
                 const plCls = plClass(p.unrealized_pl);
+                const price = parseFloat(p.current_price);
+                const before = prevPrice[p.symbol];
+                const tick = before === undefined || price === before ? '' : (price > before ? ' tick-up' : ' tick-down');
+                prevPrice[p.symbol] = price;
                 return '<tr>' +
                     '<td class="sym">' + escHtml(p.symbol) + '</td>' +
                     '<td>' + escHtml(p.qty) + '</td>' +
                     '<td>' + fmt$(p.avg_entry_price) + '</td>' +
-                    '<td>' + fmt$(p.current_price) + '</td>' +
+                    '<td class="price' + tick + '">' + fmt$(p.current_price) + '</td>' +
                     '<td>' + fmt$(p.market_value) + '</td>' +
                     '<td class="' + plCls + '">' + fmt$(p.unrealized_pl) + '</td>' +
                     '<td class="' + plCls + '">' + fmtPct(p.unrealized_plpc) + '</td>' +
                     '</tr>';
             }).join('');
+            // Let the flash fade (td.price has a background transition).
+            setTimeout(function () {
+                tbody.querySelectorAll('.tick-up, .tick-down').forEach(function (el) { el.classList.remove('tick-up', 'tick-down'); });
+            }, 700);
         }
 
-        async function loadOrders() {
-            const r = await fetch(profileApiUrl('/orders'));
-            const data = await r.json();
-            const tbody = document.getElementById('orders-body');
+        function renderOrders(data) {
+            const tbody = q('orders-body');
             if (!Array.isArray(data) || data.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="7" class="loading-row">No recent orders.</td></tr>';
                 return;
             }
-            tbody.innerHTML = data.map(function(o) {
+            tbody.innerHTML = data.map(function (o) {
                 const sideCls = o.side === 'buy' ? 'side-buy' : 'side-sell';
                 return '<tr>' +
                     '<td class="mono-sm">' + fmtDate(o.created_at) + '</td>' +
                     '<td class="sym">' + escHtml(o.symbol) + '</td>' +
                     '<td class="' + sideCls + '">' + escHtml((o.side || '').toUpperCase()) + '</td>' +
-                    '<td>' + escHtml(o.qty || o.filled_qty) + '</td>' +
+                    '<td>' + escHtml(o.qty || o.filled_qty || (o.notional ? fmt$(o.notional) : '')) + '</td>' +
                     '<td>' + escHtml((o.type || '').toUpperCase()) + '</td>' +
                     '<td class="status-' + escHtml(o.status) + '">' + escHtml((o.status || '').toUpperCase()) + '</td>' +
                     '<td>' + (o.filled_avg_price ? fmt$(o.filled_avg_price) : '—') + '</td>' +
                     '</tr>';
             }).join('');
+        }
+
+        // ── Apply paper positions to the live account ─────────────────────────
+        let pendingOrders = [];
+
+        async function openApplyModal() {
+            q('apply-modal').style.display = 'flex';
+            q('modal-result').style.display = 'none';
+            q('modal-confirm-btn').disabled = false;
+            q('modal-confirm-btn').textContent = 'CONFIRM — PLACE ORDERS';
+            q('modal-paper-rows').innerHTML = 'Loading...';
+            q('modal-personal-balance').innerHTML = 'Loading...';
+            q('modal-orders-rows').innerHTML = '';
+            pendingOrders = [];
+
+            // Source = the paper wallet on screen; target = the live wallet.
+            const [posRes, liveRes] = await Promise.all([
+                fetch(walletApi(currentWallet, '/positions')),
+                fetch(walletApi('live', '/account')),
+            ]);
+            const positions = posRes.ok ? await posRes.json() : [];
+            const liveAcct = await liveRes.json().catch(function () { return null; });
+
+            if (!Array.isArray(positions) || positions.length === 0) {
+                q('modal-paper-rows').innerHTML = '<span class="modal-none">No open paper positions.</span>';
+                q('modal-orders-rows').innerHTML = '<span class="modal-none">Nothing to apply.</span>';
+                q('modal-confirm-btn').disabled = true;
+                return;
+            }
+
+            q('modal-paper-rows').innerHTML =
+                '<table><thead><tr><th>SYMBOL</th><th>QTY</th><th>MKT VALUE</th><th>UNREAL P&amp;L</th></tr></thead><tbody>' +
+                positions.map(function (p) {
+                    return '<tr><td class="sym">' + escHtml(p.symbol) + '</td><td>' + escHtml(p.qty) + '</td>' +
+                        '<td>' + fmt$(p.market_value) + '</td>' +
+                        '<td class="' + (parseFloat(p.unrealized_pl) >= 0 ? 'pos' : 'neg') + '">' + fmt$(p.unrealized_pl) + '</td></tr>';
+                }).join('') + '</tbody></table>';
+
+            if (liveRes.ok && liveAcct && !liveAcct.error) {
+                q('modal-personal-balance').innerHTML =
+                    'Equity: <strong>' + fmt$(liveAcct.equity) + '</strong> &nbsp;|&nbsp; Buying Power: <strong>' + fmt$(liveAcct.buying_power) + '</strong>';
+            } else {
+                q('modal-personal-balance').innerHTML = '<span class="modal-err">' +
+                    escHtml((liveAcct && liveAcct.error) || 'Could not load the live account. Check your API keys on the Profile page.') + '</span>';
+            }
+
+            // Proposed orders: market buy, notional = paper market value.
+            pendingOrders = positions.map(function (p) {
+                return { symbol: p.symbol, notional: Math.abs(parseFloat(p.market_value)) };
+            });
+            q('modal-orders-rows').innerHTML =
+                '<table><thead><tr><th>SYMBOL</th><th>SIDE</th><th>NOTIONAL</th></tr></thead><tbody>' +
+                pendingOrders.map(function (o) {
+                    return '<tr><td class="sym">' + escHtml(o.symbol) + '</td><td class="side-buy">BUY</td><td>' + fmt$(o.notional) + '</td></tr>';
+                }).join('') + '</tbody></table>';
+        }
+
+        function closeApplyModal() {
+            q('apply-modal').style.display = 'none';
+        }
+
+        async function confirmApply() {
+            if (!pendingOrders.length) return;
+
+            // MUR-62: real-money orders require an explicit, per-trade interactive
+            // confirmation typed by the board member. The phrase is also sent as a
+            // header so the server can reject non-interactive / agent callers.
+            const CONFIRM_PHRASE = 'I CONFIRM LIVE ORDERS';
+            const typed = window.prompt(
+                'LIVE REAL-MONEY ORDERS\\n\\nThis places real orders on your live Alpaca account.\\nType exactly the following to confirm:\\n\\n' + CONFIRM_PHRASE
+            );
+            const resultEl = q('modal-result');
+            if (typed !== CONFIRM_PHRASE) {
+                resultEl.style.display = 'block';
+                resultEl.innerHTML = '<span class="modal-err">Cancelled — confirmation phrase not entered.</span>';
+                return;
+            }
+
+            const btn = q('modal-confirm-btn');
+            btn.disabled = true;
+            btn.textContent = 'Placing orders...';
+
+            const r = await fetch('/admin/alpaca/api/apply-to-personal?token=' + TOKEN, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Live-Apply-Confirm': CONFIRM_PHRASE },
+                body: JSON.stringify({ orders: pendingOrders, confirmation: CONFIRM_PHRASE }),
+            });
+            const data = await r.json().catch(function () { return {}; });
+            resultEl.style.display = 'block';
+
+            if (!r.ok || data.error) {
+                resultEl.innerHTML = '<span class="modal-err">Error: ' + escHtml(data.error || r.status) + '</span>';
+                return;
+            }
+            resultEl.innerHTML = data.results.map(function (res) {
+                return '<div class="' + (res.ok ? 'modal-ok' : 'modal-err') + '">' + (res.ok ? '✓' : '✗') + ' ' +
+                    escHtml(res.symbol) + ' — ' + escHtml(res.ok ? 'Order ' + res.orderId : res.error) + '</div>';
+            }).join('');
+            btn.textContent = 'Done';
         }
 
         // ── Charts ───────────────────────────────────────────────────────────
@@ -1748,15 +1900,50 @@ router.get('/alpaca', (req, res) => {
             return '$' + n.toFixed(0);
         }
 
+        // Replace a chart with a one-line message drawn on its canvas.
+        function chartMessage(canvasId, key, msg) {
+            if (charts[key]) { charts[key].destroy(); charts[key] = null; }
+            const canvasEl = q(canvasId);
+            // Size the backing store to the element, or CSS stretches the text.
+            const dpr = window.devicePixelRatio || 1;
+            const w = canvasEl.clientWidth, h = canvasEl.clientHeight;
+            canvasEl.width = w * dpr;
+            canvasEl.height = h * dpr;
+            const ctx = canvasEl.getContext('2d');
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.clearRect(0, 0, w, h);
+            ctx.fillStyle = '#555';
+            ctx.font = '11px ' + chartFontFamily;
+            ctx.textAlign = 'center';
+            ctx.fillText(msg, w / 2, h / 2);
+        }
+
+        function upsertChart(key, canvasId, data, opts) {
+            if (charts[key]) {
+                charts[key].data = data;
+                charts[key].options = opts;
+                charts[key].update();
+            } else {
+                charts[key] = new Chart(q(canvasId).getContext('2d'), { type: 'line', data: data, options: opts });
+            }
+        }
+
         async function loadHistoryChart() {
+            const wallet = currentWallet;
             const tf = RANGE_TIMEFRAME[currentRange] || '1D';
             const period = currentRange === 'ALL' ? 'all' : currentRange;
-            // Portfolio history is only available for the paper account (Alpaca personal API
-            // also supports it, but we skip chart loading for personal to keep things simple).
-            if (currentProfile === 'personal') return;
-            const r = await fetch('/admin/alpaca/api/history?period=' + period + '&timeframe=' + tf + '&token=' + TOKEN);
-            const h = await r.json();
-            if (!h || h.error || !Array.isArray(h.timestamp)) return;
+            let h;
+            try {
+                const r = await fetch(walletApi(wallet, '/history?period=' + period + '&timeframe=' + tf));
+                h = await r.json();
+            } catch (e) { h = { error: e.message }; }
+            if (wallet !== currentWallet) return;
+            if (!h || h.error || !Array.isArray(h.timestamp)) {
+                const msg = 'History unavailable' + (h && h.error ? ': ' + h.error : '');
+                chartMessage('chart-equity', 'equity', msg);
+                chartMessage('chart-pl', 'pl', msg);
+                return;
+            }
 
             const bounds = rangeBounds();
             const equityPts = [];
@@ -1769,8 +1956,7 @@ router.get('/alpaca', (req, res) => {
                 if (h.profit_loss && h.profit_loss[i] != null) plPts.push({ x: t, y: h.profit_loss[i] });
             }
 
-            // Equity line
-            const equityData = {
+            upsertChart('equity', 'chart-equity', {
                 datasets: [{
                     label: 'Equity',
                     data: equityPts,
@@ -1781,56 +1967,36 @@ router.get('/alpaca', (req, res) => {
                     borderWidth: 1.5,
                     tension: 0.2,
                 }],
-            };
-            if (charts.equity) {
-                charts.equity.data = equityData;
-                charts.equity.options = baseChartOpts(fmtCompact);
-                charts.equity.update();
-            } else {
-                charts.equity = new Chart(document.getElementById('chart-equity').getContext('2d'),
-                    { type: 'line', data: equityData, options: baseChartOpts(fmtCompact) });
-            }
+            }, baseChartOpts(fmtCompact));
 
             // Cumulative P&L line (color based on last value within window)
             const finalPl = plPts.length ? plPts[plPts.length - 1].y : 0;
-            const plColor = finalPl >= 0 ? '#10b981' : '#ef4444';
-            const plBg = finalPl >= 0 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)';
-            const plData = {
+            upsertChart('pl', 'chart-pl', {
                 datasets: [{
                     label: 'P&L',
                     data: plPts,
-                    borderColor: plColor,
-                    backgroundColor: plBg,
+                    borderColor: finalPl >= 0 ? '#10b981' : '#ef4444',
+                    backgroundColor: finalPl >= 0 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
                     fill: 'origin',
                     pointRadius: 0,
                     borderWidth: 1.5,
                     tension: 0.2,
                 }],
-            };
-            if (charts.pl) {
-                charts.pl.data = plData;
-                charts.pl.options = baseChartOpts(fmtCompact);
-                charts.pl.update();
-            } else {
-                charts.pl = new Chart(document.getElementById('chart-pl').getContext('2d'),
-                    { type: 'line', data: plData, options: baseChartOpts(fmtCompact) });
-            }
+            }, baseChartOpts(fmtCompact));
         }
 
         const POSITION_COLORS = ['#0d9488','#f97316','#fbbf24','#10b981','#3b82f6','#a855f7','#ec4899','#06b6d4','#eab308','#f43f5e'];
 
         async function loadPositionsChart() {
+            if (currentWallet !== 'cloudclaw') {
+                chartMessage('chart-positions', 'positions', 'Position snapshots are recorded for the Cloud-Claw paper wallet only.');
+                return;
+            }
             const r = await fetch('/admin/alpaca/api/snapshots?period=' + currentRange + '&token=' + TOKEN);
             const snaps = await r.json();
-            const canvasEl = document.getElementById('chart-positions');
+            if (currentWallet !== 'cloudclaw') return;
             if (!Array.isArray(snaps) || snaps.length === 0) {
-                if (charts.positions) { charts.positions.destroy(); charts.positions = null; }
-                const ctx = canvasEl.getContext('2d');
-                ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
-                ctx.fillStyle = '#444';
-                ctx.font = '11px ' + chartFontFamily;
-                ctx.textAlign = 'center';
-                ctx.fillText('No snapshots yet — first sample arrives within 5 min.', canvasEl.width / 2, canvasEl.height / 2);
+                chartMessage('chart-positions', 'positions', 'No snapshots yet — the server records one every 5 min.');
                 return;
             }
 
@@ -1860,7 +2026,6 @@ router.get('/alpaca', (req, res) => {
                 };
             });
 
-            const data = { datasets: datasets };
             const opts = baseChartOpts(fmtCompact);
             opts.plugins.legend = {
                 display: true,
@@ -1868,15 +2033,7 @@ router.get('/alpaca', (req, res) => {
                 labels: { color: '#888', font: { family: chartFontFamily, size: 10 }, boxWidth: 10 },
             };
             opts.scales.y.stacked = true;
-
-            if (charts.positions) {
-                charts.positions.data = data;
-                charts.positions.options = opts;
-                charts.positions.update();
-            } else {
-                charts.positions = new Chart(canvasEl.getContext('2d'),
-                    { type: 'line', data: data, options: opts });
-            }
+            upsertChart('positions', 'chart-positions', { datasets: datasets }, opts);
         }
 
         function bindRangeButtons() {
@@ -1891,19 +2048,15 @@ router.get('/alpaca', (req, res) => {
         }
 
         async function loadCharts() {
+            if (!currentWallet) return;
             await Promise.all([loadHistoryChart(), loadPositionsChart()]);
         }
 
-        async function loadAll() {
-            document.getElementById('last-updated').textContent = 'Refreshing...';
-            await Promise.all([loadAccount(), loadPositions(), loadOrders(), loadCharts()]);
-            document.getElementById('last-updated').textContent =
-                'Updated: ' + new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        }
-
         bindRangeButtons();
-        loadAll();
-        setInterval(loadAll, 30_000);
+        loadWallets();
+        // Account, positions and orders arrive live over the stream; the charts
+        // are history, so a slow refresh is plenty.
+        setInterval(loadCharts, 5 * 60 * 1000);
         </script>
     `;
 
@@ -2093,6 +2246,50 @@ router.get('/alpaca', (req, res) => {
         }
         .profile-btn:hover { color: #aaa; }
         .profile-btn.active { background: #0d9488; color: #000; font-weight: bold; }
+        .profile-btn.unavailable { color: #444; text-decoration: line-through; }
+        .profile-btn + .profile-btn { border-left: 1px solid #333; }
+        .wallet-mode {
+            font-size: 0.55rem;
+            letter-spacing: 1px;
+            padding: 0.05rem 0.3rem;
+            border: 1px solid currentColor;
+            margin-left: 0.2rem;
+            vertical-align: middle;
+        }
+        .wallet-mode.mode-live { color: #f97316; }
+        .profile-btn.active .wallet-mode.mode-live { color: #7c2d12; }
+
+        /* Stream health */
+        .live-pill {
+            font-size: 0.65rem;
+            letter-spacing: 1px;
+            padding: 0.2rem 0.5rem;
+            border: 1px solid #333;
+            color: #666;
+            white-space: nowrap;
+            cursor: help;
+        }
+        .live-pill.pill-live { color: #10b981; border-color: #065f46; }
+        .live-pill.pill-live::first-letter { animation: livepulse 1.6s ease-in-out infinite; }
+        .live-pill.pill-degraded { color: #fbbf24; border-color: #78350f; }
+        .live-pill.pill-reconnecting, .live-pill.pill-connecting { color: #888; }
+        .live-pill.pill-error { color: #ef4444; border-color: #7f1d1d; }
+        @keyframes livepulse { 50% { opacity: 0.25; } }
+
+        .alpaca-banner {
+            border: 1px solid #333;
+            background: #111;
+            padding: 0.6rem 0.9rem;
+            font-size: 0.78rem;
+            color: #ccc;
+        }
+        .alpaca-banner.err { border-color: #7f1d1d; color: #fca5a5; }
+        .alpaca-banner a { color: #2dd4bf; margin-left: 0.25rem; }
+
+        /* Price prints flash the CURRENT cell */
+        td.price { transition: background-color 0.6s ease-out; }
+        td.price.tick-up { background-color: rgba(16, 185, 129, 0.28); color: #10b981; }
+        td.price.tick-down { background-color: rgba(239, 68, 68, 0.28); color: #ef4444; }
 
         /* Apply button */
         .apply-btn {

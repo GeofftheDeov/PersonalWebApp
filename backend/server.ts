@@ -28,6 +28,7 @@ import leadRoutes from "./routes/leadRoutes.js";
 import accountRoutes from "./routes/accountRoutes.js";
 import dbRoutes from "./routes/dbRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
+import runnerRoutes from "./routes/runnerRoutes.js";
 import campaignRoutes from "./routes/campaignRoutes.js";
 import taskRoutes from "./routes/taskRoutes.js";
 import eventRoutes from "./routes/eventRoutes.js";
@@ -128,6 +129,7 @@ app.use("/api/google-calendar", googleCalendarRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/campaign-invites", inviteRoutes);
+app.use("/api/runner", runnerRoutes); // PC skill runner (agentic OS); RUNNER_TOKEN auth
 
 // Event bus (Redis Streams when REDIS_URL is set; in-memory otherwise).
 // Started after routes are imported so module-level subscriptions are registered.

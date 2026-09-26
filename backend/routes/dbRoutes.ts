@@ -7,6 +7,9 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { sendResetPasswordEmail } from "../services/emailService.js";
 import { renderPage } from '../utils/adminUi.js';
+import { toCsv } from '../utils/csv.js';
+import { workshopClientJs } from '../utils/workshopClient.js';
+import { listViews, createView, updateView, deleteView, ListViewError } from '../services/listViews.js';
 import User from "../models/User.js";
 import Account from "../models/Account.js";
 import Contact from "../models/Contact.js";
@@ -52,6 +55,31 @@ const modelFor = (name: string): any => {
     if (!m) throw new Error(`Unknown collection: ${name}`);
     return m;
 };
+
+/** Collections whose records can be sent a password-reset email. */
+const RESETTABLE = new Set(['users', 'leads', 'accounts']);
+
+/**
+ * Left out of every export. The grid still shows them (it always has), but a
+ * CSV gets forwarded and opened in places a password hash or an encrypted key
+ * should not travel to.
+ */
+const EXPORT_OMIT = new Set(['password', 'resetPasswordToken', 'emailVerificationToken', 'encryptedKeyId', 'encryptedSecret']);
+
+/** Every key that appears on any row, in first-seen order. */
+const unionKeys = (rows: Record<string, unknown>[]): string[] => {
+    const keys = new Set<string>();
+    rows.forEach((r) => Object.keys(r).forEach((k) => keys.add(k)));
+    return Array.from(keys);
+};
+
+const escHtml = (v: unknown) => String(v ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+/** JSON that is safe inside a <script> element (no `</script>`, no U+2028/9). */
+const scriptJson = (v: unknown) => JSON.stringify(v)
+    .replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 
 // Middleware to verify token in query param
 const verifyToken = (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -169,13 +197,31 @@ const dbStyles = `
     /* Main Content Styling */
     .main-content {
         flex: 1;
+        min-width: 0;
         overflow-y: auto;
         padding: 2rem;
         position: relative;
         display: flex;
         flex-direction: column;
     }
-    
+    /* Table pages: the page itself never scrolls; the grid below does. A sticky
+       header only pins flush when its scroller has no top padding. With the
+       2rem padding this used to scroll in, rows showed through a strip above
+       the header. */
+    .main-content.list-mode {
+        overflow: hidden;
+        padding: 1.25rem 1.5rem 1rem;
+        z-index: 95; /* above the page vignette, like the other admin pages */
+    }
+    .main-content.list-mode .container {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+    }
+    /* .btn sets display, which would otherwise beat the hidden attribute. */
+    [hidden] { display: none !important; }
+
     /* Utility Styles for Inner Content */
     h1 {
         color: #fff;
@@ -185,50 +231,105 @@ const dbStyles = `
         margin-top: 0;
         text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
     }
+    .list-mode h1 { margin: 0; font-size: 1.6rem; }
     .container {
         max-width: 1600px;
         margin: 0 auto;
         width: 100%;
     }
-    
-    table { 
-        border-collapse: collapse; 
-        width: 100%; 
+
+    /* ── Data grid ─────────────────────────────────────────────────────── */
+    .table-scroll {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
         border: 2px solid #444;
-        background-color: #222;
+        background: #222;
         box-shadow: 0 0 20px rgba(0,0,0,0.5);
     }
-    th, td { 
-        border: 1px solid #444; 
-        padding: 12px; 
-        text-align: left; 
+    .table-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+    .table-scroll::-webkit-scrollbar-thumb { background: #444; }
+    .table-scroll::-webkit-scrollbar-corner { background: #222; }
+
+    /* separate + zero spacing, not collapse: collapsed borders belong to the
+       table, so they scrolled away and left a sticky header borderless. */
+    #data-table {
+        border-collapse: separate;
+        border-spacing: 0;
+        width: max-content;
+        font-size: 0.85rem;
     }
-    th { 
-        background-color: #333; 
-        color: #0d9488; 
-        text-transform: uppercase;
-        letter-spacing: 1px;
+    #data-table.fixed { table-layout: fixed; }
+    #data-table th, #data-table td {
+        border-right: 1px solid #444;
+        border-bottom: 1px solid #444;
+        padding: 8px 10px;
+        text-align: left;
+        vertical-align: top;
+        overflow: hidden;
+    }
+    #data-table th {
         position: sticky;
         top: 0;
-        z-index: 5;
-        cursor: pointer;
-        user-select: none;
-        transition: background-color 0.2s;
+        z-index: 3;
+        background-color: #333;
+        color: #0d9488;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        box-shadow: 0 2px 0 #555;
+        padding-right: 14px;
     }
-    th:hover {
-        background-color: #444;
+    #data-table th:hover { background-color: #3d3d3d; }
+    .th-label { pointer-events: none; }
+    .sort-ind { margin-left: 0.35rem; font-size: 0.65rem; color: #f97316; pointer-events: none; }
+
+    .col-resizer {
+        position: absolute;
+        top: 0;
+        right: -1px;
+        width: 9px;
+        height: 100%;
+        cursor: col-resize !important;
+        z-index: 4;
     }
-    th.sort-asc::after { content: ' ▲'; font-size: 0.7rem; }
-    th.sort-desc::after { content: ' ▼'; font-size: 0.7rem; }
-    tr:nth-child(even) { background-color: #2a2a2a; }
-    tr:hover { background-color: #333; }
+    .col-resizer::after {
+        content: '';
+        position: absolute;
+        top: 20%;
+        bottom: 20%;
+        right: 4px;
+        width: 2px;
+        background: #555;
+        transition: background 0.1s;
+    }
+    .col-resizer:hover::after { background: #f97316; top: 0; bottom: 0; }
+    body.col-resizing, body.col-resizing * { cursor: col-resize !important; }
+
+    #data-table tbody tr { background-color: #222; }
+    #data-table tbody tr:nth-child(even) { background-color: #2a2a2a; }
+    #data-table tbody tr:hover { background-color: #333; }
+    #data-table tr.no-rows td { color: #666; text-align: center; padding: 2rem; letter-spacing: 2px; }
+
+    /* ACTIONS stays in view however wide the table gets. */
+    #data-table .col-actions {
+        position: sticky;
+        right: 0;
+        z-index: 1;
+        background: inherit;
+        border-left: 1px solid #555;
+        box-shadow: -4px 0 8px rgba(0,0,0,0.35);
+    }
+    #data-table th.col-actions { z-index: 5; background-color: #333; cursor: default !important; }
+
     .cell-content {
         max-height: 100px;
         overflow-y: auto;
-        word-break: break-all;
-        font-size: 0.9rem;
+        overflow-wrap: anywhere;
+        white-space: pre-wrap;
     }
-    
+
     .empty-state {
         display: flex;
         align-items: center;
@@ -254,18 +355,21 @@ const dbStyles = `
         font-weight: bold;
         text-transform: uppercase;
         font-size: 0.8rem;
+        font-family: 'Courier New', monospace;
         cursor: pointer;
         transition: all 0.2s;
         display: inline-block;
     }
-    .btn:hover {
+    .btn:hover:not(:disabled) {
         transform: translateY(-2px);
         box-shadow: 0 4px 8px rgba(0,0,0,0.5);
     }
-    .btn-teal:hover { background: #0d9488; border-color: #0d9488; color: #000; }
-    .btn-orange:hover { background: #f97316; border-color: #f97316; color: #000; }
-    .btn-red:hover { background: #ef4444; border-color: #ef4444; color: #fff; }
-    
+    .btn:disabled { opacity: 0.45; cursor: not-allowed !important; }
+    .btn-teal:hover:not(:disabled) { background: #0d9488; border-color: #0d9488; color: #000; }
+    .btn-orange:hover:not(:disabled) { background: #f97316; border-color: #f97316; color: #000; }
+    .btn-red:hover:not(:disabled) { background: #ef4444; border-color: #ef4444; color: #fff; }
+    #data-table .btn { padding: 0.3rem 0.6rem; font-size: 0.7rem; }
+
     .actions-cell {
         display: flex;
         gap: 0.5rem;
@@ -305,20 +409,52 @@ const dbStyles = `
         gap: 1rem;
         justify-content: flex-end;
     }
-    
+
     .header-actions {
         display: flex;
         justify-content: space-between;
         align-items: center;
         margin-bottom: 1rem;
+        gap: 1rem;
     }
+
+    /* ── List view bar ─────────────────────────────────────────────────── */
+    .view-bar {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        margin-bottom: 0.75rem;
+        padding: 0.5rem 0.75rem;
+        background: #1e1e1e;
+        border: 1px solid #333;
+    }
+    .view-bar-label { font-size: 0.7rem; letter-spacing: 2px; color: #0d9488; font-weight: bold; }
+    #view-select {
+        background: #111;
+        border: 2px solid #444;
+        color: #f97316;
+        font-family: 'Courier New', monospace;
+        font-weight: bold;
+        font-size: 0.85rem;
+        padding: 0.3rem 0.5rem;
+        min-width: 220px;
+        outline: none;
+        cursor: pointer;
+    }
+    #view-select:focus { border-color: #0d9488; }
+    .view-bar .btn { padding: 0.3rem 0.7rem; font-size: 0.7rem; }
+    .view-dirty { font-size: 0.7rem; color: #fbbf24; letter-spacing: 1px; }
+    .view-status { font-size: 0.72rem; color: #888; margin-left: auto; }
+    .view-status.ok { color: #10b981; }
+    .view-status.err { color: #f87171; }
 
     /* Filter + column toolbar */
     .table-toolbar {
         display: flex;
         align-items: center;
         gap: 0.75rem;
-        margin-bottom: 1rem;
+        margin-bottom: 0.75rem;
         flex-wrap: wrap;
     }
 
@@ -338,16 +474,14 @@ const dbStyles = `
 
     .filter-count {
         font-size: 0.75rem;
-        color: #555;
+        color: #777;
         white-space: nowrap;
         letter-spacing: 1px;
     }
 
-    /* Column toggle dropdown */
-    .col-toggle-wrap {
-        position: relative;
-    }
-    .col-toggle-btn {
+    /* Dropdown menus (columns / filters / export) */
+    .menu-wrap { position: relative; }
+    .menu-btn {
         padding: 0.5rem 1rem;
         border: 2px solid #555;
         background: #333;
@@ -359,61 +493,105 @@ const dbStyles = `
         font-family: 'Courier New', monospace;
         white-space: nowrap;
     }
-    .col-toggle-btn:hover { background: #444; border-color: #0d9488; color: #0d9488; }
-
-    .col-dropdown {
+    .menu-btn:hover, .menu-btn.has-active { border-color: #0d9488; color: #0d9488; }
+    .menu {
         display: none;
         position: absolute;
         top: calc(100% + 4px);
         right: 0;
         background: #1e1e1e;
         border: 2px solid #444;
-        min-width: 220px;
-        max-height: 320px;
-        overflow-y: auto;
+        min-width: 260px;
         z-index: 50;
         box-shadow: 0 8px 24px rgba(0,0,0,0.6);
     }
-    .col-dropdown.open { display: block; }
-    .col-dropdown::-webkit-scrollbar { width: 4px; }
-    .col-dropdown::-webkit-scrollbar-thumb { background: #333; }
-
-    .col-dropdown-header {
+    .menu.open { display: block; }
+    .menu-head {
         display: flex;
         justify-content: space-between;
         align-items: center;
+        gap: 0.75rem;
         padding: 0.5rem 0.75rem;
         border-bottom: 1px solid #333;
         font-size: 0.65rem;
         letter-spacing: 2px;
-        color: #555;
+        color: #777;
     }
-    .col-dropdown-header button {
+    .menu-head span { margin-right: auto; }
+    .menu-head button {
         background: transparent;
         border: none;
         color: #0d9488;
         font-family: 'Courier New', monospace;
-        font-size: 0.65rem;
+        font-size: 0.7rem;
         letter-spacing: 1px;
         cursor: pointer;
         padding: 0;
     }
-    .col-dropdown-header button:hover { color: #f97316; }
+    .menu-head button:hover { color: #f97316; }
+    .menu-scroll { max-height: 360px; overflow-y: auto; }
+    .menu-scroll::-webkit-scrollbar { width: 4px; }
+    .menu-scroll::-webkit-scrollbar-thumb { background: #333; }
+    .menu-empty { padding: 0.75rem; font-size: 0.75rem; color: #666; }
+    .menu-note { padding: 0.5rem 0.75rem; font-size: 0.65rem; color: #666; border-top: 1px solid #333; }
 
     .col-item {
         display: flex;
         align-items: center;
-        gap: 0.6rem;
-        padding: 0.45rem 0.75rem;
-        cursor: pointer;
+        gap: 0.35rem;
+        padding: 0.3rem 0.5rem 0.3rem 0.75rem;
         font-size: 0.8rem;
         color: #ccc;
         border-bottom: 1px solid #111;
-        transition: background 0.1s;
     }
+    .col-item label { flex: 1; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .col-item:hover { background: #2b2b2b; }
     .col-item input[type="checkbox"] { accent-color: #0d9488; cursor: pointer; }
     .col-item.hidden-col { color: #555; }
+    .mini-btn {
+        background: #111;
+        border: 1px solid #333;
+        color: #888;
+        font-size: 0.6rem;
+        padding: 0.15rem 0.35rem;
+        cursor: pointer;
+        font-family: inherit;
+    }
+    .mini-btn:hover:not(:disabled) { color: #f97316; border-color: #f97316; }
+    .mini-btn:disabled { opacity: 0.3; cursor: default !important; }
+
+    #filters-menu { min-width: 560px; }
+    .filter-row { display: flex; gap: 0.4rem; align-items: center; padding: 0.4rem 0.75rem; border-bottom: 1px solid #111; }
+    .filter-row select, .filter-row input {
+        background: #111;
+        border: 1px solid #444;
+        color: #e0e0e0;
+        font-family: 'Courier New', monospace;
+        font-size: 0.8rem;
+        padding: 0.3rem 0.4rem;
+        outline: none;
+    }
+    .filter-row select:first-child { width: 170px; }
+    .filter-row input { flex: 1; min-width: 0; }
+    .filter-row input:disabled { opacity: 0.35; }
+    .filter-row select:focus, .filter-row input:focus { border-color: #0d9488; }
+
+    .menu-item {
+        display: block;
+        width: 100%;
+        text-align: left;
+        padding: 0.6rem 0.9rem;
+        background: transparent;
+        border: none;
+        border-bottom: 1px solid #111;
+        color: #ddd;
+        font-family: 'Courier New', monospace;
+        font-size: 0.8rem;
+        text-decoration: none;
+        cursor: pointer;
+        box-sizing: border-box;
+    }
+    .menu-item:hover { background: #2b2b2b; color: #f97316; }
 `;
 
 
@@ -443,330 +621,220 @@ router.get('/', async (req, res) => {
     }
 });
 
+// ── Saved list views (JSON) ──────────────────────────────────────────────────
+// Registered before the /:collection routes. Shared by all admins; see
+// services/listViews.ts and migrations/2026-09-25-admin-list-views.sql.
+
+const sendViewError = (res: express.Response, err: any) => {
+    if (err instanceof ListViewError) return res.status(err.status).json({ error: err.message, code: err.code });
+    console.error('[db] list views:', err);
+    res.status(500).json({ error: err?.message || 'List view request failed' });
+};
+
+const knownCollection = (req: express.Request, res: express.Response): string | null => {
+    const collection = String(req.params.collection);
+    if (!COLLECTIONS[collection]) { res.status(404).json({ error: `Unknown table: ${collection}` }); return null; }
+    return collection;
+};
+
+router.get('/api/views/:collection', async (req, res) => {
+    const collection = knownCollection(req, res);
+    if (!collection) return;
+    try { res.json(await listViews(collection)); } catch (err) { sendViewError(res, err); }
+});
+
+router.post('/api/views/:collection', async (req, res) => {
+    const collection = knownCollection(req, res);
+    if (!collection) return;
+    // verifyToken has already checked the signature; this only reads who saved it.
+    const who = jwt.decode(String(req.query.token)) as { email?: string } | null;
+    try {
+        res.status(201).json(await createView(collection, req.body ?? {}, who?.email ?? null));
+    } catch (err) { sendViewError(res, err); }
+});
+
+router.put('/api/views/:collection/:id', async (req, res) => {
+    const collection = knownCollection(req, res);
+    if (!collection) return;
+    try { res.json(await updateView(collection, String(req.params.id), req.body ?? {})); } catch (err) { sendViewError(res, err); }
+});
+
+router.delete('/api/views/:collection/:id', async (req, res) => {
+    const collection = knownCollection(req, res);
+    if (!collection) return;
+    try { await deleteView(collection, String(req.params.id)); res.json({ ok: true }); } catch (err) { sendViewError(res, err); }
+});
+
+// ── Table page ───────────────────────────────────────────────────────────────
+// Rows ship as JSON and the grid is drawn in the browser (utils/workshopClient.ts):
+// list views, sorting, filtering, column sizing and the per-view export all work
+// on that one copy. Values are written with textContent — the old page spliced
+// them into the HTML unescaped.
+
+const renderTablePage = (token: string, collection: string, rows: Record<string, unknown>[]): string => {
+    const t = encodeURIComponent(token);
+    const heading = `
+        <div class="header-actions">
+            <h1>// ${escHtml(collection)}</h1>
+            <div class="actions-cell">
+                <button id="import-btn" class="btn btn-teal">IMPORT CSV</button>
+                <a href="/db/${collection}/new?token=${t}" class="btn btn-orange">ADD NEW ENTRY</a>
+            </div>
+        </div>
+        <input type="file" id="csv-upload" accept=".csv" style="display:none">`;
+
+    if (rows.length === 0) {
+        return `
+            <div class="container">
+                ${heading}
+                <div class="empty-state" style="height:auto;margin-top:2rem;">BIN EMPTY</div>
+            </div>
+            <script>
+                (function () {
+                    var upload = document.getElementById('csv-upload');
+                    var btn = document.getElementById('import-btn');
+                    btn.addEventListener('click', function () { upload.click(); });
+                    upload.addEventListener('change', async function () {
+                        if (!upload.files[0]) return;
+                        var form = new FormData();
+                        form.append('csv', upload.files[0]);
+                        btn.textContent = 'IMPORTING...';
+                        btn.disabled = true;
+                        try {
+                            var res = await fetch('/db/${collection}/import?token=${t}', { method: 'POST', body: form });
+                            var msg = await res.text();
+                            if (res.ok) { alert(msg || 'Import successful'); location.reload(); }
+                            else alert('Import failed: ' + msg);
+                        } catch (err) { alert('Error: ' + err.message); }
+                        finally { btn.textContent = 'IMPORT CSV'; btn.disabled = false; upload.value = ''; }
+                    });
+                })();
+            </script>`;
+    }
+
+    const config = {
+        token,
+        collection,
+        keys: unionKeys(rows),
+        rows,
+        sensitive: Array.from(EXPORT_OMIT),
+        canReset: RESETTABLE.has(collection),
+    };
+
+    return `
+        <div class="container">
+            ${heading}
+
+            <div class="view-bar">
+                <span class="view-bar-label">LIST VIEW</span>
+                <select id="view-select" title="Saved list views for this table"></select>
+                <span id="view-dirty" class="view-dirty" hidden>&#9679; UNSAVED CHANGES</span>
+                <button id="view-save" class="btn btn-teal" hidden>SAVE</button>
+                <button id="view-saveas" class="btn btn-teal">SAVE AS&hellip;</button>
+                <button id="view-revert" class="btn" hidden>REVERT</button>
+                <button id="view-rename" class="btn" hidden>RENAME</button>
+                <button id="view-default" class="btn" hidden></button>
+                <button id="view-delete" class="btn btn-red" hidden>DELETE VIEW</button>
+                <span id="view-status" class="view-status"></span>
+            </div>
+
+            <div class="table-toolbar">
+                <input class="filter-input" id="search-input" type="text" placeholder="Search visible columns..." autocomplete="off" />
+                <span class="filter-count" id="filter-count"></span>
+
+                <div class="menu-wrap">
+                    <button class="menu-btn" id="filters-btn">FILTERS &#9662;</button>
+                    <div class="menu" id="filters-menu">
+                        <div class="menu-head">
+                            <span>FIELD FILTERS</span>
+                            <button id="filters-add">+ ADD FILTER</button>
+                            <button id="filters-clear">CLEAR</button>
+                        </div>
+                        <div class="menu-scroll" id="filters-list"></div>
+                    </div>
+                </div>
+
+                <div class="menu-wrap">
+                    <button class="menu-btn" id="cols-btn">COLUMNS &#9662;</button>
+                    <div class="menu" id="cols-menu">
+                        <div class="menu-head">
+                            <span>SHOW / ORDER</span>
+                            <button id="cols-all">ALL</button>
+                            <button id="cols-none">NONE</button>
+                            <button id="cols-fit" title="Forget dragged widths and fit every column to its content">FIT WIDTHS</button>
+                        </div>
+                        <div class="menu-scroll" id="cols-list"></div>
+                        <div class="menu-note">Drag a header's right edge to resize; double-click it to fit.</div>
+                    </div>
+                </div>
+
+                <div class="menu-wrap">
+                    <button class="menu-btn" id="export-btn">EXPORT &#9662;</button>
+                    <div class="menu" id="export-menu">
+                        <button class="menu-item" id="export-view"><span id="export-view-label">CSV — this view</span></button>
+                        <a class="menu-item" id="export-all-csv" download>CSV — whole table, every column</a>
+                        <a class="menu-item" id="export-all-json" download>JSON — whole table</a>
+                        <div class="menu-note">Password hashes, reset/verification tokens and encrypted keys are left out of exports.</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="table-scroll">
+                <table id="data-table">
+                    <colgroup id="data-colgroup"></colgroup>
+                    <thead></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+        <script type="application/json" id="workshop-config">${scriptJson(config)}</script>
+        <script>${workshopClientJs}</script>`;
+};
+
 router.get('/:collection', async (req, res) => {
     const { collection } = req.params;
     const token = req.query.token as string;
-    
+
+    if (!COLLECTIONS[collection]) return res.status(404).send(`Unknown table: ${escHtml(collection)}`);
     try {
-        const collectionNames = listCollectionNames();
-        const data = (await modelFor(collection).find()).map((d: any) => d.toObject());
-        
-        let tableContent = "";
-
-        if (data && data.length > 0) {
-             // Aggregate all unique keys from all records to ensure columns for mixed structures
-             const allKeys = new Set<string>();
-             data.forEach((row: any) => Object.keys(row).forEach(k => allKeys.add(k)));
-             const keys = Array.from(allKeys);
-
-             const tableHeader = `<tr>${keys.map(k => `<th onclick="handleSort(event, '${k}')" data-key="${k}">${k}</th>`).join('')}<th>ACTIONS</th></tr>`;
-             const tableRows = data.map((row: any) => {
-                 const id = (row as any)._id;
-                 return `
-                    <tr>
-                        ${keys.map(k => {
-                            const val = (row as any)[k];
-                            if (val === undefined) return '<td></td>';
-                            const displayVal = typeof val === 'string' ? val : JSON.stringify(val);
-                            return `<td><div class="cell-content">${displayVal}</div></td>`;
-                        }).join('')}
-                        <td>
-                                <div class="actions-cell">
-                                    <a href="/db/${collection}/edit/${id}?token=${token}" class="btn btn-teal">EDIT</a>
-                                    ${['users', 'leads', 'accounts'].includes(collection) ? `<button onclick="resetPassword('${collection}', '${id}')" class="btn btn-orange">RESET PASS</button>` : ''}
-                                    <button onclick="deleteDoc('${collection}', '${id}')" class="btn btn-red">DELETE</button>
-                                </div>
-                        </td>
-                    </tr>`;
-             }).join('');
-             
-             tableContent = `
-                <div class="container">
-                    <div class="header-actions">
-                        <h1>// ${collection}</h1>
-                        <div class="actions-cell">
-                            <button onclick="triggerCsvUpload()" class="btn btn-teal">IMPORT CSV</button>
-                            <a href="/db/${collection}/new?token=${token}" class="btn btn-orange">ADD NEW ENTRY</a>
-                        </div>
-                    </div>
-                    <div class="table-toolbar">
-                        <input class="filter-input" id="filter-input" type="text" placeholder="Filter rows..." oninput="applyFilter()" autocomplete="off" />
-                        <span class="filter-count" id="filter-count"></span>
-                        <div class="col-toggle-wrap">
-                            <button class="col-toggle-btn" onclick="toggleColDropdown()">COLUMNS &#9660;</button>
-                            <div class="col-dropdown" id="col-dropdown">
-                                <div class="col-dropdown-header">
-                                    <span>SHOW / HIDE</span>
-                                    <button onclick="setAllCols(true)">ALL</button>
-                                    <button onclick="setAllCols(false)">NONE</button>
-                                </div>
-                                ${keys.map((k, i) => `
-                                <label class="col-item" id="col-item-${i}">
-                                    <input type="checkbox" checked onchange="toggleCol(${i}, this.checked)" />
-                                    ${k}
-                                </label>`).join('')}
-                            </div>
-                        </div>
-                    </div>
-                    <input type="file" id="csv-upload" accept=".csv" style="display: none;" onchange="handleCsvFile(event, '${collection}')">
-                    <table id="data-table">
-                        <thead>${tableHeader}</thead>
-                        <tbody>${tableRows}</tbody>
-                    </table>
-                </div>
-                <script>
-                    // Close dropdown when clicking outside
-                    document.addEventListener('click', function(e) {
-                        const wrap = document.querySelector('.col-toggle-wrap');
-                        if (wrap && !wrap.contains(e.target)) {
-                            document.getElementById('col-dropdown').classList.remove('open');
-                        }
-                    });
-
-                    function toggleColDropdown() {
-                        document.getElementById('col-dropdown').classList.toggle('open');
-                    }
-
-                    // Column visibility — colIndex matches <th> / <td> positions (0-based, excludes ACTIONS col)
-                    const hiddenCols = new Set();
-                    const totalDataCols = ${keys.length};
-
-                    function toggleCol(colIdx, visible) {
-                        const table = document.getElementById('data-table');
-                        const colItem = document.getElementById('col-item-' + colIdx);
-                        if (visible) {
-                            hiddenCols.delete(colIdx);
-                            colItem.classList.remove('hidden-col');
-                        } else {
-                            hiddenCols.add(colIdx);
-                            colItem.classList.add('hidden-col');
-                        }
-                        // Update header cell
-                        table.querySelectorAll('thead th').forEach((th, i) => {
-                            if (i < totalDataCols) th.style.display = hiddenCols.has(i) ? 'none' : '';
-                        });
-                        // Update body cells
-                        table.querySelectorAll('tbody tr').forEach(row => {
-                            row.querySelectorAll('td').forEach((td, i) => {
-                                if (i < totalDataCols) td.style.display = hiddenCols.has(i) ? 'none' : '';
-                            });
-                        });
-                        applyFilter(); // re-run filter to recount visible rows
-                    }
-
-                    function setAllCols(visible) {
-                        for (let i = 0; i < totalDataCols; i++) {
-                            const cb = document.querySelector('#col-item-' + i + ' input');
-                            if (cb) { cb.checked = visible; toggleCol(i, visible); }
-                        }
-                    }
-
-                    // Row filter
-                    function applyFilter() {
-                        const q = (document.getElementById('filter-input').value || '').toLowerCase();
-                        const tbody = document.querySelector('#data-table tbody');
-                        const rows = Array.from(tbody.querySelectorAll('tr'));
-                        let visible = 0;
-                        rows.forEach(row => {
-                            const text = Array.from(row.querySelectorAll('td'))
-                                .filter((_, i) => !hiddenCols.has(i))
-                                .map(td => td.innerText)
-                                .join(' ')
-                                .toLowerCase();
-                            const show = !q || text.includes(q);
-                            row.style.display = show ? '' : 'none';
-                            if (show) visible++;
-                        });
-                        const countEl = document.getElementById('filter-count');
-                        if (q) countEl.textContent = visible + ' / ' + rows.length + ' ROWS';
-                        else countEl.textContent = rows.length + ' ROWS';
-                    }
-
-                    // Init row count
-                    applyFilter();
-
-                    let sortState = []; // [{ key: string, order: 'asc' | 'desc' }]
-
-                        function handleSort(event, key) {
-                            const isCtrl = event.ctrlKey;
-                            const existingIdx = sortState.findIndex(s => s.key === key);
-                            
-                            if (!isCtrl) {
-                                // Clear others, toggle this one
-                                const currentOrder = (existingIdx > -1 && sortState.length === 1) ? (sortState[0].order === 'asc' ? 'desc' : 'asc') : 'asc';
-                                sortState = [{ key, order: currentOrder }];
-                            } else {
-                                // Multi-sort toggle
-                                if (existingIdx > -1) {
-                                    if (sortState[existingIdx].order === 'asc') sortState[existingIdx].order = 'desc';
-                                    else sortState.splice(existingIdx, 1);
-                                } else {
-                                    sortState.push({ key, order: 'asc' });
-                                }
-                            }
-                            
-                            updateSortUI();
-                            sortTable();
-                        }
-
-                        function updateSortUI() {
-                            document.querySelectorAll('th[data-key]').forEach(th => {
-                                th.classList.remove('sort-asc', 'sort-desc');
-                                const state = sortState.find(s => s.key === th.getAttribute('data-key'));
-                                if (state) th.classList.add(\`sort-\${state.order}\`);
-                            });
-                        }
-
-                        function sortTable() {
-                            const tbody = document.querySelector('#data-table tbody');
-                            const rows = Array.from(tbody.querySelectorAll('tr'));
-
-                            rows.sort((a, b) => {
-                                for (const { key, order } of sortState) {
-                                    const aIdx = Array.from(document.querySelectorAll('#data-table th')).findIndex(th => th.getAttribute('data-key') === key);
-                                    let aval = a.children[aIdx]?.innerText || '';
-                                    let bval = b.children[aIdx]?.innerText || '';
-                                    
-                                    // Try numeric sort
-                                    const anum = Number(aval);
-                                    const bnum = Number(bval);
-                                    if (!isNaN(anum) && !isNaN(bnum)) {
-                                        if (anum !== bnum) return order === 'asc' ? anum - bnum : bnum - anum;
-                                    } else {
-                                        const cmp = aval.localeCompare(bval, undefined, { sensitivity: 'base', numeric: true });
-                                        if (cmp !== 0) return order === 'asc' ? cmp : -cmp;
-                                    }
-                                }
-                                return 0;
-                            });
-                            
-                            rows.forEach(row => tbody.appendChild(row));
-                        }
-
-                        async function resetPassword(coll, id) {
-                            if (confirm('Are you sure you want to send a password reset link to this record?')) {
-                                const res = await fetch(\`/db/\${coll}/reset-password/\${id}?token=${token}\`, { method: 'POST' });
-                                if (res.ok) {
-                                    const msg = await res.text();
-                                    alert(msg || 'Reset email sent');
-                                } else {
-                                    const err = await res.text();
-                                    alert('Reset failed: ' + err);
-                                }
-                            }
-                        }
-
-                        async function deleteDoc(coll, id) {
-                            if (confirm('Are you sure you want to delete this document?')) {
-                                const res = await fetch(\`/db/\${coll}/delete/\${id}?token=${token}\`, { method: 'POST' });
-                                if (res.ok) window.location.reload();
-                                else alert('Delete failed');
-                            }
-                        }
-
-                        function triggerCsvUpload() {
-                            document.getElementById('csv-upload').click();
-                        }
-
-                        async function handleCsvFile(event, coll) {
-                            const file = event.target.files[0];
-                            if (!file) return;
-
-                            const formData = new FormData();
-                            formData.append('csv', file);
-
-                            const btn = document.querySelector('.btn-teal');
-                            const originalText = btn.innerText;
-                            btn.innerText = 'IMPORTING...';
-                            btn.disabled = true;
-
-                            try {
-                                const res = await fetch(\`/db/\${coll}/import?token=${token}\`, {
-                                    method: 'POST',
-                                    body: formData
-                                });
-                                if (res.ok) {
-                                    const msg = await res.text();
-                                    alert(msg || 'Import successful');
-                                    window.location.reload();
-                                } else {
-                                    const err = await res.text();
-                                    alert('Import failed: ' + err);
-                                }
-                            } catch (err) {
-                                alert('Error: ' + err.message);
-                            } finally {
-                                btn.innerText = originalText;
-                                btn.disabled = false;
-                            }
-                        }
-                    </script>
-             `;
-        } else {
-             tableContent = `
-                <div class="container">
-                    <div class="header-actions">
-                        <h1>// ${collection}</h1>
-                        <div class="actions-cell">
-                            <button onclick="triggerCsvUpload()" class="btn btn-teal">IMPORT CSV</button>
-                            <a href="/db/${collection}/new?token=${token}" class="btn btn-orange">ADD NEW ENTRY</a>
-                        </div>
-                    </div>
-                    <input type="file" id="csv-upload" accept=".csv" style="display: none;" onchange="handleCsvFile(event, '${collection}')">
-                    <div class="empty-state" style="height: auto; margin-top: 2rem;">
-                        BIN EMPTY
-                    </div>
-                </div>
-                <script>
-                    function triggerCsvUpload() {
-                        document.getElementById('csv-upload').click();
-                    }
-
-                    async function handleCsvFile(event, coll) {
-                        const file = event.target.files[0];
-                        if (!file) return;
-
-                        const formData = new FormData();
-                        formData.append('csv', file);
-
-                        const btn = event.target.previousElementSibling.querySelector('.btn-teal');
-                        const originalText = btn.innerText;
-                        btn.innerText = 'IMPORTING...';
-                        btn.disabled = true;
-
-                        try {
-                            const res = await fetch(\`/db/\${coll}/import?token=${token}\`, {
-                                method: 'POST',
-                                body: formData
-                            });
-                            if (res.ok) {
-                                alert('Import successful');
-                                window.location.reload();
-                            } else {
-                                const err = await res.text();
-                                alert('Import failed: ' + err);
-                            }
-                        } catch (err) {
-                            alert('Error: ' + err.message);
-                        } finally {
-                            btn.innerText = originalText;
-                            btn.disabled = false;
-                        }
-                    }
-                </script>
-             `;
-        }
-
-        const sidebarHtml = renderSidebar(token, collectionNames, collection);
+        const rows = (await modelFor(collection).find()).map((d: any) => d.toObject());
         res.send(renderPage({
             token,
             title: "The Garage",
             activePage: 'db',
-            content: sidebarHtml + `<main class="main-content">${tableContent}</main>`,
+            content: renderSidebar(token, listCollectionNames(), collection)
+                + `<main class="main-content list-mode">${renderTablePage(token, collection, rows)}</main>`,
             extraStyles: dbStyles
         }));
-    } catch (err) {
-        res.status(500).send(`Error fetching data for ${collection}`);
+    } catch (err: any) {
+        console.error(`[db] loading ${collection}:`, err);
+        res.status(500).send(`Error fetching data for ${escHtml(collection)}: ${escHtml(err?.message)}`);
+    }
+});
+
+// EXPORT — the whole table, every column (minus EXPORT_OMIT). The page's
+// "this view" export is built in the browser from what is on screen.
+router.get('/:collection/export', async (req, res) => {
+    const { collection } = req.params;
+    if (!COLLECTIONS[collection]) return res.status(404).send(`Unknown table: ${escHtml(collection)}`);
+    try {
+        const rows = (await modelFor(collection).find()).map((d: any) => {
+            const o = d.toObject();
+            for (const k of EXPORT_OMIT) delete o[k];
+            return o;
+        });
+        const file = `${collection}-${new Date().toISOString().slice(0, 10)}`;
+        if (req.query.format === 'json') {
+            res.setHeader('Content-Type', 'application/json; charset=utf-8');
+            res.setHeader('Content-Disposition', `attachment; filename="${file}.json"`);
+            return res.send(JSON.stringify(rows, null, 2));
+        }
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${file}.csv"`);
+        res.send(toCsv(unionKeys(rows), rows));
+    } catch (err: any) {
+        console.error(`[db] export ${collection}:`, err);
+        res.status(500).send(`Export failed: ${escHtml(err?.message)}`);
     }
 });
 
@@ -845,7 +913,7 @@ router.get('/:collection/edit/:id', async (req, res) => {
                         <form action="/db/${collection}/update/${id}?token=${token}" method="POST">
                             <div class="form-group">
                                 <label>Document JSON</label>
-                                <textarea name="json" class="json-input">${JSON.stringify(doc, null, 4)}</textarea>
+                                <textarea name="json" class="json-input">${escHtml(JSON.stringify(doc, null, 4))}</textarea>
                             </div>
                             <div class="form-actions">
                                 <a href="/db/${collection}?token=${token}" class="btn">CANCEL</a>

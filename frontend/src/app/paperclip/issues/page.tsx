@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
-import { Send, Terminal, MessageSquare, RefreshCw, WifiOff, Wifi } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Send, Terminal, MessageSquare, RefreshCw, WifiOff, Wifi, Eye } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -18,9 +18,11 @@ interface Agent {
 interface Issue {
   id?: string;
   _id?: string;
+  identifier?: string;
   title?: string;
   description?: string;
   status?: string;
+  priority?: string;
   assigneeAgentId?: string;
   assigneeAgent?: { name?: string; id?: string };
   createdAt?: string;
@@ -54,12 +56,27 @@ const ah = (): Record<string, string> => {
 
 const issueId = (i: Issue) => i.id ?? i._id ?? '';
 
+const agentLabel = (a: Agent) => a.name ?? a.id;
+
+// Verified Paperclip issue statuses: backlog | todo | in_progress | in_review
+// | done | blocked | cancelled.
 const statusBadge = (s?: string) => {
   const v = (s ?? '').toLowerCase();
-  if (v === 'open') return 'bg-teal-500 text-white';
-  if (v === 'in_progress' || v === 'in progress') return 'bg-yellow-400 text-black';
-  if (v === 'closed' || v === 'done' || v === 'completed') return 'bg-zinc-600 text-zinc-200';
+  if (v === 'todo') return 'bg-teal-500 text-white';
+  if (v === 'in_progress') return 'bg-yellow-400 text-black';
+  if (v === 'in_review') return 'bg-sky-400 text-black';
+  if (v === 'blocked') return 'bg-red-500 text-white';
+  if (v === 'done') return 'bg-zinc-600 text-zinc-200';
   return 'bg-zinc-700 text-zinc-300';
+};
+
+// Verified upstream enum; Paperclip defaults to 'medium'.
+const PRIORITIES = ['critical', 'high', 'medium', 'low'] as const;
+
+const priorityText = (p?: string) => {
+  if (p === 'critical') return 'text-red-400';
+  if (p === 'high') return 'text-orange-400';
+  return 'text-zinc-500';
 };
 
 // Derive a readable label from a raw run event.
@@ -141,16 +158,19 @@ function TranscriptEntry({ entry }: { entry: TranscriptEntry }) {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-export default function CFOConsolePage() {
+export default function IssueDeskPage() {
   const router = useRouter();
+  // /paperclip/issues?agent=<id> preselects the recipient (org chart deep link)
+  const requestedAgentId = useSearchParams().get('agent');
 
-  // Agents for dropdown
+  // Agents for the recipient picker
   const [agents, setAgents] = useState<Agent[]>([]);
 
   // Issue form
   const [issueTitle, setIssueTitle] = useState('');
   const [issueDesc, setIssueDesc] = useState('');
   const [assigneeId, setAssigneeId] = useState('');
+  const [priority, setPriority] = useState<string>('medium');
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -192,9 +212,10 @@ export default function CFOConsolePage() {
       const data = await res.json();
       const list: Agent[] = Array.isArray(data) ? data : (data?.agents ?? data?.items ?? []);
       setAgents(list);
-      if (!assigneeId && list.length > 0) setAssigneeId(list[0].id);
+      const requested = list.find(a => a.id === requestedAgentId);
+      setAssigneeId(cur => cur || (requested ?? list[0])?.id || '');
     } catch { /* non-fatal */ }
-  }, [router, assigneeId]);
+  }, [router, requestedAgentId]);
 
   // ── Load issues
   const loadIssues = useCallback(async () => {
@@ -223,15 +244,19 @@ export default function CFOConsolePage() {
   // Authorization header works — EventSource couldn't send one.
   const POLL_MS = 2_000;
   const POLL_TIMEOUT_MS = 10 * 60 * 1_000;
+  // How long to wait for an assigned agent's wakeup run to appear.
+  const PICKUP_TIMEOUT_MS = 30_000;
   // Verified Paperclip heartbeat-run statuses; the last four are terminal.
   const TERMINAL = new Set(['succeeded', 'failed', 'cancelled', 'timed_out']);
 
-  const startStream = useCallback((rid: string) => {
+  // Cancels whatever is currently being watched and hands back a fresh
+  // controller plus a `finish` that closes the transcript exactly once.
+  const beginWatch = useCallback((intro: string) => {
     if (pollAbortRef.current) pollAbortRef.current.stopped = true;
     const ctl = { stopped: false };
     pollAbortRef.current = ctl;
 
-    setTranscript([{ kind: 'status', text: `Connecting to run ${rid}…`, ts: Date.now() }]);
+    setTranscript([{ kind: 'status', text: intro, ts: Date.now() }]);
     setStreamDone(false);
     setStreamConnected(false);
     setStreaming(true);
@@ -244,6 +269,13 @@ export default function CFOConsolePage() {
       setStreaming(false);
       setStreamConnected(false);
     };
+
+    return { ctl, finish };
+  }, []);
+
+  const startStream = useCallback((rid: string) => {
+    setRunId(rid);
+    const { ctl, finish } = beginWatch(`Connecting to run ${rid}…`);
 
     (async () => {
       let cursor = 0; // last seen event seq (numeric, monotonic)
@@ -288,20 +320,47 @@ export default function CFOConsolePage() {
         await new Promise<void>(resolve => setTimeout(resolve, POLL_MS));
       }
     })();
-  }, []);
+  }, [beginWatch]);
+
+  // Creating an assigned issue queues a wakeup run for that agent, but the
+  // create response doesn't carry its id — poll the issue's runs until the
+  // newest one appears, then stream it. Also used by WATCH on existing issues.
+  const watchIssue = useCallback((issue: Issue, agentName?: string) => {
+    const iid = issueId(issue);
+    const label = issue.identifier ?? issue.title ?? iid;
+    setRunId(null);
+    const { ctl, finish } = beginWatch(`Waiting for ${agentName ?? 'the assignee'} to pick up ${label}…`);
+
+    (async () => {
+      const startedAt = Date.now();
+      while (!ctl.stopped && Date.now() - startedAt < PICKUP_TIMEOUT_MS) {
+        try {
+          const res = await fetch(`/api/paperclip/issues/${encodeURIComponent(iid)}/runs`, { headers: ah() });
+          const runs = await res.json();
+          if (ctl.stopped) return;
+          if (!res.ok) { finish((runs as any)?.error ?? `Upstream ${res.status}`, true); return; }
+          // Newest first
+          const latest = Array.isArray(runs) ? runs[0] : null;
+          if (latest?.runId) { startStream(latest.runId); return; }
+        } catch { /* transient network error — keep polling */ }
+        await new Promise<void>(resolve => setTimeout(resolve, POLL_MS));
+      }
+      finish(`No run has started for ${label} yet — the agent may be paused or out of budget. Use WATCH on the issue to check again.`, true);
+    })();
+  }, [beginWatch, startStream]);
 
   useEffect(() => {
     return () => { if (pollAbortRef.current) pollAbortRef.current.stopped = true; };
   }, []);
 
-  // ── Submit issue
+  // ── Send issue
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!issueTitle.trim()) return;
     setSubmitting(true);
     setFormError(null);
     try {
-      const body: Record<string, string> = { title: issueTitle.trim() };
+      const body: Record<string, string> = { title: issueTitle.trim(), priority };
       if (issueDesc.trim()) body.description = issueDesc.trim();
       if (assigneeId) body.assigneeAgentId = assigneeId;
 
@@ -311,16 +370,16 @@ export default function CFOConsolePage() {
         body: JSON.stringify(body),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error((data as any)?.error ?? 'Failed to file issue');
+      if (!res.ok) throw new Error((data as any)?.error ?? 'Failed to send issue');
 
-      showToast('Issue filed!');
+      const created = data as Issue;
+      const recipient = agents.find(a => a.id === assigneeId);
+      showToast(recipient ? `Sent to ${agentLabel(recipient)}` : 'Issue filed to backlog');
       setIssueTitle('');
       setIssueDesc('');
-      setIssues(prev => [data as Issue, ...prev]);
+      setIssues(prev => [created, ...prev]);
 
-      // If the response carries a runId, start streaming
-      const rid = (data as any)?.runId ?? (data as any)?.run_id;
-      if (rid) { setRunId(rid); startStream(rid); }
+      if (recipient) watchIssue(created, agentLabel(recipient));
     } catch (err: any) {
       setFormError(err.message);
     } finally {
@@ -337,9 +396,11 @@ export default function CFOConsolePage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error((data as any)?.error ?? 'Heartbeat failed');
-      const rid = (data as any)?.runId ?? (data as any)?.run_id;
-      if (rid) { setRunId(rid); startStream(rid); showToast(`Heartbeat invoked — streaming run ${rid}`); }
-      else showToast('Heartbeat invoked (no run id returned)');
+      // Verified: 202 with the heartbeat-run row ({ id, status, ... }), or
+      // { status: 'skipped' } when the agent can't be woken.
+      const rid = (data as any)?.id;
+      if (rid) { startStream(rid); showToast(`Heartbeat invoked — streaming run ${rid}`); }
+      else showToast('Heartbeat skipped — agent is not eligible to run right now');
     } catch (err: any) {
       showToast(`Error: ${err.message}`);
     }
@@ -348,6 +409,11 @@ export default function CFOConsolePage() {
   // ── Render
   const INPUT_CLS =
     'w-full p-3 border-4 border-black bg-black text-white font-bold text-sm placeholder-zinc-600 focus:outline-none focus:border-teal-500 transition-colors';
+  const SELECT_CLS =
+    'w-full p-3 border-4 border-black bg-black text-white font-bold text-sm appearance-none focus:outline-none focus:border-teal-500';
+
+  const recipient = agents.find(a => a.id === assigneeId);
+  const recipientPaused = (recipient?.status ?? '').toLowerCase() === 'paused';
 
   return (
     <div className="min-h-[calc(100vh-76px)] flex flex-col relative w-full">
@@ -355,23 +421,48 @@ export default function CFOConsolePage() {
         {/* Header */}
         <header className="mb-8 relative">
           <h1 className="text-4xl sm:text-5xl md:text-7xl font-permanent text-black dark:text-white leading-none tracking-tight uppercase">
-            <span className="drop-shadow-[6px_6px_0px_rgba(250,204,21,1)]">CFO</span>
+            <span className="drop-shadow-[6px_6px_0px_rgba(250,204,21,1)]">ISSUE</span>
             <span className="text-teal-600 ml-3">
-              <span className="drop-shadow-[6px_6px_0px_rgba(0,0,0,1)]">CONSOLE</span>
+              <span className="drop-shadow-[6px_6px_0px_rgba(0,0,0,1)]">DESK</span>
             </span>
           </h1>
           <p className="mt-2 text-sm font-bold text-zinc-500 uppercase tracking-widest">
-            File work &amp; observe live runs
+            Send work to any agent &amp; watch it run
           </p>
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* ── LEFT COLUMN: Issue form + list ── */}
           <div className="flex flex-col gap-6">
-            {/* File Issue form */}
+            {/* Send Issue form */}
             <div className="border-4 border-black bg-slate-900 shadow-[6px_6px_0px_0px_rgba(13,148,136,1)] p-5">
-              <h2 className="text-xl font-permanent text-yellow-400 uppercase mb-4">File Work</h2>
+              <h2 className="text-xl font-permanent text-yellow-400 uppercase mb-4">Send Issue</h2>
               <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+                <div>
+                  <label htmlFor="issue-recipient" className="block text-xs font-black uppercase text-zinc-400 mb-1">
+                    Send To
+                  </label>
+                  <select
+                    id="issue-recipient"
+                    value={assigneeId}
+                    onChange={e => setAssigneeId(e.target.value)}
+                    className={SELECT_CLS}
+                  >
+                    {agents.map(a => (
+                      <option key={a.id} value={a.id}>
+                        {agentLabel(a)}
+                        {a.title || a.role ? ` — ${a.title ?? a.role}` : ''}
+                        {(a.status ?? '').toLowerCase() === 'paused' ? ' (paused)' : ''}
+                      </option>
+                    ))}
+                    <option value="">— Nobody (file to backlog) —</option>
+                  </select>
+                  {recipientPaused && (
+                    <p className="mt-1 text-[11px] font-bold text-yellow-400 uppercase">
+                      {agentLabel(recipient!)} is paused — it won&apos;t pick this up until resumed.
+                    </p>
+                  )}
+                </div>
                 <input
                   value={issueTitle}
                   onChange={e => setIssueTitle(e.target.value)}
@@ -383,23 +474,21 @@ export default function CFOConsolePage() {
                   value={issueDesc}
                   onChange={e => setIssueDesc(e.target.value)}
                   placeholder="DESCRIPTION (OPTIONAL)"
-                  rows={3}
+                  rows={4}
                   className={INPUT_CLS}
                 />
                 <div>
-                  <label className="block text-xs font-black uppercase text-zinc-400 mb-1">
-                    Assign To
+                  <label htmlFor="issue-priority" className="block text-xs font-black uppercase text-zinc-400 mb-1">
+                    Priority
                   </label>
                   <select
-                    value={assigneeId}
-                    onChange={e => setAssigneeId(e.target.value)}
-                    className="w-full p-3 border-4 border-black bg-black text-white font-bold text-sm appearance-none focus:outline-none focus:border-teal-500"
+                    id="issue-priority"
+                    value={priority}
+                    onChange={e => setPriority(e.target.value)}
+                    className={SELECT_CLS}
                   >
-                    <option value="">— Unassigned —</option>
-                    {agents.map(a => (
-                      <option key={a.id} value={a.id}>
-                        {a.name ?? a.id} {a.title ? `(${a.title})` : ''}
-                      </option>
+                    {PRIORITIES.map(p => (
+                      <option key={p} value={p}>{p.toUpperCase()}</option>
                     ))}
                   </select>
                 </div>
@@ -412,7 +501,9 @@ export default function CFOConsolePage() {
                   className="flex items-center justify-center gap-2 p-3 border-4 border-black bg-yellow-400 text-black font-black uppercase text-sm shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:bg-yellow-300 transition-colors disabled:opacity-50"
                 >
                   <Send className="w-4 h-4" />
-                  {submitting ? 'FILING…' : 'FILE ISSUE'}
+                  {submitting
+                    ? 'SENDING…'
+                    : recipient ? `SEND TO ${agentLabel(recipient)}` : 'FILE TO BACKLOG'}
                 </button>
               </form>
             </div>
@@ -433,16 +524,17 @@ export default function CFOConsolePage() {
 
               {issues.length === 0 && !issuesLoading && (
                 <p className="text-xs font-bold text-zinc-500 uppercase text-center py-8">
-                  No issues yet. File one above.
+                  No issues yet. Send one above.
                 </p>
               )}
 
               <div className="flex flex-col gap-3 max-h-80 overflow-y-auto pr-1">
                 {issues.map((issue) => {
                   const iid = issueId(issue);
+                  const assignee = agents.find(a => a.id === issue.assigneeAgentId);
                   const assigneeName =
                     issue.assigneeAgent?.name ??
-                    agents.find(a => a.id === issue.assigneeAgentId)?.name ??
+                    assignee?.name ??
                     issue.assigneeAgentId;
 
                   return (
@@ -452,20 +544,38 @@ export default function CFOConsolePage() {
                     >
                       <div className="flex items-start justify-between gap-2 mb-1">
                         <p className="text-sm font-bold text-white truncate flex-1">
+                          {issue.identifier && (
+                            <span className="font-mono text-zinc-500 mr-2">{issue.identifier}</span>
+                          )}
                           {issue.title ?? '(untitled)'}
                         </p>
                         <span className={`shrink-0 px-2 py-0.5 border border-black font-black text-[9px] uppercase ${statusBadge(issue.status)}`}>
-                          {issue.status ?? 'open'}
+                          {(issue.status ?? 'backlog').replace('_', ' ')}
                         </span>
                       </div>
                       {issue.description && (
                         <p className="text-[11px] text-zinc-400 mb-1 line-clamp-2">{issue.description}</p>
                       )}
-                      {assigneeName && (
-                        <p className="text-[10px] font-bold text-teal-400 uppercase">
-                          Assigned: {assigneeName}
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[10px] font-bold uppercase">
+                          {assigneeName && <span className="text-teal-400">Assigned: {assigneeName}</span>}
+                          {issue.priority && (
+                            <span className={`${assigneeName ? 'ml-3 ' : ''}${priorityText(issue.priority)}`}>
+                              {issue.priority}
+                            </span>
+                          )}
                         </p>
-                      )}
+                        {issue.assigneeAgentId && iid && (
+                          <button
+                            onClick={() => watchIssue(issue, assigneeName)}
+                            className="flex items-center gap-1 px-2 py-0.5 border-2 border-black bg-zinc-700 text-white font-black text-[10px] uppercase hover:bg-teal-700 transition-colors"
+                            aria-label={`Watch latest run for ${issue.identifier ?? issue.title ?? 'issue'}`}
+                          >
+                            <Eye className="w-3 h-3" />
+                            WATCH
+                          </button>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
@@ -485,7 +595,7 @@ export default function CFOConsolePage() {
                       onClick={() => handleHeartbeat(a.id)}
                       className="px-3 py-1.5 border-2 border-black bg-zinc-700 text-white font-bold text-xs uppercase hover:bg-teal-700 transition-colors"
                     >
-                      {a.name ?? a.id}
+                      {agentLabel(a)}
                     </button>
                   ))}
                 </div>
@@ -509,7 +619,7 @@ export default function CFOConsolePage() {
                 {streaming && (
                   <span className="flex items-center gap-1 px-2 py-0.5 border-2 border-black bg-teal-500 text-white font-black text-[10px] uppercase">
                     {streamConnected ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
-                    {streamConnected ? 'LIVE' : 'CONNECTING'}
+                    {streamConnected ? 'LIVE' : runId ? 'CONNECTING' : 'WAITING'}
                   </span>
                 )}
                 {streamDone && !streaming && (
@@ -521,13 +631,13 @@ export default function CFOConsolePage() {
             </div>
 
             {/* Transcript body */}
-            {!runId ? (
+            {transcript.length === 0 ? (
               <div className="flex-grow flex items-center justify-center p-8">
                 <p className="font-bold text-zinc-600 uppercase text-sm text-center leading-relaxed">
-                  Transcript appears when a run id is known.
+                  Send an issue to an agent and its run streams here.
                   <br />
                   <span className="text-zinc-500 text-xs">
-                    Invoke a heartbeat or file an issue that triggers a run.
+                    Or WATCH an existing issue, or invoke a heartbeat.
                   </span>
                 </p>
               </div>

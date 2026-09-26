@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState, useCallback } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ChevronDown, ChevronRight, Heart, Pause, Play, Activity } from 'lucide-react';
+import { ChevronDown, ChevronRight, Pause, Play, Activity, Send } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -18,6 +19,18 @@ interface Agent {
   capabilities?: string[];
   chainOfCommand?: string[];
   [key: string]: unknown;
+}
+
+// GET /api/paperclip/org returns Paperclip's lean NESTED tree (verified against
+// paperclipai 2026.707.0): [{ id, name, role, status, reports: [...] }], with
+// terminated agents already excluded. Titles, budgets and capabilities only
+// come from /agents, so the two responses are merged by id.
+interface OrgApiNode {
+  id: string;
+  name?: string;
+  role?: string;
+  status?: string;
+  reports?: OrgApiNode[];
 }
 
 interface OrgNode {
@@ -45,21 +58,13 @@ const statusColor = (status?: string) => {
   return 'bg-zinc-600 text-zinc-200';
 };
 
-// Build tree from flat agent list
-function buildTree(agents: Agent[]): OrgNode[] {
-  const byId = new Map<string, OrgNode>();
-  for (const a of agents) byId.set(a.id, { agent: a, children: [] });
-
-  const roots: OrgNode[] = [];
-  for (const node of byId.values()) {
-    const parentId = node.agent.reportsTo;
-    if (parentId && byId.has(parentId)) {
-      byId.get(parentId)!.children.push(node);
-    } else {
-      roots.push(node);
-    }
-  }
-  return roots;
+// Walk Paperclip's nested org tree, enriching each lean node with its full
+// agent record (when /agents supplied one).
+function buildTree(nodes: OrgApiNode[], agentsById: Map<string, Agent>): OrgNode[] {
+  return nodes.map(({ reports, ...lean }) => ({
+    agent: { ...lean, ...agentsById.get(lean.id) },
+    children: buildTree(reports ?? [], agentsById),
+  }));
 }
 
 // ── Detail Panel ──────────────────────────────────────────────────────────────
@@ -151,7 +156,7 @@ function AgentDetail({
         )}
 
         {/* Actions */}
-        <div className="flex gap-3 mt-4">
+        <div className="flex flex-wrap gap-3 mt-4">
           <button
             disabled={busy}
             onClick={() => doAction(isPaused ? 'resume' : 'pause', isPaused ? 'Resume' : 'Pause')}
@@ -168,6 +173,13 @@ function AgentDetail({
             <Activity className="w-4 h-4" />
             INVOKE HEARTBEAT
           </button>
+          <Link
+            href={`/paperclip/issues?agent=${encodeURIComponent(agent.id)}`}
+            className="flex items-center gap-2 px-4 py-2 border-4 border-black font-black uppercase text-sm shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] bg-zinc-100 text-black hover:bg-white transition-colors"
+          >
+            <Send className="w-4 h-4" />
+            SEND ISSUE
+          </Link>
         </div>
 
         {/* Raw JSON collapsible */}
@@ -254,16 +266,16 @@ function OrgCard({
           {expanded && (
             <>
               <div className="w-0.5 h-4 bg-zinc-600" />
-              {/* Horizontal line spanning children */}
-              <div className="flex items-start gap-8 relative">
-                {node.children.length > 1 && (
-                  <div
-                    className="absolute top-0 left-1/2 -translate-x-1/2 h-0.5 bg-zinc-600"
-                    style={{ width: `calc(100% - ${100 / node.children.length}%)` }}
-                  />
-                )}
-                {node.children.map((child) => (
-                  <div key={child.agent.id} className="flex flex-col items-center">
+              {/* Horizontal bus: each child draws the half-segments reaching
+                  toward its siblings, so the line meets every child's centre
+                  even when subtrees have different widths. */}
+              <div className="flex items-start">
+                {node.children.map((child, i) => (
+                  <div key={child.agent.id} className="relative flex flex-col items-center px-4">
+                    {i > 0 && <div className="absolute top-0 left-0 w-1/2 h-0.5 bg-zinc-600" />}
+                    {i < node.children.length - 1 && (
+                      <div className="absolute top-0 right-0 w-1/2 h-0.5 bg-zinc-600" />
+                    )}
                     <div className="w-0.5 h-4 bg-zinc-600" />
                     <OrgCard node={child} onSelect={onSelect} />
                   </div>
@@ -303,20 +315,23 @@ export default function OrgChartPage() {
     // The server's paperclipOnly gate decides, and the 403 below acts on it.
 
     try {
-      const res = await fetch('/api/paperclip/org', {
-        headers: { Authorization: `Bearer ${t}` },
-      });
-      if (res.status === 401) { router.push('/login'); return; }
-      if (res.status === 403) { router.push('/dashboard'); return; }
-      const data = await res.json();
-      if (!res.ok) throw new Error((data as any)?.error ?? 'Failed to load org');
+      const headers = { Authorization: `Bearer ${t}` };
+      const [orgRes, agentsRes] = await Promise.all([
+        fetch('/api/paperclip/org', { headers }),
+        fetch('/api/paperclip/agents', { headers }),
+      ]);
+      if (orgRes.status === 401) { router.push('/login'); return; }
+      if (orgRes.status === 403) { router.push('/dashboard'); return; }
+      const data = await orgRes.json();
+      if (!orgRes.ok) throw new Error((data as any)?.error ?? 'Failed to load org');
 
-      // Accept { agents: [...] }, { nodes: [...] }, or a bare array
-      const raw: Agent[] = Array.isArray(data)
-        ? data
-        : (data?.agents ?? data?.nodes ?? data?.members ?? []);
+      // Agent details are enrichment only — the tree still renders without them.
+      const agentList = agentsRes.ok ? await agentsRes.json().catch(() => []) : [];
+      const agentsById = new Map<string, Agent>(
+        (Array.isArray(agentList) ? agentList : []).map((a: Agent) => [a.id, a])
+      );
 
-      setRoots(buildTree(raw));
+      setRoots(buildTree(Array.isArray(data) ? data : [], agentsById));
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -351,6 +366,13 @@ export default function OrgChartPage() {
           >
             {loading ? 'LOADING…' : 'REFRESH'}
           </button>
+          <Link
+            href="/paperclip/issues"
+            className="flex items-center gap-2 px-5 py-2 border-4 border-black bg-teal-600 text-white font-black uppercase text-sm shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:bg-teal-500 transition-colors"
+          >
+            <Send className="w-4 h-4" />
+            SEND AN ISSUE
+          </Link>
         </div>
 
         {/* Error */}
@@ -369,7 +391,9 @@ export default function OrgChartPage() {
 
         {!loading && roots.length > 0 && (
           <div className="overflow-x-auto pb-8">
-            <div className="flex gap-16 items-start justify-center">
+            {/* w-max + min-w-full: centred when it fits, scrollable (not
+                clipped on the left) when the org is wider than the page */}
+            <div className="flex gap-16 items-start justify-center w-max min-w-full">
               {roots.map((root) => (
                 <OrgCard key={root.agent.id} node={root} onSelect={setSelected} />
               ))}

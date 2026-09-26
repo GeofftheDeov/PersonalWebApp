@@ -5,7 +5,10 @@
  * then drives them over HTTP with tokens minted by the real /api/users/register
  * and /api/users/login — the path anybody on the internet can take. Before the
  * gate, a fresh signup's token opened both portals, including a write to its
- * own sf_users.role; after it, only an sf_users row with role = 'admin' does.
+ * own role; after it, only an accounts row with app_role = 'admin' does.
+ *
+ * Phase 3 (#35) moved the gate from sf_users.role to accounts.app_role and made
+ * every login an accounts row, so the personas below are accounts rows too.
  *
  * Run against a throwaway database loaded from db/schema.sql (it inserts and
  * deletes its own rows, and refuses to run against anything but localhost):
@@ -75,13 +78,14 @@ async function main() {
 
   try {
     // ── personas ─────────────────────────────────────────────────────────────
-    // The admin: the one sf_users row production has, role = 'admin'.
+    // The admin: app_role = 'admin' by a manual pin, as the Phase 2 backfill's
+    // --admin leaves production's one admin.
     const adminEmail = `gate-admin-${tag}@example.test`, adminPw = pw();
     const { rows: [admin] } = await pool.query(
-      `INSERT INTO sf_users (name, email, password, role, is_verified)
-       VALUES ('Gate Admin', $1, $2, 'admin', true) RETURNING id, password`,
+      `INSERT INTO accounts (name, email, password, app_role, app_role_source, is_verified)
+       VALUES ('Gate Admin', $1, $2, 'admin', 'manual', true) RETURNING id, password`,
       [adminEmail, await bcrypt.hash(adminPw, 10)]);
-    created.push({ table: "sf_users", id: admin.id });
+    created.push({ table: "accounts", id: admin.id });
     const adminToken = await login(adminEmail, adminPw);
 
     // A stranger who signs up through the public form. In production that
@@ -89,24 +93,24 @@ async function main() {
     const signupEmail = `gate-signup-${tag}@example.test`, signupPw = pw();
     const reg = await postJson("/api/users/register", { name: "Gate Signup", email: signupEmail, password: signupPw });
     const { rows: [signup] } = await pool.query(
-      `SELECT id, role, is_verified FROM sf_users WHERE email = $1`, [signupEmail]);
-    if (signup) created.push({ table: "sf_users", id: signup.id });
-    check("a public signup creates an ordinary sf_users row",
-      reg.status === 201 && signup?.role === "user",
-      `register ${reg.status}, role=${signup?.role}`);
+      `SELECT id, app_role, is_verified FROM accounts WHERE email = $1`, [signupEmail]);
+    if (signup) created.push({ table: "accounts", id: signup.id });
+    check("a public signup creates an ordinary accounts row",
+      reg.status === 201 && signup?.app_role === "user",
+      `register ${reg.status}, app_role=${signup?.app_role}`);
     const signupToken = await login(signupEmail, signupPw);
     const signupClaims = jwt.decode(signupToken) as any;
     check("the signup's JWT is the ordinary login JWT (same secret, id claim)",
-      jwt.verify(signupToken, SECRET) !== null && signupClaims.id === signup.id && signupClaims.type === "User",
+      jwt.verify(signupToken, SECRET) !== null && signupClaims.id === signup.id,
       JSON.stringify(signupClaims));
 
     // A Lead — what Google sign-in auto-creates for any Google account.
     const leadEmail = `gate-lead-${tag}@example.test`, leadPw = pw();
     const { rows: [lead] } = await pool.query(
-      `INSERT INTO sf_leads (first_name, last_name, email, password)
-       VALUES ('Gate', 'Lead', $1, $2) RETURNING id`,
+      `INSERT INTO accounts (first_name, last_name, name, email, password, sf_object)
+       VALUES ('Gate', 'Lead', 'Gate Lead', $1, $2, 'Lead') RETURNING id`,
       [leadEmail, await bcrypt.hash(leadPw, 10)]);
-    created.push({ table: "sf_leads", id: lead.id });
+    created.push({ table: "accounts", id: lead.id });
     const leadToken = await login(leadEmail, leadPw);
 
     // Correctly signed, but its subject no longer exists (a deleted user).
@@ -124,9 +128,9 @@ async function main() {
 
     // ── the gate ─────────────────────────────────────────────────────────────
     // #43's verification: the admin still gets the table...
-    const adminPaths = ["/admin", "/db", "/db/users"];
+    const adminPaths = ["/admin", "/db", "/db/accounts"];
     const asAdmin = await Promise.all(adminPaths.map((p) => hit("GET", p, adminToken)));
-    check("the admin still reaches /admin, /db and /db/users",
+    check("the admin still reaches /admin, /db and /db/accounts",
       asAdmin.every((r) => r.status === 200) && asAdmin[2].body.includes(adminEmail),
       adminPaths.map((p, i) => `${p}=${asAdmin[i].status}`).join(", "));
 
@@ -134,29 +138,33 @@ async function main() {
     const gated = [
       ["GET", "/admin"], ["GET", "/admin/obsidian/api/tree"], ["GET", "/admin/alpaca/api/wallets"],
       ["GET", "/admin/paperclip/api/overview"], ["GET", "/admin/cloud-claw"],
-      ["GET", "/db"], ["GET", "/db/users"], ["GET", "/db/api_key_vault"], ["GET", "/db/users/export"],
+      ["GET", "/db"], ["GET", "/db/accounts"], ["GET", "/db/api_key_vault"], ["GET", "/db/accounts/export"],
     ] as const;
-    for (const [who, token] of [["a public signup", signupToken], ["a Lead", leadToken], ["a deleted user", ghostToken]] as const) {
+    // A deleted user's id resolves to no account, so verifyToken sends them to
+    // login before requireAdmin runs: refused with a redirect, not a 403.
+    for (const [who, token, want] of [
+      ["a public signup", signupToken, 403], ["a Lead", leadToken, 403], ["a deleted user", ghostToken, 302],
+    ] as const) {
       const got = await Promise.all(gated.map(([m, p]) => hit(m, p, token)));
-      check(`${who} gets 403 from /admin and /db`, got.every((r) => r.status === 403),
+      check(`${who} gets ${want} from /admin and /db`, got.every((r) => r.status === want),
         gated.map(([, p], i) => `${p}=${got[i].status}`).join(", "));
     }
 
     // ── the writes that made this more than a read leak ──────────────────────
-    const escalate = await hit("POST", `/db/users/update/${signup.id}`, signupToken, { json: JSON.stringify({ role: "admin" }) });
-    const { rows: [after] } = await pool.query(`SELECT role FROM sf_users WHERE id = $1`, [signup.id]);
-    check("a signup cannot write role = 'admin' onto its own row through /db",
-      escalate.status === 403 && after.role === "user", `POST ${escalate.status}, role now ${after.role}`);
+    const escalate = await hit("POST", `/db/accounts/update/${signup.id}`, signupToken, { json: JSON.stringify({ appRole: "admin" }) });
+    const { rows: [after] } = await pool.query(`SELECT app_role FROM accounts WHERE id = $1`, [signup.id]);
+    check("a signup cannot write app_role = 'admin' onto its own row through /db",
+      escalate.status === 403 && after.app_role === "user", `POST ${escalate.status}, app_role now ${after.app_role}`);
 
-    const takeover = await hit("POST", `/db/users/update/${admin.id}`, signupToken, { json: JSON.stringify({ password: "pwned" }) });
-    const { rows: [adminAfter] } = await pool.query(`SELECT password FROM sf_users WHERE id = $1`, [admin.id]);
+    const takeover = await hit("POST", `/db/accounts/update/${admin.id}`, signupToken, { json: JSON.stringify({ password: "pwned" }) });
+    const { rows: [adminAfter] } = await pool.query(`SELECT password FROM accounts WHERE id = $1`, [admin.id]);
     check("a signup cannot reset the admin's password through /db",
       takeover.status === 403 && adminAfter.password === admin.password, `POST ${takeover.status}`);
 
     // ── role is read per request, not baked into the token ───────────────────
-    await pool.query(`UPDATE sf_users SET role = 'user' WHERE id = $1`, [admin.id]);
+    await pool.query(`UPDATE accounts SET app_role = 'user' WHERE id = $1`, [admin.id]);
     const demoted = await hit("GET", "/admin", adminToken);
-    await pool.query(`UPDATE sf_users SET role = 'admin' WHERE id = $1`, [admin.id]);
+    await pool.query(`UPDATE accounts SET app_role = 'admin' WHERE id = $1`, [admin.id]);
     const restored = await hit("GET", "/admin", adminToken);
     check("demoting the admin closes the door on the very next request, with the same token",
       demoted.status === 403 && restored.status === 200, `demoted=${demoted.status}, restored=${restored.status}`);

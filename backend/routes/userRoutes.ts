@@ -17,6 +17,7 @@ import path from "path";
 import fs from "fs";
 import { sendResetPasswordEmail, sendVerificationEmail } from "../services/emailService.js";
 import { auth } from "../middleware/auth.js";
+import { isDevEnv } from "../utils/env.js";
 import { OAuth2Client } from "google-auth-library";
 
 const uploadDir = path.join(process.cwd(), "uploads", "profile-pictures");
@@ -44,7 +45,7 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 router.post("/register", async (req, res) => {
   try {
     const { name, email, password } = req.body;
-    const isDev = process.env.NODE_ENV === "development" || req.headers.host?.includes("localhost");
+    const isDev = isDevEnv();
     const token = isDev ? undefined : crypto.randomBytes(20).toString("hex");
 
     const user = new User({ 
@@ -118,43 +119,34 @@ router.post("/login", async (req, res) => {
             return res.status(400).json({ error: "Email and password are required" });
         }
 
-        console.log(`[AUTH/DEBUG] DB URL: ${process.env.DATABASE_URL ? process.env.DATABASE_URL.replace(/:\/\/([^:]+):([^@]+)@/, "://$1:***@") : "MISSING"}`);
         email = email.trim().toLowerCase();
-        console.log(`[AUTH/DEBUG] Normalized login attempt for: "${email}"`);
 
         let user: any = await User.findOne({ email: { $regex: new RegExp(`^${email}$`, 'i') } });
         let userType = "User";   
         
         if (!user) {
-            console.log(`[AUTH/DEBUG] Not found in Users. Checking Accounts...`);
             user = await Account.findOne({ email: { $regex: new RegExp(`^${email}$`, 'i') } });
             userType = "Account";
         }
 
         if (!user) {
-            console.log(`[AUTH/DEBUG] Not found in Accounts. Checking Contacts...`);
             user = await Contact.findOne({ email: { $regex: new RegExp(`^${email}$`, 'i') } });
             userType = "Contact";
         }
 
         if (!user) {
-            console.log(`[AUTH/DEBUG] Not found in Contacts. Checking Leads...`);
             user = await Lead.findOne({ email: { $regex: new RegExp(`^${email}$`, 'i') } });
             userType = "Lead";
         }
 
         if (!user) {
-            console.log(`[AUTH/DEBUG] CRITICAL: No user found with email: "${email}" in any collection (even case-insensitive).`);
+            console.log(`[AUTH] Login failed: no account for "${email}"`);
             return res.status(401).json({ error: "Invalid credentials [DEBUG-817]" });
         }
 
-        console.log(`[AUTH/DEBUG] User found in ${userType}. ID: ${user._id}`);
-        console.log(`[AUTH/DEBUG] Stored Email: "${user.email}"`);
-
         // Verify password
-        console.log(`[AUTH/DEBUG] Checking if password is set...`);
         if (!user.password) {
-            console.log(`[AUTH/DEBUG] No password set for: "${email}". Prompting for reset.`);
+            console.log(`[AUTH] Login blocked: no password set for ${userType} ${user._id}, prompting reset`);
             return res.status(403).json({ 
                 error: "Password not set", 
                 message: "Professional accounts synced from Salesforce must set a password for first-time login. Please use 'Forgot Password'.",
@@ -162,16 +154,14 @@ router.post("/login", async (req, res) => {
             });
         }
 
-        console.log(`[AUTH/DEBUG] Comparing passwords...`);
         const isMatch = await bcrypt.compare(password, user.password);
-        console.log(`[AUTH/DEBUG] Password match result: ${isMatch}`);
 
         if (!isMatch) {
-             console.log(`[AUTH/DEBUG] Authentication FAILED for: "${email}"`);
+             console.log(`[AUTH] Login failed: wrong password for ${userType} ${user._id}`);
              return res.status(401).json({ error: "Incorrect Password" });
         }
 
-        console.log(`[AUTH/DEBUG] Authentication SUCCESS for: "${email}"`);
+        console.log(`[AUTH] Login OK: ${userType} ${user._id}`);
 
         // Generate Token
         const token = jwt.sign(
@@ -564,7 +554,9 @@ router.post("/forgot-password", async (req, res) => {
 
         await sendResetPasswordEmail(user.email, token);
 
-        res.json({ message: "Password reset email sent", mockToken: token });
+        // mockToken is for local testing (verify_reset.ts) only. Returning it in
+        // prod would let anyone reset any account's password without the email.
+        res.json({ message: "Password reset email sent", ...(isDevEnv() && { mockToken: token }) });
     } catch (error) {
         console.error("Forgot Password Error:", error);
         res.status(500).json({ error: "Error sending email" });
@@ -574,7 +566,6 @@ router.post("/forgot-password", async (req, res) => {
 router.post("/reset-password", async (req, res) => {
     const { token, newPassword } = req.body;
     try {
-        console.log(`[RESET] Searching for token: ${token}`);
         let user: any = await User.findOne({
             resetPasswordToken: token,
             resetPasswordExpires: { $gt: new Date() },
@@ -606,7 +597,7 @@ router.post("/reset-password", async (req, res) => {
         }
 
         if (!user) {
-            console.log(`[RESET] FAILED: No user found for token ${token} or it has expired.`);
+            console.log(`[RESET] FAILED: No user found for the supplied token, or it has expired.`);
             // Debug: Check if token exists AT ALL without expiration check
             const debugUser = await User.findOne({ resetPasswordToken: token });
             if (debugUser) {

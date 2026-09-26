@@ -1,1 +1,0 @@
-https://personal-web-app-load-balancer-1602669254.us-east-2.elb.amazonaws.com/reset-password?token=43f86c72c4f8a430bec6354f3e0165867a17edb3

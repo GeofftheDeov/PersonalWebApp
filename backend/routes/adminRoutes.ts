@@ -11,6 +11,7 @@ import { pcFetch, paperclipConfigured, PAPERCLIP_COMPANY_ID } from '../services/
 import { requireAdmin } from '../middleware/auth.js';
 import { runPersonSync, personSyncStatus, retryFailedOutboxRow } from '../jobs/personSync.js';
 import { resolveAccountId } from '../utils/accountRefs.js';
+import briefsRoutes from './briefsRoutes.js';
 
 const router = express.Router();
 
@@ -50,6 +51,9 @@ const verifyToken = async (req: any, res: express.Response, next: express.NextFu
 };
 
 router.use(verifyToken, requireAdmin(true));
+
+// Morning briefs from the vault (outputs/briefs/); inherits the admin gate above.
+router.use('/briefs', briefsRoutes);
 
 // ── Person sync (#35, plan §2.7–2.8) ──────────────────────────────────────────
 //
@@ -196,6 +200,9 @@ router.get('/', (req, res) => {
                 </a>
                 <a href="/admin/obsidian?token=${token}" class="nav-btn">
                     Obsidian Vault
+                </a>
+                <a href="/admin/briefs?token=${token}" class="nav-btn">
+                    Morning Briefs
                 </a>
                 <a href="/admin/alpaca?token=${token}" class="nav-btn">
                     Alpaca Dashboard

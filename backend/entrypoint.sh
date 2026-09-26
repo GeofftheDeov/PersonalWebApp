@@ -9,6 +9,9 @@ if [ -n "$VAULT_TOKEN" ] && [ -n "$GITHUB_VAULT_REPO" ]; then
 
   if [ -d "$VAULT_DIR/.git" ]; then
     echo "[vault] Pulling latest notes..."
+    # The EFS clone keeps the remote URL (and token) it was cloned with; refresh it
+    # so a rotated VAULT_TOKEN takes effect for this pull and the in-app pull loop.
+    git -C "$VAULT_DIR" remote set-url origin "$CLONE_URL" || echo "[vault] could not refresh remote URL"
     git -C "$VAULT_DIR" pull --ff-only --quiet 2>&1 || echo "[vault] git pull failed — running with cached data"
   else
     echo "[vault] Cloning vault..."

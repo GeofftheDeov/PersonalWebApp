@@ -2,6 +2,8 @@ import express from 'express';
 import jwt from 'jsonwebtoken';
 import fs from 'fs';
 import path from 'path';
+import { execFile } from 'child_process';
+import { pullVault, vaultSyncStatus } from '../services/vaultSync.js';
 import { renderPage } from '../utils/adminUi.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import AlpacaSnapshot from '../models/AlpacaSnapshot.js';
@@ -635,8 +637,41 @@ router.get('/cloud-claw', (req, res) => {
 
 router.get('/obsidian/api/tree', (req, res) => {
     const vaultPath = process.env.OBSIDIAN_VAULT_PATH;
-    if (!vaultPath) return res.status(503).json({ error: 'OBSIDIAN_VAULT_PATH not configured' });
+    if (!vaultPath) return res.status(503).json({ error: 'OBSIDIAN_VAULT_PATH is not set on this server.' });
+    if (!fs.existsSync(vaultPath)) {
+        return res.status(503).json({ error: `The vault folder (${vaultPath}) does not exist on this server — the boot-time clone never ran or failed.` });
+    }
     res.json({ tree: buildVaultTree(vaultPath) });
+});
+
+/** The newest commit in the vault checkout: how fresh the notes on disk are. */
+function vaultHead(vaultPath: string): Promise<{ commit: string; date: string; subject: string } | null> {
+    const SEP = String.fromCharCode(31); // git's %x1f
+    return new Promise((resolve) => {
+        execFile('git', ['-C', vaultPath, 'log', '-1', '--format=%h%x1f%cI%x1f%s'], { timeout: 10_000 }, (err, stdout) => {
+            if (err) return resolve(null);
+            const [commit, date, subject] = stdout.trim().split(SEP);
+            resolve(commit ? { commit, date, subject: subject ?? '' } : null);
+        });
+    });
+}
+
+async function vaultStatus() {
+    const vaultPath = process.env.OBSIDIAN_VAULT_PATH;
+    if (!vaultPath) return { configured: false };
+    const exists = fs.existsSync(vaultPath);
+    const isGit = exists && fs.existsSync(path.join(vaultPath, '.git'));
+    return { configured: true, exists, isGit, head: isGit ? await vaultHead(vaultPath) : null, sync: vaultSyncStatus() };
+}
+
+router.get('/obsidian/api/status', async (_req, res) => {
+    res.json(await vaultStatus());
+});
+
+// Pull now instead of waiting for the 10-minute loop (services/vaultSync.ts).
+router.post('/obsidian/api/pull', async (_req, res) => {
+    await pullVault();
+    res.json(await vaultStatus());
 });
 
 router.get('/obsidian/api/file', (req, res) => {
@@ -660,6 +695,10 @@ router.get('/obsidian', (req, res) => {
             <div class="vault-sidebar" id="sidebar">
                 <div class="vault-sidebar-header">
                     <span>OBSIDIAN VAULT</span>
+                    <div class="vault-sync">
+                        <div id="vault-sync-text" class="vault-sync-text">Checking vault…</div>
+                        <button id="vault-pull-btn" class="vault-pull-btn" title="git pull the vault now instead of waiting for the 10-minute sync">PULL</button>
+                    </div>
                     <input id="vault-search" type="text" placeholder="Search..." oninput="filterTree(this.value)" />
                 </div>
                 <div class="vault-tree" id="vault-tree">
@@ -676,18 +715,88 @@ router.get('/obsidian', (req, res) => {
         const TOKEN = '${token}';
         let fullTree = [];
 
+        function treeMessage(text, isError) {
+            const el = document.getElementById('vault-tree');
+            el.innerHTML = '';
+            const span = document.createElement('span');
+            span.className = 'tree-loading' + (isError ? ' err' : '');
+            span.textContent = text;
+            el.appendChild(span);
+        }
+
         async function loadTree() {
             try {
                 const r = await fetch('/admin/obsidian/api/tree?token=' + TOKEN);
-                const data = await r.json();
+                const data = await r.json().catch(function() { return {}; });
+                if (!r.ok || data.error) { treeMessage(data.error || ('Failed to load vault (HTTP ' + r.status + ').'), true); return; }
                 fullTree = data.tree || [];
-                renderTree(fullTree, document.getElementById('vault-tree'));
+                if (!fullTree.length) { treeMessage('The vault folder has no notes in it.', true); return; }
+                const q = document.getElementById('vault-search').value;
+                if (q) filterTree(q); else renderTree(fullTree, document.getElementById('vault-tree'));
             } catch(e) {
-                document.getElementById('vault-tree').innerHTML = '<span class="tree-loading">Failed to load vault.</span>';
+                treeMessage('Failed to load vault: ' + e.message, true);
             }
         }
 
-        function renderTree(nodes, container, depth) {
+        // ── Sync status: how fresh the notes on disk are, and the last git pull ──
+        function ago(iso) {
+            const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+            if (s < 90) return 'just now';
+            if (s < 5400) return Math.round(s / 60) + 'm ago';
+            if (s < 129600) return Math.round(s / 3600) + 'h ago';
+            return Math.round(s / 86400) + 'd ago';
+        }
+
+        function renderSync(st) {
+            const el = document.getElementById('vault-sync-text');
+            el.className = 'vault-sync-text';
+            el.innerHTML = '';
+            const line = function(text, cls) {
+                const d = document.createElement('div');
+                d.textContent = text;
+                if (cls) d.className = cls;
+                el.appendChild(d);
+            };
+            if (!st.configured) { line('OBSIDIAN_VAULT_PATH is not set.', 'err'); return; }
+            if (!st.exists) { line('Vault folder missing on this server.', 'err'); return; }
+            if (!st.isGit) line('Not a git checkout — cannot pull.', 'err');
+            if (st.head) {
+                line('Newest note commit ' + ago(st.head.date) + ' · ' + st.head.commit);
+                el.title = st.head.subject;
+            }
+            const sync = st.sync || {};
+            if (sync.ok === false) line('Last pull failed ' + (sync.at ? ago(sync.at) : '') + ': ' + sync.message, 'err');
+            else if (sync.ok === true) line('Pulled ' + ago(sync.at) + ' — ' + sync.message, 'ok');
+            else line('No in-app pull yet (next within 10 min).', 'muted');
+        }
+
+        async function loadStatus() {
+            try {
+                const r = await fetch('/admin/obsidian/api/status?token=' + TOKEN);
+                renderSync(await r.json());
+            } catch (e) {
+                document.getElementById('vault-sync-text').textContent = 'Status unavailable: ' + e.message;
+            }
+        }
+
+        document.getElementById('vault-pull-btn').addEventListener('click', async function() {
+            const btn = this;
+            btn.disabled = true;
+            btn.textContent = 'PULLING…';
+            try {
+                const r = await fetch('/admin/obsidian/api/pull?token=' + TOKEN, { method: 'POST' });
+                renderSync(await r.json());
+                await loadTree();
+            } catch (e) {
+                document.getElementById('vault-sync-text').textContent = 'Pull failed: ' + e.message;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'PULL';
+            }
+        });
+
+        // Built with textContent: note and folder names come from the vault.
+        function renderTree(nodes, container, depth, expandAll) {
             depth = depth || 0;
             container.innerHTML = '';
             const ul = document.createElement('ul');
@@ -695,26 +804,34 @@ router.get('/obsidian', (req, res) => {
             nodes.forEach(function(node) {
                 const li = document.createElement('li');
                 if (node.type === 'dir') {
-                    li.innerHTML = '<span class="tree-dir" data-path="' + node.path + '" style="padding-left:' + (depth*12) + 'px">&#9654; ' + escHtml(node.name) + '/</span>';
+                    const label = document.createElement('span');
+                    label.className = 'tree-dir';
+                    label.style.paddingLeft = (depth * 12) + 'px';
                     const childContainer = document.createElement('div');
-                    childContainer.style.display = 'none';
-                    childContainer.dataset.children = 'true';
-                    renderTree(node.children || [], childContainer, depth + 1);
-                    li.appendChild(childContainer);
-                    li.querySelector('.tree-dir').addEventListener('click', function(e) {
+                    childContainer.style.display = expandAll ? 'block' : 'none';
+                    renderTree(node.children || [], childContainer, depth + 1, expandAll);
+                    const setLabel = function(open) { label.textContent = (open ? '▼ ' : '▶ ') + node.name + '/'; };
+                    setLabel(!!expandAll);
+                    label.addEventListener('click', function(e) {
                         e.stopPropagation();
-                        const open = childContainer.style.display !== 'none';
-                        childContainer.style.display = open ? 'none' : 'block';
-                        this.innerHTML = (open ? '&#9654; ' : '&#9660; ') + escHtml(node.name) + '/';
-                        this.style.paddingLeft = (depth*12) + 'px';
+                        const open = childContainer.style.display === 'none';
+                        childContainer.style.display = open ? 'block' : 'none';
+                        setLabel(open);
                     });
+                    li.appendChild(label);
+                    li.appendChild(childContainer);
                 } else {
-                    li.innerHTML = '<span class="tree-file" data-path="' + node.path + '" style="padding-left:' + (depth*12+12) + 'px">&#128196; ' + escHtml(node.name) + '</span>';
-                    li.querySelector('.tree-file').addEventListener('click', function() {
+                    const label = document.createElement('span');
+                    label.className = 'tree-file';
+                    label.style.paddingLeft = (depth * 12 + 12) + 'px';
+                    label.textContent = '📄 ' + node.name;
+                    label.title = node.path;
+                    label.addEventListener('click', function() {
                         document.querySelectorAll('.tree-file').forEach(function(el) { el.classList.remove('active'); });
-                        this.classList.add('active');
+                        label.classList.add('active');
                         openFile(node.path);
                     });
+                    li.appendChild(label);
                 }
                 ul.appendChild(li);
             });
@@ -731,11 +848,9 @@ router.get('/obsidian', (req, res) => {
                     return ch.length ? [Object.assign({}, n, {children: ch})] : [];
                 });
             }
-            renderTree(filter(fullTree), document.getElementById('vault-tree'));
-            document.querySelectorAll('.tree-dir').forEach(function(el) {
-                el.nextElementSibling.style.display = 'block';
-                el.innerHTML = '&#9660; ' + el.innerHTML.replace(/^&#9654; |^&#9660; /, '');
-            });
+            const hits = filter(fullTree);
+            if (!hits.length) { treeMessage('No notes match "' + q + '".'); return; }
+            renderTree(hits, document.getElementById('vault-tree'), 0, true);
         }
 
         async function openFile(p) {
@@ -758,6 +873,7 @@ router.get('/obsidian', (req, res) => {
         function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
         loadTree();
+        loadStatus();
         </script>
     `;
 
@@ -807,6 +923,38 @@ router.get('/obsidian', (req, res) => {
         }
         #vault-search:focus { border-color: #0d9488; }
 
+        .vault-sync {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.5rem;
+            font-weight: normal;
+            letter-spacing: 0;
+        }
+        .vault-sync-text {
+            flex: 1;
+            min-width: 0;
+            font-size: 0.65rem;
+            line-height: 1.4;
+            color: #888;
+            overflow-wrap: anywhere;
+        }
+        .vault-sync-text .ok { color: #10b981; }
+        .vault-sync-text .err { color: #f97316; }
+        .vault-sync-text .muted { color: #555; }
+        .vault-pull-btn {
+            background: transparent;
+            border: 1px solid #444;
+            color: #0d9488;
+            font-family: 'Courier New', monospace;
+            font-size: 0.65rem;
+            letter-spacing: 1px;
+            padding: 0.2rem 0.5rem;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .vault-pull-btn:hover:not(:disabled) { border-color: #0d9488; color: #2dd4bf; }
+        .vault-pull-btn:disabled { opacity: 0.5; }
+
         .vault-tree {
             flex: 1;
             overflow-y: auto;
@@ -835,6 +983,7 @@ router.get('/obsidian', (req, res) => {
         .tree-file.active { background: #1e3a3a; color: #0d9488; }
 
         .tree-loading { color: #555; font-size: 0.75rem; padding: 1rem; display: block; }
+        .tree-loading.err { color: #f97316; line-height: 1.5; }
 
         .vault-content {
             flex: 1;

@@ -46,6 +46,7 @@ import { snapshotAlpacaNow } from "./routes/adminRoutes.js";
 import { startEventBus, stopEventBus } from "./events/index.js";
 import { startReadyCheckLoop } from "./utils/readyCheck.js";
 import { startWorkers } from "./jobs/workers.js";
+import { startVaultSyncLoop } from "./services/vaultSync.js";
 import { registerRepeatableJobs, closeBullConnection } from "./jobs/queues.js";
 
 import https from "https";
@@ -93,7 +94,11 @@ app.get("/health", async (req, res) => {
     });
 });
 app.use((req, res, next) => {
-    console.log(`[BACKEND] ${req.method} ${req.url}`);
+    // req.url includes the query string, and /admin authenticates by ?token=.
+    // This middleware runs before /admin mounts, so every admin page load used to
+    // write a valid JWT into CloudWatch in plaintext, readable for the log
+    // group's whole retention period (#39). Redact before logging, not after.
+    console.log(`[BACKEND] ${req.method} ${req.url.replace(/([?&]token=)[^&]+/, "$1***")}`);
     next();
 });
 app.use(express.json());
@@ -165,6 +170,10 @@ if (process.env.ALPACA_API_KEY && process.env.ALPACA_SECRET_KEY) {
     setInterval(() => snapshotAlpacaNow(), FIVE_MIN);
     console.log('[BACKEND] Alpaca snapshot loop scheduled (every 5 min).');
 }
+
+// Obsidian vault: entrypoint.sh pulls once at boot; keep it current while running
+// so new vault commits (e.g. the daily morning brief) show up without a redeploy.
+startVaultSyncLoop();
 
 // Global Error Handler.
 app.use((err: any, req: any, res: any, next: any) => {

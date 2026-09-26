@@ -57,7 +57,9 @@ router.post("/register", async (req, res) => {
     });
     
     await user.save();
-    if (!isDev && token) await sendVerificationEmail(email, token);
+    // The user is already saved, so a mail failure must not turn this into a 500.
+    if (!isDev && token) await sendVerificationEmail(email, token).catch((err: any) =>
+      console.error("Register: verification email failed:", err.message));
     
     res.status(201).json({ 
       message: isDev ? "User registered successfully!" : "User registered successfully! Please check your email to verify your account.",

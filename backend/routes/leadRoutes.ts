@@ -45,7 +45,9 @@ router.post("/", async (req, res) => {
             console.log(">>> [BACKEND/LEADS] Dev mode: Skipping email verification.");
         } else if (email) {
             console.log(">>> [BACKEND/LEADS] Production: Sending verification email...");
-            if (token) await sendVerificationEmail(email, token);
+            // The lead is already saved, so a mail failure must not turn this into a 500.
+            if (token) await sendVerificationEmail(email, token).catch((err: any) =>
+                console.error("!!! [BACKEND/LEADS] Verification email failed:", err.message));
         } else {
             console.log(">>> [BACKEND/LEADS] Production: Phone-only registration, skipping verification for now.");
         }

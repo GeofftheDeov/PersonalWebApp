@@ -2,6 +2,7 @@ import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
+import { isDevEnv } from '../utils/env.js';
 
 dotenv.config();
 
@@ -29,15 +30,18 @@ export const sendResetPasswordEmail = async (email: string, token: string) => {
     };
 
     console.log(`[Email Service] Sending reset password email to ${email}`);
-    console.log(`[Email Service] Reset Link: ${resetUrl}`); // Log for dev/testing
 
-    // HACK: Log to file for testing/demo purposes
-    try {
-        const logPath = path.join(process.cwd(), 'reset_link.txt');
-        fs.writeFileSync(logPath, resetUrl);
-        console.log(`[Email Service] Reset link written to ${logPath}`);
-    } catch (e) {
-        console.error("Failed to write reset link to file:", e);
+    // The link carries the reset token (a password-equivalent), so only
+    // surface it locally. Never in prod logs or on the container disk.
+    if (isDevEnv()) {
+        console.log(`[Email Service] Reset Link: ${resetUrl}`);
+        try {
+            const logPath = path.join(process.cwd(), 'reset_link.txt');
+            fs.writeFileSync(logPath, resetUrl);
+            console.log(`[Email Service] Reset link written to ${logPath}`);
+        } catch (e) {
+            console.error("Failed to write reset link to file:", e);
+        }
     }
 
     try {
@@ -46,7 +50,7 @@ export const sendResetPasswordEmail = async (email: string, token: string) => {
              console.log(`[Email Service] Email sent: ${info.response}`);
              return info;
         } else {
-             console.log('[Email Service] No password provided. Skipping actual email send. Check console for link.');
+             console.warn('[Email Service] EMAIL_PASS not set. Skipping actual email send.');
              return { response: 'Mock email sent' };
         }
        
@@ -72,15 +76,17 @@ export const sendVerificationEmail = async (email: string, token: string) => {
     };
 
     console.log(`[Email Service] Sending verification email to ${email}`);
-    console.log(`[Email Service] Verify Link: ${verifyUrl}`); // Log for dev/testing
 
-    // HACK: Log to file for testing/demo purposes
-    try {
-        const logPath = path.join(process.cwd(), 'verify_link.txt');
-        fs.writeFileSync(logPath, verifyUrl);
-        console.log(`[Email Service] Verify link written to ${logPath}`);
-    } catch (e) {
-        console.error("Failed to write verify link to file:", e);
+    // Same as the reset link: the token must not reach prod logs or disk.
+    if (isDevEnv()) {
+        console.log(`[Email Service] Verify Link: ${verifyUrl}`);
+        try {
+            const logPath = path.join(process.cwd(), 'verify_link.txt');
+            fs.writeFileSync(logPath, verifyUrl);
+            console.log(`[Email Service] Verify link written to ${logPath}`);
+        } catch (e) {
+            console.error("Failed to write verify link to file:", e);
+        }
     }
 
     try {
@@ -89,7 +95,7 @@ export const sendVerificationEmail = async (email: string, token: string) => {
              console.log(`[Email Service] Email sent: ${info.response}`);
              return info;
         } else {
-             console.log('[Email Service] No password provided. Skipping actual email send. Check console for link.');
+             console.warn('[Email Service] EMAIL_PASS not set. Skipping actual email send.');
              return { response: 'Mock email sent' };
         }
        

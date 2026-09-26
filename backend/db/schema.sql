@@ -564,3 +564,24 @@ CREATE TABLE cloud_claw_sessions (
 );
 CREATE TRIGGER trg_cloud_claw_updated BEFORE UPDATE ON cloud_claw_sessions
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ============================================================
+-- Admin portal
+-- ============================================================
+
+-- Saved list views for the /db table browser (migrations/2026-09-25-admin-list-views.sql).
+-- Shared by all admins; created_by is informational, not a person ref.
+CREATE TABLE admin_list_views (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  collection  text NOT NULL,
+  name        text NOT NULL CHECK (length(btrim(name)) BETWEEN 1 AND 80),
+  config      jsonb NOT NULL DEFAULT '{}',
+  is_default  boolean NOT NULL DEFAULT false,
+  created_by  text,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (collection, name)
+);
+CREATE UNIQUE INDEX uq_admin_list_views_default ON admin_list_views (collection) WHERE is_default;
+CREATE TRIGGER trg_admin_list_views_updated BEFORE UPDATE ON admin_list_views
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();

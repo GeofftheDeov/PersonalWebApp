@@ -5,12 +5,14 @@ import Lead from "../models/Lead.js";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { sendVerificationEmail } from "../services/emailService.js";
+import { isDevEnv } from "../utils/env.js";
 
 // Create a new lead
 router.post("/", async (req, res) => {
-    console.log("!!! [BACKEND/LEADS] RECEIVED REGISTRATION REQUEST:", JSON.stringify(req.body));
     try {
         const { firstName, lastName, email, password, company, phone } = req.body;
+        // Never log req.body here — it carries the plaintext password.
+        console.log(`>>> [BACKEND/LEADS] Received registration request for ${email || "(phone-only)"}`);
         
         // Validation
         if (!firstName || !lastName || (!email && !phone) || !password) {
@@ -20,10 +22,10 @@ router.post("/", async (req, res) => {
             });
         }
         
-        const isDev = process.env.NODE_ENV === "development" || req.headers.host?.includes("localhost");
+        const isDev = isDevEnv();
         const token = isDev ? undefined : crypto.randomBytes(20).toString("hex");
         
-        console.log(`>>> [BACKEND/LEADS] Saving lead to MongoDB (isDev=${isDev})...`);
+        console.log(`>>> [BACKEND/LEADS] Saving lead to Postgres (isDev=${isDev})...`);
         const lead = new Lead({ 
             firstName: firstName, 
             lastName: lastName, 
@@ -43,7 +45,9 @@ router.post("/", async (req, res) => {
             console.log(">>> [BACKEND/LEADS] Dev mode: Skipping email verification.");
         } else if (email) {
             console.log(">>> [BACKEND/LEADS] Production: Sending verification email...");
-            if (token) await sendVerificationEmail(email, token);
+            // The lead is already saved, so a mail failure must not turn this into a 500.
+            if (token) await sendVerificationEmail(email, token).catch((err: any) =>
+                console.error("!!! [BACKEND/LEADS] Verification email failed:", err.message));
         } else {
             console.log(">>> [BACKEND/LEADS] Production: Phone-only registration, skipping verification for now.");
         }

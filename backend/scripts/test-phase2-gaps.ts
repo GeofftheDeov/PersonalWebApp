@@ -16,6 +16,9 @@ import path from "path";
 import pool from "../db/index.js";
 import { parseCsv, runBackfill, type MergeRow } from "./phase2-backfill.js";
 
+/** The System Administrator persona in the dev sheet — the account the backfill pins admin/manual. */
+const DEV_ADMIN = "62320595-fc13-5112-9cbb-25f094e08c0a";
+
 let pass = 0, fail = 0;
 const check = (name: string, ok: boolean, detail = "") => {
   console.log(`  ${ok ? "PASS" : "FAIL"}  ${name}${detail ? `\n          ${detail}` : ""}`);
@@ -80,7 +83,7 @@ async function main() {
   try {
     await client.query("BEGIN");
     await seed(client, rows);
-    const result = await runBackfill(client, rows);
+    const result = await runBackfill(client, rows, { adminId: DEV_ADMIN });
     check("backfill still produces 19 accounts / 39 links",
       result.accounts === 19 && result.links === 39,
       `${result.accounts} accounts, ${result.links} links`);
@@ -146,7 +149,7 @@ async function main() {
        SELECT id, 'create', '{}'::jsonb FROM accounts LIMIT 1`);
     let refused = "";
     try {
-      await runBackfill(client, rows);
+      await runBackfill(client, rows, { adminId: DEV_ADMIN });
     } catch (e: any) { refused = e.message; }
     check("a re-run refuses while person_outbox holds queued write-backs",
       /person_outbox holds 1 queued/.test(refused),

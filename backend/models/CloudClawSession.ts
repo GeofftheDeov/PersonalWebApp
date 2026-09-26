@@ -11,7 +11,7 @@ const CloudClawSession = defineModel({
   fields: {
     userId: { col: "user_id", type: "uuid" },
     messages: { col: "messages", type: "jsonb" },
-    createdAt: "created_at", updatedAt: "updated_at",
+    createdAt: { col: "created_at", type: "date" }, updatedAt: { col: "updated_at", type: "date" },
   },
   refs: { userId: () => User },
 });

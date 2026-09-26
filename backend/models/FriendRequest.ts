@@ -6,7 +6,7 @@ const FriendRequest = defineModel({
   fields: {
     from: { col: "from_user", type: "uuid" },
     to: { col: "to_user", type: "uuid" },
-    status: "status", createdAt: "created_at",
+    status: "status", createdAt: { col: "created_at", type: "date" },
   },
   refs: { from: () => User, to: () => User },
 });

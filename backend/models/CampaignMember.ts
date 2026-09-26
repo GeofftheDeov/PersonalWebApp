@@ -12,7 +12,7 @@ const CampaignMember = defineModel({
     contact: { col: "contact_id", type: "uuid" },
     account: { col: "account_id", type: "uuid" },
     email: "email", phone: "phone", firstName: "first_name", lastName: "last_name",
-    status: "status", joinedAt: "joined_at", sfID: "sf_id", createdAt: "created_at",
+    status: "status", joinedAt: { col: "joined_at", type: "date" }, sfID: "sf_id", createdAt: { col: "created_at", type: "date" },
   },
   refs: { campaign: () => Campaign, lead: () => Lead, contact: () => Contact, account: () => Account },
 });

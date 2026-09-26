@@ -9,7 +9,7 @@ const Message = defineModel({
     event: { col: "event_id", type: "uuid" },
     dmKey: "dm_key", recipient: "recipient",
     "sender.id": "sender_id", "sender.name": "sender_name", "sender.email": "sender_email",
-    body: "body", createdAt: "created_at",
+    body: "body", createdAt: { col: "created_at", type: "date" },
   },
   refs: { campaign: () => Campaign, event: () => Event },
   preSave: (doc) => {

@@ -12,7 +12,7 @@ import pool from "./index.js";
 
 // ---------------------------------------------------------------- types
 
-type FieldType = "plain" | "jsonb" | "uuid" | "uuid[]" | "text[]";
+type FieldType = "plain" | "jsonb" | "uuid" | "uuid[]" | "text[]" | "date" | "jsonpath";
 
 export interface FieldDef {
   col: string;
@@ -78,13 +78,66 @@ function runner(session?: ClientSession | null): pg.Pool | pg.PoolClient {
   return session?.client ?? pool;
 }
 
+/**
+ * An HTML form that leaves an optional input untouched submits `""`, not
+ * `undefined`. Mongo accepted `""` in an optional Date field; Postgres rejects
+ * it outright:
+ *
+ *   invalid input syntax for type timestamp with time zone: ""
+ *
+ * So every create with a blank optional date 500s — which is the default state
+ * of most of those forms. `""` is not a meaningful value for a date or a uuid
+ * (unlike text, where empty and absent can legitimately differ), so for those
+ * two types it is normalised to NULL here rather than being audited at each of
+ * the ~20 call sites. See GitHub #41.
+ *
+ * Note the deliberate limit: only blank/whitespace becomes NULL. A non-empty
+ * but unparseable date is still sent to Postgres and still errors, because
+ * silently nulling a mistyped date loses data the user thought they entered.
+ */
+function blankToNull(value: any): any {
+  if (value === undefined) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+  return value;
+}
+
 function toParam(value: any, type: FieldType): any {
   if (type === "jsonb") return value === undefined || value === null ? null : JSON.stringify(value);
+  if (type === "date" || type === "uuid") return blankToNull(value);
   return value === undefined ? null : value;
 }
 
 function castSuffix(type: FieldType): string {
   return type === "jsonb" ? "::jsonb" : "";
+}
+
+/**
+ * Resolve a dotted filter key that reaches *into* a jsonb column, e.g.
+ * `{ "readyCheck.sentAt": { $exists: false } }` -> `ready_check->>'sentAt'`.
+ *
+ * Mongo traversed subdocuments natively, so the port left call sites like the
+ * ready-check sweep filtering on a dotted path. buildWhere throws on any key
+ * not in def.fields, so that query has been failing every 60s since the port:
+ *
+ *   [ready-check] sweep failed: [db] game_sessions: unknown filter field
+ *   "readyCheck.sentAt"
+ *
+ * Returns null unless the head of the path is a declared jsonb field, so a
+ * genuinely unknown field still raises "unknown filter field" as before.
+ */
+function jsonbPathField(def: ModelDef, key: string): FieldDef | null {
+  const dot = key.indexOf(".");
+  if (dot < 1) return null;
+  const head = fdef(def, key.slice(0, dot));
+  if (!head || head.type !== "jsonb") return null;
+  const path = key.slice(dot + 1).split(".").map((p) => p.replace(/'/g, "''"));
+  const expr = path.length === 1
+    ? `${head.col}->>'${path[0]}'`
+    : `${head.col}#>>'{${path.join(",")}}'`;
+  // `->>` yields text. Equality, $in, $ne, $exists and $regex all behave; the
+  // ordering operators would compare lexically, which is silently wrong for
+  // numbers and dates, so fieldCond rejects them on a jsonb path.
+  return { col: expr, type: "jsonpath" };
 }
 
 /** Convert a JS RegExp (or string) to a Postgres regex condition. */
@@ -106,7 +159,9 @@ function buildWhere(def: ModelDef, filter: any, params: any[]): string {
       parts.push(`(${sub.join(key === "$or" ? " OR " : " AND ")})`);
       continue;
     }
-    const f = key === "_id" || key === "id" ? { col: "id", type: "uuid" as FieldType } : fdef(def, key);
+    const f = key === "_id" || key === "id"
+      ? { col: "id", type: "uuid" as FieldType }
+      : fdef(def, key) ?? jsonbPathField(def, key);
     if (!f) throw new Error(`[db] ${def.table}: unknown filter field "${key}"`);
     parts.push(fieldCond(f, value, params));
   }
@@ -142,10 +197,17 @@ function fieldCond(f: FieldDef, value: any, params: any[]): string {
           if (v === null) conds.push(`${f.col} IS NOT NULL`);
           else { params.push(v); conds.push(`${f.col} IS DISTINCT FROM $${params.length}`); }
           break;
-        case "$gt": params.push(v); conds.push(`${f.col} > $${params.length}`); break;
-        case "$gte": params.push(v); conds.push(`${f.col} >= $${params.length}`); break;
-        case "$lt": params.push(v); conds.push(`${f.col} < $${params.length}`); break;
-        case "$lte": params.push(v); conds.push(`${f.col} <= $${params.length}`); break;
+        case "$gt": case "$gte": case "$lt": case "$lte": {
+          // `->>` on a jsonb path yields text, so these would compare lexically
+          // — silently wrong for numbers and dates. Refuse rather than lie.
+          if (f.type === "jsonpath") {
+            throw new Error(`[db] ${op} is not supported on a jsonb path (${f.col}); use plain SQL with an explicit cast`);
+          }
+          const sqlOp = op === "$gt" ? ">" : op === "$gte" ? ">=" : op === "$lt" ? "<" : "<=";
+          params.push(v);
+          conds.push(`${f.col} ${sqlOp} $${params.length}`);
+          break;
+        }
         case "$regex": conds.push(regexCond(f.col, v as any, (value as any).$options, params)); break;
         case "$options": break; // consumed by $regex
         case "$exists": conds.push((v as boolean) ? `${f.col} IS NOT NULL` : `${f.col} IS NULL`); break;
@@ -309,6 +371,48 @@ class Query<T = any> implements PromiseLike<T> {
   }
 }
 
+/**
+ * Thenable wrapper returned by the *AndUpdate statics so callers can chain
+ * .select() / .populate() / .lean(), the way mongoose Queries allowed.
+ *
+ * Before this, those statics were plain `async` methods returning a bare
+ * Promise, so `Model.findByIdAndUpdate(...).select("-password")` threw
+ * "select is not a function" at runtime. That broke PUT /users/profile
+ * (any profile edit, e.g. changing your handle) and the tabletop session /
+ * character updates, which chain .populate(). Regression from the mongoose
+ * -> node-postgres port; the update itself always worked.
+ */
+class UpdateQuery<T = any> implements PromiseLike<T> {
+  private _select: string | null = null;
+  private _populate: Array<string | { path: string; select?: string }> = [];
+  private _lean = false;
+
+  constructor(private M: any, private run: () => Promise<any>) {}
+
+  select(spec: string) { this._select = spec; return this; }
+  populate(spec: string | { path: string; select?: string }) { this._populate.push(spec); return this; }
+  lean() { this._lean = true; return this; }
+
+  then<R1 = T, R2 = never>(
+    onfulfilled?: ((value: T) => R1 | PromiseLike<R1>) | null,
+    onrejected?: ((reason: any) => R2 | PromiseLike<R2>) | null,
+  ): PromiseLike<R1 | R2> {
+    return this.exec().then(onfulfilled as any, onrejected as any);
+  }
+  catch(onrejected: (reason: any) => any) { return this.exec().catch(onrejected); }
+
+  async exec(): Promise<any> {
+    const doc = await this.run();
+    if (!doc) return null;
+    if (this._select != null) {
+      doc.__partial = true;
+      applySelect(doc, this._select);
+    }
+    if (this._populate.length) await populateDocs(this.M, [doc], this._populate);
+    return this._lean ? doc.toObject() : doc;
+  }
+}
+
 function applySelect(doc: any, spec: string): any {
   const parts = spec.split(/\s+/).filter(Boolean);
   const excludes = parts.filter((p) => p.startsWith("-")).map((p) => p.slice(1));
@@ -324,7 +428,13 @@ function applySelect(doc: any, spec: string): any {
   return doc;
 }
 
-async function populateDocs(M: any, docs: any[], specs: Array<string | { path: string; select?: string }>) {
+async function populateDocs(M: any, docs: any[], specsIn: Array<string | { path: string; select?: string }>) {
+  // Mongoose accepts several paths in one string — populate("player campaign
+  // dungeon") — and the character and encounter routes use exactly that. Treated
+  // as one path it matched no ref and was skipped, so those endpoints returned
+  // bare ids where the July build returned campaign and dungeon objects.
+  type Spec = string | { path: string; select?: string };
+  const specs: Spec[] = specsIn.flatMap((s): Spec[] => (typeof s === "string" ? s.split(/\s+/).filter(Boolean) : [s]));
   for (const spec of specs) {
     const path = typeof spec === "string" ? spec : spec.path;
     const select = typeof spec === "string" ? undefined : spec.select;
@@ -472,35 +582,39 @@ export function defineModel(def: ModelDef): any {
       return { matchedCount: res.rowCount, modifiedCount: res.rowCount };
     }
 
-    static async findOneAndUpdate(filter: any, update: any, opts: { session?: ClientSession; new?: boolean; upsert?: boolean } = {}) {
-      const r = runner(opts.session);
-      const params: any[] = [];
-      const setSql = buildUpdate(def, update, params);
-      const where = buildWhere(def, filter, params);
-      const { rows } = await r.query(
-        `UPDATE ${def.table} SET ${setSql} WHERE id = (SELECT id FROM ${def.table} WHERE ${where} LIMIT 1) RETURNING *`, params);
-      if (rows[0]) return rowToDoc(def, rows[0], Model, false);
-      if (!opts.upsert) return null;
-      // upsert: merge equality fields from the filter + $set/$setOnInsert + plain update fields
-      const seed: Record<string, any> = {};
-      for (const [k, v] of Object.entries(filter ?? {})) {
-        if (!k.startsWith("$") && (typeof v !== "object" || v instanceof Date || v === null)) seed[k] = v;
-      }
-      Object.assign(seed, update?.$setOnInsert ?? {});
-      Object.assign(seed, update?.$set ?? {});
-      for (const [k, v] of Object.entries(update ?? {})) if (!k.startsWith("$")) seed[k] = v;
-      const doc = new Model(seed);
-      return doc.save({ session: opts.session });
+    static findOneAndUpdate(filter: any, update: any, opts: { session?: ClientSession; new?: boolean; upsert?: boolean } = {}) {
+      return new UpdateQuery(Model, async () => {
+        const r = runner(opts.session);
+        const params: any[] = [];
+        const setSql = buildUpdate(def, update, params);
+        const where = buildWhere(def, filter, params);
+        const { rows } = await r.query(
+          `UPDATE ${def.table} SET ${setSql} WHERE id = (SELECT id FROM ${def.table} WHERE ${where} LIMIT 1) RETURNING *`, params);
+        if (rows[0]) return rowToDoc(def, rows[0], Model, false);
+        if (!opts.upsert) return null;
+        // upsert: merge equality fields from the filter + $set/$setOnInsert + plain update fields
+        const seed: Record<string, any> = {};
+        for (const [k, v] of Object.entries(filter ?? {})) {
+          if (!k.startsWith("$") && (typeof v !== "object" || v instanceof Date || v === null)) seed[k] = v;
+        }
+        Object.assign(seed, update?.$setOnInsert ?? {});
+        Object.assign(seed, update?.$set ?? {});
+        for (const [k, v] of Object.entries(update ?? {})) if (!k.startsWith("$")) seed[k] = v;
+        const doc = new Model(seed);
+        return doc.save({ session: opts.session });
+      });
     }
 
-    static async findByIdAndUpdate(id: any, update: any, opts: { session?: ClientSession; new?: boolean } = {}) {
-      if (!isUuid(String(id))) return null;
-      const params: any[] = [];
-      const setSql = buildUpdate(def, update, params);
-      params.push(String(id));
-      const { rows } = await runner(opts.session).query(
-        `UPDATE ${def.table} SET ${setSql} WHERE id = $${params.length} RETURNING *`, params);
-      return rows[0] ? rowToDoc(def, rows[0], Model, false) : null;
+    static findByIdAndUpdate(id: any, update: any, opts: { session?: ClientSession; new?: boolean } = {}) {
+      return new UpdateQuery(Model, async () => {
+        if (!isUuid(String(id))) return null;
+        const params: any[] = [];
+        const setSql = buildUpdate(def, update, params);
+        params.push(String(id));
+        const { rows } = await runner(opts.session).query(
+          `UPDATE ${def.table} SET ${setSql} WHERE id = $${params.length} RETURNING *`, params);
+        return rows[0] ? rowToDoc(def, rows[0], Model, false) : null;
+      });
     }
 
     static async findByIdAndDelete(id: any, opts: { session?: ClientSession } = {}) {

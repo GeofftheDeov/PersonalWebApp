@@ -280,7 +280,7 @@ router.get("/characters", auth, async (req: any, res) => {
         const campaignIds = await getAuthorizedCampaignIds(req.user);
         const query = campaignIds ? { campaign: { $in: campaignIds } } : {};
 
-        const characters = await Character.find(query).populate("player campaign dungeon");
+        const characters = await Character.find(query).populate("campaign dungeon");
         res.json(characters);
     } catch (error: any) {
         res.status(500).json({ error: "Failed to fetch characters", details: error.message });
@@ -299,7 +299,7 @@ router.post("/characters", async (req, res) => {
 
 router.get("/characters/:id", auth, async (req: any, res) => {
     try {
-        const character = await Character.findById(req.params.id).populate("player campaign dungeon");
+        const character = await Character.findById(req.params.id).populate("campaign dungeon");
         if (!character) return res.status(404).json({ error: "Character not found" });
         res.json(character);
     } catch (error: any) {
@@ -314,7 +314,7 @@ router.put("/characters/:id", auth, async (req: any, res) => {
             req.params.id,
             { name, class: charClass, level, gameType, campaign, isDead },
             { new: true }
-        ).populate("player campaign dungeon");
+        ).populate("campaign dungeon");
         if (!character) return res.status(404).json({ error: "Character not found" });
         res.json(character);
     } catch (error: any) {

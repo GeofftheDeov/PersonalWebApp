@@ -4,7 +4,7 @@ const Dungeon = defineModel({
   table: "dungeons",
   fields: {
     name: "name", description: "description", level: "level",
-    isCompleted: "is_completed", sfID: "sf_id", createdAt: "created_at",
+    isCompleted: "is_completed", sfID: "sf_id", createdAt: { col: "created_at", type: "date" },
   },
 });
 export default Dungeon;

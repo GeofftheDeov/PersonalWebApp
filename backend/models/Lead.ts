@@ -2,11 +2,14 @@ import { defineModel } from "../db/model.js";
 import { hashPasswordHook, fourDigit, digitTag } from "./_shared.js";
 import { createLeadInSalesforce } from "../services/salesforceService.js";
 
+// Phase 1 of the unified account model (#33) renamed this table to sf_leads.
+// The fire-and-forget postSave push below is what person_outbox replaces in
+// Phase 3 (#35) — nightly drain with retries instead of setImmediate.
 const Lead = defineModel({
-  table: "leads",
+  table: "sf_leads",
   fields: {
     firstName: "first_name", lastName: "last_name", email: "email", password: "password",
-    resetPasswordToken: "reset_password_token", resetPasswordExpires: "reset_password_expires",
+    resetPasswordToken: "reset_password_token", resetPasswordExpires: { col: "reset_password_expires", type: "date" },
     isVerified: "is_verified", emailVerificationToken: "email_verification_token",
     company: "company", handle: "handle", phone: "phone",
     status: "status", source: "source",
@@ -15,7 +18,7 @@ const Lead = defineModel({
     profilePicture: "profile_picture",
     favoriteGames: { col: "favorite_games", type: "text[]" },
     friends: { col: "friends", type: "uuid[]" },
-    createdAt: "created_at",
+    createdAt: { col: "created_at", type: "date" },
   },
   defaults: { userNumber: fourDigit, userDigit: digitTag("LD") },
   preSave: hashPasswordHook,

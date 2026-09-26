@@ -53,6 +53,18 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
+    # The Postgres cutover (#45) ships this task definition with a placeholder
+    # for the DATABASE_URL secret ARN, filled in only once the secret exists
+    # and the execution role may read it. Fail in seconds here rather than
+    # after a 45-minute image build, and never register a task definition
+    # that cannot start.
+    - name: Refuse a task definition with placeholders
+      run: |
+        if grep -n "REPLACE_ME" "${{ env.ECS_TASK_DEFINITION }}"; then
+          echo "::error::${{ env.ECS_TASK_DEFINITION }} still contains REPLACE_ME - see the cutover checklist in #45"
+          exit 1
+        fi
+
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v3
 
@@ -199,6 +211,14 @@ jobs:
   rebase-dev:
     name: Rebase Dev onto Main
     needs: deploy
+    # Disabled for the parity release (#44/#45). main now takes a SUBSET of dev
+    # (cut at b18fa67, before Phase 3), so "rebase dev onto main" no longer
+    # means "replay a few commits": it replays all of Phase 3 flattened, stops
+    # on a conflict in backend/routes/tabletopRoutes.ts (rehearsed 2026-09-25),
+    # and if it ever succeeded it would force-push a rewritten dev. Bring main
+    # into dev with a normal merge instead. Re-enable only once dev is again
+    # main plus a few commits.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

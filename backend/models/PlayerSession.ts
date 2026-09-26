@@ -10,7 +10,7 @@ const PlayerSession = defineModel({
     session: { col: "session_id", type: "uuid" },
     player: { col: "player_id", type: "uuid" },
     campaign: { col: "campaign_id", type: "uuid" },
-    sfID: "sf_id", createdAt: "created_at",
+    sfID: "sf_id", createdAt: { col: "created_at", type: "date" },
   },
   refs: { session: () => Session, player: () => Account, campaign: () => Campaign },
 });

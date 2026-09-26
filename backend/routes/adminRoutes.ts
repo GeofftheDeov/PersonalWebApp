@@ -2379,23 +2379,43 @@ router.get('/paperclip', (req: any, res) => {
                 ).join('') + '</ul>';
             }
 
+            // Every card always ends in a real state — never left on "Loading…".
+            function setAllCards(msg, cls) {
+                const cell = '<span class="' + cls + '">' + esc(msg) + '</span>';
+                $('pc-agents').querySelector('tbody').innerHTML = '<tr><td colspan="5">' + cell + '</td></tr>';
+                $('pc-costs').innerHTML = cell;
+                $('pc-issues').innerHTML = cell;
+            }
+
             async function load() {
+                const btn = $('pc-refresh');
+                btn.disabled = true;
+                btn.textContent = 'LOADING…';
                 try {
                     const o = await api('/overview');
                     if (!o.configured) {
                         banner('Paperclip is not configured on this environment (PAPERCLIP_BASE_URL is unset). See .aws/PAPERCLIP_SERVICE.md.', 'warn');
+                        setAllCards('Not configured.', 'pc-muted');
                         return;
                     }
                     if (!o.companyId) {
                         banner('PAPERCLIP_COMPANY_ID is not set — service is reachable but no company is selected.', 'warn');
+                        setAllCards('No company selected.', 'pc-muted');
                         return;
                     }
-                    banner('Connected — company ' + o.companyId, 'ok');
+                    const failed = ['agents', 'costs', 'issues'].filter((k) => o[k] && o[k].error);
+                    if (failed.length === 3) banner('Paperclip is configured but every request failed: ' + o.agents.error, 'err');
+                    else if (failed.length) banner('Connected — company ' + o.companyId + ' (some sections failed to load)', 'warn');
+                    else banner('Connected — company ' + o.companyId + ' · loaded ' + new Date().toLocaleTimeString(), 'ok');
                     renderAgents(o.agents);
                     renderCosts(o.costs);
                     renderIssues(o.issues);
                 } catch (e) {
                     banner('Error: ' + e.message, 'err');
+                    setAllCards('Could not load: ' + e.message, 'pc-err');
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = 'REFRESH';
                 }
             }
 
@@ -2431,7 +2451,7 @@ router.get('/paperclip', (req: any, res) => {
 
     const extraStyles = `
         body { align-items: flex-start; justify-content: center; overflow-y: auto; }
-        .pc-wrap { width: 90%; max-width: 1100px; padding: 2rem 0; }
+        .pc-wrap { width: 90%; max-width: 1100px; padding: 2rem 0; position: relative; z-index: 95; }
         .hidden { display: none; }
 
         .pc-banner {

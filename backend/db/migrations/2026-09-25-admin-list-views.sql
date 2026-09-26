@@ -18,7 +18,8 @@
 --
 -- Idempotent: safe to re-run.
 --
--- APPLIED: (not yet)
+-- APPLIED: Neon production branch br-autumn-salad-aj8biq1v, 2026-09-26. 4
+-- statements in one transaction, all successful. Not yet on dev.
 -- ============================================================================
 
 BEGIN;

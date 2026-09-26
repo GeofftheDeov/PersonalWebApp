@@ -7,6 +7,7 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { sendResetPasswordEmail } from "../services/emailService.js";
 import { renderPage } from '../utils/adminUi.js';
+import { requireAdmin } from '../middleware/auth.js';
 import { toCsv } from '../utils/csv.js';
 import { workshopClientJs } from '../utils/workshopClient.js';
 import { listViews, createView, updateView, deleteView, ListViewError } from '../services/listViews.js';
@@ -81,8 +82,18 @@ const escHtml = (v: unknown) => String(v ?? '')
 const scriptJson = (v: unknown) => JSON.stringify(v)
     .replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 
-// Middleware to verify token in query param
-const verifyToken = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+/**
+ * Authentication for the raw table browser (#43).
+ *
+ * This used to be the whole gate, and it did not even decode the payload — just
+ * `jwt.verify(...)` for the signature. Any signed-in person who appended
+ * `?token=<their own JWT>` reached every model in COLLECTIONS with edit and
+ * delete, including sf_users, api_key_vault and cloud_claw_sessions. No
+ * privilege escalation was needed because there was no privilege.
+ *
+ * The token still identifies; requireAdmin below decides.
+ */
+const verifyToken = (req: any, res: express.Response, next: express.NextFunction) => {
     const token = req.query.token as string;
     const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login`;
 
@@ -92,7 +103,8 @@ const verifyToken = (req: express.Request, res: express.Response, next: express.
     }
 
     try {
-        jwt.verify(token, process.env.JWT_SECRET || "your-secret-key-change-this");
+        const decoded: any = jwt.verify(token, process.env.JWT_SECRET || "your-secret-key-change-this");
+        req.adminUser = { id: decoded.id, email: decoded.email };
         next();
     } catch (err: any) {
         console.log(`[AUTH] 401: Invalid token for ${req.originalUrl}. Error: ${err.message}`);
@@ -100,7 +112,7 @@ const verifyToken = (req: express.Request, res: express.Response, next: express.
     }
 };
 
-router.use(verifyToken);
+router.use(verifyToken, requireAdmin(true));
 
 // Helper to render sidebar HTML
 const renderSidebar = (token: string, collectionNames: string[], activeCollection: string | null) => {

@@ -101,7 +101,30 @@ function blankToNull(value: any): any {
   return value;
 }
 
+/**
+ * populate() swaps a ref's id for the referenced document, but the column only
+ * ever holds the id. Mongoose depopulated on write — populating a path did not
+ * mark it modified, and assigning a document to a ref stored its _id — so a
+ * route could populate, change some other field, and save(). Here the
+ * populated document was diffed against the loaded id, counted as a change,
+ * and sent to Postgres whole, which is how accepting a campaign invite 500'd:
+ *
+ *   invalid input syntax for type uuid: "{"title":"Test Campaign",...}"
+ *
+ * Every ref is a uuid (or uuid[]) field, so that is where this applies.
+ */
+function refId(v: any): any {
+  return v !== null && typeof v === "object" && !(v instanceof Date) && "_id" in v ? v._id : v;
+}
+
+function depopulate(value: any, type: FieldType): any {
+  if (type === "uuid") return refId(value);
+  if (type === "uuid[]" && Array.isArray(value)) return value.map(refId);
+  return value;
+}
+
 function toParam(value: any, type: FieldType): any {
+  value = depopulate(value, type);
   if (type === "jsonb") return value === undefined || value === null ? null : JSON.stringify(value);
   if (type === "date" || type === "uuid") return blankToNull(value);
   return value === undefined ? null : value;
@@ -484,8 +507,10 @@ export function defineModel(def: ModelDef): any {
     }
 
     isModified(field: string): boolean {
-      if (this.__isNew) return getPath(this, field) !== undefined;
-      return JSON.stringify(getPath(this, field) ?? null) !== JSON.stringify(getPath(this.__orig, field) ?? null);
+      const type = fdef(def, field)?.type ?? "plain";
+      const cur = depopulate(getPath(this, field), type);
+      if (this.__isNew) return cur !== undefined;
+      return JSON.stringify(cur ?? null) !== JSON.stringify(depopulate(getPath(this.__orig, field), type) ?? null);
     }
 
     toObject(): any {

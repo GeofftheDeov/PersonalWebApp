@@ -94,9 +94,16 @@ router.get('/', (req, res) => {
         </script>`;
 
     const extraStyles = `
-        .briefs-layout { display: grid; grid-template-columns: 220px 1fr; gap: 1.5rem; padding: 1.5rem; max-width: 1200px; margin: 0 auto; }
-        @media (max-width: 800px) { .briefs-layout { grid-template-columns: 1fr; } }
-        .briefs-side { border: 1px solid #333; background: #1e1e1e; padding: 1rem; height: fit-content; }
+        /* The shared admin shell centres a 100vh flex body, which pushes anything
+           taller than the viewport off the top. Like .vault-layout, pin this page to
+           the viewport below the nav and scroll the panels instead. */
+        .briefs-layout { display: grid; grid-template-columns: 220px 1fr; gap: 1.5rem; padding: 1.5rem; box-sizing: border-box;
+            width: 100%; max-width: 1200px; height: calc(100vh - 60px); margin: 0 auto; position: relative; z-index: 95; }
+        @media (max-width: 800px) {
+            .briefs-layout { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); gap: 1rem; padding: 1rem; }
+            .briefs-side { max-height: 30vh; }
+        }
+        .briefs-side { border: 1px solid #333; background: #1e1e1e; padding: 1rem; overflow-y: auto; min-height: 0; align-self: start; max-height: 100%; box-sizing: border-box; }
         .side-header { color: #0d9488; font-size: 0.7rem; letter-spacing: 2px; font-weight: bold; margin: 0.5rem 0; }
         .history { display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 1rem; }
         .history-item { display: flex; justify-content: space-between; align-items: center; color: #ccc; text-decoration: none; padding: 0.3rem 0.4rem; font-size: 0.8rem; }
@@ -106,7 +113,9 @@ router.get('/', (req, res) => {
         .sync button:disabled { opacity: 0.6; cursor: default; }
         .muted { color: #666; font-size: 0.75rem; }
         .err { color: #f97316; font-size: 0.75rem; word-break: break-word; }
-        .briefs-main { border: 1px solid #333; background: #1e1e1e; padding: 1.5rem; min-width: 0; }
+        .briefs-main { border: 1px solid #333; background: #1e1e1e; padding: 1.5rem; min-width: 0; min-height: 0; overflow-y: auto; box-sizing: border-box; }
+        .briefs-main::-webkit-scrollbar, .briefs-side::-webkit-scrollbar { width: 6px; }
+        .briefs-main::-webkit-scrollbar-thumb, .briefs-side::-webkit-scrollbar-thumb { background: #333; }
         .brief-header { border-bottom: 1px solid #333; padding-bottom: 0.75rem; margin-bottom: 1rem; }
         .brief-title { color: #fff; font-weight: bold; letter-spacing: 2px; display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
         .brief-meta { color: #888; font-size: 0.75rem; margin-top: 0.35rem; }

@@ -82,8 +82,8 @@ async function main() {
     // --admin leaves production's one admin.
     const adminEmail = `gate-admin-${tag}@example.test`, adminPw = pw();
     const { rows: [admin] } = await pool.query(
-      `INSERT INTO accounts (name, email, password, app_role, app_role_source, is_verified)
-       VALUES ('Gate Admin', $1, $2, 'admin', 'manual', true) RETURNING id, password`,
+      `INSERT INTO accounts (id, name, email, password, app_role, app_role_source, is_verified)
+       VALUES (gen_random_uuid(), 'Gate Admin', $1, $2, 'admin', 'manual', true) RETURNING id, password`,
       [adminEmail, await bcrypt.hash(adminPw, 10)]);
     created.push({ table: "accounts", id: admin.id });
     const adminToken = await login(adminEmail, adminPw);
@@ -107,8 +107,8 @@ async function main() {
     // A Lead — what Google sign-in auto-creates for any Google account.
     const leadEmail = `gate-lead-${tag}@example.test`, leadPw = pw();
     const { rows: [lead] } = await pool.query(
-      `INSERT INTO accounts (first_name, last_name, name, email, password, sf_object)
-       VALUES ('Gate', 'Lead', 'Gate Lead', $1, $2, 'Lead') RETURNING id`,
+      `INSERT INTO accounts (id, first_name, last_name, name, email, password, sf_object)
+       VALUES (gen_random_uuid(), 'Gate', 'Lead', 'Gate Lead', $1, $2, 'Lead') RETURNING id`,
       [leadEmail, await bcrypt.hash(leadPw, 10)]);
     created.push({ table: "accounts", id: lead.id });
     const leadToken = await login(leadEmail, leadPw);

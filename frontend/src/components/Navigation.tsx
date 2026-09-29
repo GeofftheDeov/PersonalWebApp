@@ -128,7 +128,7 @@ export default function Navigation() {
                   {paperclipOpen && (
                     <div className="absolute top-full left-0 mt-2 min-w-[9rem] border-4 border-black bg-white dark:bg-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] z-50 flex flex-col">
                       <Link href="/paperclip/org" onClick={() => setPaperclipOpen(false)} className={dropdownItemCls} tabIndex={0}>ORG</Link>
-                      <Link href="/paperclip/cfo" onClick={() => setPaperclipOpen(false)} className={dropdownItemCls} tabIndex={0}>CFO</Link>
+                      <Link href="/paperclip/issues" onClick={() => setPaperclipOpen(false)} className={dropdownItemCls} tabIndex={0}>ISSUES</Link>
                       <Link href="/paperclip/budgets" onClick={() => setPaperclipOpen(false)} className={dropdownItemCls} tabIndex={0}>BUDGETS</Link>
                     </div>
                   )}
@@ -217,7 +217,7 @@ export default function Navigation() {
                   {mobilePaperclipOpen && (
                     <div className="flex flex-col items-center gap-3 pt-1">
                       <Link href="/paperclip/org" onClick={closeMenu} className={mobileSubLinkCls}>ORG</Link>
-                      <Link href="/paperclip/cfo" onClick={closeMenu} className={mobileSubLinkCls}>CFO</Link>
+                      <Link href="/paperclip/issues" onClick={closeMenu} className={mobileSubLinkCls}>ISSUES</Link>
                       <Link href="/paperclip/budgets" onClick={closeMenu} className={mobileSubLinkCls}>BUDGETS</Link>
                     </div>
                   )}

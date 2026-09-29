@@ -1,0 +1,1036 @@
+/**
+ * Phase 3 (#35) regression suite.
+ *
+ * Run against a throwaway local Postgres built from db/schema.sql — Neon is
+ * unreachable from a session environment on every port, so a pass here proves
+ * LOGIC, never dev data:
+ *
+ *   DATABASE_URL="postgresql://postgres@127.0.0.1:5433/pwatest" npx tsx scripts/test-phase3.ts
+ *
+ * Sections map to the agreed slices. Each is expected to fail until its slice
+ * lands; a section that passes before its slice is written is a bug in the
+ * test, not good news (see the Phase 2 fixture lesson in phase3-fixture.ts).
+ */
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import pool from "../db/index.js";
+import { buildFixture, IDS, LOSING_IDS, PASSWORD } from "./phase3-fixture.js";
+
+const MIGRATIONS = join(dirname(fileURLToPath(import.meta.url)), "..", "db", "migrations");
+
+/** Apply a Phase 3 migration exactly as it would be applied to dev. */
+async function applyMigration(client: any, file: string): Promise<string | null> {
+    try {
+        await client.query(readFileSync(join(MIGRATIONS, file), "utf8"));
+        return null;
+    } catch (err: any) {
+        // A migration that fails must leave the suite red, not blow it up — the
+        // remaining assertions still describe what it should have produced.
+        try { await client.query("ROLLBACK"); } catch { /* not in a transaction */ }
+        return String(err.message).split("\n")[0];
+    }
+}
+
+let passed = 0;
+let failed = 0;
+const failures: string[] = [];
+
+function assert(name: string, ok: boolean, detail = "") {
+    if (ok) { passed++; console.log(`  PASS  ${name}${detail ? ` — ${detail}` : ""}`); }
+    else { failed++; failures.push(name); console.log(`  FAIL  ${name}${detail ? ` — ${detail}` : ""}`); }
+}
+
+/** Run a check that may reference not-yet-existing columns; a thrown error is a failure, not a crash. */
+async function check(name: string, fn: () => Promise<[boolean, string]>) {
+    try {
+        const [ok, detail] = await fn();
+        assert(name, ok, detail);
+    } catch (err: any) {
+        assert(name, false, `threw: ${String(err.message).split("\n")[0]}`);
+    }
+}
+
+function section(title: string) {
+    console.log(`\n── ${title} ${"─".repeat(Math.max(0, 60 - title.length))}`);
+}
+
+async function main() {
+    const client = await pool.connect();
+    try {
+        await buildFixture(client);
+        console.log("Fixture built: 9 landing rows, 4 accounts, 7 links, 3 losing ids.");
+
+        // ── S1: reference remap ──────────────────────────────────────────────
+        section("S1 — every person reference is an accounts.id");
+
+        const remapErr = await applyMigration(client, "2026-09-09-phase3-remap-person-refs.sql");
+        assert("the remap migration applies", remapErr === null, remapErr ?? "clean");
+
+        // The distinction that matters. Phase 2 asserted references RESOLVE
+        // (accounts.id OR account_source_links.source_id). After Phase 3 the app
+        // reads accounts directly, so resolving via a link is no longer enough:
+        // the id itself has to be an account id.
+        await check("no person reference points at a non-primary source id", async () => {
+            const { rows } = await client.query(`
+                WITH refs AS (
+                  SELECT 'friend_requests.from_user' AS site, from_user AS pid FROM friend_requests
+                  UNION ALL SELECT 'friend_requests.to_user', to_user FROM friend_requests
+                  UNION ALL SELECT 'campaign_invites.from_user', from_user FROM campaign_invites
+                  UNION ALL SELECT 'campaign_invites.to_user', to_user FROM campaign_invites
+                  UNION ALL SELECT 'notifications.user_id', user_id FROM notifications
+                  UNION ALL SELECT 'characters.player_id', player_id FROM characters
+                  UNION ALL SELECT 'player_sessions.player_id', player_id FROM player_sessions
+                  UNION ALL SELECT 'accounts.friends[]', unnest(friends) FROM accounts
+                )
+                SELECT r.site, count(*)::int AS n
+                  FROM refs r
+                 WHERE r.pid IS NOT NULL
+                   AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.id = r.pid)
+                 GROUP BY 1 ORDER BY 1`);
+            return [rows.length === 0,
+                rows.length === 0 ? "0 dangling"
+                    : rows.map((r: any) => `${r.site}:${r.n}`).join(", ")];
+        });
+
+        // messages.sender_id was in Phase 2's sweep; messages.recipient was not.
+        await check("messages.sender_id and .recipient both resolve to accounts", async () => {
+            const { rows } = await client.query(`
+                WITH refs AS (
+                  SELECT 'sender_id' AS site, sender_id AS pid FROM messages
+                  UNION ALL SELECT 'recipient', recipient FROM messages WHERE recipient IS NOT NULL
+                )
+                SELECT site, count(*)::int AS n FROM refs
+                 WHERE pid <> 'system' AND pid ~ '^[0-9a-f-]{36}$'
+                   AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.id::text = pid)
+                 GROUP BY 1 ORDER BY 1`);
+            return [rows.length === 0,
+                rows.length === 0 ? "0 dangling"
+                    : rows.map((r: any) => `${r.site}:${r.n}`).join(", ")];
+        });
+
+        await check("the excluded lead is referenced by nothing", async () => {
+            const { rows } = await client.query(`
+                SELECT count(*)::int AS n FROM (
+                  SELECT from_user pid FROM friend_requests UNION ALL SELECT to_user FROM friend_requests
+                  UNION ALL SELECT user_id FROM notifications
+                  UNION ALL SELECT player_id FROM characters
+                  UNION ALL SELECT player_id FROM player_sessions
+                  UNION ALL SELECT unnest(friends) FROM accounts
+                ) r WHERE r.pid = $1`, [IDS.L2]);
+            return [rows[0].n === 0, `${rows[0].n} reference(s)`];
+        });
+
+        // A remap that drops rows instead of rewriting them would pass the check
+        // above trivially. Count the rows too.
+        await check("the remap rewrote rows rather than deleting them", async () => {
+            const { rows } = await client.query(`
+                SELECT (SELECT count(*) FROM characters)::int AS chars,
+                       (SELECT count(*) FROM notifications)::int AS notifs,
+                       (SELECT count(*) FROM friend_requests)::int AS reqs,
+                       (SELECT count(*) FROM player_sessions)::int AS sess,
+                       (SELECT count(*) FROM messages)::int AS msgs,
+                       (SELECT count(*) FROM campaign_invites)::int AS invites`);
+            const r = rows[0];
+            const ok = r.chars === 1 && r.notifs === 1 && r.reqs === 1
+                && r.sess === 1 && r.msgs === 3 && r.invites === 1;
+            return [ok, JSON.stringify(r)];
+        });
+
+        // Group A's three source rows all collapse to one account, so the
+        // character (via C1) and the player_session (via A1) must land on the
+        // SAME person. This is the check that catches a remap that resolves to
+        // the wrong group.
+        await check("remapped rows land on the correct account", async () => {
+            const { rows } = await client.query(`
+                SELECT (SELECT player_id FROM characters LIMIT 1) AS ch,
+                       (SELECT player_id FROM player_sessions LIMIT 1) AS ps,
+                       (SELECT user_id FROM notifications LIMIT 1) AS nt,
+                       (SELECT to_user FROM friend_requests LIMIT 1) AS fr`);
+            const r = rows[0];
+            const ok = r.ch === IDS.acctA && r.ps === IDS.acctA
+                && r.nt === IDS.acctA && r.fr === IDS.acctC;
+            return [ok, `character=${r.ch} session=${r.ps} notif=${r.nt} request=${r.fr}`];
+        });
+
+        await check("accounts.friends[] holds account ids only", async () => {
+            const { rows } = await client.query(
+                `SELECT friends FROM accounts WHERE id = $1`, [IDS.acctA]);
+            const friends: string[] = rows[0]?.friends ?? [];
+            const ok = friends.length === 1 && friends[0] === IDS.acctC;
+            return [ok, `friends=[${friends.join(", ")}] (was [${IDS.C2}], a losing Contact)`];
+        });
+
+        await check("ready_check.responses[].playerId was remapped in place", async () => {
+            const { rows } = await client.query(
+                `SELECT jsonb_agg(r.value ->> 'playerId' ORDER BY r.value ->> 'name') AS ids,
+                        jsonb_array_length(ready_check -> 'responses') AS n
+                   FROM game_sessions, jsonb_array_elements(ready_check -> 'responses') AS r(value)
+                  GROUP BY ready_check`);
+            const ids: string[] = rows[0]?.ids ?? [];
+            const ok = rows[0]?.n === 2 && ids.includes(IDS.acctA) && ids.includes(IDS.acctB)
+                && !ids.includes(IDS.C1);
+            return [ok, `responses=${rows[0]?.n} playerIds=[${ids.join(", ")}]`];
+        });
+
+        await check("dm_key was remapped and re-sorted", async () => {
+            const { rows } = await client.query(
+                `SELECT dm_key FROM messages WHERE dm_key IS NOT NULL`);
+            const expected = [IDS.acctA, IDS.acctB].sort().join(":");
+            return [rows.length === 1 && rows[0].dm_key === expected,
+                `dm_key=${rows[0]?.dm_key} expected=${expected}`];
+        });
+
+        await check("a request whose two ends merged into one person was dropped", async () => {
+            const { rows } = await client.query(
+                `SELECT count(*)::int AS self FROM friend_requests WHERE from_user = to_user`);
+            return [rows[0].self === 0, `${rows[0].self} self-request(s) left`];
+        });
+
+        await check("re-running the remap changes nothing", async () => {
+            const before = await client.query(
+                `SELECT (SELECT count(*) FROM friend_requests)::int a,
+                        (SELECT count(*) FROM campaign_invites)::int b,
+                        (SELECT md5(string_agg(id::text || friends::text, '|' ORDER BY id))
+                           FROM accounts) c`);
+            const err = await applyMigration(client, "2026-09-09-phase3-remap-person-refs.sql");
+            const after = await client.query(
+                `SELECT (SELECT count(*) FROM friend_requests)::int a,
+                        (SELECT count(*) FROM campaign_invites)::int b,
+                        (SELECT md5(string_agg(id::text || friends::text, '|' ORDER BY id))
+                           FROM accounts) c`);
+            const same = JSON.stringify(before.rows[0]) === JSON.stringify(after.rows[0]);
+            return [err === null && same, err ?? (same ? "identical" : "second run mutated data")];
+        });
+
+        await check("resolveAccountId maps old ids, and refuses ids with no account", async () => {
+            const { resolveAccountId, resolveAccountIds } = await import("../utils/accountRefs.js");
+            const fromLosing = await resolveAccountId(IDS.C1);      // merged away -> Group A
+            const fromWinner = await resolveAccountId(IDS.acctB);   // already an account
+            const excluded = await resolveAccountId(IDS.L2);        // never graduated
+            const batch = await resolveAccountIds([IDS.C2, IDS.acctD, IDS.L2, "not-a-uuid"]);
+            const ok = fromLosing === IDS.acctA && fromWinner === IDS.acctB && excluded === null
+                && batch.get(IDS.C2) === IDS.acctC && batch.get(IDS.acctD) === IDS.acctD
+                && !batch.has(IDS.L2) && batch.size === 2;
+            return [ok, `losing->${fromLosing === IDS.acctA ? "account" : fromLosing}, `
+                + `winner->${fromWinner === IDS.acctB ? "self" : fromWinner}, `
+                + `excluded->${excluded}, batch=${batch.size}`];
+        });
+
+        // ── S2: schema additions ─────────────────────────────────────────────
+        section("S2 — schema additions");
+
+        const schemaErr = await applyMigration(client, "2026-09-09-phase3-schema-additions.sql");
+        assert("the schema migration applies", schemaErr === null, schemaErr ?? "clean");
+
+        await check("every campaign_members row carries a resolvable person_id", async () => {
+            const { rows } = await client.query(`
+                SELECT count(*) FILTER (WHERE person_id IS NULL)::int AS nulls,
+                       count(*) FILTER (WHERE person_id IS NOT NULL
+                         AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.id = person_id))::int AS dangling,
+                       count(*)::int AS total
+                  FROM campaign_members`);
+            const r = rows[0];
+            return [r.nulls === 0 && r.dangling === 0 && r.total === 3,
+                `${r.total} rows, ${r.nulls} null, ${r.dangling} dangling`];
+        });
+
+        // The email-only row is the one campaignRoutes' `else` branch writes for
+        // a User. It has no lead/contact/account id, so it can only be resolved
+        // by email — the case §3.5 flags and #27 counted as zero on dev today.
+        await check("the email-only member row resolved by email", async () => {
+            const { rows } = await client.query(
+                `SELECT person_id, status FROM campaign_members
+                  WHERE lead_id IS NULL AND contact_id IS NULL AND account_id IS NULL`);
+            return [rows.length === 1 && rows[0].person_id === IDS.acctA,
+                rows.length ? `status=${rows[0].status} person_id=${rows[0].person_id}` : "row missing"];
+        });
+
+        await check("campaign_invites carries from_account_id / to_account_id / to_email", async () => {
+            const { rows } = await client.query(`
+                SELECT column_name FROM information_schema.columns
+                 WHERE table_name = 'campaign_invites'
+                   AND column_name IN ('from_account_id','to_account_id','to_email','from_user','to_user')
+                 ORDER BY 1`);
+            const cols = rows.map((r: any) => r.column_name);
+            const ok = cols.includes("from_account_id") && cols.includes("to_account_id")
+                && cols.includes("to_email")
+                && !cols.includes("from_user") && !cols.includes("to_user");
+            return [ok, `columns: ${cols.join(", ") || "none"}`];
+        });
+
+        await check("an invite may name an email with no account yet", async () => {
+            await client.query(
+                `INSERT INTO campaign_invites (campaign_id, from_account_id, to_email)
+                 VALUES ($1,$2,'newcomer@example.com')`, [IDS.campaign, IDS.acctB]);
+            const { rows } = await client.query(
+                `SELECT count(*)::int AS n FROM campaign_invites
+                  WHERE to_account_id IS NULL AND to_email IS NOT NULL`);
+            // ...and may not name neither.
+            let rejected = false;
+            try {
+                await client.query(
+                    `INSERT INTO campaign_invites (campaign_id, from_account_id) VALUES ($1,$2)`,
+                    [IDS.campaign, IDS.acctB]);
+            } catch { rejected = true; }
+            return [rows[0].n === 1 && rejected,
+                `email-only invites=${rows[0].n}, target CHECK rejects empty=${rejected}`];
+        });
+
+        await check("friend_requests, api_key_vault and cloud_claw_sessions FK accounts(id)", async () => {
+            const { rows } = await client.query(`
+                SELECT c.conrelid::regclass::text AS tbl,
+                       c.confrelid::regclass::text AS refs
+                  FROM pg_constraint c
+                 WHERE c.contype = 'f'
+                   AND c.conrelid::regclass::text IN
+                       ('friend_requests','api_key_vault','cloud_claw_sessions')
+                 ORDER BY 1`);
+            const byTable = new Map(rows.map((r: any) => [r.tbl, r.refs]));
+            const want = ["friend_requests", "api_key_vault", "cloud_claw_sessions"];
+            const ok = want.every((t) => byTable.get(t) === "accounts");
+            return [ok, want.map((t) => `${t}->${byTable.get(t) ?? "none"}`).join(", ")];
+        });
+
+        await check("a friend request to a non-account is now refused by the database", async () => {
+            let rejected = false;
+            try {
+                await client.query(
+                    `INSERT INTO friend_requests (from_user, to_user) VALUES ($1,$2)`,
+                    [IDS.acctA, LOSING_IDS[0]]);
+            } catch { rejected = true; }
+            return [rejected, rejected ? "rejected" : "accepted a dangling id"];
+        });
+
+        // ── S3/S4/S5: application cutover ────────────────────────────────────
+        section("S3/S4/S5 — application cutover");
+
+        const { findPersonById, findPersonByHandle, findPeopleByEmail, toPublicPerson } =
+            await import("../utils/personUtils.js");
+        const Account = (await import("../models/Account.js")).default;
+        const CampaignMember = (await import("../models/CampaignMember.js")).default;
+        const bcrypt = (await import("bcryptjs")).default;
+
+        await check("personUtils resolves against accounts", async () => {
+            const byId = await findPersonById(IDS.acctA);
+            const byHandle = await findPersonByHandle("GEOFF", "0001");   // case-insensitive
+            const byEmail = await findPeopleByEmail(["ashley.early@example.com"]);
+            // A merged-away id is NOT a person any more. That is the whole point
+            // of the slice-1 remap: nothing in the database still says C1, and
+            // anything arriving from outside goes through resolveAccountId first.
+            const losing = await findPersonById(IDS.C1);
+            const ok = byId?.doc?._id === IDS.acctA
+                && byHandle?.doc?._id === IDS.acctA
+                && byEmail.length === 1 && byEmail[0].doc._id === IDS.acctD
+                && losing === null;
+            return [ok, `id=${byId?.doc?._id === IDS.acctA}, handle=${byHandle?.doc?._id === IDS.acctA}, `
+                + `email=${byEmail.length}, losing-id=${losing === null ? "not a person" : "STILL RESOLVES"}`];
+        });
+
+        await check("no vestigial `type` survives on a resolved person", async () => {
+            const person = await findPersonById(IDS.acctA);
+            const pub: any = person ? toPublicPerson(person) : {};
+            // `type` is gone; sf_object survives as provenance under recordType.
+            const ok = person !== null && !("type" in (person as any))
+                && pub.recordType === "User";
+            return [ok, `type present=${person && "type" in (person as any)}, recordType=${pub.recordType}`];
+        });
+
+        await check("login matrix: one query, every source, right answer", async () => {
+            // A person merged from each of the four Salesforce objects. Group C
+            // has no email on any source row, which is true of most of dev, so
+            // it cannot log in at all — that is not a regression, it is the
+            // reason #35's four-source login matrix is not satisfiable as
+            // written and Group C is asserted to fail here on purpose.
+            const cases: Array<[string, string | null, boolean]> = [
+                ["User-sourced", "geoffrey.murray.1995@gmail.com", true],
+                ["Lead-sourced", "gdrumz@momurrays.com", true],
+                ["Contact-sourced", "ashley.early@example.com", true],
+                ["Account-sourced (no email anywhere)", null, false],
+            ];
+            const results: string[] = [];
+            let ok = true;
+            for (const [label, email, shouldSucceed] of cases) {
+                if (email === null) { results.push(`${label}: no email, cannot log in`); continue; }
+                const person: any = await Account.findOne({ email });
+                const matched = person?.password
+                    ? await bcrypt.compare(PASSWORD, person.password) : false;
+                if (matched !== shouldSucceed) ok = false;
+                results.push(`${label}: ${matched ? "ok" : "FAILED"}`);
+            }
+            // Case-insensitivity is the citext column, not a regex scan.
+            const upper = await Account.findOne({ email: "GEOFFREY.MURRAY.1995@GMAIL.COM" });
+            if (upper?._id !== IDS.acctA) ok = false;
+            results.push(`mixed-case lookup: ${upper?._id === IDS.acctA ? "ok" : "FAILED"}`);
+            return [ok, results.join("; ")];
+        });
+
+        await check("identity gates read app_role, never tier or provenance", async () => {
+            const { getAuthorizedCampaignIds, isCampaignGameMaster } =
+                await import("../utils/gameNightPlannerUtils.js");
+
+            // Admin sees everything.
+            const adminScope = await getAuthorizedCampaignIds({ id: IDS.acctA, email: "x" });
+            // A patron who is NOT an admin must not: this is the #28 split. Group
+            // C is account_tier 'patron' and app_role 'user'.
+            const patronScope = await getAuthorizedCampaignIds({ id: IDS.acctC, email: "x" });
+            const leadScope = await getAuthorizedCampaignIds({ id: IDS.acctB, email: "x" });
+
+            const adminIsGm = await isCampaignGameMaster({ id: IDS.acctA }, IDS.campaign);
+            const patronIsGm = await isCampaignGameMaster({ id: IDS.acctC }, IDS.campaign);
+
+            const ok = adminScope === null
+                && Array.isArray(patronScope) && patronScope.length === 1
+                && Array.isArray(leadScope) && leadScope.length === 1
+                && adminIsGm === true && patronIsGm === false;
+            return [ok, `admin=all(${adminScope === null}), patron=${(patronScope as any)?.length} campaign(s), `
+                + `lead=${(leadScope as any)?.length}, adminGM=${adminIsGm}, patronGM=${patronIsGm}`];
+        });
+
+        await check("a tier change never moves access (#28)", async () => {
+            // The whole reason app_role and account_tier are two columns.
+            await Account.findByIdAndUpdate(IDS.acctB, { $set: { accountTier: "patron" } });
+            const stillNotAdmin = await Account.findById(IDS.acctB).select("appRole accountTier");
+            const scope = await (await import("../utils/gameNightPlannerUtils.js"))
+                .getAuthorizedCampaignIds({ id: IDS.acctB, email: "x" });
+            await Account.findByIdAndUpdate(IDS.acctB, { $set: { accountTier: "free" } });
+            const ok = stillNotAdmin?.appRole === "user" && scope !== null;
+            return [ok, `promoted to patron -> app_role=${stillNotAdmin?.appRole}, sees all=${scope === null}`];
+        });
+
+        await check("the Paperclip gate admits admins and Salesforce users, nobody else", async () => {
+            // Mirrors paperclipOnly: app_role = 'admin' OR sf_object = 'User'.
+            const allowed = async (id: string) => {
+                const p = await Account.findById(id).select("appRole sfObject");
+                return Boolean(p && (p.appRole === "admin" || p.sfObject === "User"));
+            };
+            const admin = await allowed(IDS.acctA);        // admin AND User-sourced
+            const lead = await allowed(IDS.acctB);         // neither
+            const patron = await allowed(IDS.acctC);       // patron tier, not admin
+            const ok = admin === true && lead === false && patron === false;
+            return [ok, `admin=${admin}, lead=${lead}, patron(tier only)=${patron}`];
+        });
+
+        await check("requireAdmin closes /admin and /db (#43)", async () => {
+            const { requireAdmin } = await import("../middleware/auth.js");
+            const gate = requireAdmin(false);
+
+            const run = (id: string) => new Promise<number>((resolve) => {
+                const res: any = {
+                    status(code: number) { this.__code = code; return this; },
+                    json() { resolve(this.__code); return this; },
+                    send() { resolve(this.__code); return this; },
+                };
+                gate({ adminUser: { id }, originalUrl: "/db/users" }, res, () => resolve(200));
+            });
+
+            const asAdmin = await run(IDS.acctA);
+            const asLead = await run(IDS.acctB);     // the repro in #43
+            const asPatron = await run(IDS.acctC);   // paid, still not staff
+            const ok = asAdmin === 200 && asLead === 403 && asPatron === 403;
+            return [ok, `admin=${asAdmin}, ordinary user=${asLead}, patron=${asPatron}`];
+        });
+
+        await check("the admin gate rests on the manual pin, and says so", async () => {
+            // Every admin gate in the app depends on one row. sf_profile is NULL
+            // everywhere, so sf_profile_role_map resolves everyone to 'user';
+            // only app_role_source = 'manual' keeps the pin alive through a merge.
+            const { rows } = await client.query(
+                `SELECT count(*)::int AS admins,
+                        count(*) FILTER (WHERE app_role_source = 'manual')::int AS pinned,
+                        count(*) FILTER (WHERE sf_profile IS NOT NULL)::int AS with_profile
+                   FROM accounts WHERE app_role = 'admin'`);
+            const r = rows[0];
+            return [r.admins === 1 && r.pinned === 1 && r.with_profile === 0,
+                `${r.admins} admin(s), ${r.pinned} pinned manually, ${r.with_profile} derived from sf_profile`];
+        });
+
+        await check("campaign membership is one indexed lookup, and complete", async () => {
+            // The old four-way OR included an unindexed email match, and the GM
+            // row it had to find that way was the email-only one.
+            const gm = await CampaignMember.findOne({
+                campaign: IDS.campaign, status: "Game Master" });
+            const mine = await CampaignMember.find({ person: IDS.acctA });
+            const ok = String(gm?.person) === IDS.acctA && mine.length === 1;
+            return [ok, `GM person=${gm?.person}, memberships for Geoff=${mine.length}`];
+        });
+
+        // ── S6a: outbox enqueue trigger ──────────────────────────────────────
+        section("S6a — outbox enqueue trigger");
+
+        const trigErr = await applyMigration(client, "2026-09-24-phase3-person-outbox-trigger.sql");
+        assert("the outbox trigger migration applies", trigErr === null, trigErr ?? "clean");
+
+        const outboxFor = async (id: string) => (await client.query(
+            `SELECT op, status, payload->'fields' AS fields FROM person_outbox
+              WHERE account_id = $1 ORDER BY id`, [id])).rows;
+
+        // A signup through the real app path: models/Account.ts, exactly as
+        // leadRoutes registers people. New to Salesforce, so it must be created.
+        const signup = new Account({
+            email: "newcomer@example.com", password: "pw-for-test",
+            firstName: "New", lastName: "Comer", name: "New Comer", sfObject: "Lead",
+        });
+        await signup.save();
+        const signupId = String(signup._id);
+
+        await check("an app signup enqueues one Salesforce create", async () => {
+            const rows = await outboxFor(signupId);
+            const ok = rows.length === 1 && rows[0].op === "create" && rows[0].status === "pending"
+                && ["email", "first_name", "last_name", "name", "phone"].every((f) => rows[0].fields.includes(f));
+            return [ok, JSON.stringify(rows)];
+        });
+
+        await check("editing before the drain folds into the pending create", async () => {
+            await Account.findByIdAndUpdate(signupId, { $set: { name: "New N. Comer", phone: "555-0100" } });
+            const rows = await outboxFor(signupId);
+            return [rows.length === 1 && rows[0].op === "create", `${rows.length} row(s), op=${rows[0]?.op}`];
+        });
+
+        await check("an existing Salesforce person enqueues an update, coalesced per person", async () => {
+            // Zpecterr: a Lead that already has an sf_id.
+            await client.query(`UPDATE accounts SET phone = '555-0101' WHERE id = $1`, [IDS.acctB]);
+            await client.query(`UPDATE accounts SET email = 'zpecterr@example.com' WHERE id = $1`, [IDS.acctB]);
+            const rows = await outboxFor(IDS.acctB);
+            const ok = rows.length === 1 && rows[0].op === "update"
+                && JSON.stringify(rows[0].fields) === JSON.stringify(["email", "phone"]);
+            return [ok, `${rows.length} row(s): ${JSON.stringify(rows.map((r: any) => [r.op, r.fields]))}`];
+        });
+
+        await check("a Salesforce User is never pushed (pull-only)", async () => {
+            await client.query(`UPDATE accounts SET name = 'G. Murray', phone = '555-0102' WHERE id = $1`, [IDS.acctA]);
+            const rows = await outboxFor(IDS.acctA);
+            return [rows.length === 0, `${rows.length} row(s) for the User-sourced account`];
+        });
+
+        await check("writes under app.sync_in_progress never enqueue (the loop guard)", async () => {
+            await client.query("BEGIN");
+            await client.query("SET LOCAL app.sync_in_progress = 'on'");
+            await client.query(`UPDATE accounts SET name = 'Ashley E.', phone = '555-0103' WHERE id = $1`, [IDS.acctD]);
+            await client.query("COMMIT");
+            const inside = (await outboxFor(IDS.acctD)).length;
+            // ...and the guard is transaction-scoped: the next write outside it counts.
+            await client.query(`UPDATE accounts SET phone = '555-0104' WHERE id = $1`, [IDS.acctD]);
+            const after = await outboxFor(IDS.acctD);
+            return [inside === 0 && after.length === 1,
+                `inside the guard: ${inside} row(s); after it: ${after.length} row(s)`];
+        });
+
+        await check("app-only and Salesforce-owned columns never enqueue", async () => {
+            // Group C has no pending row. Touch everything that must NOT travel:
+            // app-owned identity, capability, and a Salesforce-owned field.
+            await client.query(
+                `UPDATE accounts SET handle = 'tyler2', friends = ARRAY[$2]::uuid[], app_role = 'user',
+                                     account_tier = 'member', profile_picture = '/x.png',
+                                     company = 'Campbell Co', is_active = true
+                  WHERE id = $1`, [IDS.acctC, IDS.acctA]);
+            const rows = await outboxFor(IDS.acctC);
+            return [rows.length === 0, `${rows.length} row(s) after touching 7 non-pushable columns`];
+        });
+
+        await check("accepting a friend request enqueues nothing", async () => {
+            // friendRoutes' accept path: $addToSet on friends for both parties.
+            const before = (await client.query(`SELECT count(*)::int n FROM person_outbox`)).rows[0].n;
+            await Account.findByIdAndUpdate(IDS.acctD, { $addToSet: { friends: IDS.acctC } });
+            const after = (await client.query(`SELECT count(*)::int n FROM person_outbox`)).rows[0].n;
+            return [before === after, `${after - before} new row(s)`];
+        });
+
+        // ── S6b: outbox drain ────────────────────────────────────────────────
+        section("S6b — outbox drain");
+
+        const { drainPersonOutbox } = await import("../jobs/personSync.js");
+
+        /** A stand-in Salesforce: records every call, fails on demand, never talks to the org. */
+        const fakeSf = (failFor: Set<string> = new Set()) => {
+            const calls: Array<{ kind: string; sobject: string; id?: string; fields: any }> = [];
+            let n = 0;
+            return {
+                calls,
+                create: async (sobject: string, fields: any) => {
+                    calls.push({ kind: "create", sobject, fields });
+                    return `00QFAKE0000${String(++n).padStart(4, "0")}`;
+                },
+                update: async (sobject: string, id: string, fields: any) => {
+                    calls.push({ kind: "update", sobject, id, fields });
+                    if (failFor.has(id)) throw new Error(`UNABLE_TO_LOCK_ROW: ${id} (fake)`);
+                },
+            };
+        };
+        const outboxState = async (id: string) => (await client.query(
+            `SELECT status, attempts, last_error FROM person_outbox WHERE account_id = $1 ORDER BY id`,
+            [id])).rows;
+
+        const sf1 = fakeSf();
+        const run1 = await drainPersonOutbox({ sf: sf1 });
+
+        await check("the drain pushes each queued person once", async () => {
+            // Queued by S6a: the signup (create), Zpecterr (email+phone), Ashley (phone).
+            const ok = run1.claimed === 3 && run1.created === 1 && run1.updated === 2
+                && run1.failed === 0 && sf1.calls.length === 3;
+            return [ok, JSON.stringify({ ...run1, errors: run1.errors.length })];
+        });
+
+        await check("a signup is created as a Lead, with a Company it never gave", async () => {
+            const c = sf1.calls.find((x) => x.kind === "create");
+            // The signup form makes Company optional; Salesforce does not. The old
+            // postSave create failed for anyone who left it blank.
+            const f = c?.fields ?? {};
+            const ok = c?.sobject === "Lead" && f.Company === "New N. Comer" && f.FirstName === "New"
+                && f.LastName === "Comer" && f.Email === "newcomer@example.com"
+                && f.Phone === "555-0100" && f.LeadSource === "Web App";
+            return [ok, JSON.stringify(c)];
+        });
+
+        await check("the new Salesforce id is written back without re-queueing it", async () => {
+            const { rows: [a] } = await client.query(
+                `SELECT sf_id, sf_last_pushed_at FROM accounts WHERE id = $1`, [signupId]);
+            const pending = (await client.query(
+                `SELECT count(*)::int n FROM person_outbox WHERE status = 'pending'`)).rows[0].n;
+            const ok = a.sf_id === "00QFAKE00000001" && a.sf_last_pushed_at !== null && pending === 0;
+            return [ok, `sf_id=${a.sf_id}, pushed=${a.sf_last_pushed_at !== null}, pending rows=${pending}`];
+        });
+
+        await check("an update sends only the fields that changed, current values", async () => {
+            const u = sf1.calls.find((x) => x.kind === "update" && x.id === "00Q000000000001AAA");
+            const ok = u?.sobject === "Lead"
+                && JSON.stringify(Object.keys(u.fields).sort()) === JSON.stringify(["Email", "Phone"])
+                && u.fields.Email === "zpecterr@example.com" && u.fields.Phone === "555-0101";
+            return [ok, JSON.stringify(u)];
+        });
+
+        await check("a second drain has nothing to do", async () => {
+            const sf = fakeSf();
+            const r = await drainPersonOutbox({ sf });
+            return [r.claimed === 0 && sf.calls.length === 0, `claimed=${r.claimed}, calls=${sf.calls.length}`];
+        });
+
+        await check("a Salesforce failure retries later, once per run — not five times in a loop", async () => {
+            await client.query(`UPDATE accounts SET phone = '555-0199' WHERE id = $1`, [IDS.acctD]);
+            const sf = fakeSf(new Set(["003000000000003AAA"]));
+            const r = await drainPersonOutbox({ sf });
+            const [row] = await outboxState(IDS.acctD).then((rows) => rows.filter((x: any) => x.status !== "done"));
+            const ok = r.claimed === 1 && r.retrying === 1 && sf.calls.length === 1
+                && row?.status === "pending" && row?.attempts === 1 && /UNABLE_TO_LOCK_ROW/.test(row?.last_error);
+            return [ok, `claimed=${r.claimed}, calls=${sf.calls.length}, row=${JSON.stringify(row)}`];
+        });
+
+        await check("after the last attempt it gives up visibly as 'failed'", async () => {
+            await client.query(
+                `UPDATE person_outbox SET attempts = 4 WHERE account_id = $1 AND status = 'pending'`, [IDS.acctD]);
+            const r = await drainPersonOutbox({ sf: fakeSf(new Set(["003000000000003AAA"])) });
+            const rows = await outboxState(IDS.acctD);
+            const last = rows[rows.length - 1];
+            return [r.failed === 1 && last.status === "failed" && last.attempts === 5,
+                `failed=${r.failed}, row=${JSON.stringify(last)}`];
+        });
+
+        await check("a push interrupted mid-flight folds into the person's newer change", async () => {
+            // A run that died while pushing Zpecterr's phone left the row in_flight;
+            // then Zpecterr changed their name, which queued a new pending row.
+            await client.query(
+                `INSERT INTO person_outbox (account_id, op, payload, status, attempts)
+                 VALUES ($1, 'update', '{"fields":["phone"]}', 'in_flight', 1)`, [IDS.acctB]);
+            await client.query(`UPDATE accounts SET first_name = 'Testy' WHERE id = $1`, [IDS.acctB]);
+            const sf = fakeSf();
+            const r = await drainPersonOutbox({ sf });
+            const mine = sf.calls.filter((c) => c.id === "00Q000000000001AAA");
+            const live = (await outboxState(IDS.acctB)).filter((x: any) => x.status !== "done");
+            const keys = Object.keys(mine[0]?.fields ?? {}).sort();
+            const ok = mine.length === 1 && live.length === 0
+                && JSON.stringify(keys) === JSON.stringify(["FirstName", "Phone"]);
+            return [ok, `pushes=${mine.length}, fields=${keys.join(",")}, left open=${live.length}, run=${r.claimed}`];
+        });
+
+        await check("a queued push for a Salesforce User is skipped, never sent", async () => {
+            await client.query(
+                `INSERT INTO person_outbox (account_id, op, payload) VALUES ($1, 'update', '{"fields":["phone"]}')`,
+                [IDS.acctA]);
+            const sf = fakeSf();
+            const r = await drainPersonOutbox({ sf });
+            return [r.skipped === 1 && sf.calls.length === 0, `skipped=${r.skipped}, calls=${sf.calls.length}`];
+        });
+
+        await check("a Person Account gets PersonEmail and First/Last — never Name", async () => {
+            // The org has Person Accounts; Salesforce rejects writes to a Person
+            // Account's Name, which is derived. Group C has no record type, so it
+            // is treated as one.
+            await client.query(
+                `UPDATE accounts SET email = 'tyler@example.com', phone = '555-0105', name = 'Tyler J Campbell'
+                  WHERE id = $1`, [IDS.acctC]);
+            const sf = fakeSf();
+            const r = await drainPersonOutbox({ sf });
+            const call = sf.calls[0];
+            const [row] = (await outboxState(IDS.acctC)).slice(-1);
+            const ok = r.updated === 1 && call?.sobject === "Account" && !("Name" in (call?.fields ?? {}))
+                && call.fields.PersonEmail === "tyler@example.com" && call.fields.Phone === "555-0105"
+                && call.fields.FirstName === "Tyler J" && call.fields.LastName === "Campbell"
+                && row.status === "done" && row.last_error === null;
+            return [ok, `call=${JSON.stringify(call)}, note=${row?.last_error}`];
+        });
+
+        await check("a business Account gets Name/Phone; its email change is reported, not failed", async () => {
+            await client.query(
+                `UPDATE accounts SET sf_record_type_name = 'Business Account' WHERE id = $1`, [IDS.acctC]);
+            await client.query(
+                `UPDATE accounts SET email = 'tyler2@example.com', name = 'Campbell Holdings' WHERE id = $1`, [IDS.acctC]);
+            const sf = fakeSf();
+            await drainPersonOutbox({ sf });
+            const call = sf.calls[0];
+            const [row] = (await outboxState(IDS.acctC)).slice(-1);
+            const ok = call?.fields?.Name === "Campbell Holdings" && !("PersonEmail" in (call?.fields ?? {}))
+                && row.status === "done" && /no email field/.test(row.last_error ?? "");
+            // Put Group C back the way the fixture had it for the merge section.
+            await client.query("BEGIN");
+            await client.query("SET LOCAL app.sync_in_progress = 'on'");
+            await client.query(
+                `UPDATE accounts SET sf_record_type_name = NULL, email = 'tyler@example.com', name = 'Tyler Campbell'
+                  WHERE id = $1`, [IDS.acctC]);
+            await client.query("COMMIT");
+            return [ok, `call=${JSON.stringify(call)}, note=${row?.last_error}`];
+        });
+
+        // ── S6c: nightly merge ───────────────────────────────────────────────
+        section("S6c — nightly merge, landing -> accounts");
+
+        const mergeErr = await applyMigration(client, "2026-09-24-phase3-merge-support.sql");
+        assert("the merge-support migration applies", mergeErr === null, mergeErr ?? "clean");
+        const { mergeLandingIntoAccounts, recordPull } = await import("../jobs/personSync.js");
+        const acct = async (id: string) => (await client.query(`SELECT * FROM accounts WHERE id = $1`, [id])).rows[0];
+        const outboxCount = async () => (await client.query(`SELECT count(*)::int n FROM person_outbox`)).rows[0].n;
+
+        await check("the #27 exclusion seed matches exactly the adjudicated row", async () => {
+            // Nothing in the fixture has JOHNNY's real id, so the seed found nothing.
+            const before = (await client.query(`SELECT count(*)::int n FROM account_merge_exclusions`)).rows[0].n;
+            // Right email + right id prefix, and right email + WRONG prefix.
+            await client.query(
+                `INSERT INTO sf_leads (id, first_name, last_name, email, password)
+                 VALUES ('2576df7b-0000-4000-8000-000000000001','JOHNNY','SILVERHAND','name@example.com','x'),
+                        ('11111111-0000-4000-8000-000000000001','Other','Person','name@example.com','x')`);
+            await applyMigration(client, "2026-09-24-phase3-merge-support.sql");   // idempotent re-run
+            const { rows } = await client.query(`SELECT source_id FROM account_merge_exclusions`);
+            await client.query(`DELETE FROM account_merge_exclusions`);
+            await client.query(`DELETE FROM sf_leads WHERE email = 'name@example.com' AND id::text NOT LIKE '0e%'`);
+            const ok = before === 0 && rows.length === 1 && rows[0].source_id === "2576df7b-0000-4000-8000-000000000001";
+            return [ok, `seeded before=${before}; after inserting both, excluded=[${rows.map((r: any) => r.source_id).join(", ")}]`];
+        });
+
+        // The fixture's JOHNNY stands in for the real one.
+        await client.query(
+            `INSERT INTO account_merge_exclusions (source_table, source_id, reason) VALUES ('sf_leads', $1, 'fixture')`,
+            [IDS.L2]);
+        const outboxBefore = await outboxCount();
+        const m1 = await mergeLandingIntoAccounts({ trigger: "manual" });
+
+        await check("an excluded landing row never gets an account", async () => {
+            const { rows } = await client.query(
+                `SELECT (SELECT count(*) FROM accounts WHERE id = $1)::int a,
+                        (SELECT count(*) FROM account_source_links WHERE source_id = $1)::int l`, [IDS.L2]);
+            return [m1.excluded === 1 && m1.created === 0 && rows[0].a === 0 && rows[0].l === 0,
+                `excluded=${m1.excluded}, created=${m1.created}, account=${rows[0].a}, link=${rows[0].l}`];
+        });
+
+        await check("a Salesforce User's name and phone are Salesforce's outright", async () => {
+            const a = await acct(IDS.acctA);
+            // Set to 'G. Murray' / 555-0102 by a direct write in S6a; Salesforce says otherwise.
+            const ok = a.name === "Geoffrey Murray" && a.phone === null && a.company === "Murray LLC"
+                && a.app_role === "admin" && a.app_role_source === "manual";
+            return [ok, `name=${a.name}, phone=${a.phone}, company=${a.company}, role=${a.app_role}/${a.app_role_source}`];
+        });
+
+        await check("shared fields the app pushed are protected until Salesforce is pulled again", async () => {
+            const b = await acct(IDS.acctB);
+            // first_name and phone were pushed by the drain and no Lead pull has
+            // happened since, so the landing row cannot reflect them yet.
+            // last_name was never changed in the app, so Salesforce's value lands.
+            const ok = b.first_name === "Testy" && b.phone === "555-0101"
+                && b.last_name === "Player" && b.lead_status === "New"
+                && b.email === "zpecterr@example.com";
+            return [ok, `first=${b.first_name}, phone=${b.phone}, last=${b.last_name}, `
+                + `lead_status=${b.lead_status}, email=${b.email}`];
+        });
+
+        await check("a failed push stays protected; an unrecorded app edit does not", async () => {
+            const d = await acct(IDS.acctD);
+            // phone has a 'failed' outbox row: Salesforce never got it, so it holds.
+            // name was written under the sync guard in S6a, so no outbox row: SF wins.
+            return [d.phone === "555-0199" && d.name === "Ashley Early", `phone=${d.phone}, name=${d.name}`];
+        });
+
+        await check("Salesforce-owned fields always follow Salesforce; email never does", async () => {
+            const c = await acct(IDS.acctC);
+            // company was written directly in S6a; Salesforce's landing row says NULL.
+            return [c.company === null && c.email === "tyler@example.com" && c.phone === "555-0105",
+                `company=${c.company}, email=${c.email}, phone=${c.phone}`];
+        });
+
+        await check("the merge queues nothing back to Salesforce", async () => {
+            const after = await outboxCount();
+            return [after === outboxBefore, `${after - outboxBefore} new outbox row(s) across the merge`];
+        });
+
+        await check("a second merge with no new Salesforce data changes nothing", async () => {
+            const m2 = await mergeLandingIntoAccounts();
+            const linked = m2.linked.bySalesforceId + m2.linked.byEmail + m2.linked.byContactAccount;
+            const ok = m2.updated === 0 && linked === 0 && m2.created === 0 && m2.promoted === 0
+                && m2.roleChanges === 0 && m2.tierChanges === 0;
+            return [ok, JSON.stringify({ updated: m2.updated, linked, created: m2.created,
+                roles: m2.roleChanges, tiers: m2.tierChanges })];
+        });
+
+        await check("after a pull that reflects the push, nothing flips", async () => {
+            // What Salesforce's nightly pull brings back after our push landed.
+            await client.query(
+                `UPDATE sf_leads SET first_name = 'Testy', phone = '555-0101' WHERE id = $1`, [IDS.L1]);
+            await recordPull("Lead", new Date(), { records: 1 });
+            const m = await mergeLandingIntoAccounts();
+            const b = await acct(IDS.acctB);
+            return [b.first_name === "Testy" && b.phone === "555-0101" && !m.fieldsChanged.first_name,
+                `first=${b.first_name}, phone=${b.phone}, changed=${JSON.stringify(m.fieldsChanged)}`];
+        });
+
+        await check("after a pull, a later Salesforce edit wins", async () => {
+            await client.query(`UPDATE sf_leads SET phone = '555-0999' WHERE id = $1`, [IDS.L1]);
+            await recordPull("Lead", new Date(), { records: 1 });
+            await mergeLandingIntoAccounts();
+            const b = await acct(IDS.acctB);
+            return [b.phone === "555-0999", `phone=${b.phone}`];
+        });
+
+        await check("an app signup comes home by its Salesforce id, not as a duplicate", async () => {
+            // The drain created Lead 00QFAKE00000001 for the signup; now it arrives
+            // in the pull like any other Lead.
+            await client.query(
+                `INSERT INTO sf_leads (id, first_name, last_name, email, password, sf_lead_id)
+                 VALUES ('0f000000-0000-4000-8000-00000000ab01','New','Comer','newcomer@example.com','x','00QFAKE00000001')`);
+            const m = await mergeLandingIntoAccounts();
+            const { rows } = await client.query(
+                `SELECT account_id FROM account_source_links WHERE source_id = '0f000000-0000-4000-8000-00000000ab01'`);
+            return [m.linked.bySalesforceId === 1 && m.created === 0 && rows[0]?.account_id === signupId,
+                `bySalesforceId=${m.linked.bySalesforceId}, created=${m.created}, linked to signup=${rows[0]?.account_id === signupId}`];
+        });
+
+        await check("a converted Lead arriving as a Contact links by email and promotes", async () => {
+            await client.query(
+                `INSERT INTO sf_contacts (id, name, email, sf_id)
+                 VALUES ('0f000000-0000-4000-8000-00000000ab02','New Comer','newcomer@example.com','003NEW000000001')`);
+            const m = await mergeLandingIntoAccounts();
+            const a = await acct(signupId);
+            // Its identity moves to the Contact — a converted Lead can no longer
+            // be updated in Salesforce — and the tier follows the object map.
+            const ok = m.linked.byEmail === 1 && m.promoted === 1 && a.sf_object === "Contact"
+                && a.sf_id === "003NEW000000001" && a.account_tier === "member";
+            return [ok, `byEmail=${m.linked.byEmail}, promoted=${m.promoted}, now ${a.sf_object} ${a.sf_id}, tier=${a.account_tier}`];
+        });
+
+        await check("a new Salesforce Account founds a person; its Contact joins it", async () => {
+            await client.query(
+                `INSERT INTO sf_accounts (id, name, sf_id) VALUES ('0f000000-0000-4000-8000-00000000ab03','Fresh Org','001NEW000000001')`);
+            await client.query(
+                `INSERT INTO sf_contacts (id, name, account_id, sf_id)
+                 VALUES ('0f000000-0000-4000-8000-00000000ab04','Fresh Person','0f000000-0000-4000-8000-00000000ab03','003NEW000000002')`);
+            const m = await mergeLandingIntoAccounts();
+            const a = await acct("0f000000-0000-4000-8000-00000000ab03");
+            const { rows } = await client.query(
+                `SELECT account_id FROM account_source_links WHERE source_id = '0f000000-0000-4000-8000-00000000ab04'`);
+            const ok = m.created === 1 && m.linked.byContactAccount === 1 && a?.sf_object === "Account"
+                && a?.account_tier === "patron" && a?.app_role === "user"
+                && rows[0]?.account_id === "0f000000-0000-4000-8000-00000000ab03";
+            return [ok, `created=${m.created}, byContactAccount=${m.linked.byContactAccount}, `
+                + `donated id=${Boolean(a)}, tier=${a?.account_tier}, role=${a?.app_role}`];
+        });
+
+        await check("a new person whose handle is taken is kept, without the handle", async () => {
+            // Every fixture account is #0001; 'ashley' already belongs to Group D.
+            await client.query(
+                `INSERT INTO sf_leads (id, first_name, last_name, password, handle, user_number, sf_lead_id)
+                 VALUES ('0f000000-0000-4000-8000-00000000ab05','Second','Ashley','x','ashley','0001','00QNEW000000003')`);
+            const m = await mergeLandingIntoAccounts();
+            const a = await acct("0f000000-0000-4000-8000-00000000ab05");
+            return [m.created === 1 && a?.handle === null && m.conflicts.some((c) => /handle/.test(c.problem)),
+                `created=${m.created}, handle=${a?.handle}, conflicts=${JSON.stringify(m.conflicts)}`];
+        });
+
+        await check("app_role follows the profile map only where the merge owns it", async () => {
+            // The manual pin survives a Profile that maps to 'user'...
+            await client.query(`UPDATE accounts SET sf_profile = 'Standard User' WHERE id = $1`, [IDS.acctA]);
+            await mergeLandingIntoAccounts();
+            const pinned = (await acct(IDS.acctA)).app_role;
+            // ...and when the merge DOES own the column, the map decides.
+            await client.query(`UPDATE accounts SET app_role_source = 'sf' WHERE id = $1`, [IDS.acctA]);
+            const m = await mergeLandingIntoAccounts();
+            const derived = (await acct(IDS.acctA)).app_role;
+            await client.query(
+                `UPDATE accounts SET app_role = 'admin', app_role_source = 'manual', sf_profile = NULL WHERE id = $1`,
+                [IDS.acctA]);
+            return [pinned === "admin" && derived === "user" && m.roleChanges === 1,
+                `manual pin -> ${pinned}; merge-owned -> ${derived} (roleChanges=${m.roleChanges}); pin restored`];
+        });
+
+        await check("every merge is in the ledger", async () => {
+            const { rows } = await client.query(
+                `SELECT count(*) FILTER (WHERE step = 'merge' AND ok)::int merges,
+                        count(*) FILTER (WHERE step = 'pull')::int pulls FROM person_sync_runs`);
+            return [rows[0].merges >= 9 && rows[0].pulls === 2, JSON.stringify(rows[0])];
+        });
+
+        // ── S6d: pipeline, sync endpoints, admin ─────────────────────────────
+        section("S6d — pipeline, sync endpoints, admin page");
+
+        const { runPersonSync, personSyncStatus, retryFailedOutboxRow } = await import("../jobs/personSync.js");
+
+        await check("run now: drain then merge, both in the ledger", async () => {
+            await client.query(`UPDATE accounts SET phone = '555-0300' WHERE id = $1`, [IDS.acctB]);
+            const sf = fakeSf();
+            const r = await runPersonSync({ trigger: "manual", sf });
+            const { rows } = await client.query(
+                `SELECT step FROM person_sync_runs WHERE trigger = 'manual' ORDER BY id DESC LIMIT 2`);
+            const ok = r.ran && r.drain!.updated === 1 && sf.calls.length === 1
+                && rows.map((x: any) => x.step).sort().join() === "drain,merge";
+            return [ok, `ran=${r.ran}, pushed=${r.drain?.updated}, ledger=${rows.map((x: any) => x.step)}`];
+        });
+
+        await check("a second run while one is in progress is refused, not overlapped", async () => {
+            await client.query(`UPDATE accounts SET phone = '555-0301' WHERE id = $1`, [IDS.acctB]);
+            let release!: () => void;
+            const gate = new Promise<void>((r) => { release = r; });
+            let entered!: () => void;
+            const inSf = new Promise<void>((r) => { entered = r; });
+            const slowSf = { ...fakeSf(), update: async () => { entered(); await gate; } };
+            const first = runPersonSync({ trigger: "manual", sf: slowSf as any });
+            await inSf;                                  // run 1 now holds the lock, mid-push
+            const second = await runPersonSync({ trigger: "manual", sf: fakeSf() });
+            release();
+            const one = await first;
+            return [one.ran && !second.ran && /in progress/.test(second.reason ?? ""),
+                `first ran=${one.ran}; second ran=${second.ran} (${second.reason})`];
+        });
+
+        // The sync endpoints, over real HTTP, as Salesforce's Apex batches call them.
+        const express = (await import("express")).default;
+        process.env.SYNC_API_KEY = "phase3-test-key";
+        const app = express();
+        app.use(express.json());
+        app.use("/api/sync", (await import("../routes/syncRoutes.js")).default);
+        app.use("/api/accounts", (await import("../routes/accountRoutes.js")).default);
+        app.use("/admin", (await import("../routes/adminRoutes.js")).default);
+        const server = app.listen(0);
+        const base = `http://127.0.0.1:${(server.address() as any).port}`;
+        const post = (path: string, body: unknown) => fetch(base + path, {
+            method: "POST", headers: { "content-type": "application/json", "x-api-key": "phase3-test-key" },
+            body: JSON.stringify(body) }).then((r) => r.json());
+
+        try {
+            await check("two Salesforce records sharing an email stay two landing rows", async () => {
+                // The old endpoints matched on email too, collapsing them into one.
+                await post("/api/sync/salesforce", { object: "Lead", records: [
+                    { Id: "00QPULL000000001", FirstName: "Pulled", LastName: "One", Email: "dup@example.com" },
+                    { Id: "00QPULL000000002", FirstName: "Pulled", LastName: "Two", Email: "dup@example.com" }] });
+                const { rows } = await client.query(
+                    `SELECT sf_lead_id, password FROM sf_leads WHERE email = 'dup@example.com' ORDER BY sf_lead_id`);
+                return [rows.length === 2 && rows.every((r: any) => r.password === null),
+                    `${rows.length} row(s), passwords=${JSON.stringify(rows.map((r: any) => r.password))}`];
+            });
+
+            await check("a legacy row with no Salesforce id is adopted, not duplicated", async () => {
+                await client.query(
+                    `INSERT INTO sf_leads (id, first_name, last_name, email)
+                     VALUES ('0f000000-0000-4000-8000-00000000ab06','Legacy','Row','legacy@example.com')`);
+                await post("/api/sync/salesforce", { object: "Lead", records: [
+                    { Id: "00QPULL000000003", LastName: "Row", Email: "legacy@example.com" }] });
+                const { rows } = await client.query(`SELECT id, sf_lead_id FROM sf_leads WHERE email = 'legacy@example.com'`);
+                return [rows.length === 1 && rows[0].sf_lead_id === "00QPULL000000003",
+                    `${rows.length} row(s), sf_lead_id=${rows[0]?.sf_lead_id}`];
+            });
+
+            await check("an Account sharing a User's email is no longer silently skipped", async () => {
+                const r: any = await post("/api/sync/salesforce", { object: "Account", records: [
+                    { Id: "001PULL000000001", Name: "Geoffrey Murray", PersonEmail: "geoffrey.murray.1995@gmail.com" }] });
+                const { rows } = await client.query(`SELECT password FROM sf_accounts WHERE sf_id = '001PULL000000001'`);
+                return [rows.length === 1 && rows[0].password === null && r.results.skipped === 0,
+                    `landed=${rows.length}, skipped=${r.results.skipped}, password=${rows[0]?.password}`];
+            });
+
+            await check("accounts/sync no longer deletes a Lead it thinks converted", async () => {
+                await client.query(
+                    `INSERT INTO sf_leads (id, first_name, last_name, email, sf_lead_id)
+                     VALUES ('0f000000-0000-4000-8000-00000000ab07','Lead','Convert','convert@example.com','00QPULL000000004')`);
+                await post("/api/accounts/sync", { accounts: [
+                    { sfID: "001PULL000000002", name: "Lead Convert", email: "convert@example.com" }] });
+                const { rows: [c] } = await client.query(
+                    `SELECT (SELECT count(*) FROM sf_leads WHERE id = '0f000000-0000-4000-8000-00000000ab07')::int lead,
+                            (SELECT count(*) FROM sf_accounts WHERE sf_id = '001PULL000000002' AND password IS NULL)::int acct`);
+                return [c.lead === 1 && c.acct === 1, `lead kept=${c.lead}, account landed=${c.acct}`];
+            });
+
+            await check("every person pull is recorded per object", async () => {
+                const { rows } = await client.query(
+                    `SELECT sf_object, count(*)::int n FROM person_sync_runs
+                      WHERE step = 'pull' AND trigger = 'salesforce' AND result IS NOT NULL
+                      GROUP BY 1 ORDER BY 1`);
+                const by = Object.fromEntries(rows.map((r: any) => [r.sf_object, r.n]));
+                return [by.Lead >= 2 && by.Account >= 2, JSON.stringify(by)];
+            });
+
+            await check("the merge, not the mirror, decides those shared-email records are one person", async () => {
+                const m = await mergeLandingIntoAccounts();
+                const { rows } = await client.query(
+                    `SELECT a.id, count(l.*)::int links FROM accounts a
+                       JOIN account_source_links l ON l.account_id = a.id
+                      WHERE a.email = 'dup@example.com' GROUP BY a.id`);
+                return [rows.length === 1 && rows[0].links === 2,
+                    `accounts for dup@=${rows.length}, links=${rows[0]?.links}; merge created=${m.created}, byEmail=${m.linked.byEmail}`];
+            });
+
+            // ── admin page ───────────────────────────────────────────────────
+            const jwt = (await import("jsonwebtoken")).default;
+            const adminToken = jwt.sign({ id: IDS.acctA, email: "geoffrey.murray.1995@gmail.com" },
+                process.env.JWT_SECRET || "your-secret-key-change-this", { expiresIn: "5m" });
+            const leadToken = jwt.sign({ id: IDS.acctB, email: "gdrumz@momurrays.com" },
+                process.env.JWT_SECRET || "your-secret-key-change-this", { expiresIn: "5m" });
+
+            await check("the Person Sync page is admin-only", async () => {
+                const admin = await fetch(`${base}/admin/person-sync?token=${adminToken}`);
+                const lead = await fetch(`${base}/admin/person-sync?token=${leadToken}`);
+                return [admin.status === 200 && lead.status === 403, `admin=${admin.status}, ordinary user=${lead.status}`];
+            });
+
+            await check("a hostile name in a failed row renders as text, not markup", async () => {
+                await client.query("BEGIN");
+                await client.query("SET LOCAL app.sync_in_progress = 'on'");
+                await client.query(`UPDATE accounts SET name = '<script>alert(1)</script>' WHERE id = $1`, [IDS.acctD]);
+                await client.query("COMMIT");
+                const html = await (await fetch(`${base}/admin/person-sync?token=${adminToken}`)).text();
+                const ok = html.includes("&lt;script&gt;alert(1)&lt;/script&gt;") && !html.includes("<script>alert(1)");
+                await client.query("BEGIN");
+                await client.query("SET LOCAL app.sync_in_progress = 'on'");
+                await client.query(`UPDATE accounts SET name = 'Ashley Early' WHERE id = $1`, [IDS.acctD]);
+                await client.query("COMMIT");
+                return [ok, ok ? "escaped" : "RAW MARKUP IN THE ADMIN PAGE"];
+            });
+
+            await check("status shows the failed push, and retry re-queues it", async () => {
+                const before = await personSyncStatus();
+                const row = before.failed.find((f: any) => f.account_id === IDS.acctD);
+                const res = await fetch(`${base}/admin/person-sync/retry/${row?.id}?token=${adminToken}`,
+                    { method: "POST", redirect: "manual" });
+                const { rows: [after] } = await client.query(
+                    `SELECT status, attempts FROM person_outbox WHERE id = $1`, [row?.id]);
+                return [Boolean(row) && res.status === 303 && after?.status === "pending" && after?.attempts === 0,
+                    `failed listed=${Boolean(row)}, POST=${res.status}, now ${after?.status}/${after?.attempts}`];
+            });
+        } finally {
+            server.close();
+        }
+
+        console.log(`\n${passed} passed, ${failed} failed`);
+        if (failures.length) console.log(`Failing: ${failures.join(" · ")}`);
+        console.log(`Password for login tests: ${PASSWORD}`);
+        process.exitCode = failed ? 1 : 0;
+    } finally {
+        client.release();
+        await pool.end();
+    }
+}
+
+main().catch((err) => { console.error(err); process.exit(1); });

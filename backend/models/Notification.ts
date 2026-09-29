@@ -1,6 +1,8 @@
 import { defineModel } from "../db/model.js";
-import User from "./User.js";
+import Account from "./Account.js";
 
+// user_id could hold any of the four person tables while this ref named User,
+// so populate() silently returned null for most people. Correct since #35.
 const Notification = defineModel({
   table: "notifications",
   fields: {
@@ -9,6 +11,6 @@ const Notification = defineModel({
     meta: { col: "meta", type: "jsonb" },
     count: "count", read: "read", createdAt: { col: "created_at", type: "date" },
   },
-  refs: { user: () => User },
+  refs: { user: () => Account },
 });
 export default Notification;

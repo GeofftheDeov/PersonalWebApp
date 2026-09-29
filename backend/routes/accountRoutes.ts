@@ -1,8 +1,22 @@
 import express from "express";
 const router = express.Router();
-import Account from "../models/Account.js";
-import Lead from "../models/Lead.js";
+import SfAccount from "../models/SfAccount.js";
 import jwt from "jsonwebtoken";
+import { recordPull } from "../jobs/personSync.js";
+
+/**
+ * Salesforce-facing routes over the sf_accounts LANDING table (#35).
+ *
+ * Until Phase 3 `models/SfAccount.ts` was this landing table; it is now the app's
+ * unified person table, so these handlers use SfAccount/SfLead explicitly. The
+ * app's own account data is never served from here.
+ *
+ * NOTE (not in #35): the two GET handlers below had no authentication at all —
+ * `GET /api/accounts` returned every landing row, names, emails and phones
+ * included, to anyone who asked. Same species as the campaignMemberRoutes leak
+ * in plan §3.6, found while repointing the imports. They now require the same
+ * credential the sync endpoint does.
+ */
 
 // JWT Authentication Middleware
 const authenticateJWT = (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -39,6 +53,7 @@ const authenticateSync = (req: express.Request, res: express.Response, next: exp
 // Bulk sync endpoint for Salesforce batch job
 router.post("/sync", authenticateSync, async (req, res) => {
     try {
+        const startedAt = new Date();
         const accounts = req.body.accounts;
 
         if (!Array.isArray(accounts)) {
@@ -58,74 +73,38 @@ router.post("/sync", authenticateSync, async (req, res) => {
                 const email = accountData.email || "";
                 const name = accountData.name || "";
 
-                // 1. Check if Account already exists (by Salesforce ID OR Email)
-                let existingAccount = null;
-                if (sfID) {
-                    existingAccount = await Account.findOne({ sfID: sfID });
-                }
+                // A landing row is found by its Salesforce Id, with an email
+                // fallback only for a legacy row that never received one — see
+                // routes/syncRoutes.ts for why matching mirrors on email is wrong.
+                let existingAccount: any = sfID ? await SfAccount.findOne({ sfID }) : null;
                 if (!existingAccount && email) {
-                    existingAccount = await Account.findOne({ email: email });
+                    existingAccount = await SfAccount.findOne({ email, sfID: null });
                 }
 
-                if (existingAccount) {
-                    // Update existing account with latest Salesforce info (don't create new record)
-                    existingAccount.name = name;
-                    existingAccount.industry = accountData.industry;
-                    existingAccount.website = accountData.website;
-                    existingAccount.phone = accountData.phone;
-                    existingAccount.address = accountData.address;
-                    existingAccount.sfID = sfID;
-                    existingAccount.sfRecordTypeID = accountData.sfRecordTypeID;
-                    existingAccount.sfRecordTypeName = accountData.sfRecordTypeName;
-                    
-                    if (email && !existingAccount.email) {
-                        existingAccount.email = email;
-                    }
-
-                    await existingAccount.save();
-                    results.success++;
-                    continue;
-                }
-
-                // 2. If NO account exists, check for a matching Lead by first/last name and email
-                let parsedFirstName = accountData.firstName || "";
-                let parsedLastName = accountData.lastName || "";
-                
-                if (!parsedFirstName && !parsedLastName && name) {
-                    const nameParts = name.trim().split(/\s+/);
-                    parsedFirstName = nameParts[0] || "";
-                    parsedLastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "";
-                }
-
-                const leadMatch = await Lead.findOne({
-                    email: email,
-                    firstName: parsedFirstName,
-                    lastName: parsedLastName
-                });
-
-                let migratedPassword = null;
-                if (leadMatch) {
-                    console.info(`Found matching Lead for ${email} (${parsedFirstName} ${parsedLastName}). Migrating password...`);
-                    migratedPassword = leadMatch.password;
-                    // Delete the old lead as it's now being converted
-                    await Lead.deleteOne({ _id: leadMatch._id });
-                }
-
-                // 3. Create the new Account
-                const newAccount = new Account({
-                    name: name,
-                    email: email,
-                    password: migratedPassword, // Inherits existing hashed password if Lead was found
+                const fields = {
+                    name,
                     industry: accountData.industry,
                     website: accountData.website,
                     phone: accountData.phone,
                     address: accountData.address,
-                    sfID: sfID,
+                    sfID,
                     sfRecordTypeID: accountData.sfRecordTypeID,
-                    sfRecordTypeName: accountData.sfRecordTypeName
-                });
+                    sfRecordTypeName: accountData.sfRecordTypeName,
+                };
 
-                await newAccount.save();
+                if (existingAccount) {
+                    Object.assign(existingAccount, fields);
+                    if (email && !existingAccount.email) existingAccount.email = email;
+                    await existingAccount.save();
+                } else {
+                    // This used to look for a Lead with the same name and email, DELETE
+                    // its landing row as "converted", and carry its password across.
+                    // That is identity logic running inside a mirror: it destroyed a
+                    // row the merge links to, and moved a credential through a table
+                    // that no longer holds credentials. Conversion is now the merge's
+                    // job — it links the new Account by email and promotes the person.
+                    await SfAccount.create({ ...fields, email: email || undefined });
+                }
                 results.success++;
             } catch (error: any) {
                 results.failed++;
@@ -134,6 +113,15 @@ router.post("/sync", authenticateSync, async (req, res) => {
                     error: error.message
                 });
             }
+        }
+
+        // The merge reads the latest pull per object to know whether a change the
+        // app pushed can have come back yet (jobs/personSync.ts).
+        try {
+            await recordPull("Account", startedAt, results, results.failed === 0,
+                results.failed ? `${results.failed} record(s) failed` : undefined);
+        } catch (err: any) {
+            console.error("[SYNC] could not record the Account pull:", err.message);
         }
 
         res.status(200).json({
@@ -147,9 +135,9 @@ router.post("/sync", authenticateSync, async (req, res) => {
 });
 
 // Get all accounts
-router.get("/", async (req, res) => {
+router.get("/", authenticateSync, async (req, res) => {
     try {
-        const accounts = await Account.find().sort({ createdAt: -1 });
+        const accounts = await SfAccount.find().sort({ createdAt: -1 });
         res.json(accounts);
     } catch (error: any) {
         console.error("Error fetching accounts:", error);
@@ -158,9 +146,9 @@ router.get("/", async (req, res) => {
 });
 
 // Get a specific account
-router.get("/:id", async (req, res) => {
+router.get("/:id", authenticateSync, async (req, res) => {
     try {
-        const account = await Account.findById(req.params.id);
+        const account = await SfAccount.findById(req.params.id);
         if (!account) {
             return res.status(404).json({ error: "Account not found" });
         }

@@ -2,6 +2,7 @@ import { Worker, Job } from "bullmq";
 import Task from "../models/Task.js";
 import { pullNotionTasks, pushTaskToNotion } from "../services/notionSync.js";
 import { pushTaskToSalesforce, pullTasksFromSalesforce } from "../services/salesforceService.js";
+import { runPersonSync } from "./personSync.js";
 import {
     getBullConnectionOptions,
     QUEUE_NAMES,
@@ -13,6 +14,7 @@ let _notionSyncWorker: Worker | null = null;
 let _sfWritebackWorker: Worker | null = null;
 let _notionWritebackWorker: Worker | null = null;
 let _sfPollWorker: Worker | null = null;
+let _personSyncWorker: Worker | null = null;
 
 /**
  * Pull all Notion tasks and upsert into MongoDB.
@@ -239,8 +241,22 @@ export function startWorkers(): () => Promise<void> {
         console.error(`[bullmq] sf-poll job ${job?.id} failed:`, err.message)
     );
 
+    // Person sync (#35): concurrency 1, and runPersonSync holds an advisory lock
+    // besides, so a "run now" from the admin portal cannot overlap the nightly run.
+    _personSyncWorker = new Worker(QUEUE_NAMES.PERSON_SYNC, async (job: Job) => {
+        const r = await runPersonSync({ trigger: job.data?.trigger === "manual" ? "manual" : "schedule" });
+        if (!r.ran) console.log(`[bullmq] person-sync: skipped — ${r.reason}`);
+        else console.log(`[bullmq] person-sync: drained ${r.drain!.claimed} ` +
+            `(created ${r.drain!.created}, updated ${r.drain!.updated}, failed ${r.drain!.failed}); ` +
+            `merge updated ${r.merge!.updated}, created ${r.merge!.created}`);
+        return r;
+    }, { connection: opts, concurrency: 1 });
+    _personSyncWorker.on("failed", (job, err) =>
+        console.error(`[bullmq] person-sync failed: ${err.message}`)
+    );
+
     console.log(
-        "[bullmq] Workers started: notion-sync (c=1), sf-writeback (c=3), notion-writeback (c=2), sf-poll (c=1)"
+        "[bullmq] Workers started: notion-sync (c=1), sf-writeback (c=3), notion-writeback (c=2), sf-poll (c=1), person-sync (c=1)"
     );
 
     return async () => {
@@ -249,11 +265,13 @@ export function startWorkers(): () => Promise<void> {
             _sfWritebackWorker?.close(),
             _notionWritebackWorker?.close(),
             _sfPollWorker?.close(),
+            _personSyncWorker?.close(),
         ]);
         _notionSyncWorker = null;
         _sfWritebackWorker = null;
         _notionWritebackWorker = null;
         _sfPollWorker = null;
+        _personSyncWorker = null;
         console.log("[bullmq] Workers shut down");
     };
 }

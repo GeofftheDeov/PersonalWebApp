@@ -1,74 +1,56 @@
 import { isUuid } from "../db/model.js";
-import User from "../models/User.js";
-import Lead from "../models/Lead.js";
-import Contact from "../models/Contact.js";
 import Account from "../models/Account.js";
 
 /**
- * People can live in any of four collections (mirroring Salesforce person
- * records): User, Lead, Contact, Account. Auth tokens carry `type`, but ids
- * arriving from the client (friend ids, sender ids) may belong to any
- * collection, so these helpers resolve a person wherever they live.
+ * Person lookups (#35, plan §3.1).
+ *
+ * These helpers used to fan out across four collections — User, Lead, Contact,
+ * Account — because a person could live in any of them. Every call was four
+ * round-trips, and `findPersonById` is called in a loop in friendRoutes, so
+ * rendering a friends list cost O(4n) queries.
+ *
+ * Since the Phase 3 cutover everyone is a row in `accounts`, so each of these
+ * is one indexed query. The exported names and signatures are unchanged, which
+ * is what kept ~40 call sites from churning.
+ *
+ * `PersonType` and `modelForType` are gone deliberately, along with
+ * `ResolvedPerson.type`. `type === "User"` was used across the app as a proxy
+ * for "a real app user, not a CRM record"; after the merge everyone is an
+ * account, so every one of those gates would have silently opened to everybody
+ * or closed to everybody. Keeping a vestigial `type` would have let one survive
+ * unnoticed. Capability now comes from an explicit column — `app_role` for
+ * authorization, `account_tier` for supporter-only surface — and `sf_object`
+ * remains as provenance only: where the record came from, never what it may do.
  */
-
-export type PersonType = "User" | "Lead" | "Contact" | "Account";
-
-export const PERSON_MODELS: Record<PersonType, any> = {
-    User,
-    Lead,
-    Contact,
-    Account,
-};
-
-const PERSON_TYPES: PersonType[] = ["User", "Lead", "Contact", "Account"];
-
-export function modelForType(type?: string): any {
-    return PERSON_MODELS[(type as PersonType)] || Lead;
-}
 
 export interface ResolvedPerson {
     doc: any;
-    type: PersonType;
 }
 
-/** Find a person by id, whichever collection they live in. */
-export async function findPersonById(id: string | string, select?: string): Promise<ResolvedPerson | null> {
+/** Find a person by id. */
+export async function findPersonById(id: string, select?: string): Promise<ResolvedPerson | null> {
     if (!isUuid(String(id))) return null;
-    const results = await Promise.all(
-        PERSON_TYPES.map(async (type) => {
-            const q = PERSON_MODELS[type].findById(id);
-            const doc = await (select ? q.select(select) : q);
-            return doc ? { doc, type } : null;
-        })
-    );
-    return results.find(Boolean) ?? null;
+    const q = Account.findById(id);
+    const doc = await (select ? q.select(select) : q);
+    return doc ? { doc } : null;
 }
 
-/** Find a person by handle#userNumber across all collections (case-insensitive handle). */
+/** Find a person by handle#userNumber (case-insensitive handle). */
 export async function findPersonByHandle(handle: string, userNumber: string): Promise<ResolvedPerson | null> {
-    const query = {
+    // ux_accounts_handle is on (lower(handle), user_number), so the regex form
+    // the four-table version needed is both unnecessary and unindexable here.
+    const doc = await Account.findOne({
         handle: { $regex: new RegExp(`^${escapeRegex(handle)}$`, "i") },
         userNumber,
-    };
-    const results = await Promise.all(
-        PERSON_TYPES.map(async (type) => {
-            const doc = await PERSON_MODELS[type].findOne(query);
-            return doc ? { doc, type } : null;
-        })
-    );
-    return results.find(Boolean) ?? null;
+    });
+    return doc ? { doc } : null;
 }
 
-/** Find people by email across all collections. Returns every match. */
+/** Find people by email. Returns every match (email is unique, so at most one). */
 export async function findPeopleByEmail(emails: string[]): Promise<ResolvedPerson[]> {
     if (!emails.length) return [];
-    const results = await Promise.all(
-        PERSON_TYPES.map(async (type) => {
-            const docs = await PERSON_MODELS[type].find({ email: { $in: emails } });
-            return docs.map((doc: any) => ({ doc, type }));
-        })
-    );
-    return results.flat();
+    const docs = await Account.find({ email: { $in: emails } });
+    return docs.map((doc: any) => ({ doc }));
 }
 
 /** Human display name: prefers handle, then name fields, never the email. */
@@ -84,10 +66,13 @@ export function personDisplayName(doc: any): string {
 
 /** Safe, public subset of a person record for profile viewing / search results. */
 export function toPublicPerson(person: ResolvedPerson) {
-    const { doc, type } = person;
+    const { doc } = person;
     return {
         _id: doc._id,
-        recordType: type,
+        // Provenance, not capability: which Salesforce object this person came
+        // from. Nothing may gate on it except the Paperclip check in
+        // paperclipRoutes, which is documented there.
+        recordType: doc.sfObject ?? null,
         name: personDisplayName(doc),
         handle: doc.handle ?? null,
         userNumber: doc.userNumber ?? null,

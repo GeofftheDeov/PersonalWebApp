@@ -3,10 +3,6 @@ name: Deploy Dev to Amazon ECS
 on:
   push:
     branches: ["dev"]
-  workflow_run:
-    workflows: ["Deploy Backend to Amazon ECS"]
-    branches: ["master"]
-    types: [completed]
   workflow_dispatch:
 
 env:

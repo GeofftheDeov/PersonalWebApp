@@ -5,7 +5,9 @@
  * blank, the way an untouched HTML form submits it) against a throwaway
  * Postgres built from db/schema.sql, on every table the issue lists.
  *
- * Run:  DATABASE_URL=postgresql://postgres@127.0.0.1:5433/pwatest npx tsx scripts/test-date-coercion.ts
+ * Run against a throwaway database loaded from db/schema.sql (it inserts rows,
+ * and refuses to run against anything but localhost):
+ *   DATABASE_URL=postgresql://postgres@127.0.0.1:5433/pwatest npx tsx scripts/test-date-coercion.ts
  *
  * Before the fix, every case below fails with:
  *   invalid input syntax for type timestamp with time zone: ""
@@ -17,6 +19,11 @@ import Session from "../models/Session.js";
 import Event from "../models/Event.js";
 import Opportunity from "../models/Opportunity.js";
 import CampaignInvite from "../models/CampaignInvite.js";
+
+if (!/(\/\/|@)(127\.0\.0\.1|localhost)[:/]/.test(process.env.DATABASE_URL ?? "")) {
+  console.error("\n  Refusing to run: DATABASE_URL must be a local throwaway database.\n");
+  process.exit(2);
+}
 
 let pass = 0;
 let fail = 0;
@@ -87,30 +94,35 @@ async function main() {
     assertNull(o, ["closeDate", "accountId"]);
   });
 
-  // #41 flagged campaign_invites as possibly a *different* bug. It is — it has
-  // no date column at all. from_user/to_user are person refs that were still
-  // pinned to sf_users by a FK, so an invite to anyone who is not a User failed
-  // on the constraint rather than on coercion. Anyone can be invited to a
-  // campaign whatever table they live in, so those FKs are gone too; every
-  // cross-type pair is covered in test-person-refs.ts.
-  await check("campaign_invites: User -> User", async () => {
-    const { rows } = await pool.query(
-      `INSERT INTO sf_users (name, password) VALUES ('a','x'), ('b','x') RETURNING id`);
+  // #41 flagged campaign_invites as possibly a *different* bug. It was: the
+  // table has no date column at all. Its person refs were pinned to sf_users
+  // by a FK, so an invite to anyone who was not a User failed on the
+  // constraint rather than on coercion (#42). Since Phase 3 (#35) both ends
+  // reference accounts(id), so the personas here are accounts rows. The
+  // "User -> Contact" case that used to follow tested a cross-table pair that
+  // no longer exists; provenance coverage lives in test-person-refs.ts.
+  const { rows: people } = await pool.query(
+    `INSERT INTO accounts (id, name) VALUES (gen_random_uuid(), 'inviter'), (gen_random_uuid(), 'invitee')
+     RETURNING id`);
+
+  await check("campaign_invites: account -> account", async () => {
     const i = await CampaignInvite.create({
-      campaign: String(parent._id), from: rows[0].id, to: rows[1].id,
+      campaign: String(parent._id), from: people[0].id, to: people[1].id,
     });
     if (!i._id) throw new Error("no id returned");
   });
 
-  await check("campaign_invites: User -> Contact (was the #42 failure)", async () => {
-    const { rows: u } = await pool.query(
-      `INSERT INTO sf_users (name, password) VALUES ('inviter','x') RETURNING id`);
-    const { rows: c } = await pool.query(
-      `INSERT INTO sf_contacts (name) VALUES ('a contact') RETURNING id`);
+  // Phase 3 made to_account_id nullable: an invite by email to somebody with
+  // no account yet leaves it unset. Sent as "" by an untouched input, that is
+  // the opportunities.account_id case above on a column #41 predates.
+  await check("campaign_invites: blank optional uuid (invite by email, no account yet)", async () => {
     const i = await CampaignInvite.create({
-      campaign: String(parent._id), from: u[0].id, to: c[0].id,
+      campaign: String(parent._id), from: people[0].id, to: "", toEmail: "new-player@example.com",
     });
-    if (!i._id) throw new Error("no id returned");
+    assertNull(i, ["to"]);
+    if (i.toEmail !== "new-player@example.com") {
+      throw new Error(`expected toEmail to be kept, got ${JSON.stringify(i.toEmail)}`);
+    }
   });
 
   // A real date must still round-trip, and garbage must still be rejected —

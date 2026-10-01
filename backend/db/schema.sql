@@ -714,3 +714,21 @@ CREATE TABLE admin_list_views (
 CREATE UNIQUE INDEX uq_admin_list_views_default ON admin_list_views (collection) WHERE is_default;
 CREATE TRIGGER trg_admin_list_views_updated BEFORE UPDATE ON admin_list_views
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ---------- agentic OS: skill-run queue (migrations/2026-09-26-agent-runs.sql) ----------
+
+CREATE TABLE agent_runs (
+  id            bigserial PRIMARY KEY,
+  skill         text NOT NULL,
+  status        text NOT NULL DEFAULT 'queued'
+                  CHECK (status IN ('queued','running','succeeded','failed')),
+  requested_by  text,
+  requested_at  timestamptz NOT NULL DEFAULT now(),
+  claimed_at    timestamptz,
+  finished_at   timestamptz,
+  runner        text,
+  summary       text,
+  output_path   text
+);
+CREATE INDEX idx_agent_runs_queued ON agent_runs (requested_at) WHERE status = 'queued';
+CREATE INDEX idx_agent_runs_recent ON agent_runs (requested_at DESC);

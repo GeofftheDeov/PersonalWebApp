@@ -1,7 +1,7 @@
 export interface AdminPageOptions {
     token: string;
     title: string;
-    activePage: 'admin' | 'db' | 'frontend' | 'cloud-claw' | 'obsidian' | 'alpaca' | 'paperclip' | 'profile' | 'person-sync';
+    activePage: 'admin' | 'db' | 'frontend' | 'cloud-claw' | 'obsidian' | 'briefs' | 'alpaca' | 'paperclip' | 'profile' | 'person-sync';
     content: string;
     extraStyles?: string;
 }
@@ -130,6 +130,7 @@ export const renderPage = ({ token, title, activePage, content, extraStyles = ''
                         <a href="/db?token=${token}" class="nav-link ${activePage === 'db' ? 'active' : ''}">THE SHOP</a>
                         <a href="/admin/cloud-claw?token=${token}" class="nav-link ${activePage === 'cloud-claw' ? 'active' : ''}">CLOUD-CLAW</a>
                         <a href="/admin/obsidian?token=${token}" class="nav-link ${activePage === 'obsidian' ? 'active' : ''}">OBSIDIAN</a>
+                        <a href="/admin/briefs?token=${token}" class="nav-link ${activePage === 'briefs' ? 'active' : ''}">BRIEFS</a>
                         <a href="/admin/alpaca?token=${token}" class="nav-link ${activePage === 'alpaca' ? 'active' : ''}">ALPACA</a>
                         <a href="/admin/paperclip?token=${token}" class="nav-link ${activePage === 'paperclip' ? 'active' : ''}">PAPERCLIP</a>
                         <a href="/admin/person-sync?token=${token}" class="nav-link ${activePage === 'person-sync' ? 'active' : ''}">PERSON SYNC</a>

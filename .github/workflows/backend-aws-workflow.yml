@@ -211,19 +211,18 @@ jobs:
         wait-for-service-stability: true
 
   rebase-dev:
-    name: Rebase Dev onto Main
+    name: Rebase Dev onto Main and Redeploy
     needs: deploy
-    # Disabled for the parity release (#44/#45). main now takes a SUBSET of dev
-    # (cut at b18fa67, before Phase 3), so "rebase dev onto main" no longer
-    # means "replay a few commits": it replays all of Phase 3 flattened, stops
-    # on a conflict in backend/routes/tabletopRoutes.ts (rehearsed 2026-09-25),
-    # and if it ever succeeded it would force-push a rewritten dev. Bring main
-    # into dev with a normal merge instead. Re-enable only once dev is again
-    # main plus a few commits.
-    if: ${{ false }}
+    # After every successful prod deploy, replay dev's commits on top of the
+    # commit that was just deployed, then redeploy dev. Re-enabled after the
+    # parity release; it requires dev to be "main plus a few commits". If dev
+    # has drifted so the rebase conflicts, this job aborts WITHOUT pushing and
+    # fails loudly, leaving dev (and its running deployment) untouched. Fix dev
+    # by hand, then re-run the job.
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write   # to dispatch the dev deploy below
     steps:
     - name: Checkout
       uses: actions/checkout@v4
@@ -233,11 +232,27 @@ jobs:
 
     - name: Rebase Dev Branch
       run: |
+        set -euo pipefail
         git config user.name "GitHub Actions"
         git config user.email "actions@github.com"
-        git checkout dev
-        git rebase main
-        git push origin dev --force
+        git fetch origin dev
+        DEV_TIP=$(git rev-parse origin/dev)
+        git checkout -B dev origin/dev
+        if ! git rebase "$GITHUB_SHA"; then
+          git rebase --abort
+          echo "::error::dev does not rebase cleanly onto ${GITHUB_SHA}; dev was left unchanged. Resolve by hand (reset dev to main, or merge main into dev) and re-run this job."
+          exit 1
+        fi
+        # Only overwrite dev if nobody pushed to it while we were rebasing.
+        git push origin dev --force-with-lease="dev:${DEV_TIP}"
+
+    # A push made with GITHUB_TOKEN does not trigger other workflows, so the
+    # dev deploy has to be dispatched explicitly (dev-aws-workflow.yml has
+    # workflow_dispatch and checks out the ref it is dispatched on).
+    - name: Deploy Dev
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: gh workflow run dev-aws-workflow.yml --ref dev
 
     # NOTE: the Mongo-era "Trigger Data Refresh Task" step (scripts/db-refresh.js
     # against prod/dev MongoDB containers) was retired 2026-08-14 — both

@@ -6,8 +6,8 @@
 #                    seeds it, migrates it twice and checks the backfill
 #   pwa_sp_fresh     the current schema.sql, in one shot
 #
-# BASE_REF is pinned to the commit the migration was written against (main at
-# 7db3be63, PR #74) rather than a moving ref: once this lands, HEAD and
+# BASE_REF is pinned to the commit the migration was written against (dev at
+# 2bbfb37b, PR #76) rather than a moving ref: once this lands, HEAD and
 # origin/main both contain the change, and a "before" database built from them
 # would have nothing to migrate -- and would pass.
 #
@@ -18,7 +18,7 @@
 # PATH, e.g. PSQL="/c/Program Files/PostgreSQL/18/bin/psql.exe".
 set -euo pipefail
 
-BASE_REF="${1:-7db3be63}"
+BASE_REF="${1:-2bbfb37b}"
 PSQL="${PSQL:-psql}"
 PGPORT="${PGPORT:-5433}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # backend/

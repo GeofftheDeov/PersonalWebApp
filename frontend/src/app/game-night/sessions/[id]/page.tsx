@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Book, ArrowLeft, Calendar, MapPin, FileText, Map, Save, X, Pencil, Wifi, Swords, Check, Clock } from 'lucide-react';
+import { memberName } from '@/lib/memberName';
 
 const INPUT_CLS = "w-full p-3 border-4 border-black bg-white text-black font-permanent text-base uppercase focus:border-yellow-400 outline-none";
 const LABEL_CLS = "block text-teal-400 font-permanent uppercase text-xs mb-1";
@@ -105,10 +106,6 @@ export default function SessionDetailPage() {
     );
     const me = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('user') || 'null') : null;
     const myResponse = readyCheck?.responses?.find((r: any) => r.playerId === me?.id);
-    const memberName = (m: any) => {
-        if (m.firstName || m.lastName) return `${m.firstName || ''} ${m.lastName || ''}`.trim();
-        return m.email?.split('@')[0] || 'Unknown Player';
-    };
     const responseFor = (m: any) => readyCheck?.responses?.find((r: any) => m.playerId && r.playerId === m.playerId);
     const readyCount = readyCheck?.responses?.filter((r: any) => r.ready).length ?? 0;
 

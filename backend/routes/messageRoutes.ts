@@ -2,13 +2,12 @@ import express, { Response } from "express";
 import jwt from "jsonwebtoken";
 import { isUuid } from "../db/model.js";
 import Message from "../models/Message.js";
-import CampaignMember from "../models/CampaignMember.js";
 import Campaign from "../models/Campaign.js";
 import { auth } from "../middleware/auth.js";
 import { getAuthorizedCampaignIds } from "../utils/gameNightPlannerUtils.js";
 import { bus } from "../events/index.js";
 import { notify } from "../utils/notify.js";
-import { findPersonById, findPeopleByEmail, personDisplayName } from "../utils/personUtils.js";
+import { findPersonById, findCampaignPeopleIds, personDisplayName } from "../utils/personUtils.js";
 
 const router = express.Router();
 
@@ -178,18 +177,15 @@ router.post("/campaign/:campaignId", auth, async (req: any, res) => {
 /** One bell entry per campaign per member, collapsing while unread. */
 async function notifyCampaignMembers(campaignId: string, senderId: string, senderName: string, body: string) {
     try {
-        const [campaign, members] = await Promise.all([
+        const [campaign, peopleIds] = await Promise.all([
             Campaign.findById(campaignId).select("title"),
-            CampaignMember.find({ campaign: campaignId }).select("email"),
+            findCampaignPeopleIds(campaignId),
         ]);
-        const emails = [...new Set(members.map((m: any) => m.email).filter((e: any): e is string => Boolean(e)))];
-        if (!emails.length) return;
-        const people = await findPeopleByEmail(emails as string[]);
         const preview = body.length > 80 ? `${body.slice(0, 77)}...` : body;
         await Promise.all(
-            people
-                .filter(p => String(p.doc._id) !== String(senderId))
-                .map(p => notify(p.doc._id, {
+            peopleIds
+                .filter(id => id !== String(senderId))
+                .map(id => notify(id, {
                     type: "message",
                     title: `New message in "${campaign?.title || 'a campaign'}"`,
                     body: `${senderName}: ${preview}`,

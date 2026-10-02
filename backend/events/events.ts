@@ -45,6 +45,16 @@ export interface EventMap {
         createdAt: string; // ISO timestamp
     };
 
+    /**
+     * Someone's regular availability changed (#57), so any overlap that
+     * includes them is stale. Carries no times: listeners re-read the overlap,
+     * which applies its own access rules.
+     */
+    "availability.changed": {
+        personId: string;
+        what: "windows" | "exceptions" | "busy";
+    };
+
     /** A notification was created (or refreshed) for a user's bell. */
     "user.notification": {
         notificationId: string;

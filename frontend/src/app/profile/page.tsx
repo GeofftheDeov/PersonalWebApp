@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Footer from '@/components/Footer';
 import CalendarView from '@/components/CalendarView';
+import AvailabilityEditor from '@/components/AvailabilityEditor';
 
 export default function ProfilePage() {
     const router = useRouter();
@@ -19,7 +20,7 @@ export default function ProfilePage() {
     const [games, setGames] = useState<string[]>([]);
     const [gameInput, setGameInput] = useState('');
     const [savingGames, setSavingGames] = useState(false);
-    const [activeTab, setActiveTab] = useState<'info' | 'calendar' | 'games' | 'vault'>('info');
+    const [activeTab, setActiveTab] = useState<'info' | 'availability' | 'calendar' | 'games' | 'vault'>('info');
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const EMPTY_KEY_FORM = { provider: '', label: '', keyId: '', secret: '' };
@@ -306,13 +307,13 @@ export default function ProfilePage() {
 
                 {/* Profile tabs */}
                 <div className="flex flex-wrap gap-2 mb-10 border-b-4 border-black pb-4">
-                    {(['info', 'calendar', 'games', 'vault'] as const).map(tab => (
+                    {(['info', 'availability', 'calendar', 'games', 'vault'] as const).map(tab => (
                         <button
                             key={tab}
                             onClick={() => setActiveTab(tab)}
                             className={`px-6 py-3 border-4 border-black font-permanent uppercase text-base tracking-wide transition-colors ${activeTab === tab ? 'bg-black dark:bg-white text-white dark:text-black' : 'bg-white dark:bg-zinc-800 text-black dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-700 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]'}`}
                         >
-                            {tab === 'info' ? 'INFO' : tab === 'calendar' ? 'CALENDAR' : tab === 'games' ? 'GAMES' : 'VAULT'}
+                            {tab.toUpperCase()}
                         </button>
                     ))}
                 </div>
@@ -748,6 +749,8 @@ export default function ProfilePage() {
                         </div>
                     )}
                 </div>)}
+
+                {activeTab === 'availability' && <AvailabilityEditor />}
 
                 {activeTab === 'calendar' && <CalendarView />}
 

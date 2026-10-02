@@ -43,6 +43,7 @@ import googleCalendarRoutes from "./routes/googleCalendarRoutes.js";
 import messageRoutes from "./routes/messageRoutes.js";
 import notificationRoutes from "./routes/notificationRoutes.js";
 import inviteRoutes from "./routes/inviteRoutes.js";
+import availabilityRoutes from "./routes/availabilityRoutes.js";
 import { snapshotAlpacaNow } from "./routes/adminRoutes.js";
 import { startEventBus, stopEventBus } from "./events/index.js";
 import { startReadyCheckLoop } from "./utils/readyCheck.js";
@@ -130,6 +131,7 @@ app.use("/api/messages", messageRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/campaign-invites", inviteRoutes);
 app.use("/api/runner", runnerRoutes); // PC skill runner (agentic OS); RUNNER_TOKEN auth
+app.use("/api/availability", availabilityRoutes);
 
 // Event bus (Redis Streams when REDIS_URL is set; in-memory otherwise).
 // Started after routes are imported so module-level subscriptions are registered.

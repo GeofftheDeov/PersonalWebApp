@@ -43,12 +43,15 @@ router.post("/", auth, async (req: any, res) => {
             });
         }
 
+        // The creator owns the campaign (#57): the banner and GM title are
+        // theirs, and stay theirs if the torch later passes to someone else.
         const campaign = new Campaign({
             title,
             description,
             status,
             startDate,
             endDate,
+            owner: req.user.id,
         });
         await campaign.save();
 

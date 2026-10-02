@@ -233,6 +233,19 @@ export default function SessionDetailPage() {
                 {/* View */}
                 {!editing && (
                     <div className="p-6 border-4 border-black bg-white dark:bg-slate-800 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] space-y-6">
+                        {session.status === 'planning' && (
+                            <div className="p-3 border-2 border-black bg-yellow-400 text-black">
+                                <p className="font-permanent text-sm uppercase">Still being planned — no night yet.</p>
+                                {session.campaign?._id && (
+                                    <Link href={`/game-night/campaigns/${session.campaign._id}#notice-board`} className="font-permanent text-xs uppercase underline">
+                                        Vote on the Notice Board
+                                    </Link>
+                                )}
+                            </div>
+                        )}
+                        {session.status === 'cancelled' && (
+                            <p className="p-3 border-2 border-black bg-zinc-800 text-white font-permanent text-sm uppercase">This session was cancelled.</p>
+                        )}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             {sessionDate && (
                                 <div className="flex items-start gap-2">
@@ -259,6 +272,13 @@ export default function SessionDetailPage() {
                                             <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 text-xs font-permanent uppercase border-2 border-black bg-teal-500 text-white">
                                                 <Wifi className="w-3 h-3" /> ONLINE
                                             </span>
+                                        )}
+                                        {/* The campaign's table link (#57): where an online session happens. */}
+                                        {session.isOnline && session.campaign?.tableLink && (
+                                            <a href={session.campaign.tableLink} target="_blank" rel="noopener noreferrer"
+                                                className="block mt-2 font-permanent text-xs text-teal-600 dark:text-yellow-400 underline break-all">
+                                                Join the table: {session.campaign.tableLink}
+                                            </a>
                                         )}
                                     </div>
                                 </div>

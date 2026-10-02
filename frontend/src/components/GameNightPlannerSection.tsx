@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Sword, Book, Map, Users, Calendar, Plus, Save } from 'lucide-react';
+import { sessionWhen } from '@/lib/sessions';
 
 interface Session {
     _id: string;
@@ -208,7 +209,7 @@ export default function GameNightPlannerSection() {
                         {sessions.length > 0 ? sessions.map(s => (
                             <div key={s._id} className="border-b-2 border-black/10 dark:border-white/10 pb-2">
                                 <p className="font-permanent text-lg text-black dark:text-white uppercase">{s.title}</p>
-                                <p className="text-sm font-permanent text-teal-600 dark:text-yellow-400">{new Date(s.date).toLocaleDateString()}</p>
+                                <p className="text-sm font-permanent text-teal-600 dark:text-yellow-400">{sessionWhen(s)}</p>
                             </div>
                         )) : (
                             <p className="font-permanent text-black dark:text-zinc-400 italic text-sm">NO RECENT SESSIONS LOGGED.</p>

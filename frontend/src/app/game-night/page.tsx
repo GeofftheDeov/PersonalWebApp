@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Sword, Book, Map, Plus, Save, Shield, X, ChevronRight, Skull, Star, Wifi } from 'lucide-react';
 import Footer from '@/components/Footer';
 import Link from 'next/link';
+import { sessionWhen } from '@/lib/sessions';
 
 interface Campaign {
     _id: string;
@@ -336,7 +337,7 @@ export default function GameNightPage() {
                                     <div className="flex-grow">
                                         <h3 className="font-permanent text-lg text-black dark:text-white uppercase group-hover:text-teal-600 transition-colors">{s.title}</h3>
                                         <div className="flex gap-3 mt-1 flex-wrap">
-                                            <span className="text-xs font-permanent text-teal-600 dark:text-yellow-400 uppercase">{new Date(s.date).toLocaleDateString()}</span>
+                                            <span className="text-xs font-permanent text-teal-600 dark:text-yellow-400 uppercase">{sessionWhen(s)}</span>
                                             {s.campaign && <span className="text-xs font-permanent text-zinc-500 dark:text-zinc-400 uppercase">{s.campaign.title}</span>}
                                         </div>
                                         {s.summary && <p className="mt-2 text-sm font-permanent text-zinc-500 dark:text-zinc-400 uppercase">{s.summary}</p>}

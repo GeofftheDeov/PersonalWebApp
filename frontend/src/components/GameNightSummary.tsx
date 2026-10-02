@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { Book, Map, Sword, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
+import { sessionWhen } from '@/lib/sessions';
 
 interface Campaign {
     _id: string;
@@ -140,7 +141,7 @@ export default function GameNightSummary() {
                     recentSessions.length > 0 ? recentSessions.map(s => (
                         <div key={s._id} className="border-b-2 border-black/10 dark:border-white/10 pb-2">
                             <p className="font-permanent text-sm text-black dark:text-white uppercase">{s.title}</p>
-                            <p className="text-xs font-permanent text-teal-600 dark:text-yellow-400 uppercase">{new Date(s.date).toLocaleDateString()}</p>
+                            <p className="text-xs font-permanent text-teal-600 dark:text-yellow-400 uppercase">{sessionWhen(s)}</p>
                         </div>
                     )) : (
                         <p className="font-permanent text-black dark:text-zinc-400 italic text-sm uppercase">No sessions logged.</p>

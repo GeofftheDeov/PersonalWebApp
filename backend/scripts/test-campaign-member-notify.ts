@@ -10,8 +10,8 @@
  * Mounts the real routers the way server.ts does and drives them over HTTP;
  * each member reads their own bell through /api/notifications.
  *
- * Run against a throwaway database loaded from db/schema.sql (it refuses to run
- * against anything but localhost):
+ * Run against a throwaway database loaded from db/schema.sql (it inserts and
+ * deletes its own rows, and refuses to run against anything but localhost):
  *   DATABASE_URL=postgresql://postgres@127.0.0.1:5433/pwatest npx tsx scripts/test-campaign-member-notify.ts
  */
 import express from "express";
@@ -45,17 +45,23 @@ function buildApp() {
   return app;
 }
 
-/** Keeps reruns against the same database clear of the unique email index. */
+/** Keeps a rerun clear of the unique email index if an earlier run died before cleanup. */
 const RUN = Math.random().toString(36).slice(2, 8);
 
+type Persona = { id: string; email: string };
+
+/** Everything inserted here, for the cleanup in main's finally. */
+const created = { accounts: [] as string[], campaigns: [] as string[] };
+
 /** An accounts row; ids carry no database default, so mint one here. */
-async function account(handle: string, extra: Record<string, string> = {}) {
+async function account(handle: string, extra: Record<string, string> = {}): Promise<Persona> {
   const cols = ["id", "handle", "email", ...Object.keys(extra)];
   const vals = [handle, `${handle}.${RUN}@example.test`, ...Object.values(extra)];
   const { rows } = await pool.query(
     `INSERT INTO accounts (${cols.join(", ")})
      VALUES (gen_random_uuid(), ${vals.map((_, i) => `$${i + 1}`).join(", ")}) RETURNING id, email`, vals);
-  return { id: rows[0].id as string, email: rows[0].email as string };
+  created.accounts.push(rows[0].id);
+  return { id: rows[0].id, email: rows[0].email };
 }
 
 /** A member row the way the Salesforce sync writes it: person_id and nothing else. */
@@ -70,8 +76,8 @@ async function main() {
   await new Promise((r) => server.once("listening", r));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
-  const tokenFor = (p: { id: string; email: string }) => jwt.sign({ id: p.id, email: p.email }, SECRET);
-  const call = async (method: string, path: string, who: { id: string; email: string }, body?: unknown) => {
+  const tokenFor = (p: Persona) => jwt.sign({ id: p.id, email: p.email }, SECRET);
+  const call = async (method: string, path: string, who: Persona, body?: unknown) => {
     const res = await fetch(`${base}${path}`, {
       method,
       headers: { authorization: `Bearer ${tokenFor(who)}`, "content-type": "application/json" },
@@ -79,11 +85,11 @@ async function main() {
     });
     return { status: res.status, json: await res.json().catch(() => null) as any };
   };
-  const bell = async (who: { id: string; email: string }) =>
+  const bell = async (who: Persona) =>
     ((await call("GET", "/api/notifications?limit=100", who)).json?.notifications ?? []) as any[];
 
   /** Bell entries matching `pred`, waiting briefly — Table Talk notifies off the request path. */
-  const waitForBell = async (who: { id: string; email: string }, pred: (n: any) => boolean) => {
+  const waitForBell = async (who: Persona, pred: (n: any) => boolean) => {
     const deadline = Date.now() + 3000;
     for (;;) {
       const hits = (await bell(who)).filter(pred);
@@ -96,6 +102,7 @@ async function main() {
     const { rows: [campaign] } = await pool.query(
       `INSERT INTO campaigns (title) VALUES ('Curse of the Unknown Player') RETURNING id`);
     const campaignId: string = campaign.id;
+    created.campaigns.push(campaignId);
 
     // The Game Master joined through the app, so their row carries a copy of
     // their name and email. Everyone else came over from Salesforce.
@@ -171,6 +178,11 @@ async function main() {
     check("no member's `person` carries a password hash or token", leaked.length === 0,
       `leaked: ${[...new Set(leaked)].join(", ")}`);
   } finally {
+    // The campaign takes its members, sessions and messages with it.
+    // Notifications have no person FK (#42), so they go by hand.
+    await pool.query(`DELETE FROM notifications WHERE user_id = ANY($1::uuid[])`, [created.accounts]);
+    await pool.query(`DELETE FROM campaigns WHERE id = ANY($1::uuid[])`, [created.campaigns]);
+    await pool.query(`DELETE FROM accounts WHERE id = ANY($1::uuid[])`, [created.accounts]);
     server.close();
   }
 

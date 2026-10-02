@@ -55,6 +55,40 @@ export interface EventMap {
         what: "windows" | "exceptions" | "busy";
     };
 
+    /**
+     * Session planning (#57). Published by planning/planner.ts on every
+     * mutation, so the Letters live channel and notifications can react
+     * without the planner knowing about them. Payloads carry ids, not
+     * content: listeners re-read state through the planner's access rules.
+     */
+    "planning.stage_changed": {
+        sessionId: string;
+        campaignId: string;
+        status: "planning" | "scheduled" | "cancelled" | "completed";
+        stage: "night" | "venue" | "food" | null;
+    };
+    "planning.poll_opened": {
+        sessionId: string;
+        campaignId: string;
+        pollId: string;
+        kind: "night" | "venue";
+        round: number;
+    };
+    "planning.vote_cast": {
+        sessionId: string;
+        campaignId: string;
+        pollId: string;
+        personId: string;
+    };
+    "planning.poll_closed": {
+        sessionId: string;
+        campaignId: string;
+        pollId: string;
+        kind: "night" | "venue";
+        result: "winner" | "tie" | "no_quorum" | null;
+        reason: "all_voted" | "gm_advanced" | "gm_reshortlisted" | "cancelled";
+    };
+
     /** A notification was created (or refreshed) for a user's bell. */
     "user.notification": {
         notificationId: string;

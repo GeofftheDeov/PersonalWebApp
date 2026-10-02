@@ -1,16 +1,12 @@
 import Session from "../models/Session.js";
 import Campaign from "../models/Campaign.js";
 import CampaignMember from "../models/CampaignMember.js";
-import Message from "../models/Message.js";
-import { bus } from "../events/index.js";
 import { notify } from "../utils/notify.js";
+import { postTableTalk } from "./tableTalk.js";
 import { findPeopleByEmail } from "./personUtils.js";
 
 const CHECK_EVERY_MS = 60 * 1000;          // scan once a minute
 const READY_WINDOW_MS = 30 * 60 * 1000;    // fire 30 minutes before start
-
-/** Synthetic sender for automated Table Talk posts. */
-const BOT_SENDER = { id: "system", name: "GAME NIGHT", email: "system@personal-web-app.local" };
 
 /**
  * Ready-up loop: once a minute, find sessions starting within the next
@@ -30,7 +26,10 @@ export async function runReadyCheckSweep() {
     const now = new Date();
     const windowEnd = new Date(now.getTime() + READY_WINDOW_MS);
 
+    // Scheduled only (#57): a session still being planned has no night yet,
+    // and a cancelled one is not happening.
     const due = await Session.find({
+        status: "scheduled",
         date: { $gt: now, $lte: windowEnd },
         "readyCheck.sentAt": { $exists: false },
     }).populate("campaign", "title");
@@ -71,18 +70,7 @@ async function sendReadyCheck(session: any) {
 
     // 2. Automated Table Talk message so the party sees it in chat too.
     const body = `**READY CHECK!** "${session.title}" starts at ${startTime}. Head to the [session page](${sessionLink}) and ready up!`;
-    const message = await Message.create({
-        campaign: campaignId,
-        sender: BOT_SENDER,
-        body,
-    });
-    await bus.publish("gamenight.message", {
-        messageId: String(message._id),
-        campaignId,
-        sender: BOT_SENDER,
-        body: message.body,
-        createdAt: message.createdAt.toISOString(),
-    });
+    await postTableTalk(campaignId, body);
 
     console.log(`[ready-check] sent for session "${session.title}" (${session._id}) — ${people.length} member(s) notified.`);
 }

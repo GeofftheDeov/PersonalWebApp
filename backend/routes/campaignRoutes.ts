@@ -7,6 +7,7 @@ import Account from "../models/Account.js";
 import { auth } from "../middleware/auth.js";
 import { getAuthorizedCampaignIds } from "../utils/gameNightPlannerUtils.js";
 import { personDisplayName } from "../utils/personUtils.js";
+import { SettingsError, updateCampaignSettings } from "../planning/campaignSettings.js";
 
 /**
  * Phase 3 (#35, plan §3.4). Auto-enrolment used to branch on req.user.type to
@@ -122,6 +123,17 @@ router.put("/:id", auth, async (req: any, res) => {
     } catch (error: any) {
         console.error("Error updating campaign:", error);
         res.status(500).json({ error: "Failed to update campaign", details: error.message });
+    }
+});
+
+// Owner-only settings planning reads (#57): quorum, table link, GM title.
+router.patch("/:id/settings", auth, async (req: any, res) => {
+    try {
+        res.json(await updateCampaignSettings(req.user.id, req.params.id, req.body));
+    } catch (error: any) {
+        if (error instanceof SettingsError) return res.status(error.status).json({ error: error.message });
+        console.error("Error updating campaign settings:", error);
+        res.status(500).json({ error: "Failed to update campaign settings" });
     }
 });
 

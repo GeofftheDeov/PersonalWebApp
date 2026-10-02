@@ -165,8 +165,11 @@ router.get("/:id/members", auth, async (req: any, res) => {
         if (campaignIds && !campaignIds.some((cid: any) => cid.toString() === req.params.id)) {
             return res.status(403).json({ error: "Unauthorized" });
         }
+        // Every member sees this for every other member, so `person` carries
+        // what the pages name them by and nothing else. Populated whole, it
+        // handed out each account's password hash and reset token.
         const members = await CampaignMember.find({ campaign: req.params.id })
-            .populate("person")
+            .populate({ path: "person", select: "handle name firstName lastName" })
             .sort({ joinedAt: 1 });
 
         // playerId used to be assembled from whichever of three refs was set,

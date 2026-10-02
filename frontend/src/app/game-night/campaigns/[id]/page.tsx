@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Map, ArrowLeft, Calendar, Book, Users, Shield, ChevronRight, Crown, Save, X, Pencil, UserPlus, Check, Copy, Link2, Plus, Wifi } from 'lucide-react';
 import CampaignChat from '@/components/CampaignChat';
+import NoticeBoard from '@/components/NoticeBoard';
+import { sessionWhen } from '@/lib/sessions';
+import { canAdmin, fetchCapabilities } from '@/lib/capabilities';
 
 interface Session {
     _id: string;
@@ -13,6 +16,7 @@ interface Session {
     location?: string;
     isOnline?: boolean;
     summary?: string;
+    status?: string;
 }
 
 interface Member {
@@ -87,6 +91,8 @@ export default function CampaignDetailPage() {
     const [friends, setFriends] = useState<any[]>([]);
     const [inviteStatus, setInviteStatus] = useState<Record<string, string>>({});
     const [isGM, setIsGM] = useState(false);
+    const [isOwner, setIsOwner] = useState(false);
+    const [settingsError, setSettingsError] = useState<string | null>(null);
 
     const EMPTY_SESSION = { title: '', date: '', endDate: '', location: '', isOnline: false, agenda: '', createDiscordEvent: false, createGoogleEvent: false };
     const [showSessionModal, setShowSessionModal] = useState(false);
@@ -110,7 +116,12 @@ export default function CampaignDetailPage() {
             if (!campRes.ok) { router.push('/game-night'); return; }
             const c = await campRes.json();
             setCampaign(c);
-            setForm({ title: c.title, description: c.description || '', status: c.status, startDate: toDateInput(c.startDate), endDate: toDateInput(c.endDate), discordGuildId: c.discordGuildId || '', discordChannelId: c.discordChannelId || '' });
+            setForm({ title: c.title, description: c.description || '', status: c.status, startDate: toDateInput(c.startDate), endDate: toDateInput(c.endDate), discordGuildId: c.discordGuildId || '', discordChannelId: c.discordChannelId || '', quorum: c.quorum ?? '', tableLink: c.tableLink || '' });
+            // Planning settings belong to the campaign's owner or an admin (#57).
+            // Display only: the server enforces it.
+            const me = JSON.parse(localStorage.getItem('user') || 'null');
+            const caps = await fetchCapabilities(t);
+            setIsOwner(Boolean((me?.id && c.owner === me.id) || canAdmin(caps)));
             if (sessRes.ok) setSessions(await sessRes.json());
             if (membRes.ok) {
                 const memberRows = await membRes.json();
@@ -121,15 +132,39 @@ export default function CampaignDetailPage() {
           .finally(() => setLoading(false));
     }, [id, router]);
 
+    const reloadSessions = useCallback(async () => {
+        const res = await fetch(`/api/campaigns/${id}/sessions`, { headers: { Authorization: `Bearer ${token()}` } });
+        if (res.ok) setSessions(await res.json());
+    }, [id]);
+
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
         setSaving(true);
+        setSettingsError(null);
+        const { quorum, tableLink, ...details } = form;
         const res = await fetch(`/api/campaigns/${id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-            body: JSON.stringify(form),
+            body: JSON.stringify(details),
         });
-        if (res.ok) { setCampaign(await res.json()); setEditing(false); }
+        if (!res.ok) { setSaving(false); return; }
+        let updated = await res.json();
+        let settingsOk = true;
+        if (isOwner) {
+            const settings = await fetch(`/api/campaigns/${id}/settings`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+                body: JSON.stringify({ quorum: quorum === '' ? null : Number(quorum), tableLink }),
+            });
+            const body = await settings.json().catch(() => ({}));
+            settingsOk = settings.ok;
+            updated = settings.ok
+                ? { ...updated, quorum: body.quorum, tableLink: body.tableLink }
+                : { ...updated, quorum: campaign.quorum, tableLink: campaign.tableLink };
+            if (!settings.ok) setSettingsError(body.error || 'Could not save the planning settings.');
+        }
+        setCampaign(updated);
+        if (settingsOk) setEditing(false);
         setSaving(false);
     };
 
@@ -270,6 +305,25 @@ export default function CampaignDetailPage() {
                                 <option>Not Started</option><option>In Progress</option><option>Completed</option>
                             </select>
                         </div>
+                        {isOwner && (
+                            <div className="pt-2 border-t-2 border-white/10">
+                                <p className="font-permanent text-xs text-teal-400 uppercase mb-3">Planning</p>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className={LABEL_CLS}>Quorum (players a night needs)</label>
+                                        <input type="number" min={1} max={50} className={INPUT_CLS} placeholder={`WHOLE PARTY (${members.length})`} value={form.quorum} onChange={e => setForm({ ...form, quorum: e.target.value })} />
+                                    </div>
+                                    <div>
+                                        <label className={LABEL_CLS}>Table link (online sessions)</label>
+                                        <input type="url" className={INPUT_CLS + " normal-case"} placeholder="https://foundry.example/game" value={form.tableLink} onChange={e => setForm({ ...form, tableLink: e.target.value.trim() })} />
+                                    </div>
+                                </div>
+                                <p className="text-[10px] text-zinc-500 mt-2 font-permanent uppercase leading-relaxed">
+                                    Leave quorum empty to need the whole party. The table link (Foundry, Roll20, a Discord voice channel) shows on every online session.
+                                </p>
+                                {settingsError && <p role="alert" className="mt-2 font-permanent text-xs text-red-400 uppercase">{settingsError}</p>}
+                            </div>
+                        )}
                         <div className="pt-2 border-t-2 border-white/10">
                             <p className="font-permanent text-xs text-teal-400 uppercase mb-3">Discord Integration</p>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -330,6 +384,16 @@ export default function CampaignDetailPage() {
                                 <p className="font-permanent text-black dark:text-white uppercase text-sm">{new Date(campaign.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }).toUpperCase()}</p>
                             </div>
                             <div>
+                                <p className="font-permanent text-xs text-zinc-400 uppercase mb-1">Quorum</p>
+                                <p className="font-permanent text-black dark:text-white uppercase text-sm">{campaign.quorum ? `${campaign.quorum} of the party` : 'Whole party'}</p>
+                            </div>
+                            <div className="min-w-0">
+                                <p className="font-permanent text-xs text-zinc-400 uppercase mb-1">Table</p>
+                                {campaign.tableLink
+                                    ? <a href={campaign.tableLink} target="_blank" rel="noopener noreferrer" className="font-permanent text-teal-600 dark:text-yellow-400 text-sm underline break-all">{campaign.tableLink}</a>
+                                    : <p className="font-permanent text-black dark:text-white uppercase text-sm">Not set</p>}
+                            </div>
+                            <div>
                                 <p className="font-permanent text-xs text-zinc-400 uppercase mb-1">Discord Server</p>
                                 <p className="font-permanent text-black dark:text-white uppercase text-sm">
                                     {campaign.discordGuildId ? `LINKED${campaign.discordChannelId ? ' (VOICE CHANNEL)' : ''}` : 'NOT LINKED'}
@@ -338,6 +402,11 @@ export default function CampaignDetailPage() {
                         </div>
                     </div>
                 )}
+
+                {/* The Notice Board: session planning (#57) */}
+                <div id="notice-board" className="mb-10 scroll-mt-24">
+                    <NoticeBoard campaignId={id} onSessionsChanged={reloadSessions} />
+                </div>
 
                 {/* Table Talk + Players */}
                 <div className="flex flex-col lg:flex-row gap-6 mb-10">
@@ -432,7 +501,7 @@ export default function CampaignDetailPage() {
                                     <div className="flex-grow min-w-0">
                                         <h3 className="font-permanent text-sm text-black dark:text-white uppercase group-hover:text-teal-600 transition-colors truncate">{s.title}</h3>
                                         <div className="flex gap-3 mt-1 flex-wrap">
-                                            <span className="text-xs font-permanent text-teal-600 dark:text-yellow-400 uppercase">{new Date(s.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).toUpperCase()}</span>
+                                            <span className={`text-xs font-permanent uppercase ${s.status === 'planning' ? 'px-1.5 border-2 border-black bg-yellow-400 text-black' : s.status === 'cancelled' ? 'text-zinc-400 line-through' : 'text-teal-600 dark:text-yellow-400'}`}>{sessionWhen(s, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                                             {s.location && <span className="text-xs font-permanent text-zinc-400 uppercase">{s.location}</span>}
                                             {s.isOnline && (
                                                 <span className="flex items-center gap-1 px-1.5 text-xs font-permanent uppercase border-2 border-black bg-teal-500 text-white">

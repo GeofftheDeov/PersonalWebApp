@@ -58,14 +58,23 @@ export interface EventMap {
     /**
      * Session planning (#57). Published by planning/planner.ts on every
      * mutation, so the Letters live channel and notifications can react
-     * without the planner knowing about them. Payloads carry ids, not
-     * content: listeners re-read state through the planner's access rules.
+     * without the planner knowing about them (planning/announcements.ts
+     * turns them into bell notifications and Table Talk posts, #88).
+     * Payloads carry ids, not content: listeners re-read state through the
+     * planner's access rules.
+     *
+     * stage_changed, by (status, stage): planning/night is the kickoff,
+     * planning/venue the night confirmed for an in-person session,
+     * planning/food the venue confirmed, then scheduled or cancelled.
+     * `actorId` is whoever did it, when a person did, so a "you did this"
+     * notification can skip them.
      */
     "planning.stage_changed": {
         sessionId: string;
         campaignId: string;
         status: "planning" | "scheduled" | "cancelled" | "completed";
         stage: "night" | "venue" | "food" | null;
+        actorId?: string;
     };
     "planning.poll_opened": {
         sessionId: string;
@@ -73,6 +82,7 @@ export interface EventMap {
         pollId: string;
         kind: "night" | "venue";
         round: number;
+        actorId?: string;
     };
     "planning.vote_cast": {
         sessionId: string;

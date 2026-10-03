@@ -50,6 +50,14 @@ const fakeEvents: ExternalEvents = {
             warnings: fakeWarnings,
         };
     },
+    // Moving and withdrawing events (#87) are covered by test-night-vote.ts, against the integrations fake.
+    async rescheduleSession(input) {
+        return { discordEventId: input.existing.discordEventId, googleEventId: input.existing.googleEventId,
+            googleCalendarLink: "https://calendar.google.com/fake/moved", warnings: [] };
+    },
+    async withdrawSession() {
+        return { discordRemoved: true, googleRemoved: true, warnings: [] };
+    },
 };
 
 async function main() {

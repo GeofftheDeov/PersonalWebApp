@@ -14,6 +14,7 @@ import { PollError } from "../planning/poll.js";
  *   POST /api/planning/sessions/:sessionId/vote         { optionIds: [...] }  every time I can make
  *   POST /api/planning/sessions/:sessionId/advance      GM: close the vote now
  *   POST /api/planning/sessions/:sessionId/tiebreak     GM: { optionId }
+ *   POST /api/planning/sessions/:sessionId/reopen       GM: change a scheduled session's night; { options } opens a new round
  *   POST /api/planning/sessions/:sessionId/cancel       GM
  *
  * Built from a planner so tests can hand it one with fake integrations.
@@ -50,6 +51,8 @@ export function buildPlanningRouter(planner: Planner) {
         (req) => planner.advance(req.user, req.params.sessionId)));
     router.post("/sessions/:sessionId/tiebreak", auth, handle("break the tie",
         (req) => planner.tiebreak(req.user, req.params.sessionId, req.body)));
+    router.post("/sessions/:sessionId/reopen", auth, handle("change the night",
+        (req) => planner.reopen(req.user, req.params.sessionId, req.body)));
     router.post("/sessions/:sessionId/cancel", auth, handle("cancel planning",
         (req) => planner.cancel(req.user, req.params.sessionId)));
 

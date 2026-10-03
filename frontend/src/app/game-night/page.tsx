@@ -6,6 +6,7 @@ import { Sword, Book, Map, Plus, Save, Shield, X, ChevronRight, Skull, Star, Wif
 import Footer from '@/components/Footer';
 import Link from 'next/link';
 import { sessionWhen } from '@/lib/sessions';
+import { DEFAULT_GM_TITLE } from '@/lib/campaigns';
 
 interface Campaign {
     _id: string;
@@ -64,9 +65,9 @@ export default function GameNightPage() {
     const [showCreateSession, setShowCreateSession] = useState(false);
     const [showCreateCharacter, setShowCreateCharacter] = useState(false);
 
-    const [campaignForm, setCampaignForm] = useState({
-        title: '', description: '', status: 'Not Started', startDate: '', endDate: ''
-    });
+    const EMPTY_CAMPAIGN = { title: '', description: '', status: 'Not Started', startDate: '', endDate: '', gmTitle: '' };
+    const [campaignForm, setCampaignForm] = useState(EMPTY_CAMPAIGN);
+    const [campaignError, setCampaignError] = useState<string | null>(null);
     const EMPTY_SESSION = {
         title: '', campaignId: '', date: '', endDate: '', location: '', isOnline: false, agenda: '', summary: '',
         createDiscordEvent: false, createGoogleEvent: false,
@@ -116,8 +117,12 @@ export default function GameNightPage() {
         });
         if (res.ok) {
             setShowCreateCampaign(false);
-            setCampaignForm({ title: '', description: '', status: 'Not Started', startDate: '', endDate: '' });
+            setCampaignForm(EMPTY_CAMPAIGN);
+            setCampaignError(null);
             fetchAll();
+        } else {
+            const err = await res.json().catch(() => ({}));
+            setCampaignError(err.error || 'Failed to create campaign');
         }
     };
 
@@ -251,7 +256,7 @@ export default function GameNightPage() {
                             {campaigns.length} Campaign{campaigns.length !== 1 ? 's' : ''} &middot; {sessions.length} Session{sessions.length !== 1 ? 's' : ''} &middot; {characters.length} Character{characters.length !== 1 ? 's' : ''}
                         </p>
                     </div>
-                    {tab === 'campaigns' && createButton(() => setShowCreateCampaign(true), 'NEW CAMPAIGN', 'create-campaign-btn')}
+                    {tab === 'campaigns' && createButton(() => { setCampaignError(null); setShowCreateCampaign(true); }, 'NEW CAMPAIGN', 'create-campaign-btn')}
                     {tab === 'sessions' && createButton(() => { setSessionForm(EMPTY_SESSION); setSessionError(null); setShowCreateSession(true); }, 'NEW SESSION', 'create-session-btn')}
                     {tab === 'characters' && createButton(() => setShowCreateCharacter(true), 'NEW CHARACTER', 'create-character-btn')}
                 </header>
@@ -419,6 +424,12 @@ export default function GameNightPage() {
                                     <option value="Completed">Completed</option>
                                 </select>
                             </div>
+                            <div>
+                                <label className={LABEL_CLS}>Game Master title</label>
+                                <input maxLength={40} className={INPUT_CLS} placeholder={DEFAULT_GM_TITLE.toUpperCase()} value={campaignForm.gmTitle} onChange={e => setCampaignForm({ ...campaignForm, gmTitle: e.target.value })} />
+                                <p className="text-[10px] text-zinc-500 mt-1 font-permanent uppercase">What your group calls whoever runs the game (Game Master, Host, Organizer). Leave blank for {DEFAULT_GM_TITLE}. You can change it later.</p>
+                            </div>
+                            {campaignError && <p role="alert" className="font-permanent text-xs text-red-400 uppercase">{campaignError}</p>}
                         </div>
                         <div className="flex gap-3 mt-8">
                             <button type="submit" className={BTN_SUBMIT}><Save className="w-5 h-5" /> CREATE CAMPAIGN</button>

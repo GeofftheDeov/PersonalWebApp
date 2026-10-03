@@ -13,7 +13,7 @@ import { auth } from "../middleware/auth.js";
 import { getAuthorizedCampaignIds, isCampaignGameMaster } from "../utils/gameNightPlannerUtils.js";
 import { findPersonById, personDisplayName } from "../utils/personUtils.js";
 import { getDecryptedKeys } from "./apiKeyRoutes.js";
-import { createDiscordScheduledEvent, buildGoogleCalendarLink, createGoogleCalendarEvent } from "../utils/integrations.js";
+import { buildGoogleCalendarLink, integrations } from "../utils/integrations.js";
 
 // --- Sessions ---
 router.get("/sessions", auth, async (req: any, res) => {
@@ -88,7 +88,7 @@ router.post("/sessions", auth, async (req: any, res) => {
                 if (!keys) {
                     warnings.push("Discord event skipped: no 'discord' bot token in your API Key Vault.");
                 } else {
-                    const ev = await createDiscordScheduledEvent({
+                    const ev = await integrations().discord.createScheduledEvent({
                         botToken: keys.secret,
                         guildId: campaignDoc.discordGuildId as string,
                         channelId: campaignDoc.discordChannelId || undefined,
@@ -121,7 +121,7 @@ router.post("/sessions", auth, async (req: any, res) => {
             try {
                 const keys = await getDecryptedKeys(String(req.user.id), "google_calendar");
                 if (keys) {
-                    const ev = await createGoogleCalendarEvent(keys.secret, eventInput);
+                    const ev = await integrations().google.createCalendarEvent(keys.secret, eventInput);
                     session.googleEventId = ev.id;
                 } else {
                     warnings.push("Google Calendar not connected — shareable link created, but no event was added to your calendar.");

@@ -2,8 +2,9 @@ import { OAuth2Client } from 'google-auth-library';
 
 /**
  * Everything the app sends to or reads from an outside service for tabletop
- * sessions (#79): Discord scheduled events, Google Calendar events and
- * free/busy (#84), and S3 presigned uploads (for banners, #81).
+ * sessions (#79): Discord scheduled events and who is "interested" in them
+ * (#85), Google Calendar events and free/busy (#84), and S3 presigned uploads
+ * (for banners, #81).
  *
  * Callers reach these services only through `integrations()`. They never call
  * Discord, Google or S3 themselves. Tests swap the whole module for a fake that
@@ -82,6 +83,105 @@ async function createDiscordScheduledEvent(input: DiscordEventInput): Promise<{ 
     }
     const data: any = await res.json();
     return { id: data.id };
+}
+
+/**
+ * A failed Discord REST call. `status` is the HTTP status; `code` is Discord's
+ * JSON error code when it sent one (e.g. 50001 Missing Access, 10004 Unknown
+ * Guild), so callers can tell "the bot isn't in that server" from an outage.
+ */
+export class DiscordApiError extends Error {
+    constructor(public status: number, public code: number | null, detail: string) {
+        super(`Discord API ${status}: ${detail.slice(0, 300)}`);
+        this.name = 'DiscordApiError';
+    }
+}
+
+/** One of a guild's scheduled events, cut down to what busy time needs. The name is never copied. */
+export interface DiscordScheduledEventTimes {
+    id: string;
+    start: Date;
+    /** Discord leaves this empty for voice and stage events that set no end. */
+    end: Date | null;
+    /** 1 scheduled, 2 active, 3 completed, 4 canceled. */
+    status: number;
+}
+
+/** Longest a Discord read waits out one rate-limit window before giving up. */
+const DISCORD_MAX_RATE_WAIT_MS = 5_000;
+/** Interested users come 100 to a page; past this many pages the rest are ignored. */
+const DISCORD_MAX_USER_PAGES = 20;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * GET from Discord's REST API as the bot, minding its rate limits
+ * (https://discord.com/developers/docs/topics/rate-limits):
+ *   - a 429 is retried once after its retry_after, if that is short;
+ *   - when a response says the bucket is now empty (X-RateLimit-Remaining: 0),
+ *     it waits out X-RateLimit-Reset-After before returning, so the next call
+ *     in the same bucket isn't refused.
+ */
+async function discordGet(botToken: string, path: string): Promise<any> {
+    for (let attempt = 0; ; attempt++) {
+        const res = await fetch(`${DISCORD_API}${path}`, {
+            headers: { 'Authorization': `Bot ${botToken}` },
+            signal: AbortSignal.timeout(10_000),
+        });
+        const text = await res.text().catch(() => '');
+        let body: any = null;
+        try { body = text ? JSON.parse(text) : null; } catch { /* not JSON */ }
+
+        if (res.status === 429) {
+            const waitMs = Math.ceil(Number(body?.retry_after ?? res.headers.get('retry-after') ?? 60) * 1000);
+            if (attempt === 0 && waitMs <= DISCORD_MAX_RATE_WAIT_MS) { await sleep(waitMs); continue; }
+            throw new DiscordApiError(429, null, 'rate limited');
+        }
+        if (!res.ok) throw new DiscordApiError(res.status, typeof body?.code === 'number' ? body.code : null, text);
+
+        if (res.headers.get('x-ratelimit-remaining') === '0') {
+            const resetMs = Math.ceil(Number(res.headers.get('x-ratelimit-reset-after') ?? 0) * 1000);
+            if (resetMs > 0) await sleep(Math.min(resetMs, DISCORD_MAX_RATE_WAIT_MS));
+        }
+        return body;
+    }
+}
+
+/**
+ * The guild's scheduled events (scheduled and active ones). One call: this
+ * route isn't paginated.
+ *   https://discord.com/developers/docs/resources/guild-scheduled-event#list-scheduled-events-for-guild
+ */
+async function listDiscordScheduledEvents(botToken: string, guildId: string): Promise<DiscordScheduledEventTimes[]> {
+    const data = await discordGet(botToken, `/guilds/${encodeURIComponent(guildId)}/scheduled-events`);
+    // Copy only the id, times and status: names and descriptions never enter the app.
+    return (Array.isArray(data) ? data : []).map((e: any) => ({
+        id: String(e.id),
+        start: new Date(e.scheduled_start_time),
+        end: e.scheduled_end_time ? new Date(e.scheduled_end_time) : null,
+        status: Number(e.status),
+    }));
+}
+
+/**
+ * The Discord user ids of everyone marked "interested" in one scheduled
+ * event, 100 per page, paged with `after` (Discord returns them in user-id
+ * order when `after` is given).
+ *   https://discord.com/developers/docs/resources/guild-scheduled-event#get-guild-scheduled-event-users
+ */
+async function listDiscordInterestedUsers(botToken: string, guildId: string, eventId: string): Promise<string[]> {
+    const ids: string[] = [];
+    let after = '0';
+    for (let page = 0; page < DISCORD_MAX_USER_PAGES; page++) {
+        const data = await discordGet(botToken,
+            `/guilds/${encodeURIComponent(guildId)}/scheduled-events/${encodeURIComponent(eventId)}/users?limit=100&after=${after}`);
+        // Only the user id is kept: no names, avatars or member data.
+        const batch: string[] = (Array.isArray(data) ? data : []).map((u: any) => String(u?.user?.id ?? '')).filter(Boolean);
+        ids.push(...batch);
+        if (batch.length < 100) break;
+        after = batch[batch.length - 1];
+    }
+    return ids;
 }
 
 export interface CalendarEventInput {
@@ -238,6 +338,10 @@ export interface PresignedPut {
 export interface Integrations {
     discord: {
         createScheduledEvent(input: DiscordEventInput): Promise<{ id: string }>;
+        /** The guild's scheduled and active events: ids, times and status only. Throws DiscordApiError. */
+        listScheduledEvents(botToken: string, guildId: string): Promise<DiscordScheduledEventTimes[]>;
+        /** Discord user ids marked "interested" in one event, every page. Throws DiscordApiError. */
+        listInterestedUsers(botToken: string, guildId: string, eventId: string): Promise<string[]>;
     };
     google: {
         /** Inserts on the primary calendar of whoever owns the refresh token. */
@@ -252,7 +356,11 @@ export interface Integrations {
 }
 
 export const realIntegrations: Integrations = {
-    discord: { createScheduledEvent: createDiscordScheduledEvent },
+    discord: {
+        createScheduledEvent: createDiscordScheduledEvent,
+        listScheduledEvents: listDiscordScheduledEvents,
+        listInterestedUsers: listDiscordInterestedUsers,
+    },
     google: {
         createCalendarEvent: createGoogleCalendarEvent,
         freeBusy: queryGoogleFreeBusy,

@@ -17,10 +17,14 @@
  * it lands, kickoff accepts online sessions only.
  *
  * Every mutation locks the session row for its transaction, so concurrent
- * votes, advances and cancels apply one at a time. Side effects -- bell
- * notifications, Table Talk posts, Discord and Google events, bus events --
- * run after the commit, never inside it: a slow or failing integration can't
- * roll back a decision the party has already made.
+ * votes, advances and cancels apply one at a time. Side effects -- Discord
+ * and Google events, bus events -- run after the commit, never inside it: a
+ * slow or failing integration can't roll back a decision the party has
+ * already made. The party's bell notifications and Table Talk posts react to
+ * those bus events (planning/announcements.ts, #88); the planner doesn't know
+ * they exist. The one notification it sends itself is the Game Master's
+ * warning that an integration failed, which comes from the publish result
+ * rather than from any event.
  */
 import type pg from "pg";
 import pool, { withTransaction } from "../db/index.js";
@@ -28,7 +32,6 @@ import { isUuid } from "../db/model.js";
 import { bus } from "../events/index.js";
 import type { EventMap } from "../events/events.js";
 import { notify } from "../utils/notify.js";
-import { postTableTalk } from "../utils/tableTalk.js";
 import { resolveQuorum } from "./availability.js";
 import { campaignParty } from "./availabilityStore.js";
 import { realExternalEvents, type ExternalEvents } from "./externalEvents.js";
@@ -82,32 +85,14 @@ async function roleIn(db: Db, actorId: string, campaignId: string, gmOverrideId:
     return { admin, gm, member: gm || memberships.length > 0 };
 }
 
-/** Whose vault a confirmed session's external events use: the stand-in first, then the campaign's GMs. */
-async function gameMasterIds(db: Db, campaignId: string, gmOverrideId: string | null): Promise<string[]> {
+/** A session's Game Masters, the stand-in first: whose vault its external events use, and who hears about problems. */
+export async function gameMasterIds(db: Db, campaignId: string, gmOverrideId: string | null): Promise<string[]> {
     const { rows } = await db.query(
         `SELECT person_id FROM campaign_members
           WHERE campaign_id = $1 AND status = 'Game Master' AND person_id IS NOT NULL
           ORDER BY joined_at NULLS LAST, created_at`, [campaignId]);
     return [...new Set([gmOverrideId, ...rows.map((r) => r.person_id)].filter((id): id is string => Boolean(id)))];
 }
-
-/**
- * The zone the party's messages state times in: the Game Master's, from their
- * regular availability, else UTC. Message text is read by everyone at once and
- * can't localise per reader, so it names its zone instead.
- */
-async function campaignTimeZone(db: Db, campaignId: string): Promise<string> {
-    const { rows: [w] } = await db.query(
-        `SELECT w.time_zone FROM availability_windows w
-           JOIN campaign_members m ON m.person_id = w.person_id
-          WHERE m.campaign_id = $1 AND m.status = 'Game Master'
-          ORDER BY m.joined_at NULLS LAST, w.created_at LIMIT 1`, [campaignId]);
-    return w?.time_zone ?? "UTC";
-}
-
-const formatWhen = (d: Date, timeZone: string) => d.toLocaleString("en-US", {
-    timeZone, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short",
-});
 
 // ── validation ──────────────────────────────────────────────────────────────
 
@@ -142,7 +127,10 @@ function cleanNightOptions(raw: unknown, now: Date) {
 
 export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, now: () => new Date() }) {
     const publish = <K extends keyof EventMap>(name: K, payload: EventMap[K]): Effect =>
-        () => bus.publish(name, payload).catch(() => { /* bus down is non-fatal */ });
+        // Non-fatal, but not silent: the party's announcements ride on these events.
+        () => bus.publish(name, payload).catch((err: any) => {
+            console.error(`[planning] publishing ${name} failed; the party won't be told:`, JSON.stringify(payload), err?.message ?? err);
+        });
 
     /** Runs `fn` in a transaction, then its side effects in order once committed. */
     async function mutate<T>(fn: (db: pg.PoolClient, effects: Effect[]) => Promise<T>): Promise<T> {
@@ -155,15 +143,6 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
     }
 
     const noticeBoard = (campaignId: string) => `/game-night/campaigns/${campaignId}#notice-board`;
-
-    /** Bell-notify the party (optionally minus whoever acted), collapsing per session while unread. */
-    async function notifyParty(campaignId: string, sessionId: string, except: string | null, title: string, body: string) {
-        const party = await campaignParty(campaignId);
-        await Promise.all(party.filter((p) => p.id !== except).map((p) => notify(p.id, {
-            type: "system", title, body, link: noticeBoard(campaignId),
-            sourceKey: `planning:${sessionId}`, meta: { sessionId, campaignId },
-        })));
-    }
 
     async function notifyGameMasters(s: any, title: string, body: string) {
         const ids = await gameMasterIds(pool, s.campaign_id, s.gm_override_id);
@@ -208,7 +187,7 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
             [s.id, start, end, nextStage ? "planning" : "scheduled", nextStage, moved]);
         effects.push(publish("planning.stage_changed", {
             sessionId: s.id, campaignId: s.campaign_id, status: nextStage ? "planning" : "scheduled", stage: nextStage,
-            ...(moved ? { nightChange: "moved" as const } : {}),
+            ...(previous ? { nightChange: moved ? "moved" as const : "kept" as const } : {}),
         }));
         if (moved) {
             effects.push(publish("planning.night_moved", {
@@ -220,8 +199,6 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
         if (nextStage) return;
 
         const gmIds = await gameMasterIds(db, s.campaign_id, s.gm_override_id);
-        const tz = await campaignTimeZone(db, s.campaign_id);
-        const when = formatWhen(start, tz);
         const event = {
             gmIds,
             name: `${s.campaign_title}: ${s.title}`,
@@ -232,14 +209,10 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
                 ? { guildId: s.discord_guild_id, channelId: s.discord_channel_id || undefined }
                 : undefined,
         };
-        const where = s.is_online ? `online${s.table_link ? `, at ${s.table_link}` : ""}` : (s.location || "in person");
 
         if (previous) {
-            if (!moved) {
-                effects.push(() => notifyParty(s.campaign_id, s.id, null, `"${s.title}" stays on ${when}`,
-                    `${s.campaign_title} — the vote kept the same night.`));
-                return;
-            }
+            // The vote kept the same night: nothing to send out (nightChange "kept" tells the party).
+            if (!moved) return;
             effects.push(async () => {
                 const published = await deps.events.rescheduleSession({
                     ...event,
@@ -253,11 +226,6 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
                     await notifyGameMasters(s, `"${s.title}" moved, with a problem`, published.warnings.join(" "));
                 }
             });
-            const was = formatWhen(previous.start, tz);
-            effects.push(() => notifyParty(s.campaign_id, s.id, null, `"${s.title}" moved: ${when}`,
-                `${s.campaign_title} — was ${was}. Now ${where}.`));
-            effects.push(() => postTableTalk(s.campaign_id,
-                `**The night has moved!** "${s.title}" — now ${when} (was ${was}), ${where}.`));
             return;
         }
 
@@ -272,15 +240,15 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
                 await notifyGameMasters(s, `"${s.title}" is set, with a problem`, published.warnings.join(" "));
             }
         });
-        effects.push(() => notifyParty(s.campaign_id, s.id, null, `"${s.title}" is on: ${when}`,
-            `${s.campaign_title} — online${s.table_link ? `, at ${s.table_link}` : ""}.`));
-        effects.push(() => postTableTalk(s.campaign_id,
-            `**The night is set!** "${s.title}" — ${when}, online.` +
-            (s.table_link ? ` Table: [${s.table_link}](${s.table_link})` : "")));
     }
 
-    /** Opens the next night round for the party as it stands now. The caller closes any open round first. */
-    async function openNightRound(db: Db, actor: Actor, s: any, options: { start: Date; end: Date }[], effects: Effect[]) {
+    /**
+     * Opens the next night round for the party as it stands now. The caller
+     * closes any open round first. `nightChange` marks the round a reopen
+     * starts, which the reopen's stage change already announces.
+     */
+    async function openNightRound(db: Db, actor: Actor, s: any, options: { start: Date; end: Date }[], effects: Effect[],
+                                  nightChange?: "reopened") {
         const party = await campaignParty(s.campaign_id);
         const poll = await openPoll(db, {
             sessionId: s.id, kind: "night", eligibleIds: party.map((p) => p.id),
@@ -288,30 +256,23 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
             options: options.map((o) => ({ ...o, suggestedBy: actor.id })),
         });
         effects.push(publish("planning.poll_opened", {
-            sessionId: s.id, campaignId: s.campaign_id, pollId: poll.id, kind: "night", round: poll.round,
+            sessionId: s.id, campaignId: s.campaign_id, pollId: poll.id, kind: "night", round: poll.round, actorId: actor.id,
+            ...(nightChange ? { nightChange } : {}),
         }));
         return poll;
     }
 
-    /** Close the open poll and act on what it says. */
+    /**
+     * Close the open poll and act on what it says. A tie or a failed round
+     * leaves the session on the night step; the poll_closed event tells the
+     * Game Master (planning/announcements.ts).
+     */
     async function settle(db: Db, s: any, poll: Poll, reason: CloseReason, effects: Effect[]) {
         const closed = await closePoll(db, poll, reason);
         effects.push(publish("planning.poll_closed", {
             sessionId: s.id, campaignId: s.campaign_id, pollId: closed.id, kind: closed.kind, result: closed.result, reason,
         }));
-        if (closed.result === "winner") {
-            await confirmNight(db, s, closed, effects);
-        } else if (closed.result === "tie") {
-            effects.push(() => notifyGameMasters(s, `Tie on "${s.title}"`,
-                "The vote closed level. Pick the night on the Notice Board."));
-            effects.push(() => postTableTalk(s.campaign_id,
-                `The vote for "${s.title}" is a tie — the ${s.gm_title} will pick the night.`));
-        } else {
-            effects.push(() => notifyGameMasters(s, `No night worked for "${s.title}"`,
-                `No shortlisted time reached quorum (${closed.quorum}). Shortlist new times on the Notice Board.`));
-            effects.push(() => postTableTalk(s.campaign_id,
-                `None of the shortlisted times for "${s.title}" had enough of the party. The ${s.gm_title} will shortlist new ones.`));
-        }
+        if (closed.result === "winner") await confirmNight(db, s, closed, effects);
     }
 
     async function state(actor: Actor, sessionId: string) {
@@ -384,11 +345,9 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
                     `INSERT INTO game_sessions (title, campaign_id, date, status, planning_stage, is_online, agenda)
                      VALUES ($1, $2, NULL, 'planning', 'night', $3, $4) RETURNING id`,
                     [title, campaignId, body.isOnline, agenda || null]);
-                effects.push(publish("planning.stage_changed", { sessionId: s.id, campaignId, status: "planning", stage: "night" }));
-                effects.push(() => notifyParty(campaignId, s.id, actor.id, `Planning started: "${title}"`,
-                    `${c.title} — the ${c.gm_title} is finding a night. Watch the Notice Board for the vote.`));
-                effects.push(() => postTableTalk(campaignId,
-                    `**A new session is being planned:** "${title}" (online). The ${c.gm_title} will shortlist some nights — vote on the [Notice Board](${noticeBoard(campaignId)}).`));
+                effects.push(publish("planning.stage_changed", {
+                    sessionId: s.id, campaignId, status: "planning", stage: "night", actorId: actor.id,
+                }));
                 return s.id as string;
             });
             return state(actor, id);
@@ -410,11 +369,6 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
                     }));
                 }
                 await openNightRound(db, actor, s, options, effects);
-                effects.push(() => notifyParty(s.campaign_id, s.id, actor.id, `Vote: when can you play "${s.title}"?`,
-                    `${options.length} nights shortlisted. Tick every one you can make.`));
-                effects.push(() => postTableTalk(s.campaign_id,
-                    `**Vote on the night** for "${s.title}": ${options.length} times are on the [Notice Board](${noticeBoard(s.campaign_id)}). ` +
-                    `Tick every one you can make — the vote closes when everyone has voted.`));
             });
             return state(actor, sessionId);
         },
@@ -487,16 +441,13 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
                 if (s.status !== "scheduled") throw new PlanningError(409, `This session is ${s.status}.`);
                 if (!s.date || s.date <= deps.now()) throw new PlanningError(409, "This session has already started.");
                 await db.query(`UPDATE game_sessions SET status = 'planning', planning_stage = 'night' WHERE id = $1`, [s.id]);
+                // The announcer tells the party the night is changing -- not that planning has started -- from
+                // this stage change; the new round's poll_opened is marked so it isn't announced a second time.
                 effects.push(publish("planning.stage_changed", {
-                    sessionId: s.id, campaignId: s.campaign_id, status: "planning", stage: "night", nightChange: "reopened",
+                    sessionId: s.id, campaignId: s.campaign_id, status: "planning", stage: "night",
+                    actorId: actor.id, nightChange: "reopened", standingStart: s.date.toISOString(),
                 }));
-                await openNightRound(db, actor, s, options, effects);
-                const was = formatWhen(s.date, await campaignTimeZone(db, s.campaign_id));
-                effects.push(() => notifyParty(s.campaign_id, s.id, actor.id, `The night for "${s.title}" is changing`,
-                    `${s.campaign_title} — it was ${was}. Tick every new time you can make.`));
-                effects.push(() => postTableTalk(s.campaign_id,
-                    `**The night for "${s.title}" is changing.** It was ${was}; ${options.length} new times are on the ` +
-                    `[Notice Board](${noticeBoard(s.campaign_id)}). Until one is confirmed, the old night stands.`));
+                await openNightRound(db, actor, s, options, effects, "reopened");
             });
             return state(actor, sessionId);
         },
@@ -517,7 +468,9 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
                 // Quests for a session that isn't happening must not keep reminding anyone.
                 await db.query(
                     `UPDATE session_tasks SET status = 'cancelled' WHERE session_id = $1 AND status = 'open'`, [s.id]);
-                effects.push(publish("planning.stage_changed", { sessionId: s.id, campaignId: s.campaign_id, status: "cancelled", stage: null }));
+                effects.push(publish("planning.stage_changed", {
+                    sessionId: s.id, campaignId: s.campaign_id, status: "cancelled", stage: null, actorId: actor.id,
+                }));
                 // A session whose night was being changed already has events out there (#87).
                 if (s.discord_event_id || s.google_event_id) {
                     const gmIds = await gameMasterIds(db, s.campaign_id, s.gm_override_id);
@@ -535,9 +488,6 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
                         }
                     });
                 }
-                effects.push(() => notifyParty(s.campaign_id, s.id, actor.id, `"${s.title}" was cancelled`,
-                    `${s.campaign_title} — planning for this session has stopped.`));
-                effects.push(() => postTableTalk(s.campaign_id, `Planning for "${s.title}" has been cancelled.`));
             });
             return state(actor, sessionId);
         },

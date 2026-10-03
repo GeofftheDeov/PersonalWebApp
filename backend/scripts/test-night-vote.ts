@@ -8,7 +8,9 @@
  * ExternalEvents. Drives them over HTTP with real JWTs against a throwaway
  * database loaded from db/schema.sql, and checks what's visible from outside:
  * responses, rows, bell notifications, Table Talk posts, bus events and the
- * raw Discord / Google calls the fake received.
+ * raw Discord / Google calls the fake received. The party's bells and Table
+ * Talk posts come from planning/announcements.ts reacting to the bus events
+ * (#88), started here as server.ts starts it.
  *
  *   DATABASE_URL=postgresql://postgres@127.0.0.1:5433/pwatest npx tsx scripts/test-night-vote.ts
  */
@@ -30,6 +32,7 @@ const { default: tabletopRoutes } = await import("../routes/tabletopRoutes.js");
 const { default: apiKeyRoutes } = await import("../routes/apiKeyRoutes.js");
 const { buildPlanningRouter } = await import("../routes/planningRoutes.js");
 const { createPlanner } = await import("../planning/planner.js");
+const { startPlanningAnnouncements } = await import("../planning/announcements.js");
 const { buildGoogleCalendarLink } = await import("../utils/integrations.js");
 const { createFakeIntegrations } = await import("../testing/fakeIntegrations.js");
 
@@ -69,6 +72,16 @@ async function main() {
         if (n === "poll_opened") return `${n}:${p.round}`;
         return n;
     });
+    /** The bus event `name` for one session since `from`. */
+    const busEvent = (sid: string, name: string, from = 0, match: (p: any) => boolean = () => true) =>
+        events.slice(from).find((e) => e.name === name && e.payload.sessionId === sid && match(e.payload))?.payload;
+    // Bells and Table Talk posts react to those events (#88) after the
+    // response, so checks on them wait for the announcer to finish first.
+    const announcer = startPlanningAnnouncements();
+    /** A time as the party's messages state it (no GM availability here, so UTC). */
+    const fmt = (iso: string) => new Date(iso).toLocaleString("en-US", {
+        timeZone: "UTC", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short",
+    });
 
     const tag = crypto.randomBytes(4).toString("hex");
     const who: Record<string, { id: string; token: string }> = {};
@@ -85,10 +98,18 @@ async function main() {
     };
     const P = (sid: string, action = "") => `/api/planning/sessions/${sid}${action ? `/${action}` : ""}`;
     const row = async (id: string) => (await pool.query(`SELECT * FROM game_sessions WHERE id = $1`, [id])).rows[0];
-    const bell = async (person: string, sid: string, like: string) => (await pool.query(
+    const bell = async (person: string, sid: string, like: string) => (await announcer.idle(), await pool.query(
         `SELECT title, body FROM notifications WHERE user_id = $1 AND meta->>'sessionId' = $2 AND title LIKE $3`,
         [who[person].id, sid, like])).rows;
-    const talk = async () => (await pool.query(
+    /**
+     * How many party alerts this person has had for a session. They collapse
+     * into one unread entry whose title the latest overwrites, so a title
+     * alone can't show an alert didn't happen; the entry's count can.
+     */
+    const alerts = async (person: string, sid: string) => (await announcer.idle(), Number((await pool.query(
+        `SELECT coalesce(sum(count), 0) AS n FROM notifications WHERE user_id = $1 AND source_key = $2`,
+        [who[person].id, `planning:${sid}`])).rows[0].n));
+    const talk = async () => (await announcer.idle(), await pool.query(
         `SELECT body FROM messages WHERE campaign_id = $1 AND sender_id = 'system' ORDER BY created_at`, [campaignId])).rows.map((r) => r.body);
 
     const t0 = Math.ceil((Date.now() + 7 * DAY) / HOUR) * HOUR;
@@ -251,6 +272,8 @@ async function main() {
         check("...none of those changed anything or reached Discord or Google",
             (await row(sidV)).status === "scheduled" && fake.calls().length === 0 && busFor(sidV, mark).length === 0);
 
+        const talkBeforeReopen = (await talk()).length;
+        const alertsBeforeReopen = { p1: await alerts("p1", sidV), gm: await alerts("gm", sidV) };
         const ro = await call("POST", P(sidV, "reopen"), "gm", { options: [E, D] });
         check("the GM changes the night: back on the night step, with round 2 open",
             ro.status === 200 && ro.json.session.status === "planning" && ro.json.session.stage === "night" &&
@@ -262,12 +285,26 @@ async function main() {
                 ro.json.nightRounds[0].options.find((o: any) => o.start === A.start).approvals.length === 3, ro.json.nightRounds);
         check("...nothing is sent to Discord or Google yet", fake.calls().length === 0, fake.calls());
         check("...published: back to planning, and a new poll", busFor(sidV, mark).join() === "stage_changed:planning/night,poll_opened:2", busFor(sidV, mark));
-        check("...the party is told the night is changing",
-            (await bell("p1", sidV, "%night%changing%")).length === 1 && (await talk()).some((b) => /night for "Forced night" is changing/i.test(b)));
+        const roStage = busEvent(sidV, "planning.stage_changed", mark), roPoll = busEvent(sidV, "planning.poll_opened", mark);
+        check("...the stage change is marked as a reopen (not a kickoff), by the GM, and so is the round it opens",
+            roStage?.nightChange === "reopened" && roStage.actorId === who.gm.id &&
+                roPoll?.nightChange === "reopened" && roPoll.actorId === who.gm.id, { roStage, roPoll });
+        const roTalk = (await talk()).slice(talkBeforeReopen);
+        check("...the party is told the night is changing, and what it was",
+            (await bell("p1", sidV, "%night%changing%")).length === 1 && roTalk.length === 1 &&
+                /night for "Forced night" is changing/i.test(roTalk[0]) && roTalk[0].includes(`It was ${fmt(A.start)}`) &&
+                /2 new times/.test(roTalk[0]), roTalk);
+        check("...once: one alert per player, and no kickoff or separate vote call (bus-driven, #88)",
+            !roTalk.some((b) => /new session is being planned|Vote on the night/.test(b)) &&
+                (await alerts("p1", sidV)) === alertsBeforeReopen.p1 + 1, { roTalk, before: alertsBeforeReopen.p1, after: await alerts("p1", sidV) });
+        check("...and the GM who changed it isn't belled about it",
+            (await bell("gm", sidV, "%night%changing%")).length === 0 && (await alerts("gm", sidV)) === alertsBeforeReopen.gm);
         check("changing it again while it's being re-planned is a 409 (re-shortlist instead)",
             (await call("POST", P(sidV, "reopen"), "gm", { options: [F, G] })).status === 409);
 
         mark = events.length;
+        const talkBeforeMove = (await talk()).length;
+        const alertsBeforeMove = await alerts("p2", sidV);
         const moved = await voteAll(sidV, ro.json, everyone([E]));
         const mRow = await row(sidV);
         check("the party confirms E: the session is scheduled again, and its date moves to E",
@@ -291,8 +328,19 @@ async function main() {
             nm?.campaignId === campaignId && nm.previousStart === A.start && nm.previousEnd === A.end && nm.start === E.start && nm.end === E.end, nm);
         check("...alongside the close and the stage change",
             busFor(sidV, mark).filter((n) => n !== "vote_cast").join() === "poll_closed:winner/all_voted,stage_changed:scheduled/null,night_moved", busFor(sidV, mark));
-        check("...and the party hears it moved", (await bell("p2", sidV, "%moved%")).length === 1 &&
-            (await talk()).some((b) => /night has moved.*Forced night/i.test(b)));
+        check("...the stage change is marked as a move",
+            busEvent(sidV, "planning.stage_changed", mark)?.nightChange === "moved", busEvent(sidV, "planning.stage_changed", mark));
+        const mvTalk = (await talk()).slice(talkBeforeMove);
+        const mvBell = await bell("p2", sidV, "%moved%");
+        check("...and the party hears it moved: the new night, what it was, and the table",
+            mvBell.length === 1 && mvBell[0].title.includes(fmt(E.start)) && mvBell[0].body.includes(`was ${fmt(A.start)}`) &&
+                mvTalk.length === 1 && /night has moved.*Forced night/i.test(mvTalk[0]) &&
+                mvTalk[0].includes(`now ${fmt(E.start)} (was ${fmt(A.start)})`) && mvTalk[0].includes("https://foundry.example/game"),
+            { mvBell, mvTalk });
+        check("...announced once, as a move, not as a fresh \"it's on\"",
+            !mvTalk.some((b) => /The night is set!/.test(b)) && (await alerts("p2", sidV)) === alertsBeforeMove + 1,
+            { mvTalk, before: alertsBeforeMove, after: await alerts("p2", sidV) });
+        check("...the GM hears it too (the move isn't something they did alone)", (await bell("gm", sidV, "%moved:%")).length === 1);
 
         // An event that can't be moved (deleted, or already started) is replaced.
         await call("POST", P(sidV, "reopen"), "gm", { options: [F, G] });
@@ -348,6 +396,9 @@ async function main() {
         const oneOffGoogle = (await row(oneOff.json.id)).google_event_id;
         const roO = await call("POST", P(oneOff.json.id, "reopen"), "gm", { options: [slot(10), slot(11)] });
         check("a one-off session's night can be changed too (round 1)", roO.status === 200 && roO.json.night.round === 1, roO.json);
+        check("...announced as a change of night, not a kickoff",
+            (await bell("p3", oneOff.json.id, "%night%changing%")).length === 1 &&
+                !(await talk()).some((b) => /new session is being planned:\*\* "Board game night"/.test(b)));
         fake.clear();
         const doneO = await voteAll(oneOff.json.id, roO.json, everyone([slot(11)]));
         const oRow = await row(oneOff.json.id);
@@ -356,6 +407,9 @@ async function main() {
                 oRow.location === "Hearthside Games", oRow);
         check("...its Google event is moved, and no Discord event is invented for an in-person session",
             fake.calls().map((c) => c.name).join() === "google.updateCalendarEvent" && fake.calls()[0].args[1] === oneOffGoogle, fake.calls());
+        check("...and the party hears it moved, to where it's always been",
+            (await talk()).some((b) => b.includes(`"Board game night" — now ${fmt(slot(11).start)} (was ${fmt(slot(9).start)}), at Hearthside Games.`)),
+            (await talk()).slice(-2));
 
         // The vote keeps the same night, for a session added with a start but no end.
         const { rows: [noEnd] } = await pool.query(
@@ -364,6 +418,8 @@ async function main() {
         const roN = await call("POST", P(noEnd.id, "reopen"), "gm", { options: [slot(12), slot(13)] });
         fake.clear();
         mark = events.length;
+        const talkBeforeKept = (await talk()).length;
+        const alertsBeforeKept = await alerts("p1", noEnd.id);
         await voteAll(noEnd.id, roN.json, everyone([slot(12)]));
         const nRow = await row(noEnd.id);
         check("re-voting the same start isn't a move: scheduled again, no night_moved, nothing sent out, ready check kept",
@@ -371,6 +427,11 @@ async function main() {
                 nRow.ready_check !== null && fake.calls().length === 0 &&
                 !busFor(noEnd.id, mark).includes("night_moved") && (await bell("p1", noEnd.id, "%stays on%")).length === 1,
             { nRow, calls: fake.calls(), bus: busFor(noEnd.id, mark) });
+        check("...the stage change says the night was kept, and the party isn't told it moved or posted a fresh \"it's on\"",
+            busEvent(noEnd.id, "planning.stage_changed", mark)?.nightChange === "kept" &&
+                (await talk()).length === talkBeforeKept && (await alerts("p1", noEnd.id)) === alertsBeforeKept + 1 &&
+                (await bell("p1", noEnd.id, "%moved%")).length === 0,
+            { stage: busEvent(noEnd.id, "planning.stage_changed", mark), talk: (await talk()).slice(talkBeforeKept) });
 
         const { rows: [past] } = await pool.query(
             `INSERT INTO game_sessions (title, campaign_id, date, end_date, is_online) VALUES ('Last week', $1, $2, $3, true) RETURNING id`,
@@ -420,6 +481,8 @@ async function main() {
         check("a scheduled session isn't being planned, so it can't be cancelled here (409)",
             (await call("POST", P(sidB, "cancel"), "gm")).status === 409);
     } finally {
+        await announcer.idle();
+        announcer.stop();
         uninstall();
         const ids = Object.values(who).map((p) => p.id);
         if (campaignId) await pool.query(`DELETE FROM campaigns WHERE id = $1`, [campaignId]);

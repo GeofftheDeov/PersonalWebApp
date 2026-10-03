@@ -58,21 +58,35 @@ export interface EventMap {
     /**
      * Session planning (#57). Published by planning/planner.ts on every
      * mutation, so the Letters live channel and notifications can react
-     * without the planner knowing about them. Payloads carry ids, not
-     * content: listeners re-read state through the planner's access rules.
+     * without the planner knowing about them (planning/announcements.ts
+     * turns them into bell notifications and Table Talk posts, #88).
+     * Payloads carry ids, not content: listeners re-read state through the
+     * planner's access rules.
+     *
+     * stage_changed, by (status, stage): planning/night is the kickoff
+     * (unless `nightChange` is "reopened"), planning/venue the night
+     * confirmed for an in-person session, planning/food the venue confirmed,
+     * then scheduled or cancelled.
+     * `actorId` is whoever did it, when a person did, so a "you did this"
+     * notification can skip them.
      */
     "planning.stage_changed": {
         sessionId: string;
         campaignId: string;
         status: "planning" | "scheduled" | "cancelled" | "completed";
         stage: "night" | "venue" | "food" | null;
+        actorId?: string;
         /**
          * Set when the change is about a night that was already confirmed
          * (#87): "reopened" on planning/night when the Game Master changes a
          * scheduled session's night (not a kickoff), "moved" on the transition
-         * that confirms a different night for it.
+         * that confirms a different night for it (planning.night_moved follows
+         * with the old and new times), "kept" on the one where the vote kept
+         * the night it already had.
          */
-        nightChange?: "reopened" | "moved";
+        nightChange?: "reopened" | "moved" | "kept";
+        /** With "reopened": the confirmed night that stands until a new one is (ISO date-time). */
+        standingStart?: string;
     };
     /**
      * A scheduled session's night moved (#87): published once the new night
@@ -94,6 +108,9 @@ export interface EventMap {
         pollId: string;
         kind: "night" | "venue";
         round: number;
+        actorId?: string;
+        /** "reopened" on the round a reopen starts (#87): its stage_changed already told the party. */
+        nightChange?: "reopened";
     };
     "planning.vote_cast": {
         sessionId: string;

@@ -9,6 +9,7 @@ import { getAuthorizedCampaignIds } from "../utils/gameNightPlannerUtils.js";
 import { personDisplayName } from "../utils/personUtils.js";
 import { SettingsError, cleanGmTitle, updateCampaignSettings } from "../planning/campaignSettings.js";
 import { bus } from "../events/index.js";
+import { TorchError, passTorchPermanently } from "../planning/torch.js";
 
 /**
  * Phase 3 (#35, plan §3.4). Auto-enrolment used to branch on req.user.type to
@@ -142,6 +143,17 @@ router.patch("/:id/settings", auth, async (req: any, res) => {
         if (error instanceof SettingsError) return res.status(error.status).json({ error: error.message });
         console.error("Error updating campaign settings:", error);
         res.status(500).json({ error: "Failed to update campaign settings" });
+    }
+});
+
+// Pass the torch permanently (#89): { to, from? }. GM or admin; ownership stays put.
+router.post("/:id/torch", auth, async (req: any, res) => {
+    try {
+        res.json(await passTorchPermanently(req.user.id, req.params.id, req.body));
+    } catch (error: any) {
+        if (error instanceof TorchError) return res.status(error.status).json({ error: error.message });
+        console.error("Error passing the torch:", error);
+        res.status(500).json({ error: "Failed to pass the torch" });
     }
 });
 

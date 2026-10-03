@@ -25,6 +25,23 @@ export interface EventMap {
         action: "created" | "updated" | "member-added" | "member-removed";
     };
 
+    /**
+     * The Game Master role changed hands (#57, #89). `scope: "campaign"` is a
+     * permanent pass: `fromId` stepped down to Player and `toId` is now a Game
+     * Master. `scope: "session"` is a one-session pass of `sessionId`: `toId`
+     * stands in (null when the stand-in was cleared) and `fromId` is whoever
+     * stood in before (null if no one). `byId` is who did it. Ownership never
+     * moves with either.
+     */
+    "campaign.torch_passed": {
+        campaignId: string;
+        scope: "campaign" | "session";
+        sessionId: string | null;
+        byId: string;
+        fromId: string | null;
+        toId: string | null;
+    };
+
     /** A chat message was posted in a campaign's Game Night channel. */
     "gamenight.message": {
         messageId: string;

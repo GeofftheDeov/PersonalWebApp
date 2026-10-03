@@ -10,7 +10,7 @@ import Event from "../models/Event.js";
 import Campaign from "../models/Campaign.js";
 import { gmTitleOf } from "../planning/campaignSettings.js";
 import { auth } from "../middleware/auth.js";
-import { getAuthorizedCampaignIds, isCampaignGameMaster } from "../utils/gameNightPlannerUtils.js";
+import { getAuthorizedCampaignIds, isCampaignGameMaster, isSessionGameMaster } from "../utils/gameNightPlannerUtils.js";
 import { findPersonById, personDisplayName } from "../utils/personUtils.js";
 import { getDecryptedKeys } from "./apiKeyRoutes.js";
 import { createDiscordScheduledEvent, buildGoogleCalendarLink, createGoogleCalendarEvent } from "../utils/integrations.js";
@@ -156,11 +156,11 @@ router.get("/sessions/:id", auth, async (req: any, res) => {
 
 router.put("/sessions/:id", auth, async (req: any, res) => {
     try {
-        const existing = await Session.findById(req.params.id).select("campaign");
+        const existing = await Session.findById(req.params.id).select("campaign gmOverride");
         if (!existing) return res.status(404).json({ error: "Session not found" });
 
-        // Sessions are GM-only: only the campaign's Game Master may edit them.
-        if (!(await isCampaignGameMaster(req.user, String(existing.campaign)))) {
+        // Sessions are GM-only: the campaign's Game Master, or this session's stand-in (#89).
+        if (!(await isSessionGameMaster(req.user, existing))) {
             return res.status(403).json({ error: `Only the ${await gmTitleOf(existing.campaign)} can edit sessions for this campaign` });
         }
 

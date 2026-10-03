@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ClipboardList, Plus, X, Wifi, FastForward, RotateCcw, Ban, Check, Crown } from 'lucide-react';
 import OverlapPicker, { timeRange, type PickedTime } from './OverlapPicker';
+import SessionTorch, { type StandIn } from './SessionTorch';
 
 /**
  * The Notice Board (#57): the campaign's planning card. The Game Master
@@ -18,11 +19,14 @@ interface NightPoll {
     winningOptionId: string | null; tiedOptionIds: string[]; options: PollOption[];
 }
 interface PlanningState {
-    session: { id: string; title: string; status: string; stage: string | null; isOnline: boolean; agenda: string | null; date: string | null };
-    campaign: { id: string; title: string; gmTitle: string; tableLink: string | null };
+    session: {
+        id: string; title: string; status: string; stage: string | null; isOnline: boolean; agenda: string | null; date: string | null;
+        gmOverride: StandIn | null;
+    };
+    campaign: { id: string; title: string; gmTitle: string; tableLink: string | null; gameMasterIds: string[] };
     party: { id: string; name: string }[];
     quorum: number;
-    viewer: { id: string; isGameMaster: boolean };
+    viewer: { id: string; isGameMaster: boolean; canPassTorch: boolean };
     night: NightPoll | null;
 }
 interface Board { canPlan: boolean; gmTitle: string; planning: PlanningState[] }
@@ -98,6 +102,12 @@ function PlanningCard({ state, reload }: { state: PlanningState; reload: () => P
                 </span>
             </header>
             {s.agenda && <p className="mt-2 font-permanent text-xs text-zinc-700 dark:text-zinc-300 uppercase">{s.agenda}</p>}
+            {(s.gmOverride || viewer.canPassTorch) && (
+                <div className="mt-3">
+                    <SessionTorch sessionId={s.id} gmTitle={gmTitle} party={state.party} gameMasterIds={campaign.gameMasterIds}
+                        standIn={s.gmOverride} viewerId={viewer.id} canPass={viewer.canPassTorch} onChanged={reload} />
+                </div>
+            )}
 
             <div className="mt-4 pt-4 border-t-2 border-black/20 dark:border-white/20">
                 <h4 className="font-permanent text-sm text-black dark:text-white uppercase mb-3 flex items-center gap-2">

@@ -26,6 +26,7 @@ import { bus } from "../events/index.js";
 import type { EventMap } from "../events/events.js";
 import { notify } from "../utils/notify.js";
 import { postTableTalk } from "../utils/tableTalk.js";
+import { personDisplayName } from "../utils/personUtils.js";
 import { resolveQuorum } from "./availability.js";
 import { campaignParty } from "./availabilityStore.js";
 import { realExternalEvents, type ExternalEvents } from "./externalEvents.js";
@@ -75,8 +76,12 @@ async function roleIn(db: Db, actorId: string, campaignId: string, gmOverrideId:
     const { rows: memberships } = await db.query(
         `SELECT status FROM campaign_members WHERE campaign_id = $1 AND person_id = $2`, [campaignId, actorId]);
     const admin = acct?.app_role === "admin";
-    const gm = admin || gmOverrideId === actorId || memberships.some((m) => m.status === "Game Master");
-    return { admin, gm, member: gm || memberships.length > 0 };
+    // The campaign's own Game Master (or an admin): who can pass the torch.
+    const campaignGm = admin || memberships.some((m) => m.status === "Game Master");
+    const seated = memberships.length > 0;
+    // A one-session stand-in counts only while they're still in the party.
+    const gm = campaignGm || (seated && gmOverrideId === actorId);
+    return { admin, campaignGm, gm, member: campaignGm || seated };
 }
 
 /** Whose vault a confirmed session's external events use: the stand-in first, then the campaign's GMs. */
@@ -105,6 +110,14 @@ async function campaignTimeZone(db: Db, campaignId: string): Promise<string> {
 const formatWhen = (d: Date, timeZone: string) => d.toLocaleString("en-US", {
     timeZone, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short",
 });
+
+/** A person's display name: from the party when they're in it, else their account. */
+async function personName(id: string, party: { id: string; name: string }[]): Promise<string> {
+    const seated = party.find((p) => p.id === id);
+    if (seated) return seated.name;
+    const { rows: [a] } = await pool.query(`SELECT handle, name, first_name, last_name, email FROM accounts WHERE id = $1`, [id]);
+    return a ? personDisplayName({ handle: a.handle, name: a.name, firstName: a.first_name, lastName: a.last_name, email: a.email }) : "someone";
+}
 
 // ── validation ──────────────────────────────────────────────────────────────
 
@@ -248,18 +261,24 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
         const s = await loadSession(pool, sessionId, false);
         const role = await roleIn(pool, actor.id, s.campaign_id, s.gm_override_id);
         if (!role.member) throw new PlanningError(403, "Only the party can see this session's planning.");
-        const [party, night] = await Promise.all([campaignParty(s.campaign_id), latestPoll(pool, s.id, "night")]);
+        const [party, night, gmIds] = await Promise.all([
+            campaignParty(s.campaign_id), latestPoll(pool, s.id, "night"), gameMasterIds(pool, s.campaign_id, null)]);
         return {
             session: {
                 id: s.id, campaignId: s.campaign_id, title: s.title, status: s.status, stage: s.planning_stage,
                 isOnline: s.is_online, foodMode: s.food_mode, agenda: s.agenda,
                 date: s.date?.toISOString() ?? null, endDate: s.end_date?.toISOString() ?? null, location: s.location,
                 googleCalendarLink: s.google_calendar_link, discordEventId: s.discord_event_id, googleEventId: s.google_event_id,
+                // The one-session stand-in Game Master (#89), if the torch was passed for this session.
+                gmOverride: s.gm_override_id ? { id: s.gm_override_id, name: await personName(s.gm_override_id, party) } : null,
             },
-            campaign: { id: s.campaign_id, title: s.campaign_title, gmTitle: s.gm_title, quorum: s.campaign_quorum, tableLink: s.table_link },
+            campaign: {
+                id: s.campaign_id, title: s.campaign_title, gmTitle: s.gm_title, quorum: s.campaign_quorum, tableLink: s.table_link,
+                gameMasterIds: gmIds,
+            },
             party,
             quorum: resolveQuorum(s.campaign_quorum, party.length),
-            viewer: { id: actor.id, isGameMaster: role.gm },
+            viewer: { id: actor.id, isGameMaster: role.gm, canPassTorch: role.campaignGm },
             night: night ? pollJson(night) : null,
         };
     }
@@ -276,11 +295,10 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
             const { rows } = await pool.query(
                 `SELECT id, gm_override_id FROM game_sessions
                   WHERE campaign_id = $1 AND status = 'planning' ORDER BY created_at`, [campaignId]);
-            const visible = rows.filter((r) => role.member || r.gm_override_id === actor.id);
-            if (!role.member && !visible.length) throw new PlanningError(403, "Only the party can see the Notice Board.");
+            if (!role.member) throw new PlanningError(403, "Only the party can see the Notice Board.");
             return {
                 canPlan: role.gm, gmTitle: c.gm_title,
-                planning: await Promise.all(visible.map((r) => state(actor, r.id))),
+                planning: await Promise.all(rows.map((r) => state(actor, r.id))),
             };
         },
 
@@ -388,6 +406,59 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
                     reason: decided.closedReason!,
                 }));
                 await confirmNight(db, s, decided, effects);
+            });
+            return state(actor, sessionId);
+        },
+
+        /**
+         * Pass the torch for one session (#89): `to`, a party member who isn't
+         * already a Game Master, gets full GM control of this session and
+         * nothing else. Only the campaign's GM (or an admin) can, not a stand-in.
+         */
+        async passSession(actor: Actor, sessionId: string, body: any) {
+            await mutate(async (db, effects) => {
+                const s = await loadSession(db, sessionId, true);
+                const role = await roleIn(db, actor.id, s.campaign_id);
+                if (!role.campaignGm) throw new PlanningError(403, `Only the ${s.gm_title} can pass the torch.`);
+                if (s.status !== "planning" && s.status !== "scheduled") {
+                    throw new PlanningError(409, `This session is ${s.status}; its torch can't be passed.`);
+                }
+                const to = body?.to;
+                const { rows: seats } = isUuid(String(to)) ? await db.query(
+                    `SELECT status FROM campaign_members WHERE campaign_id = $1 AND person_id = $2`, [s.campaign_id, to]) : { rows: [] };
+                if (!seats.length) throw new PlanningError(400, "Pass the torch to someone in the party.");
+                if (seats.some((m) => m.status === "Game Master")) throw new PlanningError(400, `They're already the ${s.gm_title}.`);
+                if (s.gm_override_id === to) return;
+
+                await db.query(`UPDATE game_sessions SET gm_override_id = $2 WHERE id = $1`, [s.id, to]);
+                effects.push(publish("campaign.torch_passed", {
+                    campaignId: s.campaign_id, scope: "session", sessionId: s.id, byId: actor.id, fromId: s.gm_override_id, toId: to,
+                }));
+                effects.push(() => notify(to, {
+                    type: "system", title: `You're the ${s.gm_title} for "${s.title}"`,
+                    body: `${s.campaign_title} — you have the torch for this session only.`,
+                    link: noticeBoard(s.campaign_id), meta: { sessionId: s.id, campaignId: s.campaign_id },
+                }));
+            });
+            return state(actor, sessionId);
+        },
+
+        /** Take back a one-session pass. The campaign's GM (or an admin) can, and so can the stand-in, stepping down. */
+        async clearSessionPass(actor: Actor, sessionId: string) {
+            await mutate(async (db, effects) => {
+                const s = await loadSession(db, sessionId, true);
+                const role = await roleIn(db, actor.id, s.campaign_id);
+                if (!role.campaignGm && s.gm_override_id !== actor.id) {
+                    throw new PlanningError(403, `Only the ${s.gm_title} can take the torch back.`);
+                }
+                if (s.status !== "planning" && s.status !== "scheduled") {
+                    throw new PlanningError(409, `This session is ${s.status}; its torch can't change hands.`);
+                }
+                if (!s.gm_override_id) return;
+                await db.query(`UPDATE game_sessions SET gm_override_id = NULL WHERE id = $1`, [s.id]);
+                effects.push(publish("campaign.torch_passed", {
+                    campaignId: s.campaign_id, scope: "session", sessionId: s.id, byId: actor.id, fromId: s.gm_override_id, toId: null,
+                }));
             });
             return state(actor, sessionId);
         },

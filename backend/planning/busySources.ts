@@ -3,8 +3,8 @@
  * busy time, and the sync that keeps their busy_blocks fresh enough for the
  * overlap.
  *
- * A source is one adapter (Google Calendar today; Discord "interested" events
- * with #85). An adapter says whether a person can use it and fetches their
+ * A source is one adapter: Google Calendar (googleBusySource.ts) or Discord
+ * events the person marked "interested" (discordBusySource.ts, #85). An adapter says whether a person can use it and fetches their
  * busy intervals for a stretch of time. This module owns everything else:
  * the on/off switch (busy_sources), replacing that source's busy_blocks, the
  * freshness rule, and failure handling. It stores start and end only -- an
@@ -32,12 +32,13 @@
  * RETRY_AFTER_FAILURE_MINUTES (5) unless the owner asks ("Sync now"), so a
  * broken connection doesn't slow every page load.
  *
- * To add a source (#85): write a BusySourceAdapter and add it to ADAPTERS.
- * busy_sources and busy_blocks already accept 'discord'.
+ * To add a source: write a BusySourceAdapter and add it to ADAPTERS (and to
+ * the source CHECKs on busy_sources and busy_blocks).
  */
 import { query, withTransaction } from "../db/index.js";
 import { bus } from "../events/index.js";
 import { googleBusySource } from "./googleBusySource.js";
+import { discordBusySource } from "./discordBusySource.js";
 
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
@@ -84,6 +85,7 @@ export interface BusySourceAdapter {
 
 const ADAPTERS: Partial<Record<BusySourceName, BusySourceAdapter>> = {
     google: googleBusySource,
+    discord: discordBusySource,
 };
 
 /** A 4xx the route can hand straight back to the page. */

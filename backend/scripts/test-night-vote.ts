@@ -357,6 +357,21 @@ async function main() {
         check("...its Google event is moved, and no Discord event is invented for an in-person session",
             fake.calls().map((c) => c.name).join() === "google.updateCalendarEvent" && fake.calls()[0].args[1] === oneOffGoogle, fake.calls());
 
+        // The vote keeps the same night, for a session added with a start but no end.
+        const { rows: [noEnd] } = await pool.query(
+            `INSERT INTO game_sessions (title, campaign_id, date, is_online, ready_check)
+             VALUES ('Open-ended', $1, $2, true, '{"sentAt":null,"responses":[]}') RETURNING id`, [campaignId, slot(12).start]);
+        const roN = await call("POST", P(noEnd.id, "reopen"), "gm", { options: [slot(12), slot(13)] });
+        fake.clear();
+        mark = events.length;
+        await voteAll(noEnd.id, roN.json, everyone([slot(12)]));
+        const nRow = await row(noEnd.id);
+        check("re-voting the same start isn't a move: scheduled again, no night_moved, nothing sent out, ready check kept",
+            nRow.status === "scheduled" && nRow.date.toISOString() === slot(12).start && nRow.end_date?.toISOString() === slot(12).end &&
+                nRow.ready_check !== null && fake.calls().length === 0 &&
+                !busFor(noEnd.id, mark).includes("night_moved") && (await bell("p1", noEnd.id, "%stays on%")).length === 1,
+            { nRow, calls: fake.calls(), bus: busFor(noEnd.id, mark) });
+
         const { rows: [past] } = await pool.query(
             `INSERT INTO game_sessions (title, campaign_id, date, end_date, is_online) VALUES ('Last week', $1, $2, $3, true) RETURNING id`,
             [campaignId, new Date(Date.now() - DAY), new Date(Date.now() - DAY + 3 * HOUR)]);

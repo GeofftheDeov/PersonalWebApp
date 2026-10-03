@@ -198,7 +198,8 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
         const option = poll.options.find((o) => o.id === poll.winningOptionId)!;
         const start = option.start!, end = option.end!;
         const previous: { start: Date; end: Date | null } | null = s.date ? { start: s.date, end: s.end_date } : null;
-        const moved = previous !== null && (+previous.start !== +start || +(previous.end ?? 0) !== +end);
+        // A session added with a fixed date may have no end: then only the start says whether it moved.
+        const moved = previous !== null && (+previous.start !== +start || (previous.end !== null && +previous.end !== +end));
         const nextStage = previous || s.is_online ? null : "venue";
         await db.query(
             `UPDATE game_sessions SET date = $2, end_date = $3, status = $4, planning_stage = $5,
@@ -467,8 +468,11 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
 
         /**
          * Change a scheduled session's night (#87): back to the night step,
-         * with a new round of 2-4 times open. The old night stands -- and its
-         * Discord and Google events stay put -- until a new one is confirmed.
+         * with a new round of 2-4 times open. The session keeps its old date,
+         * and its Discord and Google events stay put, until a new night is
+         * confirmed. Meanwhile it counts as being planned, so -- like any
+         * session being planned -- it gets no ready check; a vote still open
+         * when the old night comes round simply moves it once it's decided.
          */
         async reopen(actor: Actor, sessionId: string, body: any) {
             const options = cleanNightOptions(body?.options, deps.now());

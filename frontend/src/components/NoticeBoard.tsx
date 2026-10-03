@@ -308,7 +308,7 @@ function UpcomingRow({ campaignId, session: u, reload }: { campaignId: string; s
             {changing && (
                 <div className="mt-3 pt-3 border-t-2 border-dashed border-black/30 dark:border-white/30">
                     <p className="mb-2 font-permanent text-xs text-black dark:text-white uppercase">
-                        Shortlist new times. The party votes again; the current night stands until a new one is confirmed, then the Discord and calendar events move with it.
+                        Shortlist new times. The party votes again. Until a new night is confirmed the session keeps its current date and events, but it’s back to being planned (no ready check). Then the Discord and calendar events move with it.
                     </p>
                     <OverlapPicker campaignId={campaignId} submitting={busy} submitLabel="Put it to a vote"
                         onSubmit={reopen} onCancel={() => setChanging(false)} />

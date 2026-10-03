@@ -254,6 +254,9 @@ async function updateGoogleCalendarEvent(
     if (changes.start) body.start = { dateTime: changes.start.toISOString() };
     if (changes.end) body.end = { dateTime: changes.end.toISOString() };
     const data: any = await (await googleEventRequest('PATCH', refreshToken, eventId, body)).json();
+    // A deleted event is kept, as "cancelled", and can still be patched: moving
+    // it would show nothing on anyone's calendar, so report it as gone.
+    if (data.status === 'cancelled') throw new Error('Google Calendar event was deleted');
     return { id: data.id };
 }
 

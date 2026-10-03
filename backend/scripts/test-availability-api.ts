@@ -118,11 +118,22 @@ async function main() {
         const after = await call("GET", "/api/availability/me", "alice");
         check("a refused save changes nothing", after.json.windows.length === 2, after.json);
 
+        const replaced = await call("PUT", "/api/availability/me/windows", "alice",
+            { windows: [{ weekday: 2, start: "19:00", end: "22:00", timeZone: "Europe/London" }] });
+        const reread = await call("GET", "/api/availability/me", "alice");
+        check("a second save replaces the whole week: the old windows are gone, not added to",
+            replaced.status === 200 && JSON.stringify(reread.json.windows.map((w: any) => [w.weekday, w.start, w.end, w.timeZone])) ===
+                JSON.stringify([[2, "19:00", "22:00", "Europe/London"]]), reread.json);
+        await call("PUT", "/api/availability/me/windows", "alice", { windows: week });   // back to the week the overlap below expects
+
         await call("PUT", "/api/availability/me/windows", "gm", { windows: [{ weekday: 6, start: "17:00", end: "23:00", timeZone: "America/Chicago" }] });
         // Bob is in London: Sun midnight-5 am BST is Sat 6-11 pm CDT.
         await call("PUT", "/api/availability/me/windows", "bob", { windows: [{ weekday: 0, start: "00:00", end: "05:00", timeZone: "Europe/London" }] });
         const others = await call("GET", "/api/availability/me", "bob");
         check("each person sees only their own windows", others.json.windows.length === 1 && others.json.windows[0].timeZone === "Europe/London");
+        const aliceAfterBob = await call("GET", "/api/availability/me", "alice");
+        check("saving my week leaves everyone else's alone",
+            aliceAfterBob.json.windows.length === 2 && aliceAfterBob.json.windows.every((w: any) => w.timeZone === "America/Chicago"), aliceAfterBob.json);
 
         const cleared = await call("PUT", "/api/availability/me/windows", "outsider", { windows: [] });
         check("an empty list clears the week", cleared.status === 200 && cleared.json.windows.length === 0);
@@ -223,7 +234,7 @@ async function main() {
         // ── events ──────────────────────────────────────────────────────────
         const seen = events.map((e) => `${e.personId === people.alice.id ? "alice" : e.personId === people.gm.id ? "gm" : "other"}:${e.what}`);
         check("every change publishes availability.changed (and refused saves don't)",
-            seen.filter((s) => s === "alice:windows").length === 1 &&
+            seen.filter((s) => s === "alice:windows").length === 3 &&
                 seen.filter((s) => s === "alice:exceptions").length === 2 && seen.includes("gm:windows"), seen);
 
         // ── campaign ownership ──────────────────────────────────────────────

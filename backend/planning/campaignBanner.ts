@@ -104,9 +104,16 @@ export async function requestBannerUpload(actorId: string, campaignId: string, b
 }
 
 async function saveBanner(campaign: any, key: string | null): Promise<Banner> {
-    const previous: string | null = campaign.banner_key;
+    // Read the key being replaced under a row lock, in the same statement as the
+    // write, so two saves at once each delete what they really replaced.
+    const { rows: [row] } = await query(
+        `UPDATE campaigns c SET banner_key = $2
+           FROM (SELECT id, banner_key FROM campaigns WHERE id = $1 FOR UPDATE) old
+          WHERE c.id = old.id
+         RETURNING old.banner_key AS previous`,
+        [campaign.id, key]);
+    const previous: string | null = row?.previous ?? null;
     if (previous !== key) {
-        await query(`UPDATE campaigns SET banner_key = $2 WHERE id = $1`, [campaign.id, key]);
         bus.publish("campaign.changed", { campaignId: campaign.id, action: "updated" }).catch(() => { /* non-fatal */ });
         // The replaced image is no longer reachable from anywhere; tidy it up.
         // Best effort: a failure leaves an orphan object, not a broken banner.

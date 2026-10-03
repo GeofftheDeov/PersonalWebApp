@@ -156,6 +156,9 @@ async function main() {
         const inList = list.json?.find((c: any) => c._id === cid), otherInList = list.json?.find((c: any) => c._id === other);
         check("the campaign list carries each campaign's banner URL, null where there is none",
             list.status === 200 && inList?.bannerUrl === set1.json.bannerUrl && otherInList && otherInList.bannerUrl === null, list.json);
+        const asOutsider = await call("GET", `/api/campaigns/${cid}`, "outsider");
+        check("someone outside the party can still open the campaign (the invite page needs it) but gets no banner URL",
+            asOutsider.status === 200 && asOutsider.json.title && asOutsider.json.bannerUrl === null, asOutsider.json);
         const edited = await call("PUT", `/api/campaigns/${cid}`, "owner",
             { title: `Banner ${tag}`, description: "edited", status: "In Progress", startDate: "2026-10-01" });
         check("editing the campaign's details returns it with its banner URL, so the page keeps showing it",
@@ -174,6 +177,20 @@ async function main() {
         await settle();
         check("saving the same key again is a no-op that deletes nothing",
             same.status === 200 && fake.calls("uploads.deleteObject").length === 0, fake.calls());
+
+        // Two saves at once: each deletes exactly what it replaced, so nothing is orphaned.
+        const k3 = (await uploadUrl("owner", cid, { contentType: "image/webp", size: 10 })).json.key;
+        const k4 = (await uploadUrl("owner", cid, { contentType: "image/webp", size: 10 })).json.key;
+        fake.clear();
+        const [ra, rb] = await Promise.all([setBanner("owner", cid, k3), setBanner("admin", cid, k4)]);
+        await settle();
+        const final = await bannerKey(cid);
+        const deleted = fake.calls("uploads.deleteObject").map((c) => c.args[0]).sort();
+        const expected = [second.json.key, final === k3 ? k4 : k3].sort();
+        check("two banner saves at the same moment delete the old banner and the loser, never orphaning one",
+            ra.status === 200 && rb.status === 200 && [k3, k4].includes(final) && JSON.stringify(deleted) === JSON.stringify(expected),
+            { final, deleted, expected });
+        await setBanner("owner", cid, second.json.key);
 
         // A failed delete leaves an orphan object, not a failed request.
         fake.fail("uploads.deleteObject", new Error("S3 AccessDenied"));

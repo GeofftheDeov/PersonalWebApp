@@ -107,7 +107,11 @@ router.get("/:id", auth, async (req: any, res) => {
         if (!campaign) {
             return res.status(404).json({ error: "Campaign not found" });
         }
-        res.json(await withBannerUrl(campaign.toJSON()));
+        // Anyone signed in can read a campaign (the invite page needs it before
+        // joining), but only the party (and admins) get a link to its banner.
+        const campaignIds = await getAuthorizedCampaignIds(req.user);
+        const inParty = !campaignIds || campaignIds.some((cid: any) => cid.toString() === String(campaign._id));
+        res.json(inParty ? await withBannerUrl(campaign.toJSON()) : { ...campaign.toJSON(), bannerUrl: null });
     } catch (error: any) {
         console.error("Error fetching campaign:", error);
         res.status(500).json({ error: "Failed to fetch campaign", details: error.message });

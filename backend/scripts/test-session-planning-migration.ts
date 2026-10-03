@@ -20,7 +20,10 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import pg from "pg";
 
-const MIGRATION = resolve(dirname(fileURLToPath(import.meta.url)), "../db/migrations/2026-10-01-session-planning.sql");
+const MIGRATIONS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../db/migrations");
+const MIGRATION = resolve(MIGRATIONS_DIR, "2026-10-01-session-planning.sql");
+/** Later session-planning migrations, applied after the first so schema.sql parity covers them too. */
+const FOLLOW_UPS = ["2026-10-03-busy-sources.sql"].map((f) => resolve(MIGRATIONS_DIR, f));
 const local = /(\/\/|@)(127\.0\.0\.1|localhost)[:/]/;
 const { MIGRATED_URL, FRESH_URL } = process.env;
 if (!MIGRATED_URL || !FRESH_URL || !local.test(MIGRATED_URL) || !local.test(FRESH_URL)) {
@@ -99,6 +102,16 @@ async function main() {
     try { await migrated.query(sql); } catch (e: any) { secondError = e.message; await migrated.query("ROLLBACK").catch(() => {}); }
     check("applying it a second time is a no-op, not an error", !secondError, secondError);
 
+    for (const file of FOLLOW_UPS) {
+        const name = file.split(/[\\/]/).pop();
+        const followUp = readFileSync(file, "utf8");
+        const errors: string[] = [];
+        for (let i = 0; i < 2; i++) {
+            try { await migrated.query(followUp); } catch (e: any) { errors.push(e.message); await migrated.query("ROLLBACK").catch(() => {}); }
+        }
+        check(`${name} applies, and applies again as a no-op`, errors.length === 0, errors.join("; "));
+    }
+
     // ── backfill ────────────────────────────────────────────────────────────
     const owners = Object.fromEntries((await migrated.query(
         `SELECT title, owner_id, gm_title, quorum FROM campaigns`)).rows.map((r) => [r.title, r]));
@@ -151,6 +164,17 @@ async function main() {
     check("busy_blocks has no column a calendar event title could land in",
         (await fresh.query(`SELECT column_name FROM information_schema.columns WHERE table_name = 'busy_blocks'`))
             .rows.every((r) => !/title|summary|name|description/.test(r.column_name)));
+    check("a busy source is on once per person and source",
+        !await refuses(fresh, `INSERT INTO busy_sources (person_id, source) VALUES ($1, 'google')`, [p.id]) &&
+        await refuses(fresh, `INSERT INTO busy_sources (person_id, source) VALUES ($1, 'google')`, [p.id]));
+    check("busy sources are google or discord only",
+        await refuses(fresh, `INSERT INTO busy_sources (person_id, source) VALUES ($1, 'outlook')`, [p.id]));
+    check("a sync records its time and the stretch it covered together",
+        await refuses(fresh, `UPDATE busy_sources SET synced_at = now() WHERE person_id = $1`, [p.id]) &&
+        await refuses(fresh, `UPDATE busy_sources SET synced_at = now(), synced_from = '2026-10-02Z', synced_to = '2026-10-01Z'
+                               WHERE person_id = $1`, [p.id]) &&
+        !await refuses(fresh, `UPDATE busy_sources SET synced_at = now(), synced_from = '2026-10-01Z', synced_to = '2026-10-30Z'
+                                WHERE person_id = $1`, [p.id]));
 
     const { rows: [sess] } = await fresh.query(
         `INSERT INTO game_sessions (title, campaign_id, date, status, planning_stage)

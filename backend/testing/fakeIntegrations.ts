@@ -46,6 +46,7 @@ function defaultHandlers(next: () => number): Handlers {
     return {
         "discord.createScheduledEvent": async () => ({ id: `fake-discord-event-${next()}` }),
         "google.createCalendarEvent": async () => ({ id: `fake-google-event-${next()}` }),
+        "google.freeBusy": async () => [],   // an empty calendar
         "uploads.presignPut": async (input) => ({
             url: `https://fake-uploads.test/${input.key}?signature=fake-${next()}`,
             method: "PUT",

@@ -108,6 +108,7 @@ export function createFakeIntegrations() {
          * Several `fail`s for one name queue up in order.
          */
         fail(name: CallName, error: Error = new Error(`fake ${name} failed`), { times = 1 }: { times?: number } = {}) {
+            if (!(times >= 1)) throw new Error(`fail(${name}): times must be at least 1`);
             failures.set(name, [...(failures.get(name) ?? []), { error, remaining: times }]);
         },
 

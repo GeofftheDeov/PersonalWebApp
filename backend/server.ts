@@ -38,6 +38,7 @@ import campaignMemberRoutes from "./routes/campaignMemberRoutes.js";
 import friendRoutes from "./routes/friendRoutes.js";
 import cloudClawRoutes from "./routes/cloudClawRoutes.js";
 import paperclipRoutes from "./routes/paperclipRoutes.js";
+import questRoutes from "./routes/questRoutes.js";
 import apiKeyRoutes from "./routes/apiKeyRoutes.js";
 import googleCalendarRoutes from "./routes/googleCalendarRoutes.js";
 import messageRoutes from "./routes/messageRoutes.js";
@@ -126,6 +127,7 @@ app.use("/api/campaign-members", campaignMemberRoutes);
 app.use("/api/friends", friendRoutes);
 app.use("/api/cloud-claw", cloudClawRoutes);
 app.use("/api/paperclip", paperclipRoutes);
+app.use("/api/quests", questRoutes); // session quests (#90)
 app.use("/api/api-keys", apiKeyRoutes);
 app.use("/api/google-calendar", googleCalendarRoutes);
 app.use("/api/messages", messageRoutes);

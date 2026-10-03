@@ -45,6 +45,7 @@ import notificationRoutes from "./routes/notificationRoutes.js";
 import inviteRoutes from "./routes/inviteRoutes.js";
 import availabilityRoutes from "./routes/availabilityRoutes.js";
 import planningRoutes from "./routes/planningRoutes.js";
+import { startPlanningAnnouncements } from "./planning/announcements.js";
 import { snapshotAlpacaNow } from "./routes/adminRoutes.js";
 import { startEventBus, stopEventBus } from "./events/index.js";
 import { startReadyCheckLoop } from "./utils/readyCheck.js";
@@ -134,6 +135,10 @@ app.use("/api/campaign-invites", inviteRoutes);
 app.use("/api/runner", runnerRoutes); // PC skill runner (agentic OS); RUNNER_TOKEN auth
 app.use("/api/availability", availabilityRoutes);
 app.use("/api/planning", planningRoutes);
+
+// Bell notifications + Table Talk posts for planning stage changes (#88).
+// Subscribes before the bus starts, which is when Redis picks its streams.
+startPlanningAnnouncements();
 
 // Event bus (Redis Streams when REDIS_URL is set; in-memory otherwise).
 // Started after routes are imported so module-level subscriptions are registered.

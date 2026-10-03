@@ -19,6 +19,7 @@ import { buildPlanningRouter } from "../routes/planningRoutes.js";
 import campaignRoutes from "../routes/campaignRoutes.js";
 import tabletopRoutes from "../routes/tabletopRoutes.js";
 import { createPlanner } from "../planning/planner.js";
+import { startPlanningAnnouncements } from "../planning/announcements.js";
 import type { ExternalEvents, PublishSessionInput } from "../planning/externalEvents.js";
 import { runReadyCheckSweep } from "../utils/readyCheck.js";
 
@@ -40,9 +41,11 @@ function check(name: string, ok: boolean, detail: unknown = "") {
 // ── the fake integrations ───────────────────────────────────────────────────
 const published: PublishSessionInput[] = [];
 let fakeWarnings: string[] = [];
+let fakeThrows = false;
 const fakeEvents: ExternalEvents = {
     async publishSession(input) {
         published.push(input);
+        if (fakeThrows) throw new Error("Discord is down");
         return {
             discordEventId: input.discord ? `discord-${published.length}` : null,
             googleEventId: `google-${published.length}`,
@@ -66,6 +69,11 @@ async function main() {
     for (const name of ["planning.stage_changed", "planning.poll_opened", "planning.vote_cast", "planning.poll_closed"] as const) {
         bus.subscribe(name, (payload: any) => { events.push({ name, payload }); });
     }
+    // Bell notifications and Table Talk posts react to those events (#88), as
+    // they do in server.ts. They land after the response, so checks on them
+    // wait for the announcer to finish first.
+    let announcer = startPlanningAnnouncements();
+    const settled = () => announcer.idle();
 
     const tag = crypto.randomBytes(4).toString("hex");
     const who: Record<string, { id: string; token: string }> = {};
@@ -81,9 +89,9 @@ async function main() {
         return { status: res.status, json };
     };
     const P = (sessionId: string, action = "") => `/api/planning/sessions/${sessionId}${action ? `/${action}` : ""}`;
-    const notes = async (person: string, sessionId: string) => (await pool.query(
-        `SELECT title FROM notifications WHERE user_id = $1 AND meta->>'sessionId' = $2`, [who[person].id, sessionId])).rows;
-    const talk = async () => (await pool.query(
+    const notes = async (person: string, sessionId: string) => (await settled(), await pool.query(
+        `SELECT title, body, link, count, read FROM notifications WHERE user_id = $1 AND meta->>'sessionId' = $2`, [who[person].id, sessionId])).rows;
+    const talk = async () => (await settled(), await pool.query(
         `SELECT body FROM messages WHERE campaign_id = $1 AND sender_id = 'system' ORDER BY created_at`, [campaignId])).rows.map((r) => r.body);
     const session = async (id: string) => (await pool.query(`SELECT * FROM game_sessions WHERE id = $1`, [id])).rows[0];
 
@@ -95,7 +103,7 @@ async function main() {
     const optionAt = (state: any, s: { start: string }) => state.night.options.find((o: any) => o.start === s.start).id;
 
     try {
-        for (const name of ["gm", "p1", "p2", "p3", "outsider", "admin"]) {
+        for (const name of ["gm", "p1", "p2", "p3", "outsider", "admin", "late"]) {
             const email = `plan-${name}-${tag}@example.test`;
             const { rows: [row] } = await pool.query(
                 `INSERT INTO accounts (id, handle, email, app_role, app_role_source) VALUES (gen_random_uuid(), $1, $2, $3, 'manual') RETURNING id`,
@@ -122,6 +130,11 @@ async function main() {
             s1.status === 200 && s1.json.quorum === 3 && s1.json.tableLink === "https://foundry.example/game" && s1.json.gmTitle === "Host", s1.json);
         check("a player can't change campaign settings (403)", (await set("p1", { quorum: 2 })).status === 403);
         check("an admin can", (await set("admin", { quorum: 3 })).status === 200);
+        const cleared = await set("gm", { quorum: null });
+        check("the owner can clear the quorum back to the whole party",
+            cleared.status === 200 && cleared.json.quorum === null &&
+                (await pool.query(`SELECT quorum FROM campaigns WHERE id = $1`, [campaignId])).rows[0].quorum === null, cleared.json);
+        await set("gm", { quorum: 3 });
         for (const [what, body] of [["quorum 0", { quorum: 0 }], ["a non-http table link", { tableLink: "javascript:alert(1)" }],
             ["an empty GM title", { gmTitle: "  " }], ["an empty body", {}]] as const) {
             check(`${what} is a 400`, (await set("gm", body)).status === 400);
@@ -141,9 +154,13 @@ async function main() {
         check("the GM kicks off: a planning session on the night step, no date yet",
             k.status === 200 && k.json.session.status === "planning" && k.json.session.stage === "night" &&
                 k.json.session.date === null && k.json.viewer.isGameMaster && k.json.quorum === 3, k.json);
-        check("the party is notified; the GM who kicked off isn't",
-            (await notes("p1", sid)).length === 1 && (await notes("gm", sid)).length === 0);
-        check("a Table Talk post announces it", (await talk()).some((b) => /being planned.*Session 14/.test(b)));
+        const board14 = `/game-night/campaigns/${campaignId}#notice-board`;
+        const kickNotes = await Promise.all(["p1", "p2", "p3"].map((p) => notes(p, sid)));
+        check("every player gets one bell notification linking to the Notice Board",
+            kickNotes.every((n) => n.length === 1 && n[0].link === board14 && /Planning started/.test(n[0].title)), kickNotes);
+        check("...and the GM who kicked off doesn't", (await notes("gm", sid)).length === 0);
+        check("a Table Talk post announces it and asks the party to vote",
+            (await talk()).some((b) => /being planned.*Session 14.*vote/.test(b)));
 
         const asPlayer = await call("GET", P(sid), "p1");
         check("a player sees the planning state, as a player", asPlayer.status === 200 && !asPlayer.json.viewer.isGameMaster);
@@ -172,6 +189,10 @@ async function main() {
         const vote = (as: string, opts: { start: string }[]) => call("POST", P(sid, "vote"), as,
             { optionIds: opts.map((o) => optionAt(sl.json, o)) });
         check("someone outside the party can't vote (403)", (await vote("outsider", [A])).status === 403);
+        // Joining mid-vote doesn't make you a voter: the electorate is the party when the vote opened.
+        await pool.query(`INSERT INTO campaign_members (campaign_id, person_id, status, joined_at) VALUES ($1, $2, 'Player', now())`,
+            [campaignId, who.late.id]);
+        check("someone who joined after the vote opened can't vote in it (403)", (await vote("late", [A])).status === 403);
         check("an option from somewhere else is a 400",
             (await call("POST", P(sid, "vote"), "p1", { optionIds: [crypto.randomUUID()] })).status === 400);
         await vote("p1", [A, B]);
@@ -204,8 +225,16 @@ async function main() {
         check("the returned event ids and calendar link are saved on the session",
             done.discord_event_id === `discord-${before + 1}` && done.google_event_id === `google-${before + 1}` &&
                 done.google_calendar_link === `https://calendar.google.com/fake/${before + 1}`, done);
+        check("...without waiting on the member who joined mid-vote", !last.json.night.eligibleIds.includes(who.late.id));
+        await pool.query(`DELETE FROM campaign_members WHERE campaign_id = $1 AND person_id = $2`, [campaignId, who.late.id]);
         check("the party hears it's on, in the GM's time zone",
             (await notes("p2", sid)).some((n) => /is on: .*(CDT|CST)/.test(n.title)), await notes("p2", sid));
+        const onNotes = await Promise.all(["gm", "p1", "p2", "p3"].map((p) => notes(p, sid)));
+        check("every party member, the GM included, has a bell notification that it's scheduled",
+            onNotes.every((n) => n.some((x) => /is on:/.test(x.title) && x.link === board14)), onNotes);
+        const p2Notes = await notes("p2", sid);
+        check("kickoff, the vote and the result collapse into one unread bell entry per person",
+            p2Notes.length === 1 && !p2Notes[0].read && p2Notes[0].count === 3, p2Notes);
         check("and Table Talk says so", (await talk()).some((b) => /night is set.*Session 14/.test(b)));
         check("voting after the close is a 409", (await vote("p1", [A])).status === 409);
         const evs = events.filter((e) => e.payload.sessionId === sid).map((e) => e.name.replace("planning.", ""));
@@ -223,6 +252,7 @@ async function main() {
         check("the GM moves forward; one approval of a needed 3 is no quorum, and the session stays on the night",
             adv.json.night.closedReason === "gm_advanced" && adv.json.night.result === "no_quorum" &&
                 adv.json.session.status === "planning" && adv.json.session.stage === "night", adv.json);
+        await settled();
         check("the GM is told the round failed", (await pool.query(
             `SELECT 1 FROM notifications WHERE user_id = $1 AND title LIKE 'No night worked%' AND meta->>'sessionId' = $2`,
             [who.gm.id, sid2])).rowCount === 1);
@@ -284,6 +314,70 @@ async function main() {
         check("the Notice Board shows only sessions still being planned",
             (await call("GET", `/api/planning/campaigns/${campaignId}`, "gm")).json.planning.map((s: any) => s.session.id).join() === sid2);
 
+        // ── an integration that throws doesn't block scheduling ─────────────
+        const k18 = await kick("gm", { title: "Session 18", isOnline: true });
+        const sid18 = k18.json.session.id;
+        const t18 = await call("POST", P(sid18, "shortlist"), "gm", { options: [A, B] });
+        for (const p of ["p1", "p2", "p3"]) await call("POST", P(sid18, "vote"), p, { optionIds: [optionAt(t18.json, A)] });
+        fakeThrows = true;
+        const adv18 = await call("POST", P(sid18, "advance"), "gm");
+        fakeThrows = false;
+        check("Discord/Google throwing outright still leaves the session scheduled for the winning night",
+            adv18.status === 200 && adv18.json.session.status === "scheduled" && adv18.json.session.date === A.start, adv18.json);
+
+        // ── announcements are driven by the bus, not called by the planner (#88)
+        announcer.stop();
+        const k19 = await kick("gm", { title: "Session 19", isOnline: true });
+        const sid19 = k19.json.session.id;
+        check("with the announcer unsubscribed, kickoff still works but nobody is notified and nothing is posted",
+            k19.status === 200 && (await notes("p1", sid19)).length === 0 && !(await talk()).some((b) => /Session 19/.test(b)));
+        announcer = startPlanningAnnouncements();
+        await call("POST", P(sid19, "cancel"), "gm");
+        check("cancelling notifies the party (not the GM who cancelled)",
+            (await notes("p1", sid19)).some((n) => /was cancelled/.test(n.title)) && (await notes("gm", sid19)).length === 0);
+        check("...and Table Talk says planning stopped", (await talk()).some((b) => /Session 19.*cancelled/.test(b)));
+
+        // The in-person stage changes come from the venue step (#92), which isn't
+        // built yet; the announcer reacts to their events all the same.
+        const { rows: [s20] } = await pool.query(
+            `INSERT INTO game_sessions (title, campaign_id, date, end_date, status, planning_stage, is_online)
+             VALUES ('Session 20', $1, $2, $3, 'planning', 'venue', false) RETURNING id`, [campaignId, A.start, A.end]);
+        await bus.publish("planning.stage_changed", { sessionId: s20.id, campaignId, status: "planning", stage: "venue" });
+        const nightNotes = await Promise.all(["gm", "p1", "p2", "p3"].map((p) => notes(p, s20.id)));
+        check("night confirmed (in person): every party member is notified, linking to the Notice Board",
+            nightNotes.every((n) => n.length === 1 && /Night set/.test(n[0].title) && n[0].link === board14), nightNotes);
+        check("...and Table Talk says what changed and what's next", (await talk()).some((b) => /night is set.*Session 20.*venue/i.test(b)));
+
+        const { rows: [venue] } = await pool.query(
+            `INSERT INTO venues (campaign_id, name, kind) VALUES ($1, 'The Gilded Griffin', 'store') RETURNING id`, [campaignId]);
+        await pool.query(`UPDATE game_sessions SET venue_id = $2, planning_stage = 'food' WHERE id = $1`, [s20.id, venue.id]);
+        await bus.publish("planning.stage_changed", { sessionId: s20.id, campaignId, status: "planning", stage: "food" });
+        const venueNotes = await notes("p1", s20.id);
+        check("venue confirmed: the bell entry is updated in place, naming the venue",
+            venueNotes.length === 1 && /Venue set.*Gilded Griffin/.test(venueNotes[0].title) && venueNotes[0].count === 2, venueNotes);
+        check("...and Table Talk names it", (await talk()).some((b) => /venue is set.*Session 20.*Gilded Griffin/i.test(b)));
+
+        await pool.query(`UPDATE game_sessions SET status = 'scheduled', planning_stage = NULL WHERE id = $1`, [s20.id]);
+        await bus.publish("planning.stage_changed", { sessionId: s20.id, campaignId, status: "scheduled", stage: null });
+        check("scheduled (in person): the party hears when and where",
+            (await notes("p3", s20.id)).some((n) => /is on:/.test(n.title) && /Gilded Griffin/.test(n.body)) &&
+                (await talk()).some((b) => /Session 20.*scheduled.*Gilded Griffin/.test(b)));
+
+        // A failure while notifying never fails the planning action.
+        let k21: Awaited<ReturnType<typeof call>>;
+        await pool.query(`ALTER TABLE notifications RENAME TO notifications_off`);
+        await pool.query(`ALTER TABLE messages RENAME TO messages_off`);
+        try {
+            k21 = await kick("gm", { title: "Session 21", isOnline: true });
+            await settled();
+        } finally {
+            await pool.query(`ALTER TABLE notifications_off RENAME TO notifications`);
+            await pool.query(`ALTER TABLE messages_off RENAME TO messages`);
+        }
+        check("with the bell and Table Talk both failing, kickoff still succeeds",
+            k21.status === 200 && (await session(k21.json.session.id))?.status === "planning", k21.json);
+        await call("POST", P(k21.json.session.id, "cancel"), "gm");
+
         // ── existing behaviour ──────────────────────────────────────────────
         const oneOff = await call("POST", "/api/tabletop/sessions", "gm",
             { title: "Quick one-shot", campaign: campaignId, date: slot(5).start, endDate: slot(5).end });
@@ -304,6 +398,8 @@ async function main() {
         check("the ready check fires for scheduled sessions only",
             rc[scheduledSoon.id] && !rc[planningSoon.id] && !rc[cancelledSoon.id], rc);
     } finally {
+        await settled();
+        announcer.stop();
         const ids = Object.values(who).map((p) => p.id);
         if (campaignId) await pool.query(`DELETE FROM campaigns WHERE id = $1`, [campaignId]);
         if (ids.length) {

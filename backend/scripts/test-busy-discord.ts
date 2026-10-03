@@ -29,7 +29,7 @@ const { default: apiKeyRoutes } = await import("../routes/apiKeyRoutes.js");
 const { default: friendRoutes } = await import("../routes/friendRoutes.js");
 const { createFakeIntegrations } = await import("../testing/fakeIntegrations.js");
 const { DiscordApiError, realIntegrations } = await import("../utils/integrations.js");
-const { DEFAULT_EVENT_HOURS, forgetDiscordReads } = await import("../planning/discordBusySource.js");
+const { DEFAULT_EVENT_HOURS, MAX_EVENTS_PER_GUILD, forgetDiscordReads } = await import("../planning/discordBusySource.js");
 
 const SECRET = process.env.JWT_SECRET || "your-secret-key-change-this";
 const HOUR = 60 * 60 * 1000, DAY = 24 * HOUR;
@@ -73,9 +73,9 @@ async function main() {
     const discordOf = async (as: string) =>
         (await call("GET", "/api/availability/me/busy-sources", as)).json?.sources?.find((s: any) => s.source === "discord");
     const snowflake = (n: number) => `1${String(n).padStart(17, "0")}`;
-    const discordIdOf: Record<string, string> = { alice: snowflake(1), bob: snowflake(2), erin: snowflake(5) };
+    const discordIdOf: Record<string, string> = { alice: snowflake(1), bob: snowflake(2), erin: snowflake(5), frank: snowflake(6) };
     const botToken = (gm: string) => `bot-${gm}-${tag}`;
-    const guild = { main: `9${tag}01`, other: `9${tag}02`, absent: `9${tag}03` };
+    const guild = { main: `9${tag}01`, other: `9${tag}02`, absent: `9${tag}03`, big: `9${tag}04` };
 
     // The night being planned: a week out, 17:00-23:00 UTC, in one-hour slots.
     const day = new Date(Date.now() + 7 * DAY);
@@ -102,6 +102,7 @@ async function main() {
     let guilds: Record<string, Ev[]> = {};
     let notInGuild = new Set<string>([guild.absent]);
     let outage = new Set<string>();
+    let latencyMs = 0;   // per interested-users read
     fake.respond("discord.listScheduledEvents", async (token, guildId) => {
         if (notInGuild.has(guildId)) throw new DiscordApiError(403, 50001, '{"message": "Missing Access", "code": 50001}');
         if (outage.has(guildId)) throw new DiscordApiError(502, null, "Bad Gateway");
@@ -110,11 +111,13 @@ async function main() {
             name: "Secret raid night", description: "dragons",
         }) as any);
     });
-    fake.respond("discord.listInterestedUsers", async (token, guildId, eventId) =>
-        (guilds[guildId] ?? []).find((e) => e.id === eventId)?.interested ?? []);
+    fake.respond("discord.listInterestedUsers", async (token, guildId, eventId) => {
+        if (latencyMs) await new Promise((r) => setTimeout(r, latencyMs));
+        return [...(guilds[guildId] ?? []).find((e) => e.id === eventId)?.interested ?? []];
+    });
 
     try {
-        for (const name of ["gm", "gm2", "gm3", "gm4", "alice", "bob", "carol", "dave", "erin"]) {
+        for (const name of ["gm", "gm2", "gm3", "gm4", "alice", "bob", "carol", "dave", "erin", "frank"]) {
             const email = `dbusy-${name}-${tag}@example.test`;
             const { rows: [acct] } = await pool.query(
                 `INSERT INTO accounts (id, handle, email) VALUES (gen_random_uuid(), $1, $2) RETURNING id`, [`d${name}_${tag}`, email]);
@@ -137,6 +140,7 @@ async function main() {
         await makeCampaign("absent", "gm3", guild.absent, ["alice"]);
         await makeCampaign("unlinked", "gm4", null, ["alice"]);
         await makeCampaign("quiet", "gm4", guild.main, ["dave"]);
+        await makeCampaign("big", "gm", guild.big, ["frank"]);
         for (const name of ["gm", "alice", "bob", "carol", "dave"]) {
             await call("PUT", "/api/availability/me/windows", name,
                 { windows: [{ weekday: day.getUTCDay(), start: "17:00", end: "23:00", timeZone: "UTC" }] });
@@ -146,7 +150,7 @@ async function main() {
                 (await call("PUT", "/api/api-keys/discord", gm, { keyId: "bot", secret: botToken(gm) })).status === 200);
         }
         // Alice, Bob and Erin link Discord the way the profile does; Carol and Dave never do.
-        for (const name of ["alice", "bob", "erin"]) {
+        for (const name of ["alice", "bob", "erin", "frank"]) {
             await call("POST", "/api/friends/link-discord", name, { discordId: discordIdOf[name], discordHandle: `${name}#0001` });
         }
 
@@ -275,9 +279,10 @@ async function main() {
         outage = new Set();
 
         // ── interest changes ────────────────────────────────────────────────
+        await call("POST", "/api/availability/me/busy-sources/discord/sync", "alice");   // the server's reads are now shared
         guilds[guild.main][0].interested = [snowflake(99)];
         guilds[guild.main].push({ id: `evt-d-${tag}`, start: 19, end: 20, interested: [discordIdOf.alice] });
-        fresh();
+        fake.clear();   // shared reads kept: "Sync now" must not answer from them
         const syncNow = await call("POST", "/api/availability/me/busy-sources/discord/sync", "alice");
         const oMoved = await overlap("main", "gm");
         check("\"Sync now\" picks up a changed interest: the old event drops off, the new one counts",
@@ -302,6 +307,21 @@ async function main() {
         check("a linked player in no Discord-linked campaign: on, synced, no busy time, no Discord calls",
             erinOn.status === 200 && erinOn.json.source.lastError === null && (await blocksOf("erin")).length === 0 && discordCalls().length === 0,
             erinOn.json);
+
+        // A big community server: every event's interested users, read a few at a time.
+        guilds[guild.big] = Array.from({ length: MAX_EVENTS_PER_GUILD + 10 }, (_, i) => ({
+            id: `evt-big-${i}-${tag}`, start: 24 + i, end: 25 + i, interested: i === 3 ? [discordIdOf.frank] : [snowflake(500 + i)],
+        }));
+        latencyMs = 300;
+        fresh();
+        const t0 = Date.now();
+        const frankOn = await call("PUT", "/api/availability/me/busy-sources/discord", "frank");
+        const took = Date.now() - t0;
+        latencyMs = 0;
+        const bigReads = fake.calls("discord.listInterestedUsers").filter((c) => c.args[1] === guild.big);
+        check(`a server with many events syncs in time: at most ${MAX_EVENTS_PER_GUILD} events, read in parallel (300 ms each)`,
+            frankOn.status === 200 && frankOn.json.source.lastError === null && bigReads.length === MAX_EVENTS_PER_GUILD &&
+                took < 10_000 && (await blocksOf("frank")).length === 1, { took, reads: bigReads.length, res: frankOn.json });
 
         check("only the integrations fake was ever called", fake.calls().every((c) => c.name.startsWith("discord.list")),
             [...new Set(fake.calls().map((c) => c.name))]);

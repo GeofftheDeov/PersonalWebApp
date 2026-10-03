@@ -31,11 +31,15 @@
  *     blocks planning it. They still count in other campaigns' overlaps:
  *     that's another game.
  *
- * Rate limits: one person's sync reads each server once and then asks about
- * at most MAX_EVENTS_PER_GUILD events, one after another. Reads are shared
- * for READ_TTL_MS, so a party syncing together for one overlap reads each
- * server once, not once per player. The integrations module honours Discord's
- * rate-limit headers and pages the interested users.
+ * Rate limits and time: one person's sync reads each server once and then
+ * asks about at most MAX_EVENTS_PER_GUILD events, INTEREST_CONCURRENCY at a
+ * time, and starts no new Discord call after FETCH_BUDGET_MS (inside the
+ * sync's own 15 s limit): a sync that runs out of time fails like any other
+ * rather than keep calling Discord in the background. Reads are shared for
+ * READ_TTL_MS, so a party syncing together for one overlap reads each server
+ * once, not once per player; "Sync now" and turning the source on always read
+ * afresh. The integrations module honours Discord's rate-limit headers and
+ * pages the interested users.
  */
 import crypto from "crypto";
 import { query } from "../db/index.js";
@@ -51,6 +55,11 @@ export const DEFAULT_EVENT_HOURS = 4;
 export const MAX_EVENTS_PER_GUILD = 50;
 /** How long one read of a server (or of an event's interested users) is reused. */
 export const READ_TTL_MS = 30_000;
+/** Interested-user reads in flight at once, per sync. */
+export const INTEREST_CONCURRENCY = 4;
+/** No Discord call starts after this long into one sync (the sync itself gives up at 15 s). */
+export const FETCH_BUDGET_MS = 12_000;
+const TOO_SLOW = "Discord took too long to answer. Try \"Sync now\" later.";
 
 const NOT_LINKED = "Add your Discord user ID on your profile (Info tab) first.";
 const BAD_ID = "Your Discord user ID should be the long number from Discord's \"Copy User ID\". Fix it on your profile (Info tab).";
@@ -63,12 +72,15 @@ type GuildRead = { ok: true; events: DiscordScheduledEventTimes[] } | { ok: fals
 
 const reads = new Map<string, { at: number; value: Promise<unknown> }>();
 
-/** Shares one read between everyone asking within READ_TTL_MS (including while it's still in flight). */
-function shared<T>(key: string, read: () => Promise<T>): Promise<T> {
+/**
+ * Shares one read between everyone asking within READ_TTL_MS (including while
+ * it's still in flight). `fresh` reads anyway, and shares that answer instead.
+ */
+function shared<T>(key: string, read: () => Promise<T>, fresh = false): Promise<T> {
     const now = Date.now();
     for (const [k, v] of reads) if (now - v.at >= READ_TTL_MS) reads.delete(k);
     const hit = reads.get(key);
-    if (hit) return hit.value as Promise<T>;
+    if (hit && !fresh) return hit.value as Promise<T>;
     const value = read();
     value.catch(() => { /* the caller handles it */ });
     reads.set(key, { at: now, value });
@@ -89,19 +101,19 @@ function classify(err: any): { problem: GuildProblem; message: string } {
     return { problem: "unreachable", message };
 }
 
-function readGuild(token: string, guildId: string): Promise<GuildRead> {
+function readGuild(token: string, guildId: string, fresh = false): Promise<GuildRead> {
     return shared(`events|${guildId}|${tokenKey(token)}`, async (): Promise<GuildRead> => {
         try {
             return { ok: true, events: await integrations().discord.listScheduledEvents(token, guildId) };
         } catch (err: any) {
             return { ok: false, ...classify(err) };
         }
-    });
+    }, fresh);
 }
 
-function readInterested(token: string, guildId: string, eventId: string): Promise<string[]> {
+function readInterested(token: string, guildId: string, eventId: string, fresh = false): Promise<string[]> {
     return shared(`users|${guildId}|${eventId}|${tokenKey(token)}`,
-        () => integrations().discord.listInterestedUsers(token, guildId, eventId));
+        () => integrations().discord.listInterestedUsers(token, guildId, eventId), fresh);
 }
 
 /** The person's linked Discord user id: null when there is none, "" when it isn't a Discord id. */
@@ -134,7 +146,10 @@ export const discordBusySource: BusySourceAdapter = {
         return { connected: true, ready: true, needsReconsent: false, problem: null };
     },
 
-    async fetchBusy(personId, range) {
+    async fetchBusy(personId, range, opts) {
+        const fresh = !!opts?.manual;
+        const deadline = Date.now() + FETCH_BUDGET_MS;
+        const inTime = () => { if (Date.now() > deadline) throw new Error(TOO_SLOW); };
         const me = await linkedDiscordId(personId);
         if (!me) return [];   // no linked id, no Discord signal
 
@@ -154,7 +169,8 @@ export const discordBusySource: BusySourceAdapter = {
         const out: FetchedBusy[] = [];
         for (const [guildId, token] of guilds) {
             if (!token) continue;   // the GM's overlap says why
-            const read = await readGuild(token, guildId);
+            inTime();
+            const read = await readGuild(token, guildId, fresh);
             if (!read.ok) {
                 if (read.problem === "unreachable") throw new Error(`Discord events couldn't be read just now (${read.message}).`);
                 continue;   // bot not in the server, or a bad token: the GM's overlap says why
@@ -164,17 +180,29 @@ export const discordBusySource: BusySourceAdapter = {
                     e.start < range.end && endOf(e) > range.start)
                 .sort((a, b) => a.start.getTime() - b.start.getTime())
                 .slice(0, MAX_EVENTS_PER_GUILD);
-            for (const e of relevant) {
-                let interested: string[];
-                try {
-                    interested = await readInterested(token, guildId, e.id);
-                } catch (err: any) {
-                    const { problem, message } = classify(err);
-                    if (problem === "unreachable") throw new Error(`Discord events couldn't be read just now (${message}).`);
-                    continue;   // the event vanished, or the bot can't see its channel
+            // A few at a time: quick for a big server, gentle on Discord's rate limits.
+            let next = 0, stop = false;
+            const worker = async () => {
+                while (!stop && next < relevant.length) {
+                    const e = relevant[next++];
+                    try { inTime(); } catch (err) { stop = true; throw err; }
+                    let interested: string[];
+                    try {
+                        interested = await readInterested(token, guildId, e.id, fresh);
+                    } catch (err: any) {
+                        const { problem, message } = classify(err);
+                        if (problem === "unreachable") {
+                            stop = true;
+                            throw new Error(`Discord events couldn't be read just now (${message}).`);
+                        }
+                        continue;   // the event vanished, or the bot can't see its channel
+                    }
+                    if (interested.includes(me)) out.push({ start: e.start, end: endOf(e), externalId: e.id });
                 }
-                if (interested.includes(me)) out.push({ start: e.start, end: endOf(e), externalId: e.id });
-            }
+            };
+            const workers = Array.from({ length: Math.min(INTEREST_CONCURRENCY, relevant.length) }, worker);
+            // The first failure fails the sync, and the other workers start no more calls.
+            await Promise.all(workers);
         }
         return out;
     },

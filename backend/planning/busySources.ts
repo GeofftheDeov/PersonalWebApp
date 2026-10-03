@@ -79,8 +79,10 @@ export interface BusySourceAdapter {
     /**
      * The person's busy time between start and end. Throw to fail the sync;
      * the error's message is shown to the person (only), so word it for them.
+     * `manual` is set when the person asked ("Sync now", or turning it on):
+     * don't answer from anything cached.
      */
-    fetchBusy(personId: string, range: { start: Date; end: Date }): Promise<FetchedBusy[]>;
+    fetchBusy(personId: string, range: { start: Date; end: Date }, opts?: { manual?: boolean }): Promise<FetchedBusy[]>;
 }
 
 const ADAPTERS: Partial<Record<BusySourceName, BusySourceAdapter>> = {
@@ -172,10 +174,10 @@ function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> 
 }
 
 /** Sync one source for one person over `window`. True when it worked. */
-async function syncOne(personId: string, adapter: BusySourceAdapter, window: { start: Date; end: Date }, now: Date) {
+async function syncOne(personId: string, adapter: BusySourceAdapter, window: { start: Date; end: Date }, now: Date, manual = false) {
     let blocks: ReturnType<typeof cleanBlocks>;
     try {
-        blocks = cleanBlocks(await withTimeout(adapter.fetchBusy(personId, window), SYNC_TIMEOUT_MS,
+        blocks = cleanBlocks(await withTimeout(adapter.fetchBusy(personId, window, { manual }), SYNC_TIMEOUT_MS,
             "The calendar took too long to answer."), window);
     } catch (err: any) {
         const message = String(err?.message || "The calendar couldn't be read.").slice(0, 300);
@@ -274,7 +276,7 @@ export async function enableBusySource(personId: string, source: string, now: Da
     if (!conn.ready) throw new BusySourceError(409, conn.problem || "This source can't be turned on yet.");
     await query(`INSERT INTO busy_sources (person_id, source, enabled_at) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
         [personId, adapter.name, now]);
-    await syncOne(personId, adapter, syncWindow({ start: now, end: now }, now), now);
+    await syncOne(personId, adapter, syncWindow({ start: now, end: now }, now), now, true);
     return getBusySource(personId, adapter.name);
 }
 
@@ -282,7 +284,7 @@ export async function enableBusySource(personId: string, source: string, now: Da
 export async function syncBusySourceNow(personId: string, source: string, now: Date): Promise<BusySourceStatus> {
     const adapter = adapterFor(source);
     if (!(await rowOf(personId, adapter.name))) throw new BusySourceError(404, "That source is off.");
-    await syncOne(personId, adapter, syncWindow({ start: now, end: now }, now), now);
+    await syncOne(personId, adapter, syncWindow({ start: now, end: now }, now), now, true);
     return getBusySource(personId, adapter.name);
 }
 

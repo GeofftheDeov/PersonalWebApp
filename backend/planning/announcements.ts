@@ -148,15 +148,16 @@ async function onPollClosed(e: EventMap["planning.poll_closed"]) {
     const s = await loadSession(e.sessionId);
     if (!s) return;
     const what = e.kind === "night" ? "night" : "venue";
+    const options = e.kind === "night" ? "times" : "venues";
     if (e.result === "tie") {
         await notifyGameMasters(s, `Tie on "${s.title}"`, `The vote closed level. Pick the ${what} on the Notice Board.`);
         await postTableTalk(s.campaign_id, `The vote for "${s.title}" is a tie — the ${s.gm_title} will pick the ${what}.`);
     } else {
         const { rows: [p] } = await pool.query(`SELECT quorum FROM polls WHERE id = $1`, [e.pollId]);
-        await notifyGameMasters(s, `No night worked for "${s.title}"`,
-            `No shortlisted time reached quorum (${p?.quorum ?? "?"}). Shortlist new times on the Notice Board.`);
+        await notifyGameMasters(s, `No ${what} worked for "${s.title}"`,
+            `None of the shortlisted ${options} reached quorum (${p?.quorum ?? "?"}). Shortlist new ${options} on the Notice Board.`);
         await postTableTalk(s.campaign_id,
-            `None of the shortlisted times for "${s.title}" had enough of the party. The ${s.gm_title} will shortlist new ones.`);
+            `None of the shortlisted ${options} for "${s.title}" had enough of the party. The ${s.gm_title} will shortlist new ones.`);
     }
 }
 

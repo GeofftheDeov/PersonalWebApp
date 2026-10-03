@@ -124,7 +124,10 @@ function cleanNightOptions(raw: unknown, now: Date) {
 
 export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, now: () => new Date() }) {
     const publish = <K extends keyof EventMap>(name: K, payload: EventMap[K]): Effect =>
-        () => bus.publish(name, payload).catch(() => { /* bus down is non-fatal */ });
+        // Non-fatal, but not silent: the party's announcements ride on these events.
+        () => bus.publish(name, payload).catch((err: any) => {
+            console.error(`[planning] publishing ${name} failed; the party won't be told:`, JSON.stringify(payload), err?.message ?? err);
+        });
 
     /** Runs `fn` in a transaction, then its side effects in order once committed. */
     async function mutate<T>(fn: (db: pg.PoolClient, effects: Effect[]) => Promise<T>): Promise<T> {

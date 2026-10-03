@@ -135,7 +135,8 @@ async function main() {
         const both = { createDiscordEvent: true, createGoogleEvent: true };
         const asPlayer = await create("p1", both);
         check("a player who isn't the Game Master is rejected (403), as before",
-            asPlayer.status === 403 && asPlayer.json.error === "Only the Game Master can create sessions for this campaign", asPlayer.json);
+            // #80 names the role by the campaign's GM title ("Dungeon Master" by default).
+            asPlayer.status === 403 && /^Only the (Game|Dungeon) Master can create sessions for this campaign$/.test(asPlayer.json.error), asPlayer.json);
         const asOutsider = await create("outsider", both);
         check("someone outside the party is rejected (403)", asOutsider.status === 403 && asOutsider.json.error === "Unauthorized", asOutsider.json);
         check("...and neither reached Discord or Google", fake.calls().length === 0, fake.calls());

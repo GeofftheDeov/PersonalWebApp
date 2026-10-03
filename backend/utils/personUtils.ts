@@ -1,3 +1,4 @@
+import { query } from "../db/index.js";
 import { isUuid } from "../db/model.js";
 import Account from "../models/Account.js";
 
@@ -51,6 +52,20 @@ export async function findPeopleByEmail(emails: string[]): Promise<ResolvedPerso
     if (!emails.length) return [];
     const docs = await Account.find({ email: { $in: emails } });
     return docs.map((doc: any) => ({ doc }));
+}
+
+/**
+ * Account ids of everyone in a campaign, once each however many member rows
+ * they have. Found by person_id, never by the member row's email: since Phase 3
+ * that is the one way a membership points at a person, and Salesforce-synced
+ * rows carry nothing else (#108).
+ */
+export async function findCampaignPeopleIds(campaignId: string): Promise<string[]> {
+    const { rows } = await query<{ id: string }>(
+        `SELECT DISTINCT a.id
+           FROM campaign_members m JOIN accounts a ON a.id = m.person_id
+          WHERE m.campaign_id = $1`, [campaignId]);
+    return rows.map((r) => r.id);
 }
 
 /** Human display name: prefers handle, then name fields, never the email. */

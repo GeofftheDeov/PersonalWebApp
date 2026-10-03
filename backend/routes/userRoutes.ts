@@ -16,6 +16,7 @@ import fs from "fs";
 import { sendResetPasswordEmail, sendVerificationEmail } from "../services/emailService.js";
 import { auth } from "../middleware/auth.js";
 import { isDevEnv } from "../utils/env.js";
+import { hashToken } from "../utils/tokenHash.js";
 import { OAuth2Client } from "google-auth-library";
 
 /**
@@ -120,7 +121,7 @@ router.post("/register", async (req, res) => {
       email,
       password,
       isVerified: isDev,
-      emailVerificationToken: token,
+      emailVerificationToken: token && hashToken(token),
       sfObject: "Lead",
     });
 
@@ -142,18 +143,18 @@ router.post("/register", async (req, res) => {
 
 router.post("/verify-email", async (req, res) => {
     const { token } = req.body;
-    if (!token) return res.status(400).json({ error: "Token is required" });
+    // A string only: the model layer reads an object filter value as operators,
+    // so {"$ne": null} would match whoever has a token outstanding.
+    if (typeof token !== "string" || !token) return res.status(400).json({ error: "Token is required" });
 
     try {
-        const user = await Account.findOne({ emailVerificationToken: token });
+        const user = await Account.findOne({ emailVerificationToken: hashToken(token) });
         if (!user) return res.status(400).json({ error: "Invalid or expired token" });
 
+        // The model layer has no $unset; null clears the column.
         await Account.updateOne(
             { _id: user._id },
-            {
-                $set: { isVerified: true },
-                $unset: { emailVerificationToken: "" }
-            }
+            { $set: { isVerified: true, emailVerificationToken: null } }
         );
 
         res.json({ message: "Email verified successfully" });
@@ -453,11 +454,12 @@ router.post("/forgot-password", async (req, res) => {
 
         const token = crypto.randomBytes(20).toString("hex");
 
+        // Only the hash is stored; the raw token goes out in the email below.
         await Account.updateOne(
             { _id: user._id },
             {
                 $set: {
-                    resetPasswordToken: token,
+                    resetPasswordToken: hashToken(token),
                     resetPasswordExpires: new Date(Date.now() + 3600000) // 1 hour
                 }
             }
@@ -476,9 +478,12 @@ router.post("/forgot-password", async (req, res) => {
 
 router.post("/reset-password", async (req, res) => {
     const { token, newPassword } = req.body;
+    // A string only: the model layer reads an object filter value as operators,
+    // so {"$ne": null} would match whoever has a reset in flight.
+    if (typeof token !== "string" || !token) return res.status(400).json({ error: "Invalid or expired token" });
     try {
         const doc: any = await Account.findOne({
-            resetPasswordToken: token,
+            resetPasswordToken: hashToken(token),
             resetPasswordExpires: { $gt: new Date() },
         });
 

@@ -14,12 +14,22 @@
  * had already committed, so the invitee became a member while the invite stayed
  * "pending" and the inviter was never told.
  *
- * Run:  DATABASE_URL=postgresql://postgres@127.0.0.1:5433/pwatest npx tsx scripts/test-populated-save.ts
+ * Since Phase 3 (#35) both ends of an invite are FKs to accounts(id), so the
+ * inviter and invitee are accounts rows.
+ *
+ * Run against a throwaway database loaded from db/schema.sql (it inserts rows,
+ * and refuses to run against anything but localhost):
+ *   DATABASE_URL=postgresql://postgres@127.0.0.1:5433/pwatest npx tsx scripts/test-populated-save.ts
  */
 import pool from "../db/index.js";
 import Campaign from "../models/Campaign.js";
 import CampaignInvite from "../models/CampaignInvite.js";
 import CampaignMember from "../models/CampaignMember.js";
+
+if (!/(\/\/|@)(127\.0\.0\.1|localhost)[:/]/.test(process.env.DATABASE_URL ?? "")) {
+  console.error("\n  Refusing to run: DATABASE_URL must be a local throwaway database.\n");
+  process.exit(2);
+}
 
 let pass = 0;
 let fail = 0;
@@ -47,7 +57,8 @@ async function main() {
   const campaign = await Campaign.create({ title: "Test Campaign" });
   const other = await Campaign.create({ title: "Other Campaign" });
   const { rows: people } = await pool.query(
-    `INSERT INTO sf_users (name, password) VALUES ('inviter','x'), ('invitee','x') RETURNING id`);
+    `INSERT INTO accounts (id, name) VALUES (gen_random_uuid(), 'inviter'), (gen_random_uuid(), 'invitee')
+     RETURNING id`);
 
   const newInvite = () => CampaignInvite.create({
     campaign: String(campaign._id), from: people[0].id, to: people[1].id,
@@ -80,7 +91,9 @@ async function main() {
   });
 
   await check("a new document with a document as its ref inserts the id", async () => {
-    const m = await new CampaignMember({ campaign, email: "invitee@example.com", status: "Player" }).save();
+    const m = await new CampaignMember({
+      campaign, person: people[1].id, email: "invitee@example.com", status: "Player",
+    }).save();
     const { rows } = await pool.query(`SELECT campaign_id FROM campaign_members WHERE id = $1`, [m._id]);
     assertEq(rows[0].campaign_id, campaign._id, "campaign_id");
   });

@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sword, Book, Map, Plus, Save, Shield, X, ChevronRight, Skull, Star, Wifi } from 'lucide-react';
 import Footer from '@/components/Footer';
+import QuestLog from '@/components/QuestLog';
 import Link from 'next/link';
 import { sessionWhen } from '@/lib/sessions';
 
@@ -255,6 +256,8 @@ export default function GameNightPage() {
                     {tab === 'sessions' && createButton(() => { setSessionForm(EMPTY_SESSION); setSessionError(null); setShowCreateSession(true); }, 'NEW SESSION', 'create-session-btn')}
                     {tab === 'characters' && createButton(() => setShowCreateCharacter(true), 'NEW CHARACTER', 'create-character-btn')}
                 </header>
+
+                <QuestLog />
 
                 {/* Tabs */}
                 <div className="flex gap-1 sm:gap-2 mb-8 border-b-4 border-black">

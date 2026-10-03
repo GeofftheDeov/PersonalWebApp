@@ -66,6 +66,27 @@ export interface EventMap {
         campaignId: string;
         status: "planning" | "scheduled" | "cancelled" | "completed";
         stage: "night" | "venue" | "food" | null;
+        /**
+         * Set when the change is about a night that was already confirmed
+         * (#87): "reopened" on planning/night when the Game Master changes a
+         * scheduled session's night (not a kickoff), "moved" on the transition
+         * that confirms a different night for it.
+         */
+        nightChange?: "reopened" | "moved";
+    };
+    /**
+     * A scheduled session's night moved (#87): published once the new night
+     * is confirmed, never while it's only being re-planned. Anything timed
+     * off the session's start -- quest due times and reminders (#91) --
+     * shifts by `start - previousStart`. ISO date-times.
+     */
+    "planning.night_moved": {
+        sessionId: string;
+        campaignId: string;
+        previousStart: string;
+        previousEnd: string | null;
+        start: string;
+        end: string;
     };
     "planning.poll_opened": {
         sessionId: string;

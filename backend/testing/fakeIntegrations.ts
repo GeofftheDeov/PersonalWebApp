@@ -45,7 +45,11 @@ type Handlers = { [N in CallName]: CallFn<N> };
 function defaultHandlers(next: () => number): Handlers {
     return {
         "discord.createScheduledEvent": async () => ({ id: `fake-discord-event-${next()}` }),
+        "discord.updateScheduledEvent": async (input) => ({ id: input.eventId }),
+        "discord.deleteScheduledEvent": async () => {},
         "google.createCalendarEvent": async () => ({ id: `fake-google-event-${next()}` }),
+        "google.updateCalendarEvent": async (_refreshToken, eventId) => ({ id: eventId }),
+        "google.deleteCalendarEvent": async () => {},
         "uploads.presignPut": async (input) => ({
             url: `https://fake-uploads.test/${input.key}?signature=fake-${next()}`,
             method: "PUT",

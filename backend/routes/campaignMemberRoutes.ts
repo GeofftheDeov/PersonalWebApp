@@ -18,9 +18,18 @@ import { getAuthorizedCampaignIds, isCampaignGameMaster } from "../utils/gameNig
  * no person rather than a silent partial write — hence the explicit 400.
  */
 
+/**
+ * What one member may see of another's account. `person` refs accounts, and
+ * populated whole it serialized every column — password hash, verification
+ * token, and the reset token, which is stored in plaintext and redeemed by
+ * equality — to every member of the campaign. Same fields as
+ * GET /api/campaigns/:id/members (#108).
+ */
+const PERSON_PUBLIC = { path: "person", select: "handle name firstName lastName" };
+
 /** The membership, plus the campaign it belongs to — or null if you can't see it. */
 async function readableMember(req: any, id: string) {
-    const member = await CampaignMember.findById(id).populate("campaign").populate("person");
+    const member = await CampaignMember.findById(id).populate("campaign").populate(PERSON_PUBLIC);
     if (!member) return { member: null, allowed: false };
     const campaignIds = await getAuthorizedCampaignIds(req.user);
     const campaignId = String((member.campaign as any)?._id ?? member.campaign);
@@ -36,7 +45,7 @@ router.get("/", auth, async (req: any, res) => {
         const filter = campaignIds === null ? {} : { campaign: { $in: campaignIds } };
         const members = await CampaignMember.find(filter)
             .populate("campaign")
-            .populate("person")
+            .populate(PERSON_PUBLIC)
             .sort({ createdAt: -1 });
         res.json(members);
     } catch (error: any) {

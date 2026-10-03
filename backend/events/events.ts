@@ -89,6 +89,31 @@ export interface EventMap {
         reason: "all_voted" | "gm_advanced" | "gm_reshortlisted" | "cancelled";
     };
 
+    /**
+     * Quests (#90, part of #57): a quest was created with an owner, or its
+     * owner changed. Published by planning/quests.ts. `assigneeId` is null
+     * when a potluck slot is left unclaimed; `previousAssigneeId` is null for
+     * a new quest; `assignedBy` is null when the app did it (e.g. a host-prep
+     * quest on venue confirmation).
+     */
+    "quest.assigned": {
+        questId: string;
+        sessionId: string;
+        campaignId: string;
+        kind: "host_prep" | "food" | "custom";
+        assigneeId: string | null;
+        previousAssigneeId: string | null;
+        assignedBy: string | null;
+    };
+    /** A quest was marked done, by its owner or the Game Master. */
+    "quest.completed": {
+        questId: string;
+        sessionId: string;
+        campaignId: string;
+        assigneeId: string | null;
+        completedBy: string;
+    };
+
     /** A notification was created (or refreshed) for a user's bell. */
     "user.notification": {
         notificationId: string;

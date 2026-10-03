@@ -29,7 +29,6 @@ import { postTableTalk } from "../utils/tableTalk.js";
 import { resolveQuorum } from "./availability.js";
 import { campaignParty } from "./availabilityStore.js";
 import { realExternalEvents, type ExternalEvents } from "./externalEvents.js";
-import { roleIn } from "./roles.js";
 import {
     breakTie, castBallot, closePoll, everyoneVoted, latestPoll, openPoll, openPollOf, pollJson,
     type CloseReason, type Poll,
@@ -67,6 +66,17 @@ async function loadSession(db: Db, sessionId: string, lock: boolean) {
     const { rows: [s] } = await db.query(SESSION_SQL + (lock ? " FOR UPDATE OF s" : ""), [sessionId]);
     if (!s) throw new PlanningError(404, "Session not found.");
     return s;
+}
+
+/** What this person may do in this campaign (and, for a one-session torch pass, this session). */
+async function roleIn(db: Db, actorId: string, campaignId: string, gmOverrideId: string | null = null) {
+    // Sequential: `db` may be a transaction's single client.
+    const { rows: [acct] } = await db.query(`SELECT app_role FROM accounts WHERE id = $1`, [actorId]);
+    const { rows: memberships } = await db.query(
+        `SELECT status FROM campaign_members WHERE campaign_id = $1 AND person_id = $2`, [campaignId, actorId]);
+    const admin = acct?.app_role === "admin";
+    const gm = admin || gmOverrideId === actorId || memberships.some((m) => m.status === "Game Master");
+    return { admin, gm, member: gm || memberships.length > 0 };
 }
 
 /** Whose vault a confirmed session's external events use: the stand-in first, then the campaign's GMs. */

@@ -1,7 +1,9 @@
 /**
  * Who someone is to a campaign (#57): the Game Master, a party member, or
- * neither. Shared by the planner and the quests module so the two can't drift
- * on who counts as the Game Master.
+ * neither. Used by the quests module. It mirrors the planner's private
+ * roleIn exactly; the planner should import this one instead once the
+ * in-flight planner changes (#117) have merged, so the two can't drift on who
+ * counts as the Game Master.
  */
 import type pg from "pg";
 

@@ -164,6 +164,10 @@ export default function SessionQuests({ sessionId }: { sessionId: string }) {
                                                 value={q.assignee?.id ?? ''}
                                                 onChange={e => act(() => questApi(`/${q.id}`, { method: 'PATCH', body: { assigneeId: e.target.value } }))}>
                                                 {!q.assignee && <option value="">Unclaimed</option>}
+                                                {/* An owner who has since left the party still shows as the owner. */}
+                                                {q.assignee && !party.some(p => p.id === q.assignee!.id) && (
+                                                    <option value={q.assignee.id} disabled>{q.assignee.name} (left the party)</option>
+                                                )}
                                                 {party.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                                             </select>
                                         </label>

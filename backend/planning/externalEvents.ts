@@ -1,7 +1,9 @@
 /**
  * Where a confirmed session goes outside the app (#57): a Discord scheduled
  * event and a Google Calendar event. The planner reaches Discord and Google
- * only through this interface, so tests hand it a fake that records calls.
+ * only through this interface, so tests can hand it a fake. The real one
+ * makes its calls through the integrations module (utils/integrations.ts), so
+ * a test can instead install the integrations fake and see the raw calls.
  *
  * Credentials are the Game Master's, as they are for the one-off "add
  * session" form: the Discord bot token and the Google refresh token in their
@@ -9,7 +11,7 @@
  * plus a one-session stand-in), so the first one holding the key is used.
  */
 import { getDecryptedKeys } from "../routes/apiKeyRoutes.js";
-import { buildGoogleCalendarLink, createDiscordScheduledEvent, createGoogleCalendarEvent } from "../utils/integrations.js";
+import { buildGoogleCalendarLink, integrations } from "../utils/integrations.js";
 
 export interface PublishSessionInput {
     /** Whose vault to use, in order of preference. */
@@ -67,7 +69,7 @@ export const realExternalEvents: ExternalEvents = {
                 out.warnings.push("Discord event skipped: no 'discord' bot token in the Game Master's API Key Vault.");
             } else {
                 try {
-                    const ev = await createDiscordScheduledEvent({
+                    const ev = await integrations().discord.createScheduledEvent({
                         botToken: keys.secret, guildId: input.discord.guildId, channelId: input.discord.channelId,
                         name: input.name, description: input.description, location: input.location,
                         start: input.start, end: input.end,
@@ -84,7 +86,7 @@ export const realExternalEvents: ExternalEvents = {
             out.warnings.push("Google Calendar not connected for the Game Master: the shareable link was made, but no event was added.");
         } else {
             try {
-                const ev = await createGoogleCalendarEvent(google.secret, {
+                const ev = await integrations().google.createCalendarEvent(google.secret, {
                     title: input.name, description: input.description, location: input.location,
                     start: input.start, end: input.end,
                 });

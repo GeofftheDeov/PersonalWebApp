@@ -7,7 +7,8 @@ import Account from "../models/Account.js";
 import { auth } from "../middleware/auth.js";
 import { getAuthorizedCampaignIds } from "../utils/gameNightPlannerUtils.js";
 import { personDisplayName } from "../utils/personUtils.js";
-import { SettingsError, updateCampaignSettings } from "../planning/campaignSettings.js";
+import { SettingsError, cleanGmTitle, updateCampaignSettings } from "../planning/campaignSettings.js";
+import { bus } from "../events/index.js";
 
 /**
  * Phase 3 (#35, plan §3.4). Auto-enrolment used to branch on req.user.type to
@@ -46,6 +47,8 @@ router.post("/", auth, async (req: any, res) => {
 
         // The creator owns the campaign (#57): the banner and GM title are
         // theirs, and stay theirs if the torch later passes to someone else.
+        // They may name the Game Master role now; left blank, it's the default.
+        const gmTitle = cleanGmTitle(req.body.gmTitle, { optional: true });
         const campaign = new Campaign({
             title,
             description,
@@ -53,12 +56,14 @@ router.post("/", auth, async (req: any, res) => {
             startDate,
             endDate,
             owner: req.user.id,
+            gmTitle,
         });
         await campaign.save();
 
         // Auto-enroll creator as Game Master
         const memberFields = await memberFieldsFor(req.user, campaign._id, "Game Master");
         await new CampaignMember(memberFields).save();
+        bus.publish("campaign.changed", { campaignId: String(campaign._id), action: "created" }).catch(() => { /* non-fatal */ });
 
         res.status(201).json({
             message: "Campaign created successfully!",
@@ -68,10 +73,13 @@ router.post("/", auth, async (req: any, res) => {
                 description: campaign.description,
                 status: campaign.status,
                 startDate: campaign.startDate,
-                endDate: campaign.endDate
+                endDate: campaign.endDate,
+                owner: campaign.owner,
+                gmTitle: campaign.gmTitle,
             }
         });
     } catch (error: any) {
+        if (error instanceof SettingsError) return res.status(error.status).json({ error: error.message });
         console.error("Error creating campaign:", error);
         res.status(500).json({ error: "Failed to create campaign", details: error.message });
     }

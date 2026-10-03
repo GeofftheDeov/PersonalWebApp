@@ -8,6 +8,7 @@ import PlayerSession from "../models/PlayerSession.js";
 import Task from "../models/Task.js";
 import Event from "../models/Event.js";
 import Campaign from "../models/Campaign.js";
+import { gmTitleOf } from "../planning/campaignSettings.js";
 import { auth } from "../middleware/auth.js";
 import { getAuthorizedCampaignIds, isCampaignGameMaster } from "../utils/gameNightPlannerUtils.js";
 import { findPersonById, personDisplayName } from "../utils/personUtils.js";
@@ -37,7 +38,7 @@ router.post("/sessions", auth, async (req: any, res) => {
 
         // Sessions are GM-only: only the campaign's Game Master may create them.
         if (!(await isCampaignGameMaster(req.user, targetCampaign))) {
-            return res.status(403).json({ error: "Only the Game Master can create sessions for this campaign" });
+            return res.status(403).json({ error: `Only the ${await gmTitleOf(targetCampaign)} can create sessions for this campaign` });
         }
 
         const {
@@ -160,7 +161,7 @@ router.put("/sessions/:id", auth, async (req: any, res) => {
 
         // Sessions are GM-only: only the campaign's Game Master may edit them.
         if (!(await isCampaignGameMaster(req.user, String(existing.campaign)))) {
-            return res.status(403).json({ error: "Only the Game Master can edit sessions for this campaign" });
+            return res.status(403).json({ error: `Only the ${await gmTitleOf(existing.campaign)} can edit sessions for this campaign` });
         }
 
         const { title, date, endDate, location, isOnline, agenda, summary, vodUrl } = req.body;
@@ -223,7 +224,7 @@ router.post("/prepare-session", auth, async (req: any, res) => {
 
         // GM-only, same as direct session creation (this endpoint was previously unauthenticated).
         if (!(await isCampaignGameMaster(req.user, campaignId?.toString()))) {
-            return res.status(403).json({ error: "Only the Game Master can create sessions for this campaign" });
+            return res.status(403).json({ error: `Only the ${await gmTitleOf(campaignId)} can create sessions for this campaign` });
         }
 
 

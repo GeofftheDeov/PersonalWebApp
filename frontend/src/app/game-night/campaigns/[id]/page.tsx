@@ -7,6 +7,7 @@ import { Map, ArrowLeft, Calendar, Book, Users, Shield, ChevronRight, Crown, Sav
 import CampaignChat from '@/components/CampaignChat';
 import NoticeBoard from '@/components/NoticeBoard';
 import { sessionWhen } from '@/lib/sessions';
+import { DEFAULT_GM_TITLE, gmTitleOf, roleLabel } from '@/lib/campaigns';
 import { canAdmin, fetchCapabilities } from '@/lib/capabilities';
 
 interface Session {
@@ -116,7 +117,7 @@ export default function CampaignDetailPage() {
             if (!campRes.ok) { router.push('/game-night'); return; }
             const c = await campRes.json();
             setCampaign(c);
-            setForm({ title: c.title, description: c.description || '', status: c.status, startDate: toDateInput(c.startDate), endDate: toDateInput(c.endDate), discordGuildId: c.discordGuildId || '', discordChannelId: c.discordChannelId || '', quorum: c.quorum ?? '', tableLink: c.tableLink || '' });
+            setForm({ title: c.title, description: c.description || '', status: c.status, startDate: toDateInput(c.startDate), endDate: toDateInput(c.endDate), discordGuildId: c.discordGuildId || '', discordChannelId: c.discordChannelId || '', quorum: c.quorum ?? '', tableLink: c.tableLink || '', gmTitle: c.gmTitle || DEFAULT_GM_TITLE });
             // Planning settings belong to the campaign's owner or an admin (#57).
             // Display only: the server enforces it.
             const me = JSON.parse(localStorage.getItem('user') || 'null');
@@ -141,7 +142,7 @@ export default function CampaignDetailPage() {
         e.preventDefault();
         setSaving(true);
         setSettingsError(null);
-        const { quorum, tableLink, ...details } = form;
+        const { quorum, tableLink, gmTitle, ...details } = form;
         const res = await fetch(`/api/campaigns/${id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
@@ -154,13 +155,13 @@ export default function CampaignDetailPage() {
             const settings = await fetch(`/api/campaigns/${id}/settings`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-                body: JSON.stringify({ quorum: quorum === '' ? null : Number(quorum), tableLink }),
+                body: JSON.stringify({ quorum: quorum === '' ? null : Number(quorum), tableLink, gmTitle }),
             });
             const body = await settings.json().catch(() => ({}));
             settingsOk = settings.ok;
             updated = settings.ok
-                ? { ...updated, quorum: body.quorum, tableLink: body.tableLink }
-                : { ...updated, quorum: campaign.quorum, tableLink: campaign.tableLink };
+                ? { ...updated, quorum: body.quorum, tableLink: body.tableLink, gmTitle: body.gmTitle }
+                : { ...updated, quorum: campaign.quorum, tableLink: campaign.tableLink, gmTitle: campaign.gmTitle };
             if (!settings.ok) setSettingsError(body.error || 'Could not save the planning settings.');
         }
         setCampaign(updated);
@@ -251,6 +252,8 @@ export default function CampaignDetailPage() {
 
     if (loading) return <div className="min-h-screen flex items-center justify-center"><span className="text-3xl font-permanent text-teal-600 animate-pulse">LOADING CAMPAIGN...</span></div>;
     if (!campaign) return null;
+    // The owner is separate from the Game Master (#80): who set the campaign up.
+    const ownerMember = campaign.owner ? members.find(m => m.playerId === campaign.owner) : undefined;
 
     return (
         <div className="min-h-[calc(100vh-76px)] flex flex-col">
@@ -309,6 +312,10 @@ export default function CampaignDetailPage() {
                             <div className="pt-2 border-t-2 border-white/10">
                                 <p className="font-permanent text-xs text-teal-400 uppercase mb-3">Planning</p>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div className="sm:col-span-2">
+                                        <label className={LABEL_CLS}>Game Master title</label>
+                                        <input required maxLength={40} className={INPUT_CLS} placeholder={DEFAULT_GM_TITLE.toUpperCase()} value={form.gmTitle} onChange={e => setForm({ ...form, gmTitle: e.target.value })} />
+                                    </div>
                                     <div>
                                         <label className={LABEL_CLS}>Quorum (players a night needs)</label>
                                         <input type="number" min={1} max={50} className={INPUT_CLS} placeholder={`WHOLE PARTY (${members.length})`} value={form.quorum} onChange={e => setForm({ ...form, quorum: e.target.value })} />
@@ -319,7 +326,7 @@ export default function CampaignDetailPage() {
                                     </div>
                                 </div>
                                 <p className="text-[10px] text-zinc-500 mt-2 font-permanent uppercase leading-relaxed">
-                                    Leave quorum empty to need the whole party. The table link (Foundry, Roll20, a Discord voice channel) shows on every online session.
+                                    The Game Master title is what this campaign calls its Game Master: Dungeon Master, Host, Organizer. Leave quorum empty to need the whole party. The table link (Foundry, Roll20, a Discord voice channel) shows on every online session.
                                 </p>
                                 {settingsError && <p role="alert" className="mt-2 font-permanent text-xs text-red-400 uppercase">{settingsError}</p>}
                             </div>
@@ -384,6 +391,18 @@ export default function CampaignDetailPage() {
                                 <p className="font-permanent text-black dark:text-white uppercase text-sm">{new Date(campaign.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }).toUpperCase()}</p>
                             </div>
                             <div>
+                                <p className="font-permanent text-xs text-zinc-400 uppercase mb-1">{gmTitleOf(campaign)}</p>
+                                <p className="font-permanent text-black dark:text-white uppercase text-sm">
+                                    {members.filter(m => m.status === 'Game Master').map(memberName).join(', ') || 'None yet'}
+                                </p>
+                            </div>
+                            <div>
+                                <p className="font-permanent text-xs text-zinc-400 uppercase mb-1">Owner</p>
+                                <p className="font-permanent text-black dark:text-white uppercase text-sm">
+                                    {!campaign.owner ? 'Admin-managed' : ownerMember ? memberName(ownerMember) : 'Not in the party'}
+                                </p>
+                            </div>
+                            <div>
                                 <p className="font-permanent text-xs text-zinc-400 uppercase mb-1">Quorum</p>
                                 <p className="font-permanent text-black dark:text-white uppercase text-sm">{campaign.quorum ? `${campaign.quorum} of the party` : 'Whole party'}</p>
                             </div>
@@ -405,7 +424,8 @@ export default function CampaignDetailPage() {
 
                 {/* The Notice Board: session planning (#57) */}
                 <div id="notice-board" className="mb-10 scroll-mt-24">
-                    <NoticeBoard campaignId={id} onSessionsChanged={reloadSessions} />
+                    {/* Keyed on the GM title so a rename re-reads the board's wording. */}
+                    <NoticeBoard key={gmTitleOf(campaign)} campaignId={id} onSessionsChanged={reloadSessions} />
                 </div>
 
                 {/* Table Talk + Players */}
@@ -438,7 +458,11 @@ export default function CampaignDetailPage() {
                                             </div>
                                             <div className="flex-grow min-w-0">
                                                 <p className="font-permanent text-sm text-black dark:text-white uppercase truncate">{memberName(m)}</p>
-                                                {m.status && <p className="text-xs font-permanent text-teal-600 dark:text-yellow-400 uppercase">{m.status}</p>}
+                                                {(m.status || m === ownerMember) && (
+                                                    <p className="text-xs font-permanent text-teal-600 dark:text-yellow-400 uppercase">
+                                                        {[roleLabel(m.status, campaign), m === ownerMember ? 'Owner' : ''].filter(Boolean).join(' · ')}
+                                                    </p>
+                                                )}
                                             </div>
                                         </>
                                     );

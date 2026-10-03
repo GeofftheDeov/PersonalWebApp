@@ -7,7 +7,7 @@
  *   tableLink  where online sessions happen (Foundry, Roll20, a Discord voice link)
  *   gmTitle    what the Game Master is called ("Dungeon Master", "Host", ...)
  *
- * The banner joins these in its own slice.
+ * The banner (planning/campaignBanner.ts) goes through the same owner gate.
  */
 import { query } from "../db/index.js";
 import { isUuid } from "../db/model.js";
@@ -69,17 +69,28 @@ function clean(body: any): Record<string, unknown> {
     return out;
 }
 
-export async function updateCampaignSettings(actorId: string, campaignId: string, body: unknown): Promise<CampaignSettings> {
+/**
+ * The owner gate every owner-only setting goes through (these and the banner):
+ * 404 for no such campaign, 403 unless the actor owns it or is an admin.
+ * Returns the campaign row.
+ */
+export async function requireCampaignOwner(actorId: string, campaignId: string): Promise<any> {
     if (!isUuid(campaignId)) throw new SettingsError(404, "Campaign not found.");
-    const changes = clean(body);
     const [{ rows: [c] }, { rows: [acct] }] = await Promise.all([
-        query(`SELECT owner_id FROM campaigns WHERE id = $1`, [campaignId]),
+        query(`SELECT * FROM campaigns WHERE id = $1`, [campaignId]),
         query(`SELECT app_role FROM accounts WHERE id = $1`, [actorId]),
     ]);
     if (!c) throw new SettingsError(404, "Campaign not found.");
     if (acct?.app_role !== "admin" && (!c.owner_id || c.owner_id !== actorId)) {
         throw new SettingsError(403, "Only the campaign's owner can change its settings.");
     }
+    return c;
+}
+
+export async function updateCampaignSettings(actorId: string, campaignId: string, body: unknown): Promise<CampaignSettings> {
+    if (!isUuid(campaignId)) throw new SettingsError(404, "Campaign not found.");
+    const changes = clean(body);
+    await requireCampaignOwner(actorId, campaignId);
     const cols = Object.keys(changes);
     const { rows: [row] } = await query(
         `UPDATE campaigns SET ${cols.map((col, i) => `${col} = $${i + 2}`).join(", ")} WHERE id = $1 RETURNING *`,

@@ -53,6 +53,11 @@ function defaultHandlers(next: () => number): Handlers {
             key: input.key,
             expiresAt: new Date(Date.now() + (input.expiresInSeconds ?? 300) * 1000),
         }),
+        "uploads.readUrl": async (input) => ({
+            url: `https://fake-uploads.test/${input.key}?read=fake`,
+            expiresAt: new Date(Date.now() + (input.expiresInSeconds ?? 3600) * 1000),
+        }),
+        "uploads.deleteObject": async () => undefined,
     };
 }
 

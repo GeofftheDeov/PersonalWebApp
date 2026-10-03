@@ -1,7 +1,19 @@
 import { OAuth2Client } from 'google-auth-library';
 
 /**
- * External event integrations for tabletop sessions.
+ * Everything the app sends to or reads from an outside service for tabletop
+ * sessions (#79): Discord scheduled events, Google Calendar events, and S3
+ * presigned uploads (for banners, #81).
+ *
+ * Callers reach these services only through `integrations()`. They never call
+ * Discord, Google or S3 themselves. Tests swap the whole module for a fake that
+ * records every call (testing/fakeIntegrations.ts) using `installIntegrations`.
+ * Production never installs anything, so it always gets `realIntegrations`.
+ *
+ * To add an outside call (e.g. Google free/busy, Discord "interested" users,
+ * or updating an event when a night moves), add the method to `Integrations`,
+ * implement it in `realIntegrations`, and give it a default in the fake. The
+ * compiler points at each place that's missing.
  *
  * Discord scheduled events  — https://discord.com/developers/docs/resources/guild-scheduled-event
  *   Required: name, privacy_level, scheduled_start_time, entity_type.
@@ -28,7 +40,7 @@ export interface DiscordEventInput {
     end?: Date;
 }
 
-export async function createDiscordScheduledEvent(input: DiscordEventInput): Promise<{ id: string }> {
+async function createDiscordScheduledEvent(input: DiscordEventInput): Promise<{ id: string }> {
     const isVoice = !!input.channelId;
 
     if (!isVoice && !input.location) {
@@ -102,7 +114,7 @@ export function buildGoogleCalendarLink(input: CalendarEventInput): string {
  * Create an event on the user's primary Google Calendar via the Calendar API.
  * Requires a refresh token previously obtained with calendar.events scope.
  */
-export async function createGoogleCalendarEvent(
+async function createGoogleCalendarEvent(
     refreshToken: string,
     input: CalendarEventInput,
 ): Promise<{ id: string }> {
@@ -138,4 +150,64 @@ export async function createGoogleCalendarEvent(
     }
     const data: any = await res.json();
     return { id: data.id };
+}
+
+export interface PresignPutInput {
+    /** Object key, built by the caller (e.g. `campaign-banners/<campaignId>/<uuid>.webp`). */
+    key: string;
+    /** Checked by the caller against what it accepts (banners: jpeg, png or webp). */
+    contentType: string;
+    /** Exact size in bytes, checked by the caller (banners: max 5 MB) and signed so the upload must match. */
+    contentLength: number;
+    /** How long the URL works. Default 300 seconds. */
+    expiresInSeconds?: number;
+}
+
+export interface PresignedPut {
+    url: string;
+    method: 'PUT';
+    /** Headers the browser must send with the PUT, exactly as given. */
+    headers: Record<string, string>;
+    key: string;
+    expiresAt: Date;
+}
+
+export interface Integrations {
+    discord: {
+        createScheduledEvent(input: DiscordEventInput): Promise<{ id: string }>;
+    };
+    google: {
+        /** Inserts on the primary calendar of whoever owns the refresh token. */
+        createCalendarEvent(refreshToken: string, input: CalendarEventInput): Promise<{ id: string }>;
+    };
+    uploads: {
+        /** A URL the browser PUTs one object to directly. The caller checks type and size first. */
+        presignPut(input: PresignPutInput): Promise<PresignedPut>;
+    };
+}
+
+export const realIntegrations: Integrations = {
+    discord: { createScheduledEvent: createDiscordScheduledEvent },
+    google: { createCalendarEvent: createGoogleCalendarEvent },
+    uploads: {
+        // The bucket, its CORS rule, the task role's s3:PutObject grant and the
+        // AWS SDK arrive with banners (#81). Until then nothing calls this.
+        async presignPut() {
+            throw new Error('S3 uploads are not configured yet');
+        },
+    },
+};
+
+let active: Integrations = realIntegrations;
+
+/** The integrations in use: the real ones unless a test installed a fake. */
+export function integrations(): Integrations {
+    return active;
+}
+
+/** Swap in another implementation (tests only). Returns a function that puts the previous one back. */
+export function installIntegrations(impl: Integrations): () => void {
+    const previous = active;
+    active = impl;
+    return () => { active = previous; };
 }

@@ -256,7 +256,7 @@ export default function GameNightPage() {
                             {campaigns.length} Campaign{campaigns.length !== 1 ? 's' : ''} &middot; {sessions.length} Session{sessions.length !== 1 ? 's' : ''} &middot; {characters.length} Character{characters.length !== 1 ? 's' : ''}
                         </p>
                     </div>
-                    {tab === 'campaigns' && createButton(() => setShowCreateCampaign(true), 'NEW CAMPAIGN', 'create-campaign-btn')}
+                    {tab === 'campaigns' && createButton(() => { setCampaignError(null); setShowCreateCampaign(true); }, 'NEW CAMPAIGN', 'create-campaign-btn')}
                     {tab === 'sessions' && createButton(() => { setSessionForm(EMPTY_SESSION); setSessionError(null); setShowCreateSession(true); }, 'NEW SESSION', 'create-session-btn')}
                     {tab === 'characters' && createButton(() => setShowCreateCharacter(true), 'NEW CHARACTER', 'create-character-btn')}
                 </header>

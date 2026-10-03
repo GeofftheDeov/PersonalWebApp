@@ -85,7 +85,8 @@ async function main() {
     day.setUTCHours(0, 0, 0, 0);
     const at = (h: number, d = day) => new Date(d.getTime() + h * HOUR);
     const iso = (h: number, d = day) => at(h, d).toISOString();
-    const far = new Date(day.getTime() + 42 * DAY);   // beyond the sync horizon
+    const mid = new Date(day.getTime() + 35 * DAY);   // beyond the 28-day horizon, close enough to share a sync with it
+    const far = new Date(day.getTime() + 84 * DAY);   // too far to share: synced on its own
     const rangeQs = (d = day) => `start=${iso(17, d)}&end=${iso(23, d)}&slotMinutes=60&stepMinutes=60`;
     const overlap = (d = day) => call("GET", `/api/availability/campaigns/${campaignId}?${rangeQs(d)}`, "gm");
     const slotAt = (o: any, h: number, d = day) => o.json?.slots?.find((s: any) => s.start === iso(h, d));
@@ -99,12 +100,13 @@ async function main() {
     // The fake hands back extra fields a careless sync might keep.
     let calendars: Record<string, [number, number][]> = {};
     let broken = new Set<string>();
+    let brokenWith = "Google Calendar API 500: backendError";
     fake.respond("google.freeBusy", async (refreshToken, input) => {
         const name = Object.keys(who).find((n) => tokenOf(n) === refreshToken) ?? "?";
-        if (broken.has(name)) throw new Error("Google Calendar API 500: backendError");
-        // The same hours on the planned night and six weeks later; the sync
-        // keeps whichever fall inside the window it asked about.
-        return [day, far].flatMap((d) => (calendars[name] ?? []).map(([s, e]) => ({
+        if (broken.has(name)) throw new Error(brokenWith);
+        // The same hours on each night the test plans; the sync keeps
+        // whichever fall inside the window it asked about.
+        return [day, mid, far].flatMap((d) => (calendars[name] ?? []).map(([s, e]) => ({
             start: at(s, d), end: at(e, d), summary: "Dentist (secret)", id: `evt-${name}`,
         }) as any)).filter((b) => b.end > input.start && b.start < input.end);
     });
@@ -264,16 +266,35 @@ async function main() {
         broken = new Set();
         await call("POST", "/api/availability/me/busy-sources/google/sync", "alice");
 
-        // ── a range outside the horizon ─────────────────────────────────────
+        // ── ranges outside the horizon ──────────────────────────────────────
+        fake.clear();
+        const midAsked = Date.now();
+        const oMid = await overlap(mid);
+        const midCalls = freeBusyCalls();
+        check("a range just past the horizon stretches the sync over it (horizon and range in one read), for everyone using Google",
+            oMid.status === 200 && midCalls.length === 2 && midCalls.every((c) =>
+                Math.abs(+c.args[1].start - (midAsked - DAY)) < 60_000 && +c.args[1].end === +at(23 + 24, mid)),
+            midCalls.map((c) => [c.args[0], c.args[1]]));
+        check("...and its busy time counts there", JSON.stringify(busyHours(oMid, "alice", mid)) === "[19]" &&
+            JSON.stringify(busyHours(oMid, "bob", mid)) === "[20]", oMid.json?.slots?.slice(0, 2));
+        fake.clear();
+        await overlap();
+        await overlap(mid);
+        check("...so the near and the stretched range then share that sync instead of re-reading each other",
+            freeBusyCalls().length === 0, freeBusyCalls().length);
+
         fake.clear();
         const o3 = await overlap(far);
         const farCalls = freeBusyCalls();
-        check("a range beyond the horizon is synced for that range (a day either side), for everyone using Google",
+        check("a range too far to share a sync is read on its own (a day either side)",
             o3.status === 200 && farCalls.length === 2 && farCalls.every((c) =>
                 +c.args[1].start === +at(17 - 24, far) && +c.args[1].end === +at(23 + 24, far)),
             farCalls.map((c) => [c.args[0], c.args[1]]));
-        check("...and its busy time counts there", JSON.stringify(busyHours(o3, "alice", far)) === "[19]" &&
+        check("...its busy time counts there", JSON.stringify(busyHours(o3, "alice", far)) === "[19]" &&
             JSON.stringify(busyHours(o3, "bob", far)) === "[20]", o3.json?.slots?.slice(0, 2));
+        check("...and it leaves the nearer busy time alone (a concurrent near overlap can't lose it)",
+            (await blocksOf("alice")).some((b) => +b.starts_at === +at(19)) && (await blocksOf("alice")).some((b) => +b.starts_at === +at(19, far)),
+            (await blocksOf("alice")).map((b) => b.starts_at));
 
         // ── turning Google off ──────────────────────────────────────────────
         events.length = 0;
@@ -304,6 +325,23 @@ async function main() {
         check("after Carol reconnects once, Google turns on and her busy time counts",
             carolAgain.status === 200 && !(await st("carol")).needsReconsent &&
                 JSON.stringify(busyHours(await overlap(), "carol")) === "[21]", carolAgain.json);
+
+        // A 403 that is a rate limit isn't a consent problem.
+        broken = new Set(["carol"]);
+        brokenWith = 'Google Calendar API 403: {"error":{"errors":[{"reason":"rateLimitExceeded"}]}}';
+        const limited = await call("POST", "/api/availability/me/busy-sources/google/sync", "carol");
+        check("a rate-limited Google says so, rather than asking Carol to reconnect",
+            /limiting requests/i.test(limited.json?.source?.lastError ?? "") && !/reconnect/i.test(limited.json.source.lastError), limited.json);
+        brokenWith = 'Google Calendar API 403: {"error":{"status":"PERMISSION_DENIED","details":[{"reason":"ACCESS_TOKEN_SCOPE_INSUFFICIENT"}]}}';
+        const narrow = await call("POST", "/api/availability/me/busy-sources/google/sync", "carol");
+        check("...while a grant that's too narrow does ask her to reconnect",
+            /reconnect/i.test(narrow.json?.source?.lastError ?? ""), narrow.json);
+        broken = new Set();
+
+        const vaultDelete = await call("DELETE", "/api/api-keys/google_calendar", "carol");
+        const gcGone = await google("carol");
+        check("removing the Google entry from the API Key Vault also turns Google off as a busy source, and deletes its blocks",
+            vaultDelete.status === 200 && !gcGone.enabled && !gcGone.connected && (await blocksOf("carol")).length === 0, gcGone);
 
         check("only the integrations fake was ever called", fake.calls().every((c) => c.name === "google.freeBusy"),
             fake.calls().map((c) => c.name));

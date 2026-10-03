@@ -17,7 +17,12 @@ const configured = () => !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_C
 function explain(err: any): string {
     const message = String(err?.message ?? "");
     if (/invalid_grant|\b401\b/.test(message)) return "Google no longer accepts this connection. Reconnect Google Calendar.";
-    if (/\b403\b|insufficient/i.test(message)) return RECONSENT;
+    // A 403 is only a consent problem when Google says the grant is too narrow;
+    // it is also how Google reports rate limits, which reconnecting can't fix.
+    if (/insufficient/i.test(message)) return RECONSENT;
+    if (/rateLimitExceeded|userRateLimitExceeded|quotaExceeded|usageLimits|\b429\b/i.test(message)) {
+        return "Google Calendar is limiting requests right now. Try again in a few minutes.";
+    }
     if (/timeout|aborted/i.test(message)) return "Google Calendar took too long to answer.";
     return `Google Calendar couldn't be read (${message.slice(0, 160) || "no reason given"}).`;
 }

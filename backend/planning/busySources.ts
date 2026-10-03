@@ -15,10 +15,14 @@
  * person's enabled source is synced first unless its last good sync is both
  *   - younger than FRESH_MINUTES (15), and
  *   - covers the whole range (synced_from <= range start, synced_to >= range end).
- * A sync asks for the next HORIZON_DAYS (28) days -- what the Notice Board and
- * the profile preview look at -- or, for a range outside that, the range
- * itself (a day of slack either side). Each source's blocks are replaced
- * wholesale with what the calendar said about that stretch.
+ * A sync always asks for the next HORIZON_DAYS (28) days -- what the Notice
+ * Board and the profile preview look at -- stretched to take in the range
+ * (with a day of slack either side), so ranges near each other share one sync
+ * instead of evicting each other. Only when that would exceed MAX_SYNC_DAYS
+ * (Google refuses one free/busy query longer than about three months) does it
+ * ask for the range alone. A sync replaces that source's blocks inside the
+ * stretch it asked about and leaves the rest alone, so a far-off sync never
+ * wipes the busy time a nearer overlap is about to read.
  *
  * Failure rule. If a sync fails (or takes longer than SYNC_TIMEOUT_MS), that
  * person's blocks from that source are left out of overlaps until a sync
@@ -41,6 +45,8 @@ const DAY = 24 * 60 * MINUTE;
 export const FRESH_MINUTES = 15;
 export const RETRY_AFTER_FAILURE_MINUTES = 5;
 export const HORIZON_DAYS = 28;
+/** The longest stretch one sync asks for. */
+export const MAX_SYNC_DAYS = 70;
 export const SYNC_TIMEOUT_MS = 15_000;
 /** More than this from one sync is cut off: nobody has 1,000 commitments in two months. */
 export const MAX_BLOCKS_PER_SYNC = 1000;
@@ -118,11 +124,13 @@ function announce(personId: string) {
     bus.publish("availability.changed", { personId, what: "busy" }).catch(() => { /* bus down is non-fatal */ });
 }
 
-/** What one sync asks for: the planning horizon, or the range itself when it lies outside it. */
+/** What one sync asks for: the planning horizon stretched over the range, or the range alone when that's too long. */
 export function syncWindow(range: { start: Date; end: Date }, now: Date) {
-    const horizon = { start: new Date(now.getTime() - DAY), end: new Date(now.getTime() + (HORIZON_DAYS + 1) * DAY) };
-    if (range.start >= horizon.start && range.end <= horizon.end) return horizon;
-    return { start: new Date(range.start.getTime() - DAY), end: new Date(range.end.getTime() + DAY) };
+    const padded = { start: range.start.getTime() - DAY, end: range.end.getTime() + DAY };
+    const start = Math.min(now.getTime() - DAY, padded.start);
+    const end = Math.max(now.getTime() + (HORIZON_DAYS + 1) * DAY, padded.end);
+    if (end - start <= MAX_SYNC_DAYS * DAY) return { start: new Date(start), end: new Date(end) };
+    return { start: new Date(padded.start), end: new Date(padded.end) };
 }
 
 /** A failed attempt since the last good sync means nothing from this source is trusted until one works. */
@@ -169,8 +177,10 @@ async function syncOne(personId: string, adapter: BusySourceAdapter, window: { s
             "The calendar took too long to answer."), window);
     } catch (err: any) {
         const message = String(err?.message || "The calendar couldn't be read.").slice(0, 300);
+        // Recording the failure must not fail the overlap that asked.
         await query(`UPDATE busy_sources SET last_attempt_at = $3, last_error = $4 WHERE person_id = $1 AND source = $2`,
-            [personId, adapter.name, now, message]);
+            [personId, adapter.name, now, message])
+            .catch((e: any) => console.error(`[busy] recording a ${adapter.name} sync failure failed:`, e.message));
         return false;
     }
     try {
@@ -181,8 +191,9 @@ async function syncOne(personId: string, adapter: BusySourceAdapter, window: { s
                 `SELECT 1 FROM busy_sources WHERE person_id = $1 AND source = $2 FOR UPDATE`, [personId, adapter.name]);
             if (!rowCount) return false;
             const { rows: old } = await db.query(
-                `DELETE FROM busy_blocks WHERE person_id = $1 AND source = $2 RETURNING starts_at AS start, ends_at AS "end"`,
-                [personId, adapter.name]);
+                `DELETE FROM busy_blocks WHERE person_id = $1 AND source = $2 AND ends_at > $3 AND starts_at < $4
+                 RETURNING starts_at AS start, ends_at AS "end"`,
+                [personId, adapter.name, window.start, window.end]);
             if (blocks.length) {
                 await db.query(
                     `INSERT INTO busy_blocks (person_id, source, starts_at, ends_at, external_id, fetched_at)

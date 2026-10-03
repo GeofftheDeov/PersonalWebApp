@@ -744,7 +744,10 @@ CREATE TABLE session_tasks (
                             AND 20160 >= ALL (reminder_offsets)),
   created_by       uuid REFERENCES accounts(id) ON DELETE SET NULL,
   created_at       timestamptz NOT NULL DEFAULT now(),
-  completed_at     timestamptz
+  completed_at     timestamptz,
+  -- The session start due_at was last set against (#91), so due times follow
+  -- the night idempotently. NULL: set before the session had a night.
+  due_anchor       timestamptz
 );
 CREATE INDEX idx_session_tasks_session  ON session_tasks (session_id);
 CREATE INDEX idx_session_tasks_assignee ON session_tasks (assignee_id, status);

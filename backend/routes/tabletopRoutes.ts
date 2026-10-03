@@ -13,6 +13,8 @@ import { getAuthorizedCampaignIds, isCampaignGameMaster } from "../utils/gameNig
 import { findPersonById, personDisplayName } from "../utils/personUtils.js";
 import { getDecryptedKeys } from "./apiKeyRoutes.js";
 import { buildGoogleCalendarLink, integrations } from "../utils/integrations.js";
+import pool from "../db/index.js";
+import { followSessionStarts } from "../planning/questReminders.js";
 
 // --- Sessions ---
 router.get("/sessions", auth, async (req: any, res) => {
@@ -170,6 +172,11 @@ router.put("/sessions/:id", auth, async (req: any, res) => {
             { new: true }
         ).populate("campaign");
         if (!session) return res.status(404).json({ error: "Session not found" });
+        // Its quests' due times follow a new start (#91). The reminder job catches up anyway.
+        if (date !== undefined) {
+            await followSessionStarts(pool, String(session._id)).catch((err) =>
+                console.error("[tabletop] moving quest due times failed:", err.message));
+        }
         res.json(session);
     } catch (error: any) {
         res.status(500).json({ error: "Failed to update session", details: error.message });

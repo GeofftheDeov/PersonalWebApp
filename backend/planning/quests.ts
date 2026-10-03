@@ -46,6 +46,9 @@ const DAY = 24 * 60 * 60 * 1000;
 export const MAX_TITLE = 120;
 export const MAX_NOTES = 1000;
 export const MAX_ALMANAC_DAYS = 400;
+/** Reminder offsets (#91), in minutes before the due time. The table's CHECK allows the same range. */
+export const MAX_REMINDERS = 5;
+export const MAX_REMINDER_MINUTES = 14 * 24 * 60;
 /** A session without an end time still counts as upcoming for this long after it starts. */
 const SESSION_GRACE = "4 hours";
 
@@ -67,8 +70,10 @@ export interface QuestJson {
     /** ISO. null while the session's night is still being voted on. */
     dueAt: string | null;
     status: QuestStatus;
-    /** Minutes before dueAt (#91). */
+    /** Minutes before dueAt, chosen by the quest's owner (#91). Largest first. */
     reminderOffsets: number[];
+    /** The offsets already sent for the current dueAt (#91). Moving the night re-arms them. */
+    remindersSent: number[];
     createdBy: string | null;
     createdAt: string;
     completedAt: string | null;
@@ -88,7 +93,9 @@ const QUEST_SQL = `
     SELECT t.*, s.title AS session_title, s.date AS session_date, s.end_date AS session_end_date,
            s.status AS session_status, s.campaign_id, c.title AS campaign_title,
            a.handle AS a_handle, a.name AS a_name, a.first_name AS a_first_name,
-           a.last_name AS a_last_name, a.email AS a_email
+           a.last_name AS a_last_name, a.email AS a_email,
+           ARRAY(SELECT r.offset_minutes FROM session_task_reminders r
+                  WHERE r.task_id = t.id AND r.due_at = t.due_at ORDER BY r.offset_minutes DESC) AS reminders_sent
       FROM session_tasks t
       JOIN game_sessions s ON s.id = t.session_id
       JOIN campaigns c ON c.id = s.campaign_id
@@ -113,6 +120,7 @@ function toQuestJson(r: any): QuestJson {
         dueAt: iso(r.due_at),
         status: r.status,
         reminderOffsets: r.reminder_offsets ?? [],
+        remindersSent: r.reminders_sent ?? [],
         createdBy: r.created_by,
         createdAt: r.created_at.toISOString(),
         completedAt: iso(r.completed_at),
@@ -181,6 +189,22 @@ async function cleanAssignee(db: Db, raw: unknown, kind: QuestKind, campaignId: 
     return raw as string;
 }
 
+/**
+ * Reminder offsets (#91): whole minutes before the due time, 1 minute to two
+ * weeks, at most five. Duplicates collapse; stored largest (earliest) first.
+ */
+export function cleanReminderOffsets(raw: unknown): number[] {
+    if (!Array.isArray(raw)) throw new QuestError(400, "offsets must be a list of minutes before the due time.");
+    const offsets = [...new Set(raw)];
+    for (const o of offsets) {
+        if (typeof o !== "number" || !Number.isInteger(o) || o < 1 || o > MAX_REMINDER_MINUTES) {
+            throw new QuestError(400, `Each reminder is a whole number of minutes before the due time, from 1 to ${MAX_REMINDER_MINUTES} (two weeks).`);
+        }
+    }
+    if (offsets.length > MAX_REMINDERS) throw new QuestError(400, `A quest can have at most ${MAX_REMINDERS} reminders.`);
+    return (offsets as number[]).sort((a, b) => b - a);
+}
+
 // ── building blocks (ungated; the caller has already decided) ───────────────
 
 export interface NewQuest {
@@ -196,20 +220,31 @@ export interface NewQuest {
     createdBy: string | null;
 }
 
-/** Inserts a quest and returns its id. */
+/**
+ * Inserts a quest and returns its id. Its due time is anchored to the
+ * session's start as it is now, so it follows the night when that moves (#91).
+ */
 export async function insertQuest(db: Db, q: NewQuest): Promise<string> {
     const { rows: [r] } = await db.query(
-        `INSERT INTO session_tasks (session_id, kind, title, notes, assignee_id, due_at, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+        `INSERT INTO session_tasks (session_id, kind, title, notes, assignee_id, due_at, created_by, due_anchor)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, (SELECT date FROM game_sessions WHERE id = $1)) RETURNING id`,
         [q.sessionId, q.kind, q.title, q.notes ?? null, q.assigneeId, q.dueAt, q.createdBy]);
     return r.id;
 }
 
-/** Gives a quest a new owner (or none, for a potluck slot). Returns the previous owner. */
+/**
+ * Gives a quest a new owner (or none, for a potluck slot). Returns the previous
+ * owner. Reminder timing is the owner's own choice (#91), so a new owner starts
+ * with none.
+ */
 export async function setAssignee(db: Db, questId: string, assigneeId: string | null): Promise<{ previousAssigneeId: string | null }> {
     const { rows: [old] } = await db.query(`SELECT assignee_id FROM session_tasks WHERE id = $1 FOR UPDATE`, [questId]);
     if (!old) throw new QuestError(404, "Quest not found.");
-    await db.query(`UPDATE session_tasks SET assignee_id = $2 WHERE id = $1`, [questId, assigneeId]);
+    await db.query(
+        `UPDATE session_tasks
+            SET assignee_id = $2,
+                reminder_offsets = CASE WHEN assignee_id IS DISTINCT FROM $2 THEN '{}' ELSE reminder_offsets END
+          WHERE id = $1`, [questId, assigneeId]);
     return { previousAssigneeId: old.assignee_id };
 }
 
@@ -349,7 +384,11 @@ export function createQuests(deps: QuestDeps = { now: () => new Date() }) {
                 const set = (col: string, value: unknown) => { params.push(value); sets.push(`${col} = $${params.length}`); };
                 if ("title" in body) set("title", cleanTitle(body.title));
                 if ("notes" in body) set("notes", cleanNotes(body.notes));
-                if ("dueAt" in body) set("due_at", cleanDueAt(body.dueAt) ?? null);
+                if ("dueAt" in body) {
+                    set("due_at", cleanDueAt(body.dueAt) ?? null);
+                    // A due time set now is relative to the session's start as it is now (#91).
+                    sets.push(`due_anchor = (SELECT date FROM game_sessions WHERE id = session_id)`);
+                }
                 let previous: string | null | undefined;
                 if ("assigneeId" in body) {
                     const assigneeId = await cleanAssignee(db, body.assigneeId, t.kind, t.campaign_id);
@@ -380,6 +419,23 @@ export function createQuests(deps: QuestDeps = { now: () => new Date() }) {
                         assigneeId: t.assignee_id, completedBy: actor.id,
                     }).catch(() => { /* bus down is non-fatal */ }));
                 }
+                return (await getQuest(db, t.id))!;
+            });
+        },
+
+        /**
+         * The quest's owner chooses when to be reminded (#91): minutes before
+         * the due time. Only the owner -- it's their routine, not the Game
+         * Master's call. An offset already sent for the current due time stays
+         * sent; the reminder job sends the rest.
+         */
+        async setReminders(actor: Actor, questId: string, body: any): Promise<QuestJson> {
+            const offsets = cleanReminderOffsets(body?.offsets);
+            return mutate(async (db) => {
+                const t = await lockQuest(db, questId);
+                if (t.assignee_id !== actor.id) throw new QuestError(403, "Only the quest's owner can choose its reminders.");
+                if (t.status !== "open") throw new QuestError(409, `This quest is ${t.status}, so it sends no reminders.`);
+                await db.query(`UPDATE session_tasks SET reminder_offsets = $2 WHERE id = $1`, [t.id, offsets]);
                 return (await getQuest(db, t.id))!;
             });
         },

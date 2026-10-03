@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ScrollText, Check, ChevronRight } from 'lucide-react';
 import { KIND_LABEL, questApi, questDue, type Quest } from '@/lib/quests';
+import QuestReminders from './QuestReminders';
 
 /**
  * The Quest Log (#90): the signed-in player's open quests for sessions being
@@ -74,6 +75,8 @@ export default function QuestLog() {
                                     <span>{questDue(q)}</span>
                                     <span className="text-zinc-500 dark:text-zinc-400">{q.session.campaign.title}</span>
                                 </p>
+                                <QuestReminders quest={q}
+                                    onChange={next => setQuests(prev => prev?.map(x => x.id === next.id ? next : x) ?? null)} />
                             </div>
                             <Link href={`/game-night/sessions/${q.sessionId}#quests`}
                                 className="shrink-0 self-center flex items-center gap-1 font-permanent text-[10px] uppercase text-zinc-600 dark:text-zinc-300 hover:text-teal-600 max-w-[40%]">

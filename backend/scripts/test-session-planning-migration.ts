@@ -21,6 +21,8 @@ import { dirname, resolve } from "node:path";
 import pg from "pg";
 
 const MIGRATION = resolve(dirname(fileURLToPath(import.meta.url)), "../db/migrations/2026-10-01-session-planning.sql");
+/** Later session-planning migrations, applied after it in order, so schema.sql parity covers them too. */
+const FOLLOW_UPS = ["2026-10-03-quest-reminders.sql"];
 const local = /(\/\/|@)(127\.0\.0\.1|localhost)[:/]/;
 const { MIGRATED_URL, FRESH_URL } = process.env;
 if (!MIGRATED_URL || !FRESH_URL || !local.test(MIGRATED_URL) || !local.test(FRESH_URL)) {
@@ -114,6 +116,29 @@ async function main() {
     check("existing sessions backfill as scheduled, with no planning stage",
         sessions.length === 2 && sessions.every((s) => s.status === "scheduled" && s.planning_stage === null && s.date),
         JSON.stringify(sessions));
+
+    // ── follow-up migrations, in order, each twice ──────────────────────────
+    // #91 anchors quest due times to their session's start. Seed one quest
+    // with a due time and one without (added while the night was being voted on).
+    const { rows: [fixed] } = await migrated.query(`SELECT id, date FROM game_sessions WHERE title = 'fixed date'`);
+    await migrated.query(`
+        INSERT INTO session_tasks (session_id, kind, title, due_at, assignee_id) VALUES
+          ($1, 'custom', 'has a due time', $2, $3), ($1, 'custom', 'no due time yet', NULL, $3)`,
+        [fixed.id, new Date(+fixed.date - 60 * 60 * 1000), a.id]);
+    for (const file of FOLLOW_UPS) {
+        const followUp = readFileSync(resolve(dirname(MIGRATION), file), "utf8");
+        for (const attempt of ["applies", "re-applies as a no-op"]) {
+            let error = "";
+            try { await migrated.query(followUp); } catch (e: any) { error = e.message; await migrated.query("ROLLBACK").catch(() => {}); }
+            check(`${file} ${attempt}`, !error, error);
+        }
+    }
+    const anchors = Object.fromEntries((await migrated.query(
+        `SELECT title, due_anchor FROM session_tasks`)).rows.map((r) => [r.title, r.due_anchor]));
+    check("#91: a quest with a due time is anchored to its session's start",
+        +anchors["has a due time"] === +fixed.date, anchors);
+    check("#91: a quest with no due time stays unanchored, so it takes the session's start",
+        anchors["no due time yet"] === null, anchors);
 
     // ── parity with schema.sql ──────────────────────────────────────────────
     const [m, f] = await Promise.all([schemaOf(migrated), schemaOf(fresh)]);

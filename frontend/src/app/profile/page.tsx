@@ -313,7 +313,7 @@ export default function ProfilePage() {
                             onClick={() => setActiveTab(tab)}
                             className={`px-6 py-3 border-4 border-black font-permanent uppercase text-base tracking-wide transition-colors ${activeTab === tab ? 'bg-black dark:bg-white text-white dark:text-black' : 'bg-white dark:bg-zinc-800 text-black dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-700 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]'}`}
                         >
-                            {tab.toUpperCase()}
+                            {tab === 'calendar' ? 'ALMANAC' : tab.toUpperCase()}
                         </button>
                     ))}
                 </div>

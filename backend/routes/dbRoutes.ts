@@ -6,6 +6,7 @@ import { Readable } from 'stream';
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { sendResetPasswordEmail } from "../services/emailService.js";
+import { hashToken } from "../utils/tokenHash.js";
 import { renderPage } from '../utils/adminUi.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { resolveAccountId } from '../utils/accountRefs.js';
@@ -1002,7 +1003,8 @@ router.post('/:collection/reset-password/:id', async (req, res) => {
         const email = doc.email;
         if (!email) return res.status(400).send('Document has no email field');
         const token = crypto.randomBytes(20).toString('hex');
-        await modelFor(collection).findByIdAndUpdate(id, { $set: { resetPasswordToken: token, resetPasswordExpires: new Date(Date.now() + 3600000) } });
+        // Stored hashed, as forgot-password does: /api/users/reset-password hashes what it is sent.
+        await modelFor(collection).findByIdAndUpdate(id, { $set: { resetPasswordToken: hashToken(token), resetPasswordExpires: new Date(Date.now() + 3600000) } });
         await sendResetPasswordEmail(email, token);
         res.status(200).send(`Reset email sent to ${email}`);
     } catch (err: any) {

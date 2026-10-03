@@ -4,11 +4,13 @@ import React, { useEffect, useState } from 'react';
 import { Book, Map, Sword, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 import { sessionWhen } from '@/lib/sessions';
+import CampaignBanner from '@/components/CampaignBanner';
 
 interface Campaign {
     _id: string;
     title: string;
     status: string;
+    bannerUrl?: string | null;
 }
 
 interface Session {
@@ -124,10 +126,13 @@ export default function GameNightSummary() {
                     'Campaigns',
                     <Map className="w-5 h-5 text-black" />,
                     displayCampaigns.length > 0 ? displayCampaigns.map(c => (
-                        <div key={c._id} className="flex justify-between items-center border-b-2 border-black/10 dark:border-white/10 pb-2">
-                            <p className="font-permanent text-sm text-black dark:text-white uppercase leading-tight">{c.title}</p>
-                            {statusBadge(c.status)}
-                        </div>
+                        <Link key={c._id} href={`/game-night/campaigns/${c._id}`} className="block border-b-2 border-black/10 dark:border-white/10 pb-2 group">
+                            <CampaignBanner url={c.bannerUrl} seed={c._id} title={c.title} compact className="mb-2 border-2 border-black" />
+                            <div className="flex justify-between items-center gap-2">
+                                <p className="font-permanent text-sm text-black dark:text-white uppercase leading-tight group-hover:text-teal-600 transition-colors">{c.title}</p>
+                                {statusBadge(c.status)}
+                            </div>
+                        </Link>
                     )) : (
                         <p className="font-permanent text-black dark:text-zinc-400 italic text-sm uppercase">No campaigns yet.</p>
                     ),

@@ -156,6 +156,10 @@ async function main() {
         const inList = list.json?.find((c: any) => c._id === cid), otherInList = list.json?.find((c: any) => c._id === other);
         check("the campaign list carries each campaign's banner URL, null where there is none",
             list.status === 200 && inList?.bannerUrl === set1.json.bannerUrl && otherInList && otherInList.bannerUrl === null, list.json);
+        const edited = await call("PUT", `/api/campaigns/${cid}`, "owner",
+            { title: `Banner ${tag}`, description: "edited", status: "In Progress", startDate: "2026-10-01" });
+        check("editing the campaign's details returns it with its banner URL, so the page keeps showing it",
+            edited.status === 200 && edited.json.bannerUrl === set1.json.bannerUrl, edited.json);
 
         // ── replacing it ────────────────────────────────────────────────────
         fake.clear();

@@ -25,7 +25,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { Redis } from "ioredis";
-import { RedisStreamBus } from "../events/RedisStreamBus.js";
+import { RedisStreamBus, busNames } from "../events/RedisStreamBus.js";
 import { InMemoryEventBus } from "../events/InMemoryEventBus.js";
 import type { EventBus, EventEnvelope, EventName } from "../events/index.js";
 
@@ -39,8 +39,10 @@ if (!/\/\/(127\.0\.0\.1|localhost)[:/]/.test(REDIS_URL)) {
 // `events:t96eph` streams, which no real subscriber reads.
 const MESSAGE = "t96.message" as EventName;
 const TYPING = "t96eph.typing" as EventName;
-const MESSAGE_STREAM = "events:t96";
-const TYPING_STREAM = "events:t96eph";
+// These buses set no namespace (#118), so the streams keep the un-namespaced
+// names `events:t96` and `events:t96eph`.
+const MESSAGE_STREAM = busNames().stream(MESSAGE);
+const TYPING_STREAM = busNames().stream(TYPING);
 
 let pass = 0, fail = 0;
 function check(name: string, ok: boolean, detail = "") {

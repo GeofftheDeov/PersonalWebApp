@@ -11,7 +11,9 @@ import OverlapPicker, { timeRange, type PickedTime } from './OverlapPicker';
  * shortlists nights from the party's overlap, and steers the vote; the party
  * votes on every night they can make. In person, the venue vote follows
  * (#92): it starts with the campaign's recent venues, anyone can suggest
- * one, and each player picks one. Backed by /api/planning.
+ * one, and each player picks one. Then the food (#93): a potluck, where the
+ * Game Master seeds slots and the party claims them (unclaimed ones stand
+ * out), or food provided by one person. Backed by /api/planning.
  */
 
 /** A venue as the party sees it. The address is only sent while it's shortlisted or confirmed. */
@@ -28,6 +30,8 @@ interface Poll {
 type NightPoll = Poll;
 type FoodMode = 'potluck' | 'provided';
 interface Member { id: string; name: string }
+/** A food quest (#93): a potluck slot (no assignee: unclaimed), or the food owner's provisioning. */
+interface FoodQuest { id: string; title: string; notes: string | null; assignee: Member | null; status: 'open' | 'done' | 'cancelled'; dueAt: string | null; createdBy: string | null }
 interface PlanningState {
     session: {
         id: string; title: string; status: string; stage: 'night' | 'venue' | 'food' | null; isOnline: boolean; agenda: string | null;
@@ -46,6 +50,8 @@ interface PlanningState {
     venueRounds: Poll[];
     /** In person: the campaign's saved venues, most recently used first. */
     venues: Venue[];
+    /** In person (#93): how food works, and its quests in the order they were made. */
+    food: { mode: FoodMode; ownerId: string | null; quests: FoodQuest[] } | null;
 }
 interface Upcoming { id: string; title: string; date: string; endDate: string | null; isOnline: boolean; canChangeNight: boolean; venue: Venue | null }
 interface Board { canPlan: boolean; gmTitle: string; party: Member[]; planning: PlanningState[]; upcoming: Upcoming[] }
@@ -343,6 +349,112 @@ function VenueStep({ state, busy, act }: { state: PlanningState; busy: boolean; 
     );
 }
 
+const DEFAULT_SLOTS = 'Main, Snacks, Drinks';
+
+/**
+ * The food step (#93). Potluck: the slots, with unclaimed ones highlighted;
+ * the party claims, backs out of, or adds a slot; the Game Master seeds them.
+ * Food provided: who's on it. Either way the Game Master can schedule it at
+ * any time, and it closes by itself when the session starts.
+ */
+function FoodStep({ state, busy, act }: { state: PlanningState; busy: boolean; act: (path: string, body?: unknown) => Promise<boolean> }) {
+    const { food, viewer, campaign } = state;
+    const gm = viewer.isGameMaster;
+    const inParty = state.party.some(p => p.id === viewer.id);
+    const quests = food?.quests ?? [];
+    const [seed, setSeed] = useState(quests.length ? '' : DEFAULT_SLOTS);
+    const [own, setOwn] = useState('');
+    const who = (m: Member) => m.id === viewer.id ? 'You' : m.name;
+
+    if (!food) return null;
+    if (food.mode === 'provided') {
+        const q = quests[0];
+        return (
+            <div>
+                {q ? (
+                    <p className="p-2 border-2 border-black bg-white dark:bg-slate-700 font-permanent text-xs text-black dark:text-white uppercase flex flex-wrap items-center gap-2">
+                        <Utensils className="w-4 h-4 shrink-0" />
+                        <span className="flex-1 min-w-0">{q.title} · {q.assignee ? who(q.assignee) : 'nobody yet'}</span>
+                        <span className={`px-1.5 border-2 border-black text-[9px] ${q.status === 'done' ? 'bg-teal-600 text-white' : 'bg-zinc-100 text-black'}`}>{q.status === 'done' ? 'Done' : 'On it'}</span>
+                    </p>
+                ) : (
+                    <p className="font-permanent text-xs text-zinc-700 dark:text-zinc-300 uppercase">Food provided.</p>
+                )}
+                {q?.assignee?.id === viewer.id && (
+                    <p className="mt-2 font-permanent text-[10px] text-teal-700 dark:text-teal-300 uppercase">It’s in your Quest Log — mark it done there when the food’s sorted.</p>
+                )}
+            </div>
+        );
+    }
+
+    const open = quests.filter(q => q.status === 'open' && !q.assignee);
+    const titles = seed.split(',').map(t => t.trim()).filter(Boolean);
+    return (
+        <div>
+            {quests.length === 0 ? (
+                <p className="font-permanent text-xs text-zinc-700 dark:text-zinc-300 uppercase">
+                    {gm ? 'List what’s needed and the party can claim it.' : `The ${campaign.gmTitle} hasn’t listed what’s needed yet — you can add what you’ll bring.`}
+                </p>
+            ) : (
+                <>
+                    <ul className="space-y-2">
+                        {quests.map(q => {
+                            const unclaimed = q.status === 'open' && !q.assignee;
+                            const mine = q.assignee?.id === viewer.id;
+                            return (
+                                <li key={q.id} className={`flex flex-wrap items-center gap-2 p-2 border-2 ${unclaimed ? 'border-dashed border-red-600 bg-yellow-100 dark:bg-yellow-900/40' : 'border-black bg-white dark:bg-slate-700'}`}>
+                                    <span className="flex-1 min-w-0 font-permanent text-xs uppercase break-words text-black dark:text-white">
+                                        {q.title}
+                                        <span className={`ml-2 text-[10px] ${unclaimed ? 'text-red-700 dark:text-red-300' : 'text-teal-700 dark:text-teal-300'}`}>
+                                            {unclaimed ? 'Unclaimed' : q.assignee ? `${who(q.assignee)}${q.status === 'done' ? ' · done' : ''}` : q.status}
+                                        </span>
+                                    </span>
+                                    {unclaimed && inParty && (
+                                        <button type="button" disabled={busy} onClick={() => act(`food/${q.id}/claim`)} className={`${BTN} bg-teal-600 text-white hover:bg-teal-500`}>
+                                            <Check className="w-4 h-4" /> I’ll bring it
+                                        </button>
+                                    )}
+                                    {mine && q.status === 'open' && (
+                                        <button type="button" disabled={busy} onClick={() => act(`food/${q.id}/unclaim`)} className={`${BTN} bg-white text-black hover:bg-yellow-100`}>
+                                            <X className="w-4 h-4" /> Back out
+                                        </button>
+                                    )}
+                                </li>
+                            );
+                        })}
+                    </ul>
+                    <p className="mt-2 font-permanent text-[10px] text-zinc-600 dark:text-zinc-300 uppercase">
+                        {quests.length - open.length} of {quests.length} claimed{open.length ? ` · ${open.length} still open` : ' · all covered'}
+                    </p>
+                </>
+            )}
+
+            {inParty && (
+                <form className="mt-3 flex flex-wrap gap-2" onSubmit={async e => { e.preventDefault(); if (await act('food/add', { title: own })) setOwn(''); }}>
+                    <input maxLength={120} value={own} onChange={e => setOwn(e.target.value)} className={`${INPUT_CLS} flex-1 min-w-[10rem]`}
+                        placeholder="Something else you’ll bring" aria-label="Something else you’ll bring" />
+                    <button type="submit" disabled={busy || !own.trim()} className={`${BTN} bg-white text-black hover:bg-yellow-100`}>
+                        <Plus className="w-4 h-4" /> I’ll bring this
+                    </button>
+                </form>
+            )}
+
+            {gm && (
+                <form className="mt-3 p-3 border-2 border-dashed border-black/40 dark:border-white/40"
+                    onSubmit={async e => { e.preventDefault(); if (await act('food/seed', { titles })) setSeed(''); }}>
+                    <label className="block">
+                        <span className="block font-permanent text-[10px] text-zinc-700 dark:text-zinc-300 uppercase mb-1">What’s needed (comma-separated)</span>
+                        <input value={seed} onChange={e => setSeed(e.target.value)} className={INPUT_CLS} placeholder={DEFAULT_SLOTS} aria-label="Slots to add" />
+                    </label>
+                    <button type="submit" disabled={busy || titles.length === 0 || titles.length > 10} className={`${BTN} mt-2 bg-yellow-400 text-black hover:bg-white`}>
+                        <Plus className="w-4 h-4" /> Add {titles.length > 1 ? `${titles.length} slots` : 'slot'}
+                    </button>
+                </form>
+            )}
+        </div>
+    );
+}
+
 function PlanningCard({ state, reload }: { state: PlanningState; reload: () => Promise<void> }) {
     const { session: s, night, viewer, campaign } = state;
     const gm = viewer.isGameMaster;
@@ -382,14 +494,15 @@ function PlanningCard({ state, reload }: { state: PlanningState; reload: () => P
     const vPoll = state.venue;
     const venueOpen = vPoll?.status === 'open';
     const venueTie = vPoll?.status === 'closed' && vPoll.result === 'tie';
+    const unclaimedFood = state.food?.mode === 'potluck' ? state.food.quests.filter(q => q.status === 'open' && !q.assignee).length : 0;
     const seal = stage === 'venue'
         ? (venueOpen ? `Pick the venue · ${vPoll!.voted.length} of ${vPoll!.eligibleIds.length}` : venueTie ? `Tie · the ${gmTitle} decides` : 'Venue')
-        : stage === 'food' ? (gm ? 'Confirm the food' : `Food · waiting on the ${gmTitle}`)
+        : stage === 'food' ? (unclaimedFood ? `Food · ${unclaimedFood} unclaimed` : gm ? 'Confirm the food' : `Food · waiting on the ${gmTitle}`)
         : open ? `Awaiting votes · ${night!.voted.length} of ${night!.eligibleIds.length}`
         : tie ? `Tie · the ${gmTitle} decides`
         : gm ? 'Pick some nights' : `Waiting on the ${gmTitle}`;
     const sealHot = stage === 'night' ? open : stage === 'venue' ? venueOpen : false;
-    const sealTie = stage === 'night' ? tie : stage === 'venue' ? venueTie : false;
+    const sealTie = stage === 'night' ? tie : stage === 'venue' ? venueTie : unclaimedFood > 0;
     const foodLabel = s.foodMode === 'potluck' ? 'potluck'
         : s.foodMode === 'provided' ? `food by ${s.foodOwnerId === viewer.id ? 'you' : name(s.foodOwnerId ?? '')}` : null;
 
@@ -554,18 +667,24 @@ function PlanningCard({ state, reload }: { state: PlanningState; reload: () => P
 
             {!s.isOnline && s.foodMode && !(stage === 'night' && s.venue) && (
                 <div className="mt-4 pt-4 border-t-2 border-black/20 dark:border-white/20">
-                    <StepHeading n={3} title="Food" state={stage === 'food' ? 'now' : 'later'} />
-                    <p className="font-permanent text-xs text-zinc-700 dark:text-zinc-300 uppercase flex items-center gap-1.5">
+                    <StepHeading n={3} title={stage === 'food' ? 'Sort the food' : 'Food'} state={stage === 'food' ? 'now' : 'later'} />
+                    <p className="mb-3 font-permanent text-xs text-zinc-700 dark:text-zinc-300 uppercase flex items-center gap-1.5">
                         <Utensils className="w-4 h-4 shrink-0" />
                         {s.foodMode === 'potluck' ? 'Potluck: everyone brings something.' : `Food provided by ${s.foodOwnerId === viewer.id ? 'you' : name(s.foodOwnerId ?? '')}.`}
                     </p>
+                    {stage === 'food' && <FoodStep state={state} busy={busy} act={act} />}
                     {stage === 'food' && gm && (
-                        <button type="button" disabled={busy} onClick={() => act('confirm-food')} className={`${BTN} mt-3 bg-teal-600 text-white hover:bg-teal-500`}>
-                            <Check className="w-4 h-4" /> Food’s sorted: schedule it
-                        </button>
+                        <>
+                            <button type="button" disabled={busy} onClick={() => act('confirm-food')} className={`${BTN} mt-3 bg-teal-600 text-white hover:bg-teal-500`}>
+                                <Check className="w-4 h-4" /> Food’s sorted: schedule it
+                            </button>
+                            <p className="mt-2 font-permanent text-[10px] text-zinc-600 dark:text-zinc-300 uppercase">
+                                {unclaimedFood ? 'Unclaimed slots won’t hold it up. ' : ''}Otherwise the food step closes when the session starts.
+                            </p>
+                        </>
                     )}
                     {stage === 'food' && !gm && (
-                        <p className="mt-2 font-permanent text-[10px] text-zinc-600 dark:text-zinc-300 uppercase">The {gmTitle} will confirm the food, and then it’s on.</p>
+                        <p className="mt-2 font-permanent text-[10px] text-zinc-600 dark:text-zinc-300 uppercase">The {gmTitle} will confirm the food (or it closes when the session starts), and then it’s on.</p>
                     )}
                 </div>
             )}
@@ -728,9 +847,9 @@ export default function NoticeBoard({ campaignId, onSessionsChanged }: { campaig
                     {!kickoff.isOnline && (
                         <div className="flex flex-wrap gap-2">
                             <label className="block flex-1 min-w-[10rem]">
-                                <span className="block font-permanent text-[10px] text-teal-400 uppercase mb-1">Food</span>
-                                <select value={kickoff.foodMode} onChange={e => setKickoff({ ...kickoff, foodMode: e.target.value as FoodMode | '' })} className={INPUT_CLS}>
-                                    <option value="">Not planning food</option>
+                                <span className="block font-permanent text-[10px] text-teal-400 uppercase mb-1">Food *</span>
+                                <select required value={kickoff.foodMode} onChange={e => setKickoff({ ...kickoff, foodMode: e.target.value as FoodMode | '' })} className={INPUT_CLS}>
+                                    <option value="">Choose…</option>
                                     <option value="potluck">Potluck</option>
                                     <option value="provided">Food provided</option>
                                 </select>
@@ -747,7 +866,7 @@ export default function NoticeBoard({ campaignId, onSessionsChanged }: { campaig
                         </div>
                     )}
                     {kickoffError && <p role="alert" className="font-permanent text-xs text-red-400 uppercase">{kickoffError}</p>}
-                    <button type="submit" disabled={starting || !kickoff.title.trim() || (!kickoff.isOnline && kickoff.foodMode === 'provided' && !kickoff.foodOwnerId)} className={`${BTN} bg-teal-600 text-white hover:bg-teal-500`}>
+                    <button type="submit" disabled={starting || !kickoff.title.trim() || (!kickoff.isOnline && (!kickoff.foodMode || (kickoff.foodMode === 'provided' && !kickoff.foodOwnerId)))} className={`${BTN} bg-teal-600 text-white hover:bg-teal-500`}>
                         {starting ? 'Starting...' : 'Start planning'}
                     </button>
                 </form>

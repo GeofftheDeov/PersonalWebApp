@@ -1,20 +1,24 @@
-import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 import fs from "fs";
+import { signJwt } from "../utils/jwt.js";
 
 dotenv.config();
 
-const jwtSecret = process.env.JWT_SECRET || "your-secret-key-change-this";
-
-// Generate a JWT token that doesn't expire (for Salesforce integration)
-const token = jwt.sign(
-    { 
-        service: "salesforce",
-        purpose: "account-sync"
-    },
-    jwtSecret,
-    { expiresIn: "365d" } // 1 year expiration
-);
+// Signs with the backend's own JWT_SECRET (#95); refuses if it is unset or the
+// old insecure default, since a token signed with that is a token anyone can mint.
+let token: string;
+try {
+    token = signJwt(
+        {
+            service: "salesforce",
+            purpose: "account-sync"
+        },
+        { expiresIn: "365d" } // 1 year expiration
+    );
+} catch (err: any) {
+    console.error(`\n${err.message}\n`);
+    process.exit(1);
+}
 
 console.log("\n=== JWT Token for Salesforce ===");
 console.log(token);

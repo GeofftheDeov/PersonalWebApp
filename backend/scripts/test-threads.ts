@@ -17,10 +17,11 @@
  * against anything but localhost). It deletes every row it creates.
  *   DATABASE_URL=postgresql://postgres@127.0.0.1:5433/pwatest npx tsx scripts/test-threads.ts
  */
+import "./use-test-jwt-secret.js";
 import express from "express";
 import type { AddressInfo } from "net";
-import jwt from "jsonwebtoken";
 import pool from "../db/index.js";
+import { signJwt } from "../utils/jwt.js";
 import {
   visibleThreadKeys, canAccessThread, campaignThreadKey, dmThreadKey, parseThreadKey,
 } from "../services/threads.js";
@@ -29,11 +30,6 @@ if (!/(\/\/|@)(127\.0\.0\.1|localhost)[:/]/.test(process.env.DATABASE_URL ?? "")
   console.error("\n  Refusing to run: DATABASE_URL must be a local throwaway database.\n");
   process.exit(2);
 }
-
-// Set before the routes load, so this keeps working once the secret is
-// required at boot (#95).
-process.env.JWT_SECRET ||= "t97-threads-test-secret";
-const SECRET = process.env.JWT_SECRET;
 
 let pass = 0, fail = 0;
 function check(name: string, ok: boolean, detail = "") {
@@ -100,7 +96,7 @@ async function main() {
   await new Promise((r) => server.once("listening", r));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
-  const tokenFor = (p: Person) => jwt.sign({ id: p.id, email: p.email }, SECRET);
+  const tokenFor = (p: Person) => signJwt({ id: p.id, email: p.email });
   const call = async (method: string, path: string, who: Person, body?: unknown) => {
     const res = await fetch(`${base}${path}`, {
       method,

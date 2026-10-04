@@ -1,5 +1,5 @@
 import express, { Response } from "express";
-import jwt from "jsonwebtoken";
+import { verifyJwt } from "../utils/jwt.js";
 import { isUuid } from "../db/model.js";
 import Message from "../models/Message.js";
 import Campaign from "../models/Campaign.js";
@@ -78,7 +78,7 @@ function sseAuth(req: any, res: Response): boolean {
         return false;
     }
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || "your-secret-key-change-this") as any;
+        const decoded = verifyJwt(token);
         req.user = { id: decoded.id, email: decoded.email, type: decoded.type };
         return true;
     } catch {

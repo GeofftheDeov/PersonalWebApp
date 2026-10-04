@@ -48,5 +48,9 @@ Copy `.env.example` to `.env` and fill in the required values:
 
 - `PORT`: Server port (default: 5000)
 - `MONGODB_URI`: MongoDB connection string
-- `JWT_SECRET`: Secret key for JWT signing
+- `JWT_SECRET` (required, every environment): secret for signing and verifying login tokens. The server
+  exits at boot if it is unset or still an old placeholder; there is no default. Generate one with
+  `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. All signing and
+  verification goes through `utils/jwt.ts`. The `scripts/test-*.ts` suites set a random one for
+  themselves (`scripts/use-test-jwt-secret.ts`).
 - `SF_LOGIN_URL`, `SF_USERNAME`, `SF_CLIENT_ID`, `SF_PRIVATE_KEY_PATH`: Salesforce JWT flow credentials.

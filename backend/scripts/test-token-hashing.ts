@@ -29,6 +29,7 @@
  * deletes its own rows, and refuses to run against anything but localhost):
  *   DATABASE_URL=postgresql://postgres@127.0.0.1:5433/pwatest npx tsx scripts/test-token-hashing.ts
  */
+import "./use-test-jwt-secret.js";
 import express from "express";
 import type { AddressInfo } from "net";
 import bcrypt from "bcryptjs";

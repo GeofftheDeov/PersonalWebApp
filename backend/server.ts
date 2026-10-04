@@ -1,14 +1,13 @@
 import dotenv from "dotenv";
+import { assertJwtSecretConfigured } from "./utils/jwt.js";
 dotenv.config();
 
-const INSECURE_JWT_DEFAULT = "your-secret-key-change-this";
-const jwtSecret = process.env.JWT_SECRET;
-if (!jwtSecret || jwtSecret === INSECURE_JWT_DEFAULT) {
-    if (process.env.NODE_ENV === "production") {
-        throw new Error("FATAL: JWT_SECRET must be set to a strong secret in production");
-    } else {
-        console.warn("[SECURITY] WARNING: JWT_SECRET is missing or using the insecure default. Set a strong secret before deploying to production.");
-    }
+// No JWT secret, no backend — in every environment, not only production (#95).
+try {
+    assertJwtSecretConfigured();
+} catch (err: any) {
+    console.error(`FATAL: ${err.message}`);
+    process.exit(1);
 }
 
 const vaultKey = process.env.VAULT_ENCRYPTION_KEY;

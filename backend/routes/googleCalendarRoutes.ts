@@ -1,5 +1,5 @@
 import express, { Response } from 'express';
-import jwt from 'jsonwebtoken';
+import { signJwt, verifyJwt } from '../utils/jwt.js';
 import { OAuth2Client } from 'google-auth-library';
 import { auth } from '../middleware/auth.js';
 import ApiKeyVault from '../models/ApiKeyVault.js';
@@ -36,11 +36,7 @@ const oauthClient = () => {
 // Returns the consent-screen URL. The user's identity rides along in `state`.
 router.get('/auth-url', auth, (req: any, res: Response) => {
     try {
-        const state = jwt.sign(
-            { id: req.user.id, purpose: 'gcal-connect' },
-            process.env.JWT_SECRET || 'your-secret-key-change-this',
-            { expiresIn: '10m' },
-        );
+        const state = signJwt({ id: req.user.id, purpose: 'gcal-connect' }, { expiresIn: '10m' });
         const url = oauthClient().generateAuthUrl({
             access_type: 'offline',
             prompt: 'consent', // force refresh-token issuance on reconnect
@@ -62,7 +58,7 @@ router.get('/callback', async (req: any, res: Response) => {
         if (error) return res.redirect(`${frontend}/profile?gcal=denied`);
         if (!code || !state) return res.redirect(`${frontend}/profile?gcal=error`);
 
-        const decoded = jwt.verify(state, process.env.JWT_SECRET || 'your-secret-key-change-this') as any;
+        const decoded = verifyJwt(state);
         if (decoded.purpose !== 'gcal-connect') throw new Error('Bad state');
 
         const { tokens } = await oauthClient().getToken(code);

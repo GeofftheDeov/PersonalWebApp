@@ -8,7 +8,8 @@
  *     ...nightChange "reopened"    not a kickoff: a scheduled night is changing
  *                                  (#87); the old night stands, vote on the new times
  *   poll_opened                    a vote is open: go and vote (except the round a
- *                                  reopen starts, which the reopen already announced)
+ *                                  reopen starts, which the reopen already announced,
+ *                                  and the venue vote opening with planning/venue)
  *   stage_changed planning/venue   the night is confirmed (in person); the venue is next
  *   stage_changed planning/food    the venue is confirmed; the food is next
  *   stage_changed scheduled        it's on: when (and where, or the table link)
@@ -161,7 +162,9 @@ async function onNightMoved(e: EventMap["planning.night_moved"]) {
 }
 
 async function onPollOpened(e: EventMap["planning.poll_opened"]) {
-    if (e.nightChange === "reopened") return;   // the reopen's stage change already announced this round
+    // The reopen's stage change already announced this round; likewise the
+    // venue vote that opens as the night is confirmed (#92).
+    if (e.nightChange === "reopened" || e.withStage) return;
     const s = await loadSession(e.sessionId);
     if (!s) return;
     const { rows: [{ n }] } = await pool.query(`SELECT count(*)::int AS n FROM poll_options WHERE poll_id = $1`, [e.pollId]);

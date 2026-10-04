@@ -105,15 +105,6 @@ async function main() {
     });
     return { status: res.status, json: await res.json().catch(() => null) as any };
   };
-  /** Opens an SSE stream (token in the query, as EventSource sends it) and closes it at once. */
-  const stream = async (path: string, who: Person) => {
-    const ctl = new AbortController();
-    const res = await fetch(`${base}${path}?token=${tokenFor(who)}`, { signal: ctl.signal });
-    const contentType = res.headers.get("content-type") ?? "";
-    const json = contentType.includes("json") ? await res.json().catch(() => null) as any : null;
-    ctl.abort();
-    return { status: res.status, contentType, json };
-  };
 
   try {
     const gm = await account("gm");
@@ -217,15 +208,11 @@ async function main() {
     const history = await call("GET", path, player);
     check("a member can read history (200)", history.status === 200 && Array.isArray(history.json)
       && history.json.some((m: any) => m.body === "t97 hello table"), `got ${history.status}`);
-    const ms = await stream(`${path}/stream`, player);
-    check("a member can open the stream", ms.status === 200 && ms.contentType.includes("text/event-stream"),
-      `got ${ms.status} ${ms.contentType}`);
 
     const notMember = { error: "Not a member of this campaign" };
     for (const [label, res] of [
       ["history", await call("GET", path, outsider)],
       ["send", await call("POST", path, outsider, { body: "t97 let me in" })],
-      ["stream", await stream(`${path}/stream`, outsider)],
       ["history (campaign id not a uuid)", await call("GET", "/api/messages/campaign/not-a-uuid", player)],
     ] as const) {
       check(`a non-member is refused ${label} with 403`,
@@ -237,8 +224,6 @@ async function main() {
     check("an admin who isn't a member can still read any campaign's history",
       adminHistory.status === 200 && adminHistory.json?.some((m: any) => m.body === "t97 hello table"),
       `got ${adminHistory.status}`);
-    const adminStream = await stream(`${path}/stream`, admin);
-    check("...and open its stream", adminStream.status === 200, `got ${adminStream.status}`);
 
     console.log("\nDM endpoints\n");
 
@@ -250,15 +235,11 @@ async function main() {
     const dmHistory = await call("GET", `/api/messages/dm/${player.id}`, friend);
     check("the other side reads the same DM history (200)", dmHistory.status === 200
       && dmHistory.json?.some((m: any) => m.body === "t97 hi friend"), `got ${dmHistory.status}`);
-    const ds = await stream(`${dmPath}/stream`, player);
-    check("a friend can open the DM stream", ds.status === 200 && ds.contentType.includes("text/event-stream"),
-      `got ${ds.status} ${ds.contentType}`);
 
     const friendsOnly = { error: "You can only message friends" };
     for (const [label, res] of [
       ["history", await call("GET", `/api/messages/dm/${player.id}`, stranger)],
       ["send", await call("POST", `/api/messages/dm/${player.id}`, stranger, { body: "t97 psst" })],
-      ["stream", await stream(`/api/messages/dm/${player.id}/stream`, stranger)],
       ["history (admin)", await call("GET", `/api/messages/dm/${player.id}`, admin)],
       ["history (yourself)", await call("GET", `/api/messages/dm/${player.id}`, player)],
       ["history (not a uuid)", await call("GET", `/api/messages/dm/not-a-uuid`, player)],

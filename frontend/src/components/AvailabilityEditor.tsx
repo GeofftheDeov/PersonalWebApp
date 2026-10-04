@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Plus, Save, X, Globe, Eye, CalendarX, CalendarCheck } from 'lucide-react';
+import { Plus, Save, X, Globe, Eye, CalendarX, CalendarCheck, RefreshCw, Link2 } from 'lucide-react';
 
 /**
  * Regular availability (#57): the weekly windows a player can usually play,
- * one-off exceptions, and a preview of exactly what the party's overlap will
- * say about them. Backed by /api/availability/me.
+ * one-off exceptions, busy time from their own Google Calendar (#84), and a
+ * preview of exactly what the party's overlap will say about them. Backed by
+ * /api/availability/me.
  */
 
 const DAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
@@ -17,6 +18,27 @@ const PREVIEW_DAYS = 14;
 interface WindowRow { weekday: number; start: string; end: string }
 interface AvailabilityException { id: string; start: string; end: string; kind: 'unavailable' | 'available'; note: string | null }
 interface Run { start: string; end: string; presence: 'free' | 'busy' | 'unknown' }
+interface BusySource {
+    source: 'google' | 'discord';
+    enabled: boolean;
+    connected: boolean;
+    ready: boolean;
+    needsReconsent: boolean;
+    problem: string | null;
+    syncedAt: string | null;
+    lastError: string | null;
+    freshMinutes: number;
+}
+
+const SOURCE_LABEL: Record<BusySource['source'], string> = { google: 'Google Calendar', discord: 'Discord events' };
+
+const ago = (iso: string) => {
+    const minutes = Math.round((Date.now() - Date.parse(iso)) / 60000);
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return `${minutes} min ago`;
+    const hours = Math.round(minutes / 60);
+    return hours < 48 ? `${hours} h ago` : `${Math.round(hours / 24)} days ago`;
+};
 
 const CARD_CLS = "p-5 border-4 border-black dark:border-white bg-zinc-200 dark:bg-slate-800 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]";
 const FIELD_CLS = "p-2 border-2 border-black bg-white text-black font-permanent text-sm uppercase outline-none focus:border-teal-500";
@@ -57,7 +79,8 @@ const PRESENCE_CLS: Record<Run['presence'], string> = {
     unknown: 'bg-[repeating-linear-gradient(45deg,#facc15_0_3px,transparent_3px_7px)]',
 };
 
-export default function AvailabilityEditor() {
+/** `googleNotice`: what came back from Google's consent screen, when it sent the person here. */
+export default function AvailabilityEditor({ googleNotice }: { googleNotice?: string | null } = {}) {
     const [loading, setLoading] = useState(true);
     const [rows, setRows] = useState<WindowRow[]>([]);
     const [timeZone, setTimeZone] = useState(browserTimeZone);
@@ -70,6 +93,10 @@ export default function AvailabilityEditor() {
     const [xForm, setXForm] = useState({ kind: 'unavailable' as 'unavailable' | 'available', date: '', allDay: true, start: '18:00', end: '23:00', note: '' });
     const [xError, setXError] = useState<string | null>(null);
     const [addingException, setAddingException] = useState(false);
+
+    const [sources, setSources] = useState<BusySource[]>([]);
+    const [sourceBusy, setSourceBusy] = useState<string | null>(null);
+    const [sourceError, setSourceError] = useState<string | null>(null);
 
     const [runs, setRuns] = useState<Run[]>([]);
     const [previewFrom] = useState(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; });
@@ -106,6 +133,8 @@ export default function AvailabilityEditor() {
                 setTimeZone(tz);
                 setSavedSnapshot(snapshot(loaded, tz));
                 setExceptions(data.exceptions);
+                const src = await fetch('/api/availability/me/busy-sources', { headers: headers() });
+                if (src.ok) setSources((await src.json()).sources);
                 await loadPreview();
             } catch {
                 setError('Could not load your availability.');
@@ -185,6 +214,34 @@ export default function AvailabilityEditor() {
         if (res.ok || res.status === 404) {
             setExceptions(prev => prev.filter(x => x.id !== id));
             await loadPreview();
+        }
+    };
+
+    /** Google's consent screen, coming back to this tab. Used to connect, and to re-consent once for free/busy. */
+    const connectGoogle = async () => {
+        setSourceError(null);
+        const res = await fetch('/api/google-calendar/auth-url?return=availability', { headers: headers() });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.url) window.location.href = data.url;
+        else setSourceError(data.error || 'Google Calendar is not set up on this server.');
+    };
+
+    /** Turn a source on or off, or sync it now. */
+    const changeSource = async (source: BusySource['source'], action: 'on' | 'off' | 'sync') => {
+        setSourceBusy(`${source}:${action}`);
+        setSourceError(null);
+        try {
+            const path = `/api/availability/me/busy-sources/${source}${action === 'sync' ? '/sync' : ''}`;
+            const res = await fetch(path, { method: action === 'on' ? 'PUT' : action === 'off' ? 'DELETE' : 'POST', headers: headers() });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) { setSourceError(data.error || 'That didn’t work. Try again.'); return; }
+            const list = await fetch('/api/availability/me/busy-sources', { headers: headers() });
+            if (list.ok) setSources((await list.json()).sources);
+            await loadPreview();
+        } catch {
+            setSourceError('That didn’t work. Try again.');
+        } finally {
+            setSourceBusy(null);
         }
     };
 
@@ -335,13 +392,78 @@ export default function AvailabilityEditor() {
                 </div>
             </section>
 
+            {/* ── Busy time from outside calendars (#84) ── */}
+            {sources.length > 0 && (
+                <section aria-labelledby="busy-h">
+                    <h2 id="busy-h" className={HEADING_CLS}>
+                        <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Busy From Your Calendar</span>
+                    </h2>
+                    <p className="font-permanent text-xs text-zinc-500 dark:text-zinc-400 uppercase mb-6 max-w-2xl">
+                        Let your real commitments count without typing them in. The app reads only when you&rsquo;re busy, never
+                        what the event is, and your party sees busy without knowing where it came from.
+                    </p>
+
+                    <div className={`${CARD_CLS} space-y-3`}>
+                        {googleNotice && (
+                            <p role="status" className="font-permanent text-xs text-teal-600 dark:text-yellow-400 uppercase">{googleNotice}</p>
+                        )}
+                        {sources.map(s => {
+                            const working = sourceBusy?.startsWith(`${s.source}:`);
+                            return (
+                                <div key={s.source} className="flex flex-wrap items-center gap-3 p-3 border-2 border-black bg-white dark:bg-slate-700">
+                                    <div className="min-w-[12rem] flex-1">
+                                        <p className="font-permanent text-sm text-black dark:text-white uppercase flex items-center gap-2">
+                                            {SOURCE_LABEL[s.source]}
+                                            <span className={`px-2 py-0.5 border-2 border-black text-[10px] ${s.enabled ? 'bg-teal-600 text-white' : 'bg-zinc-200 text-black'}`}>
+                                                {s.enabled ? 'On' : 'Off'}
+                                            </span>
+                                        </p>
+                                        <p className="font-permanent text-[10px] text-zinc-500 dark:text-zinc-300 uppercase mt-1">
+                                            {s.enabled
+                                                ? (s.syncedAt ? `Synced ${ago(s.syncedAt)} · refreshed when older than ${s.freshMinutes} min` : 'Not synced yet')
+                                                : s.needsReconsent
+                                                    ? 'Google needs to ask you once more, so the app can see when you’re busy.'
+                                                    : s.ready ? 'Off: your Google busy time doesn’t count yet.' : (s.problem ?? 'Not connected.')}
+                                        </p>
+                                        {s.enabled && s.lastError && (
+                                            <p role="alert" className="font-permanent text-[10px] text-red-600 dark:text-red-400 uppercase mt-1">
+                                                Last sync failed: {s.lastError} Until it works, your party sees your regular week.
+                                            </p>
+                                        )}
+                                    </div>
+                                    {s.source === 'google' && (!s.connected || s.needsReconsent) && (
+                                        <button type="button" onClick={connectGoogle} className={`${BTN_CLS} bg-yellow-400 text-black hover:bg-white`}>
+                                            <Link2 className="w-4 h-4" /> {s.connected ? 'Reconnect Google' : 'Connect Google'}
+                                        </button>
+                                    )}
+                                    {s.enabled && (
+                                        <button type="button" disabled={working} onClick={() => changeSource(s.source, 'sync')}
+                                            className={`${BTN_CLS} bg-white text-black hover:bg-yellow-400`}>
+                                            <RefreshCw className={`w-4 h-4 ${sourceBusy === `${s.source}:sync` ? 'animate-spin' : ''}`} /> Sync now
+                                        </button>
+                                    )}
+                                    {(s.enabled || s.ready) && (
+                                        <button type="button" disabled={working} onClick={() => changeSource(s.source, s.enabled ? 'off' : 'on')}
+                                            className={`${BTN_CLS} ${s.enabled ? 'bg-zinc-800 text-white hover:bg-red-600' : 'bg-teal-600 text-white hover:bg-teal-500'}`}>
+                                            {s.enabled ? 'Turn off' : 'Turn on'}
+                                        </button>
+                                    )}
+                                </div>
+                            );
+                        })}
+                        {sourceError && <p role="alert" className="font-permanent text-xs text-red-600 dark:text-red-400 uppercase">{sourceError}</p>}
+                    </div>
+                </section>
+            )}
+
             {/* ── Preview ── */}
             <section aria-labelledby="preview-h">
                 <h2 id="preview-h" className={HEADING_CLS}>
                     <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">What Your Party Sees</span>
                 </h2>
                 <p className="font-permanent text-xs text-zinc-500 dark:text-zinc-400 uppercase mb-6 max-w-2xl">
-                    The next two weeks, exactly as the Game Master&rsquo;s overlap will count you. Saved changes only.
+                    The next two weeks, exactly as the Game Master&rsquo;s overlap will count you, calendar busy time included.
+                    Saved changes only.
                 </p>
 
                 <div className={CARD_CLS}>

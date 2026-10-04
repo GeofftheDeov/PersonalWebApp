@@ -659,6 +659,26 @@ CREATE TABLE busy_blocks (
 );
 CREATE INDEX idx_busy_blocks_person ON busy_blocks (person_id, starts_at);
 
+-- The outside calendars a person lets count as busy (#84): a row means ON.
+-- synced_from / synced_to is the stretch the last good sync covered; that
+-- source's busy_blocks are exactly what it said about that stretch.
+-- last_error is shown to the owner only.
+CREATE TABLE busy_sources (
+  person_id       uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  source          text NOT NULL CHECK (source IN ('google','discord')),
+  enabled_at      timestamptz NOT NULL DEFAULT now(),
+  synced_at       timestamptz,
+  synced_from     timestamptz,
+  synced_to       timestamptz,
+  last_attempt_at timestamptz,
+  last_error      text CHECK (char_length(last_error) <= 500),
+  PRIMARY KEY (person_id, source),
+  CONSTRAINT busy_sources_synced_shape CHECK (
+    (synced_at IS NULL) = (synced_from IS NULL) AND
+    (synced_at IS NULL) = (synced_to IS NULL) AND
+    (synced_to IS NULL OR synced_to > synced_from))
+);
+
 -- The night vote and the venue vote. eligible_ids and quorum are snapshotted
 -- when the poll opens. result: 'winner', 'tie' (closed, the GM picks) or
 -- 'no_quorum' (the round failed; the GM re-shortlists).

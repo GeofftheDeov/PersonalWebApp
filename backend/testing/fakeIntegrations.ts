@@ -50,6 +50,7 @@ function defaultHandlers(next: () => number): Handlers {
         "google.createCalendarEvent": async () => ({ id: `fake-google-event-${next()}` }),
         "google.updateCalendarEvent": async (_refreshToken, eventId) => ({ id: eventId }),
         "google.deleteCalendarEvent": async () => {},
+        "google.freeBusy": async () => [],   // an empty calendar
         "uploads.presignPut": async (input) => ({
             url: `https://fake-uploads.test/${input.key}?signature=fake-${next()}`,
             method: "PUT",

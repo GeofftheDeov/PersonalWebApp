@@ -4,8 +4,8 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 /**
  * Everything the app sends to or reads from an outside service for tabletop
- * sessions (#79): Discord scheduled events, Google Calendar events, and S3
- * presigned uploads (for banners, #81).
+ * sessions (#79): Discord scheduled events, Google Calendar events and
+ * free/busy (#84), and S3 presigned uploads (for banners, #81).
  *
  * Callers reach these services only through `integrations()`. They never call
  * Discord, Google or S3 themselves. Tests swap the whole module for a fake that
@@ -279,6 +279,59 @@ async function deleteGoogleCalendarEvent(refreshToken: string, eventId: string):
     }
 }
 
+export interface FreeBusyInput {
+    start: Date;
+    end: Date;
+}
+
+/** One stretch of busy time. Google's free/busy answer has no titles, ids or anything else. */
+export interface BusyInterval {
+    start: Date;
+    end: Date;
+}
+
+/**
+ * When the owner of the refresh token is busy on their primary Google
+ * Calendar (#84). freeBusy.query returns bare busy intervals: no titles, no
+ * event ids. It does NOT accept the calendar.events scope; the token needs
+ * calendar.freebusy (or calendar.readonly / calendar / calendar.events.freebusy).
+ *   https://developers.google.com/workspace/calendar/api/v3/reference/freebusy/query
+ * Google refuses one query longer than about three months (timeRangeTooLong);
+ * callers ask for at most ~64 days.
+ */
+async function queryGoogleFreeBusy(refreshToken: string, input: FreeBusyInput): Promise<BusyInterval[]> {
+    const token = await googleAccessToken(refreshToken);
+    const res = await fetch('https://www.googleapis.com/calendar/v3/freeBusy', {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            timeMin: input.start.toISOString(),
+            timeMax: input.end.toISOString(),
+            items: [{ id: 'primary' }],
+        }),
+        signal: AbortSignal.timeout(10_000),
+    });
+
+    if (!res.ok) {
+        const detail = await res.text().catch(() => '');
+        throw new Error(`Google Calendar API ${res.status}: ${detail.slice(0, 300)}`);
+    }
+    const data: any = await res.json();
+    const primary = data?.calendars?.primary;
+    if (!primary) throw new Error('Google Calendar API: no free/busy answer for the primary calendar');
+    if (Array.isArray(primary.errors) && primary.errors.length) {
+        throw new Error(`Google Calendar API: ${primary.errors.map((e: any) => e?.reason).join(', ')}`);
+    }
+    // Copy only the two times: nothing else Google sends is kept.
+    return (Array.isArray(primary.busy) ? primary.busy : []).map((b: any) => ({
+        start: new Date(b.start),
+        end: new Date(b.end),
+    }));
+}
+
 export interface PresignPutInput {
     /** Object key, built by the caller (e.g. `campaign-banners/<campaignId>/<uuid>.webp`). */
     key: string;
@@ -388,6 +441,8 @@ export interface Integrations {
         updateCalendarEvent(refreshToken: string, eventId: string, changes: Partial<CalendarEventInput>): Promise<{ id: string }>;
         /** An event that's already gone counts as deleted. */
         deleteCalendarEvent(refreshToken: string, eventId: string): Promise<void>;
+        /** Busy intervals on the token owner's primary calendar. Needs the calendar.freebusy scope. */
+        freeBusy(refreshToken: string, input: FreeBusyInput): Promise<BusyInterval[]>;
     };
     uploads: {
         /** A URL the browser PUTs one object to directly. The caller checks type and size first. */
@@ -409,6 +464,7 @@ export const realIntegrations: Integrations = {
         createCalendarEvent: createGoogleCalendarEvent,
         updateCalendarEvent: updateGoogleCalendarEvent,
         deleteCalendarEvent: deleteGoogleCalendarEvent,
+        freeBusy: queryGoogleFreeBusy,
     },
     uploads: { presignPut: presignS3Put, readUrl: s3ReadUrl, deleteObject: s3DeleteObject },
 };

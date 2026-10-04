@@ -111,16 +111,36 @@ export async function openPoll(db: Db, input: {
     const { rows: [poll] } = await db.query(
         `INSERT INTO polls (session_id, kind, round, eligible_ids, quorum) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
         [input.sessionId, input.kind, next, input.eligibleIds, input.kind === "night" ? input.quorum : null]);
-    for (const o of input.options) {
-        if ("venueId" in o) {
-            await db.query(`INSERT INTO poll_options (poll_id, venue_id, suggested_by) VALUES ($1, $2, $3)`,
-                [poll.id, o.venueId, o.suggestedBy ?? null]);
-        } else {
-            await db.query(`INSERT INTO poll_options (poll_id, starts_at, ends_at, suggested_by) VALUES ($1, $2, $3, $4)`,
-                [poll.id, o.start, o.end, o.suggestedBy ?? null]);
-        }
-    }
+    for (const o of input.options) await insertOption(db, poll.id, o);
     return (await getPoll(db, poll.id))!;
+}
+
+/**
+ * clock_timestamp(), not now(): options inserted in one transaction would
+ * otherwise share a created_at, and venue options (which have no time to sort
+ * by) would come back in id order instead of the order they were put up in.
+ */
+async function insertOption(db: Db, pollId: string, o: NewOption): Promise<string> {
+    const { rows: [row] } = "venueId" in o
+        ? await db.query(`INSERT INTO poll_options (poll_id, venue_id, suggested_by, created_at)
+                          VALUES ($1, $2, $3, clock_timestamp()) RETURNING id`, [pollId, o.venueId, o.suggestedBy ?? null])
+        : await db.query(`INSERT INTO poll_options (poll_id, starts_at, ends_at, suggested_by, created_at)
+                          VALUES ($1, $2, $3, $4, clock_timestamp()) RETURNING id`, [pollId, o.start, o.end, o.suggestedBy ?? null]);
+    return row.id;
+}
+
+/**
+ * Adds an option to a vote that's already open: a venue someone suggests
+ * mid-vote (#92). Ballots already cast stand, and can still be changed.
+ */
+export async function addOption(db: Db, poll: Poll, option: NewOption): Promise<{ poll: Poll; optionId: string }> {
+    if (poll.status !== "open") throw new PollError(409, "This vote has closed.");
+    if ("venueId" in option !== (poll.kind === "venue")) throw new PollError(400, `That isn't a ${poll.kind} option.`);
+    if ("venueId" in option && poll.options.some((o) => o.venueId === option.venueId)) {
+        throw new PollError(409, "That venue is already on the vote.");
+    }
+    const optionId = await insertOption(db, poll.id, option);
+    return { poll: (await getPoll(db, poll.id))!, optionId };
 }
 
 /** Replaces this person's ballot. Night: any number of options, none included. Venue: exactly one. */

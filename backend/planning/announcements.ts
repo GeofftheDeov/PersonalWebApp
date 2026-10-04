@@ -8,12 +8,14 @@
  *     ...nightChange "reopened"    not a kickoff: a scheduled night is changing
  *                                  (#87); the old night stands, vote on the new times
  *   poll_opened                    a vote is open: go and vote (except the round a
- *                                  reopen starts, which the reopen already announced)
+ *                                  reopen starts, which the reopen already announced,
+ *                                  and the venue vote opening with planning/venue)
  *   stage_changed planning/venue   the night is confirmed (in person); the venue is next
  *   stage_changed planning/food    the venue is confirmed; the food is next
  *   stage_changed scheduled        it's on: when (and where, or the table link)
  *     ...nightChange "kept"        a re-planned night came out the same: it stays on
  *     ...nightChange "moved"       nothing here: night_moved announces it
+ *     ...closedBy "session_start"  nothing: the food step closed as the session began (#93)
  *   night_moved                    the night moved: the new night, and what it was (#87)
  *   stage_changed cancelled        planning has stopped
  *   poll_closed tie / no_quorum    the Game Master has to act
@@ -130,6 +132,10 @@ async function onStageChanged(e: EventMap["planning.stage_changed"]) {
             `**The venue is set** for "${s.title}": ${where(s)}. Next, the food — see the [Notice Board](${board}).`);
     } else if (e.status === "scheduled" && e.nightChange === "moved") {
         return;   // planning.night_moved announces it, with the old and new times
+    } else if (e.status === "scheduled" && e.closedBy === "session_start") {
+        // The food step closed by itself as the session started (#93): the party
+        // already knows the night and the venue, and had the ready check at T-30.
+        return;
     } else if (e.status === "scheduled" && e.nightChange === "kept") {
         await notifyParty(s, undefined, `"${s.title}" stays on ${await when(s)}`,
             `${s.campaign_title} — the vote kept the same night.`);
@@ -163,7 +169,9 @@ async function onNightMoved(e: EventMap["planning.night_moved"]) {
 }
 
 async function onPollOpened(e: EventMap["planning.poll_opened"]) {
-    if (e.nightChange === "reopened") return;   // the reopen's stage change already announced this round
+    // The reopen's stage change already announced this round; likewise the
+    // venue vote that opens as the night is confirmed (#92).
+    if (e.nightChange === "reopened" || e.withStage) return;
     const s = await loadSession(e.sessionId);
     if (!s) return;
     const { rows: [{ n }] } = await pool.query(`SELECT count(*)::int AS n FROM poll_options WHERE poll_id = $1`, [e.pollId]);

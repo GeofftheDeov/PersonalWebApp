@@ -5,6 +5,7 @@ import { pushTaskToSalesforce, pullTasksFromSalesforce } from "../services/sales
 import { runPersonSync } from "./personSync.js";
 import pool from "../db/index.js";
 import { runQuestReminders } from "../planning/questReminders.js";
+import { closeDueFoodSteps } from "../planning/planner.js";
 import {
     getBullConnectionOptions,
     QUEUE_NAMES,
@@ -258,13 +259,27 @@ export function startWorkers(): () => Promise<void> {
         console.error(`[bullmq] person-sync failed: ${err.message}`)
     );
 
-    // Quest reminders (#91): the real clock here; tests call runQuestReminders with their own.
+    // The every-minute planning job: quest reminders (#91), and closing the food
+    // step of in-person sessions that have reached their start (#93). The real
+    // clock here; tests call runQuestReminders and closeDueFoodSteps with their
+    // own. The two are independent, so one failing doesn't stop the other; the
+    // job still fails (and logs) if either did.
     _questReminderWorker = new Worker(QUEUE_NAMES.QUEST_REMINDERS, async () => {
-        const r = await runQuestReminders(pool, new Date());
+        const now = new Date();
+        let closed = 0;
+        let sweepError: unknown = null;
+        try {
+            closed = (await closeDueFoodSteps(pool, now)).closed.length;
+        } catch (err) {
+            sweepError = err;
+        }
+        const r = await runQuestReminders(pool, now);
+        if (closed) console.log(`[bullmq] quest-reminders: closed the food step of ${closed} session(s)`);
         if (r.sent.length || r.followed.length) {
             console.log(`[bullmq] quest-reminders: sent ${r.sent.length}, moved ${r.followed.length} due time(s)`);
         }
-        return { sent: r.sent.length, followed: r.followed.length };
+        if (sweepError) throw sweepError;
+        return { sent: r.sent.length, followed: r.followed.length, closedFoodSteps: closed };
     }, { connection: opts, concurrency: 1 });
     _questReminderWorker.on("failed", (job, err) =>
         console.error(`[bullmq] quest-reminders failed: ${err.message}`)

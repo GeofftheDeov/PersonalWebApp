@@ -31,6 +31,11 @@ let _questReminderQueue: Queue | null = null;
  * (planning/questReminders.ts). attempts: 1 -- the next minute's run is the
  * retry, and each reminder is claimed in the database before it's sent, so a
  * rerun never repeats one.
+ *
+ * The same job also closes the food step of every in-person session that has
+ * reached its start (#93, planner.ts closeDueFoodSteps), which is idempotent.
+ * Without Redis (local dev) nothing closes the food step by itself; the ready
+ * check still covers those sessions (utils/readyCheck.ts).
  */
 const QUEST_REMINDERS_EVERY_MS = 60 * 1000;
 const QUEST_REMINDER_JOB_OPTS = { attempts: 1, removeOnComplete: { count: 20 }, removeOnFail: { count: 50 } };

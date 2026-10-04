@@ -7,13 +7,22 @@ import { PollError } from "../planning/poll.js";
  * Session planning (#57). Thin wrappers over planning/planner.ts:
  *
  *   GET  /api/planning/campaigns/:campaignId          the Notice Board: { canPlan, gmTitle, planning: [state] }
- *   POST /api/planning/campaigns/:campaignId/kickoff  { title, isOnline, agenda? }
+ *   POST /api/planning/campaigns/:campaignId/kickoff  { title, isOnline, agenda?, foodMode?, foodOwnerId? }
+ *                                                     in person, required: foodMode "potluck" | "provided" (with a foodOwnerId)
  *   GET  /api/planning/sessions/:sessionId            planning state
- *   POST /api/planning/sessions/:sessionId/shortlist    { options: [{ start, end }] }   2-4 times
+ *   POST /api/planning/sessions/:sessionId/shortlist    night: { options: [{ start, end }] } 2-4 times;
+ *                                                       venue: { venueIds: [...] } 1-6 of the campaign's venues
  *   POST /api/planning/sessions/:sessionId/reshortlist  same; replaces an open round
- *   POST /api/planning/sessions/:sessionId/vote         { optionIds: [...] }  every time I can make
+ *   POST /api/planning/sessions/:sessionId/vote         { optionIds: [...] }  night: every time I can make; venue: exactly one
+ *   POST /api/planning/sessions/:sessionId/suggest-venue  party: { venueId } or { name, address?, kind?, hostId? }
  *   POST /api/planning/sessions/:sessionId/advance      GM: close the vote now
  *   POST /api/planning/sessions/:sessionId/tiebreak     GM: { optionId }
+ *   POST /api/planning/sessions/:sessionId/confirm-food GM: the food step is done; the session is scheduled
+ *                                                       (unclaimed slots don't block; it also closes by itself at the start)
+ *   POST /api/planning/sessions/:sessionId/food/seed    GM, potluck: { titles: ["Main", "Snacks", ...] } 1-10 unclaimed slots
+ *   POST /api/planning/sessions/:sessionId/food/add     party, potluck: { title } a slot of my own, claimed by me
+ *   POST /api/planning/sessions/:sessionId/food/:questId/claim    party, potluck: claim an open slot
+ *   POST /api/planning/sessions/:sessionId/food/:questId/unclaim  its claimer: back out; the slot is open again
  *   POST /api/planning/sessions/:sessionId/reopen       GM: change a scheduled session's night; { options } opens a new round
  *   POST /api/planning/sessions/:sessionId/cancel       GM
  *   POST   /api/planning/sessions/:sessionId/torch      campaign GM: { to }  one-session torch pass (#89)
@@ -49,6 +58,18 @@ export function buildPlanningRouter(planner: Planner) {
         (req) => planner.shortlist(req.user, req.params.sessionId, req.body, { replace: true })));
     router.post("/sessions/:sessionId/vote", auth, handle("vote",
         (req) => planner.vote(req.user, req.params.sessionId, req.body)));
+    router.post("/sessions/:sessionId/suggest-venue", auth, handle("suggest a venue",
+        (req) => planner.suggestVenue(req.user, req.params.sessionId, req.body)));
+    router.post("/sessions/:sessionId/confirm-food", auth, handle("confirm the food",
+        (req) => planner.confirmFood(req.user, req.params.sessionId)));
+    router.post("/sessions/:sessionId/food/seed", auth, handle("seed the potluck",
+        (req) => planner.seedFood(req.user, req.params.sessionId, req.body)));
+    router.post("/sessions/:sessionId/food/add", auth, handle("add a food slot",
+        (req) => planner.addFood(req.user, req.params.sessionId, req.body)));
+    router.post("/sessions/:sessionId/food/:questId/claim", auth, handle("claim the slot",
+        (req) => planner.claimFood(req.user, req.params.sessionId, req.params.questId)));
+    router.post("/sessions/:sessionId/food/:questId/unclaim", auth, handle("un-claim the slot",
+        (req) => planner.unclaimFood(req.user, req.params.sessionId, req.params.questId)));
     router.post("/sessions/:sessionId/advance", auth, handle("move forward",
         (req) => planner.advance(req.user, req.params.sessionId)));
     router.post("/sessions/:sessionId/tiebreak", auth, handle("break the tie",

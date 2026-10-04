@@ -5,7 +5,8 @@ import { Plus, Save, X, Globe, Eye, CalendarX, CalendarCheck, RefreshCw, Link2 }
 
 /**
  * Regular availability (#57): the weekly windows a player can usually play,
- * one-off exceptions, busy time from their own Google Calendar (#84), and a
+ * one-off exceptions, busy time from their own Google Calendar (#84) and from
+ * Discord events they marked "interested" in their campaigns' servers (#85), and a
  * preview of exactly what the party's overlap will say about them. Backed by
  * /api/availability/me.
  */
@@ -31,6 +32,11 @@ interface BusySource {
 }
 
 const SOURCE_LABEL: Record<BusySource['source'], string> = { google: 'Google Calendar', discord: 'Discord events' };
+/** What each source counts, in a line. */
+const SOURCE_HINT: Record<BusySource['source'], string> = {
+    google: 'Busy times on your primary Google Calendar.',
+    discord: 'Events you marked “Interested” in your campaigns’ Discord servers, matched by your Discord user ID.',
+};
 
 const ago = (iso: string) => {
     const minutes = Math.round((Date.now() - Date.parse(iso)) / 60000);
@@ -392,11 +398,11 @@ export default function AvailabilityEditor({ googleNotice }: { googleNotice?: st
                 </div>
             </section>
 
-            {/* ── Busy time from outside calendars (#84) ── */}
+            {/* ── Busy time from outside calendars (#84, #85) ── */}
             {sources.length > 0 && (
                 <section aria-labelledby="busy-h">
                     <h2 id="busy-h" className={HEADING_CLS}>
-                        <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Busy From Your Calendar</span>
+                        <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Busy From Your Calendars</span>
                     </h2>
                     <p className="font-permanent text-xs text-zinc-500 dark:text-zinc-400 uppercase mb-6 max-w-2xl">
                         Let your real commitments count without typing them in. The app reads only when you&rsquo;re busy, never
@@ -418,12 +424,13 @@ export default function AvailabilityEditor({ googleNotice }: { googleNotice?: st
                                                 {s.enabled ? 'On' : 'Off'}
                                             </span>
                                         </p>
+                                        <p className="font-permanent text-[10px] text-zinc-600 dark:text-zinc-300 mt-1">{SOURCE_HINT[s.source]}</p>
                                         <p className="font-permanent text-[10px] text-zinc-500 dark:text-zinc-300 uppercase mt-1">
                                             {s.enabled
                                                 ? (s.syncedAt ? `Synced ${ago(s.syncedAt)} · refreshed when older than ${s.freshMinutes} min` : 'Not synced yet')
                                                 : s.needsReconsent
                                                     ? 'Google needs to ask you once more, so the app can see when you’re busy.'
-                                                    : s.ready ? 'Off: your Google busy time doesn’t count yet.' : (s.problem ?? 'Not connected.')}
+                                                    : s.ready ? `Off: your ${SOURCE_LABEL[s.source]} busy time doesn’t count yet.` : (s.problem ?? 'Not connected.')}
                                         </p>
                                         {s.enabled && s.lastError && (
                                             <p role="alert" className="font-permanent text-[10px] text-red-600 dark:text-red-400 uppercase mt-1">

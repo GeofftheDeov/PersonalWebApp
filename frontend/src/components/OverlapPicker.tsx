@@ -11,7 +11,7 @@ import { Send, X, Star } from 'lucide-react';
  */
 
 interface Slot { start: string; end: string; headcount: number; meetsQuorum: boolean; free: string[]; busy: string[]; unknown: string[] }
-interface Overlap { quorum: number; party: { id: string; name: string }[]; slots: Slot[] }
+interface Overlap { quorum: number; party: { id: string; name: string }[]; slots: Slot[]; notes?: string[] }
 export interface PickedTime { start: string; end: string }
 
 const FIELD_CLS = "p-2 border-2 border-black bg-white text-black font-permanent text-xs uppercase outline-none focus:border-teal-500";
@@ -144,6 +144,12 @@ export default function OverlapPicker({ campaignId, submitLabel, submitting, onS
 
             {data && (
                 <>
+                    {/* Why some busy time is missing, e.g. Discord can't be read (#85). Names no player. */}
+                    {(data.notes ?? []).map(note => (
+                        <p key={note} role="status" className="font-permanent text-[10px] text-zinc-700 dark:text-zinc-200 uppercase p-2 border-2 border-black bg-yellow-100 dark:bg-slate-700">
+                            {note}
+                        </p>
+                    ))}
                     <div>
                         <p className="font-permanent text-xs text-black dark:text-white uppercase mb-2 flex items-center gap-1"><Star className="w-3 h-3 text-yellow-500" /> Best times</p>
                         {best.length === 0 ? (

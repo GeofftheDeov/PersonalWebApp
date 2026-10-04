@@ -72,7 +72,8 @@ export interface ExternalEvents {
     withdrawSession(input: WithdrawSessionInput): Promise<WithdrawnSession>;
 }
 
-async function firstKey(gmIds: string[], provider: string) {
+/** The first of these people (in order) whose API Key Vault holds a key for `provider`. */
+export async function firstKey(gmIds: string[], provider: string) {
     for (const id of gmIds) {
         try {
             const keys = await getDecryptedKeys(id, provider);

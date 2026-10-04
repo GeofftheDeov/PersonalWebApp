@@ -3,8 +3,8 @@
  * busy time, and the sync that keeps their busy_blocks fresh enough for the
  * overlap.
  *
- * A source is one adapter (Google Calendar today; Discord "interested" events
- * with #85). An adapter says whether a person can use it and fetches their
+ * A source is one adapter: Google Calendar (googleBusySource.ts) or Discord
+ * events the person marked "interested" (discordBusySource.ts, #85). An adapter says whether a person can use it and fetches their
  * busy intervals for a stretch of time. This module owns everything else:
  * the on/off switch (busy_sources), replacing that source's busy_blocks, the
  * freshness rule, and failure handling. It stores start and end only -- an
@@ -32,12 +32,13 @@
  * RETRY_AFTER_FAILURE_MINUTES (5) unless the owner asks ("Sync now"), so a
  * broken connection doesn't slow every page load.
  *
- * To add a source (#85): write a BusySourceAdapter and add it to ADAPTERS.
- * busy_sources and busy_blocks already accept 'discord'.
+ * To add a source: write a BusySourceAdapter and add it to ADAPTERS (and to
+ * the source CHECKs on busy_sources and busy_blocks).
  */
 import { query, withTransaction } from "../db/index.js";
 import { bus } from "../events/index.js";
 import { googleBusySource } from "./googleBusySource.js";
+import { discordBusySource } from "./discordBusySource.js";
 
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
@@ -78,12 +79,15 @@ export interface BusySourceAdapter {
     /**
      * The person's busy time between start and end. Throw to fail the sync;
      * the error's message is shown to the person (only), so word it for them.
+     * `manual` is set when the person asked ("Sync now", or turning it on):
+     * don't answer from anything cached.
      */
-    fetchBusy(personId: string, range: { start: Date; end: Date }): Promise<FetchedBusy[]>;
+    fetchBusy(personId: string, range: { start: Date; end: Date }, opts?: { manual?: boolean }): Promise<FetchedBusy[]>;
 }
 
 const ADAPTERS: Partial<Record<BusySourceName, BusySourceAdapter>> = {
     google: googleBusySource,
+    discord: discordBusySource,
 };
 
 /** A 4xx the route can hand straight back to the page. */
@@ -170,10 +174,10 @@ function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> 
 }
 
 /** Sync one source for one person over `window`. True when it worked. */
-async function syncOne(personId: string, adapter: BusySourceAdapter, window: { start: Date; end: Date }, now: Date) {
+async function syncOne(personId: string, adapter: BusySourceAdapter, window: { start: Date; end: Date }, now: Date, manual = false) {
     let blocks: ReturnType<typeof cleanBlocks>;
     try {
-        blocks = cleanBlocks(await withTimeout(adapter.fetchBusy(personId, window), SYNC_TIMEOUT_MS,
+        blocks = cleanBlocks(await withTimeout(adapter.fetchBusy(personId, window, { manual }), SYNC_TIMEOUT_MS,
             "The calendar took too long to answer."), window);
     } catch (err: any) {
         const message = String(err?.message || "The calendar couldn't be read.").slice(0, 300);
@@ -272,7 +276,7 @@ export async function enableBusySource(personId: string, source: string, now: Da
     if (!conn.ready) throw new BusySourceError(409, conn.problem || "This source can't be turned on yet.");
     await query(`INSERT INTO busy_sources (person_id, source, enabled_at) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
         [personId, adapter.name, now]);
-    await syncOne(personId, adapter, syncWindow({ start: now, end: now }, now), now);
+    await syncOne(personId, adapter, syncWindow({ start: now, end: now }, now), now, true);
     return getBusySource(personId, adapter.name);
 }
 
@@ -280,7 +284,7 @@ export async function enableBusySource(personId: string, source: string, now: Da
 export async function syncBusySourceNow(personId: string, source: string, now: Date): Promise<BusySourceStatus> {
     const adapter = adapterFor(source);
     if (!(await rowOf(personId, adapter.name))) throw new BusySourceError(404, "That source is off.");
-    await syncOne(personId, adapter, syncWindow({ start: now, end: now }, now), now);
+    await syncOne(personId, adapter, syncWindow({ start: now, end: now }, now), now, true);
     return getBusySource(personId, adapter.name);
 }
 

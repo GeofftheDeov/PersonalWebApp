@@ -21,10 +21,10 @@ import {
  *   DELETE /api/availability/me/exceptions/:id     remove one
  *   GET    /api/availability/me/preview            what the party sees about me  ?start&end
  *   GET    /api/availability/me/busy-sources       my outside calendars (#84): on/off, connection, last sync
- *   PUT    /api/availability/me/busy-sources/:src  turn one on (and sync it now)       src: google
+ *   PUT    /api/availability/me/busy-sources/:src  turn one on (and sync it now)       src: google, discord
  *   DELETE /api/availability/me/busy-sources/:src  turn one off, deleting its busy blocks
  *   POST   /api/availability/me/busy-sources/:src/sync   re-read it now
- *   GET    /api/availability/campaigns/:id         the party overlap (Game Master only)
+ *   GET    /api/availability/campaigns/:id         the party overlap (Game Master only), with notes on missing busy time
  *                                                  ?start&end[&slotMinutes=240][&stepMinutes=30]
  *
  * Busy sources are only ever about "me": nobody can see which sources anyone

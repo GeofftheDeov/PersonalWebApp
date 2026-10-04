@@ -11,6 +11,8 @@ import { Plus, Save, X, Globe, Eye, CalendarX, CalendarCheck } from 'lucide-reac
 
 const DAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
 const HALF_HOUR = 30 * 60 * 1000;
+/** How far ahead "What your party sees" looks: the coming weeks, not just this one (#83). */
+const PREVIEW_DAYS = 14;
 
 interface WindowRow { weekday: number; start: string; end: string }
 interface AvailabilityException { id: string; start: string; end: string; kind: 'unavailable' | 'available'; note: string | null }
@@ -87,7 +89,7 @@ export default function AvailabilityEditor() {
 
     const loadPreview = useCallback(async () => {
         const to = new Date(previewFrom);
-        to.setDate(to.getDate() + 7);
+        to.setDate(to.getDate() + PREVIEW_DAYS);
         const res = await fetch(`/api/availability/me/preview?start=${previewFrom.toISOString()}&end=${to.toISOString()}`, { headers: headers() });
         if (res.ok) setRuns((await res.json()).runs);
     }, [headers, previewFrom]);
@@ -186,7 +188,7 @@ export default function AvailabilityEditor() {
         }
     };
 
-    const previewDays = useMemo(() => Array.from({ length: 7 }, (_, i) => {
+    const previewDays = useMemo(() => Array.from({ length: PREVIEW_DAYS }, (_, i) => {
         const start = new Date(previewFrom);
         start.setDate(start.getDate() + i);
         const end = new Date(start);
@@ -339,7 +341,7 @@ export default function AvailabilityEditor() {
                     <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">What Your Party Sees</span>
                 </h2>
                 <p className="font-permanent text-xs text-zinc-500 dark:text-zinc-400 uppercase mb-6 max-w-2xl">
-                    The next seven days, exactly as the Game Master&rsquo;s overlap will count you. Saved changes only.
+                    The next two weeks, exactly as the Game Master&rsquo;s overlap will count you. Saved changes only.
                 </p>
 
                 <div className={CARD_CLS}>

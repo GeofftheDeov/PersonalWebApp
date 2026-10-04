@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ClipboardList, Plus, X, Wifi, FastForward, RotateCcw, Ban, Check, Crown } from 'lucide-react';
+import Link from 'next/link';
+import { ClipboardList, Plus, X, Wifi, FastForward, RotateCcw, Ban, Check, Crown, CalendarClock, MapPin } from 'lucide-react';
 import OverlapPicker, { timeRange, type PickedTime } from './OverlapPicker';
 
 /**
@@ -18,14 +19,57 @@ interface NightPoll {
     winningOptionId: string | null; tiedOptionIds: string[]; options: PollOption[];
 }
 interface PlanningState {
-    session: { id: string; title: string; status: string; stage: string | null; isOnline: boolean; agenda: string | null; date: string | null };
+    session: { id: string; title: string; status: string; stage: string | null; isOnline: boolean; agenda: string | null; date: string | null; endDate: string | null };
     campaign: { id: string; title: string; gmTitle: string; tableLink: string | null };
     party: { id: string; name: string }[];
     quorum: number;
     viewer: { id: string; isGameMaster: boolean };
     night: NightPoll | null;
+    /** Every round, oldest first; the last is `night`. */
+    nightRounds: NightPoll[];
 }
-interface Board { canPlan: boolean; gmTitle: string; planning: PlanningState[] }
+interface Upcoming { id: string; title: string; date: string; endDate: string | null; isOnline: boolean; canChangeNight: boolean }
+interface Board { canPlan: boolean; gmTitle: string; planning: PlanningState[]; upcoming: Upcoming[] }
+
+const whenOf = (start: string, end: string | null) => end ? timeRange(start, end) : new Date(start).toLocaleString(undefined, {
+    weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+});
+
+const roundOutcome = (r: NightPoll) =>
+    r.closedReason === 'gm_reshortlisted' ? 'replaced by a new shortlist'
+    : r.closedReason === 'cancelled' ? 'cancelled'
+    : r.result === 'no_quorum' ? 'failed: nothing reached quorum'
+    : r.result === 'tie' ? 'tied'
+    : r.result === 'winner' ? 'decided'
+    : 'open';
+
+/** Rounds before the current one, folded away: who voted for what stays on record. */
+function EarlierRounds({ rounds, name }: { rounds: NightPoll[]; name: (id: string) => string }) {
+    if (!rounds.length) return null;
+    return (
+        <details className="mt-4 border-2 border-black/30 dark:border-white/30 bg-white/60 dark:bg-slate-900/40">
+            <summary className="cursor-pointer px-2 py-1.5 font-permanent text-[10px] uppercase text-zinc-700 dark:text-zinc-300">
+                Earlier rounds ({rounds.length})
+            </summary>
+            <ol className="px-2 pb-2 space-y-2">
+                {rounds.map(r => (
+                    <li key={r.id}>
+                        <p className="font-permanent text-[10px] uppercase text-black dark:text-white">Round {r.round} · {roundOutcome(r)}</p>
+                        <ul className="mt-1 space-y-0.5">
+                            {r.options.map(o => (
+                                <li key={o.id} className={`font-permanent text-[10px] uppercase ${o.id === r.winningOptionId ? 'text-teal-700 dark:text-teal-300' : 'text-zinc-600 dark:text-zinc-400'}`}>
+                                    {o.id === r.winningOptionId && <Check className="inline w-3 h-3 mr-0.5" />}
+                                    {timeRange(o.start!, o.end!)} · {o.approvals.length} of {r.eligibleIds.length}
+                                    {o.approvals.length ? ` · ${o.approvals.map(name).join(', ')}` : ''}
+                                </li>
+                            ))}
+                        </ul>
+                    </li>
+                ))}
+            </ol>
+        </details>
+    );
+}
 
 const BTN = "flex items-center gap-1.5 px-3 py-1.5 border-2 border-black font-permanent uppercase text-xs transition-colors shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] disabled:opacity-40";
 const INPUT_CLS = "w-full p-2 border-2 border-black bg-white text-black font-permanent text-sm uppercase outline-none focus:border-teal-500";
@@ -87,10 +131,14 @@ function PlanningCard({ state, reload }: { state: PlanningState; reload: () => P
                     <p className="font-permanent text-[10px] text-zinc-600 dark:text-zinc-300 uppercase">A summons for the party</p>
                     <h3 className="font-permanent text-xl text-black dark:text-white uppercase leading-tight break-words">{s.title}</h3>
                     <p className="mt-1 font-permanent text-[10px] uppercase text-teal-700 dark:text-teal-300 flex items-center gap-1 flex-wrap">
-                        <Wifi className="w-3 h-3" /> Online ·{' '}
-                        {campaign.tableLink
-                            ? <a href={campaign.tableLink} target="_blank" rel="noopener noreferrer" className="underline break-all">{campaign.tableLink}</a>
-                            : 'no table link set yet'}
+                        {s.isOnline ? (
+                            <>
+                                <Wifi className="w-3 h-3" /> Online ·{' '}
+                                {campaign.tableLink
+                                    ? <a href={campaign.tableLink} target="_blank" rel="noopener noreferrer" className="underline break-all">{campaign.tableLink}</a>
+                                    : 'no table link set yet'}
+                            </>
+                        ) : <><MapPin className="w-3 h-3" /> In person</>}
                     </p>
                 </div>
                 <span className={`px-3 py-1 border-2 border-black font-permanent text-[10px] uppercase whitespace-nowrap ${open ? 'bg-red-600 text-white' : tie ? 'bg-yellow-400 text-black' : 'bg-zinc-800 text-white'}`}>
@@ -105,6 +153,13 @@ function PlanningCard({ state, reload }: { state: PlanningState; reload: () => P
                     Pick the night
                     {night && <span className="font-permanent text-[10px] text-zinc-600 dark:text-zinc-300">round {night.round}</span>}
                 </h4>
+
+                {s.date && (
+                    <p className="mb-3 p-2 border-2 border-black bg-teal-50 dark:bg-teal-900/40 font-permanent text-xs text-black dark:text-teal-100 uppercase flex items-start gap-1.5">
+                        <CalendarClock className="w-4 h-4 shrink-0" />
+                        <span>Changing the night. It’s set for {whenOf(s.date, s.endDate)} until a new night is confirmed.</span>
+                    </p>
+                )}
 
                 {failed && (
                     <p className="mb-3 p-2 border-2 border-black bg-yellow-100 dark:bg-yellow-900/40 font-permanent text-xs text-black dark:text-yellow-100 uppercase">
@@ -200,6 +255,8 @@ function PlanningCard({ state, reload }: { state: PlanningState; reload: () => P
                             onCancel={reshortlisting ? () => setReshortlisting(false) : undefined} />
                     </div>
                 )}
+
+                <EarlierRounds rounds={state.nightRounds.slice(0, -1)} name={name} />
             </div>
 
             {error && <p role="alert" className="mt-3 font-permanent text-xs text-red-600 dark:text-red-400 uppercase">{error}</p>}
@@ -214,6 +271,51 @@ function PlanningCard({ state, reload }: { state: PlanningState; reload: () => P
                 </div>
             )}
         </article>
+    );
+}
+
+/** A scheduled session still to come. The Game Master can change its night, which puts it back to a vote. */
+function UpcomingRow({ campaignId, session: u, reload }: { campaignId: string; session: Upcoming; reload: () => Promise<void> }) {
+    const [changing, setChanging] = useState(false);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    const reopen = async (times: PickedTime[]) => {
+        setBusy(true);
+        setError(null);
+        const r = await post(`/api/planning/sessions/${u.id}/reopen`, { options: times });
+        setBusy(false);
+        if (!r.ok) { setError(r.error!); return; }
+        setChanging(false);
+        await reload();
+    };
+
+    return (
+        <li className="p-3 border-2 border-black bg-white dark:bg-slate-800">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+                <Link href={`/game-night/sessions/${u.id}`} className="min-w-0 hover:underline">
+                    <span className="block font-permanent text-sm text-black dark:text-white uppercase break-words">{u.title}</span>
+                    <span className="block font-permanent text-[10px] text-teal-700 dark:text-teal-300 uppercase">
+                        {whenOf(u.date, u.endDate)} · {u.isOnline ? 'online' : 'in person'}
+                    </span>
+                </Link>
+                {u.canChangeNight && !changing && (
+                    <button type="button" onClick={() => setChanging(true)} className={`${BTN} bg-white text-black hover:bg-yellow-100`}>
+                        <CalendarClock className="w-4 h-4" /> Change the night
+                    </button>
+                )}
+            </div>
+            {changing && (
+                <div className="mt-3 pt-3 border-t-2 border-dashed border-black/30 dark:border-white/30">
+                    <p className="mb-2 font-permanent text-xs text-black dark:text-white uppercase">
+                        Shortlist new times. The party votes again. Until a new night is confirmed the session keeps its current date and events, but it’s back to being planned (no ready check). Then the Discord and calendar events move with it.
+                    </p>
+                    <OverlapPicker campaignId={campaignId} submitting={busy} submitLabel="Put it to a vote"
+                        onSubmit={reopen} onCancel={() => setChanging(false)} />
+                </div>
+            )}
+            {error && <p role="alert" className="mt-2 font-permanent text-xs text-red-600 dark:text-red-400 uppercase">{error}</p>}
+        </li>
     );
 }
 
@@ -306,6 +408,17 @@ export default function NoticeBoard({ campaignId, onSessionsChanged }: { campaig
             ) : (
                 <div className="space-y-5">
                     {board.planning.map(state => <PlanningCard key={state.session.id} state={state} reload={reload} />)}
+                </div>
+            )}
+
+            {board.upcoming?.length > 0 && (
+                <div className="mt-6">
+                    <h3 className="mb-2 font-permanent text-sm text-black dark:text-white uppercase flex items-center gap-2">
+                        <CalendarClock className="w-4 h-4 text-teal-600" /> Coming up
+                    </h3>
+                    <ul className="space-y-2">
+                        {board.upcoming.map(u => <UpcomingRow key={u.id} campaignId={campaignId} session={u} reload={reload} />)}
+                    </ul>
                 </div>
             )}
         </section>

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Book, ArrowLeft, Calendar, MapPin, FileText, Map, Save, X, Pencil, Wifi, Swords, Check, Clock } from 'lucide-react';
+import SessionQuests from '@/components/SessionQuests';
 
 const INPUT_CLS = "w-full p-3 border-4 border-black bg-white text-black font-permanent text-base uppercase focus:border-yellow-400 outline-none";
 const LABEL_CLS = "block text-teal-400 font-permanent uppercase text-xs mb-1";
@@ -300,6 +301,7 @@ export default function SessionDetailPage() {
                                 </div>
                             </div>
                         )}
+                        <SessionQuests sessionId={id} />
                         {(session.googleCalendarLink || session.discordEventId) && (
                             <div>
                                 <p className="font-permanent text-xs text-zinc-400 uppercase mb-2">External Events</p>

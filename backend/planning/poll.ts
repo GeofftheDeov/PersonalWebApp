@@ -91,6 +91,14 @@ export const getPoll = (db: Db, pollId: string) => load(db, "id = $1", [pollId])
 export const latestPoll = (db: Db, sessionId: string, kind: PollKind) =>
     load(db, "session_id = $1 AND kind = $2 ORDER BY round DESC", [sessionId, kind]);
 
+/** Every round of this kind for the session, oldest first: closed rounds and their votes stay visible. */
+export async function pollsOf(db: Db, sessionId: string, kind: PollKind): Promise<Poll[]> {
+    const { rows } = await db.query(`SELECT id FROM polls WHERE session_id = $1 AND kind = $2 ORDER BY round`, [sessionId, kind]);
+    const out: Poll[] = [];
+    for (const r of rows) out.push((await getPoll(db, r.id))!);
+    return out;
+}
+
 export const openPollOf = (db: Db, sessionId: string) => load(db, "session_id = $1 AND status = 'open'", [sessionId]);
 
 /** Opens the next round of this kind for the session. The caller closes any open poll first. */

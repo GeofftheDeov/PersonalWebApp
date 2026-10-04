@@ -50,6 +50,7 @@ export async function markThreadRead(person: ThreadPerson, threadKey: unknown, m
     const current = row ?? (await query(
         `SELECT last_read_at, last_read_message_id FROM thread_reads WHERE person_id = $1 AND thread_key = $2`,
         [person.id, key])).rows[0];
+    if (!current) return { ok: false, reason: "no-such-message" }; // deleted mid-request
 
     return {
         ok: true,

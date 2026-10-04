@@ -64,16 +64,20 @@ export function useThreads({ filter = 'all', pollMs = 30_000, enabled = true }:
   const [error, setError] = useState<string | null>(null);
   /** threadKey → the last message id we marked read, so re-renders don't re-post. */
   const marked = useRef<Map<string, string>>(new Map());
+  /** threadKey → when we last marked it read, so a fetch that started earlier can't bring the old count back. */
+  const markedAt = useRef<Map<string, number>>(new Map());
 
   const refresh = useCallback(async () => {
     const t = token();
     if (!t) return;
+    const started = Date.now();
     setLoading(true);
     try {
       const res = await fetch('/api/threads', { headers: { Authorization: `Bearer ${t}` } });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Could not load conversations');
       const data = await res.json();
-      setAll(Array.isArray(data?.threads) ? data.threads : []);
+      const fresh: ThreadSummary[] = Array.isArray(data?.threads) ? data.threads : [];
+      setAll(fresh.map(th => ((markedAt.current.get(th.threadKey) ?? 0) >= started ? { ...th, unreadCount: 0 } : th)));
       setError(null);
     } catch (err: any) {
       setError(err.message || 'Could not load conversations');
@@ -94,6 +98,7 @@ export function useThreads({ filter = 'all', pollMs = 30_000, enabled = true }:
     const t = token();
     if (!t || !threadKey || !messageId || marked.current.get(threadKey) === messageId) return;
     marked.current.set(threadKey, messageId);
+    markedAt.current.set(threadKey, Date.now());
     setAll(prev => prev.map(th => (th.threadKey === threadKey ? { ...th, unreadCount: 0 } : th)));
     try {
       const res = await fetch(`/api/threads/${encodeURIComponent(threadKey)}/read`, {
@@ -104,6 +109,7 @@ export function useThreads({ filter = 'all', pollMs = 30_000, enabled = true }:
       if (!res.ok) throw new Error('mark read failed');
     } catch {
       marked.current.delete(threadKey);
+      markedAt.current.delete(threadKey);
       refresh(); // put the real count back
     }
   }, [refresh]);

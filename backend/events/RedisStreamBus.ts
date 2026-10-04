@@ -38,7 +38,6 @@ export function busNames(namespace?: string) {
     }
     const prefix = ns ? `${ns}:` : "";
     return {
-        namespace: ns,
         /** Domain = text before the first dot → stream `[<ns>:]events:<domain>`. */
         stream: (event: string) => `${prefix}events:${event.split(".")[0]}`,
         /**

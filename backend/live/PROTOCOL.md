@@ -27,6 +27,7 @@ The client's first frame carries its JWT:
 - `v` is the protocol version the client speaks. A version the server doesn't speak closes the socket with **4002**.
 - A token in the query string (`/api/live?token=<jwt>`) also works, but use the first frame where possible: URLs end up in logs.
 - A missing, malformed, expired or wrong-secret token, or one whose subject isn't an account, closes the socket with **4001**. So does a first frame that isn't an auth frame, and a connection that sends nothing for 10 seconds.
+- The 10 seconds cover the whole handshake. If the server is still checking a token when they run out (a slow database), it closes with **1011** instead, and the client should retry.
 
 When auth succeeds, the server answers:
 
@@ -34,7 +35,7 @@ When auth succeeds, the server answers:
 { "type": "ready", "v": 1, "threads": ["campaign:<id>", "dm:<a>:<b>"] }
 ```
 
-`threads` lists the thread keys this socket will receive events for: every campaign the person belongs to, whatever its status, plus one DM thread per friend. The server works this out once, when the socket connects.
+`threads` lists the thread keys this socket will receive events for: every campaign the person belongs to, whatever its status, plus one DM thread per friend. The server works this out once, when the socket connects. Admins get no extra campaigns. A thread missing from `threads` gets no live events on this socket, so clients should show it as not live (the web client's `threadStatus` reports `unavailable`). Until #105 recomputes subscriptions on membership and friendship events, joining a campaign or adding a friend only takes effect on the next connect, and so does leaving one.
 
 Thread keys are `campaign:<campaign id>` and `dm:<id>:<id>`, with the two account ids sorted.
 
@@ -53,7 +54,7 @@ Thread keys are `campaign:<campaign id>` and `dm:<id>:<id>`, with the two accoun
   "body": "markdown", "createdAt": "<ISO>", "eventId": "<uuid, optional>" }
 ```
 
-Automated posts, such as the ready check, arrive the same way, with `sender.id` set to `"system"`. Sender email addresses are never sent.
+For now only campaign threads carry `message.created`. DM threads are already listed in `ready`, and their messages join the channel with #99. Automated posts, such as the ready check, arrive the same way, with `sender.id` set to `"system"`. Sender email addresses are never sent.
 
 Clients must ignore frame types they don't know. Later versions of the server will add frames such as `typing`, `thread.read` and `thread.updated` (spec #58) without changing `v`.
 

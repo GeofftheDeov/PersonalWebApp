@@ -21,6 +21,8 @@ export const CLOSE_UNAUTHORIZED = 4001;
 export const CLOSE_UNSUPPORTED_VERSION = 4002;
 
 export type LiveStatus = "idle" | "connecting" | "open" | "offline" | "unauthorized";
+/** A thread's own status: `unavailable` when the socket is open but the server didn't subscribe it to that thread. */
+export type ThreadStatus = LiveStatus | "unavailable";
 
 export interface LiveMessage {
     id: string;
@@ -73,6 +75,8 @@ export class LiveClient {
     };
     private socket: SocketLike | null = null;
     private threads = new Map<string, Set<ThreadHandlers>>();
+    /** The thread keys the server's last `ready` subscribed this socket to. */
+    private serverThreads = new Set<string>();
     private statusListeners = new Set<(status: LiveStatus) => void>();
     private attempt = 0;
     private everReady = false;
@@ -106,6 +110,17 @@ export class LiveClient {
             if (set && set.size === 0) this.threads.delete(thread);
             if (this.threads.size === 0) this.scheduleIdleClose();
         };
+    }
+
+    /**
+     * Whether live events for this thread are flowing. The server works out a
+     * socket's threads when it connects, so a thread it left out (one joined
+     * since, or a campaign an admin views without being a member) reports
+     * `unavailable` rather than `open`.
+     */
+    threadStatus(thread: string): ThreadStatus {
+        if (this.status !== "open") return this.status;
+        return this.serverThreads.has(thread) ? "open" : "unavailable";
     }
 
     onStatus(listener: (status: LiveStatus) => void): () => void {
@@ -173,6 +188,7 @@ export class LiveClient {
         switch (frame?.type) {
             case "ready": {
                 const reconnected = this.everReady;
+                this.serverThreads = new Set(Array.isArray(frame.threads) ? frame.threads.map(String) : []);
                 this.everReady = true;
                 this.attempt = 0;
                 this.setStatus("open");

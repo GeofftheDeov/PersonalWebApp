@@ -42,6 +42,7 @@ import { campaignThreadKey } from "../services/threads.js";
  */
 type LiveClientLike = {
   status: string;
+  threadStatus(thread: string): string;
   onStatus(listener: (status: string) => void): () => void;
   subscribe(thread: string, handlers: { onMessage?: (m: { body: string }) => void; onReconnect?: () => void }): () => void;
   close(): void;
@@ -246,6 +247,9 @@ async function main() {
     check("a bad query-parameter token is refused with the auth close code",
       (await Promise.race([badQuery.closed, sleep(3_000).then(() => null)])) === CLOSE_UNAUTHORIZED,
       `close ${badQuery.closeCode}`);
+    const stray = open(`ws://127.0.0.1:${port}/api/not-live`);
+    check("an upgrade to any other path is turned away, not left hanging",
+      (await Promise.race([stray.closed, sleep(3_000).then(() => null)])) !== null, `close ${stray.closeCode}`);
     const silent = open(wsUrl);
     check("a connection that never authenticates is closed with the auth close code",
       (await Promise.race([silent.closed, sleep(3_000).then(() => null)])) === CLOSE_UNAUTHORIZED,
@@ -329,6 +333,10 @@ async function main() {
     check("the client connects and authenticates", await until(() => lc.status === "open"),
       `statuses ${statuses.join(",")}`);
     check("the first connect isn't reported as a reconnect", reconnects.length === 0);
+    check("a thread the server subscribed this socket to reports open", lc.threadStatus(thread) === "open",
+      lc.threadStatus(thread));
+    check("a thread the server left out reports unavailable, not open",
+      lc.threadStatus(campaignThreadKey(elsewhere)) === "unavailable", lc.threadStatus(campaignThreadKey(elsewhere)));
 
     await post(`/api/messages/campaign/${table}`, player, { body: `live ${RUN}` });
     check("the client delivers a message to its thread subscriber", await until(() => seen.includes(`live ${RUN}`)),

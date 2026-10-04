@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { LiveClient, type LiveMessage, type LiveStatus } from './liveClient';
+import { LiveClient, type LiveMessage, type LiveStatus, type ThreadStatus } from './liveClient';
 
-export type { LiveMessage, LiveStatus } from './liveClient';
+export type { LiveMessage, LiveStatus, ThreadStatus } from './liveClient';
 export { campaignThreadKey } from './threadKeys';
 
 /**
@@ -52,9 +52,11 @@ export interface LiveThreadHandlers {
 /**
  * Subscribe to one thread's live events while mounted. Handlers may change on
  * every render; the subscription only follows `thread`. Pass null to pause.
- * Returns the connection status.
+ * Returns this thread's status: `open` only while its events are flowing,
+ * `unavailable` when the socket is open but the server didn't subscribe it to
+ * this thread (see LiveClient.threadStatus).
  */
-export function useLiveThread(thread: string | null, handlers: LiveThreadHandlers): LiveStatus {
+export function useLiveThread(thread: string | null, handlers: LiveThreadHandlers): ThreadStatus {
     const latest = useRef(handlers);
     latest.current = handlers;
     const status = useLiveStatus();
@@ -67,5 +69,7 @@ export function useLiveThread(thread: string | null, handlers: LiveThreadHandler
         });
     }, [thread]);
 
-    return status;
+    // The server's thread set is replaced on each `ready`, which also flips
+    // `status` to open and re-renders this, so reading it fresh here is enough.
+    return thread && status === 'open' ? getLiveClient().threadStatus(thread) : status;
 }

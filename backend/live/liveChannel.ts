@@ -175,17 +175,22 @@ export async function attachLiveChannel(
         connections.add(conn);
         let authStarted = false;
 
+        // Covers the whole handshake: no auth frame in time is "unauthorized";
+        // an auth that stalls (a slow database) is a server error, so the client retries.
         const authTimer = setTimeout(() => {
-            if (!authStarted && ws.readyState === WebSocket.OPEN) ws.close(CLOSE_UNAUTHORIZED, "auth timeout");
+            if (conn.personId || ws.readyState !== WebSocket.OPEN) return;
+            if (authStarted) ws.close(1011, "auth timed out");
+            else ws.close(CLOSE_UNAUTHORIZED, "auth timeout");
         }, authTimeoutMs);
 
         const startAuth = (token: unknown) => {
             authStarted = true;
-            clearTimeout(authTimer);
-            authenticate(conn, token).catch((err) => {
-                console.error("[live] auth failed unexpectedly:", err);
-                if (ws.readyState === WebSocket.OPEN) ws.close(1011, "server error");
-            });
+            authenticate(conn, token)
+                .catch((err) => {
+                    console.error("[live] auth failed unexpectedly:", err);
+                    if (ws.readyState === WebSocket.OPEN) ws.close(1011, "server error");
+                })
+                .finally(() => clearTimeout(authTimer));
         };
 
         // The query parameter is accepted but not preferred: URLs end up in logs.
@@ -237,16 +242,21 @@ export async function attachLiveChannel(
     }, pingIntervalMs);
     heartbeat.unref?.();
 
-    const onUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-        let pathname: string;
+    function onUpgrade(this: AnyServer, req: IncomingMessage, socket: Duplex, head: Buffer) {
+        let pathname: string | null = null;
         try {
             pathname = new URL(req.url ?? "/", "http://live").pathname;
         } catch {
+            /* not ours */
+        }
+        if (pathname !== path) {
+            // Someone else's upgrade, if anyone else listens; otherwise nobody
+            // will ever answer it, so don't leave the socket hanging.
+            if (this.listenerCount("upgrade") <= 1) socket.destroy();
             return;
         }
-        if (pathname !== path) return; // someone else's upgrade
         wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
-    };
+    }
     const serverList = Array.isArray(servers) ? servers : [servers];
     for (const s of serverList) s.on("upgrade", onUpgrade);
 

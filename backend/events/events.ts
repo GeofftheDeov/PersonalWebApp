@@ -46,6 +46,18 @@ export interface EventMap {
         createdAt: string; // ISO timestamp
     };
 
+    /**
+     * Someone is typing in a thread (#103). Ephemeral only: published with
+     * `publishEphemeral`, never `publish`, so it is never XADDed to a stream
+     * or stored. The live channel fans it out to the thread's other members.
+     */
+    "letters.typing": {
+        threadKey: string; // "campaign:<id>" or "dm:<a>:<b>"
+        personId: string;
+        name: string; // display name, never an email address
+        expiresInMs: number;
+    };
+
     /** A notification was created (or refreshed) for a user's bell. */
     "user.notification": {
         notificationId: string;

@@ -12,8 +12,9 @@
  *   - the backend process exits with a clear error when JWT_SECRET is unset or
  *     still the old default, in development as well as production;
  *   - a token signed with any other secret (the old default included) gets a
- *     401 from a REST route and the SSE stream, a redirect to login from both
- *     admin portals, and a refused Google Calendar OAuth state;
+ *     401 from a REST route, the unauthorized close code from the live channel,
+ *     a redirect to login from both admin portals, and a refused Google
+ *     Calendar OAuth state;
  *   - with the secret set, a real login's token still opens a REST route and,
  *     for the admin, both admin portals;
  *   - with the secret removed at runtime nothing falls back: verification fails
@@ -39,8 +40,9 @@ import pool from "../db/index.js";
 import userRoutes from "../routes/userRoutes.js";
 import adminRoutes from "../routes/adminRoutes.js";
 import dbRoutes from "../routes/dbRoutes.js";
-import messageRoutes from "../routes/messageRoutes.js";
 import googleCalendarRoutes from "../routes/googleCalendarRoutes.js";
+import WebSocket from "ws";
+import { attachLiveChannel, CLOSE_UNAUTHORIZED, LIVE_PATH, PROTOCOL_VERSION } from "../live/liveChannel.js";
 import { jwtSecretProblem, signJwt, verifyJwt } from "../utils/jwt.js";
 
 if (!/(\/\/|@)(127\.0\.0\.1|localhost)[:/]/.test(process.env.DATABASE_URL ?? "")) {
@@ -107,11 +109,20 @@ async function main() {
   app.use("/db", dbRoutes);
   app.use("/admin", adminRoutes);
   app.use("/api/users", userRoutes);
-  app.use("/api/messages", messageRoutes);
   app.use("/api/google-calendar", googleCalendarRoutes);
   const server = app.listen(0, "127.0.0.1");
+  const live = await attachLiveChannel(server);
   await new Promise((r) => server.once("listening", r));
-  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const port = (server.address() as AddressInfo).port;
+  const base = `http://127.0.0.1:${port}`;
+  /** Authenticates on the live channel with `token` and reports the close code (null: not closed in time). */
+  const liveCloseCode = (token: string) => new Promise<number | null>((resolve) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}${LIVE_PATH}`);
+    const timer = setTimeout(() => { ws.terminate(); resolve(null); }, 3_000);
+    ws.on("open", () => ws.send(JSON.stringify({ type: "auth", v: PROTOCOL_VERSION, token })));
+    ws.on("error", () => { /* surfaces as close */ });
+    ws.on("close", (code) => { clearTimeout(timer); resolve(code); });
+  });
   const get = async (p: string, bearer?: string) => {
     const res = await fetch(`${base}${p}`, {
       redirect: "manual", headers: bearer ? { authorization: `Bearer ${bearer}` } : {} });
@@ -159,8 +170,9 @@ async function main() {
         portals.every((r) => r.status === 302 && /login/.test(r.location ?? "")),
         portals.map((r) => `${r.status} ${r.location}`).join(", "));
 
-      const sse = await get(`/api/messages/dm/${admin.id}/stream?token=${encodeURIComponent(forged)}`);
-      check(`a token signed with ${label} gets 401 from the SSE stream`, sse.status === 401, `got ${sse.status}`);
+      const closeCode = await liveCloseCode(forged);
+      check(`a token signed with ${label} is refused by the live channel (${CLOSE_UNAUTHORIZED})`,
+        closeCode === CLOSE_UNAUTHORIZED, `close ${closeCode}`);
 
       const state = jwt.sign({ id: admin.id, purpose: "gcal-connect" }, key, { expiresIn: "5m" });
       const cb = await get(`/api/google-calendar/callback?code=x&state=${encodeURIComponent(state)}`);
@@ -187,6 +199,7 @@ async function main() {
     process.env.JWT_SECRET = SECRET;
   } finally {
     for (const id of created) await pool.query(`DELETE FROM accounts WHERE id = $1`, [id]);
+    await live.close();
     server.close();
   }
 

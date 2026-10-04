@@ -1,5 +1,6 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
+import { verifyJwt } from '../utils/jwt.js';
 import multer from 'multer';
 import csv from 'csv-parser';
 import { Readable } from 'stream';
@@ -113,7 +114,7 @@ const verifyToken = async (req: any, res: express.Response, next: express.NextFu
     }
 
     try {
-        const decoded: any = jwt.verify(token, process.env.JWT_SECRET || "your-secret-key-change-this");
+        const decoded = verifyJwt(token);
         // Pre-cutover tokens may name a source row that lost its merge.
         const id = await resolveAccountId(String(decoded.id));
         if (!id) return res.redirect(loginUrl);

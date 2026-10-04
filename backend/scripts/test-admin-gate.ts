@@ -14,6 +14,7 @@
  * deletes its own rows, and refuses to run against anything but localhost):
  *   DATABASE_URL=postgresql://postgres@127.0.0.1:5433/pwatest npx tsx scripts/test-admin-gate.ts
  */
+import "./use-test-jwt-secret.js";
 import express from "express";
 import type { AddressInfo } from "net";
 import bcrypt from "bcryptjs";
@@ -23,13 +24,12 @@ import pool from "../db/index.js";
 import userRoutes from "../routes/userRoutes.js";
 import adminRoutes from "../routes/adminRoutes.js";
 import dbRoutes from "../routes/dbRoutes.js";
+import { signJwt, verifyJwt } from "../utils/jwt.js";
 
 if (!/(\/\/|@)(127\.0\.0\.1|localhost)[:/]/.test(process.env.DATABASE_URL ?? "")) {
   console.error("\n  Refusing to run: DATABASE_URL must be a local throwaway database.\n");
   process.exit(2);
 }
-
-const SECRET = process.env.JWT_SECRET || "your-secret-key-change-this";
 
 let pass = 0, fail = 0;
 function check(name: string, ok: boolean, detail = "") {
@@ -101,7 +101,7 @@ async function main() {
     const signupToken = await login(signupEmail, signupPw);
     const signupClaims = jwt.decode(signupToken) as any;
     check("the signup's JWT is the ordinary login JWT (same secret, id claim)",
-      jwt.verify(signupToken, SECRET) !== null && signupClaims.id === signup.id,
+      verifyJwt(signupToken) !== null && signupClaims.id === signup.id,
       JSON.stringify(signupClaims));
 
     // A Lead — what Google sign-in auto-creates for any Google account.
@@ -114,9 +114,9 @@ async function main() {
     const leadToken = await login(leadEmail, leadPw);
 
     // Correctly signed, but its subject no longer exists (a deleted user).
-    const ghostToken = jwt.sign({ id: crypto.randomUUID(), type: "User", email: "ghost@example.test" }, SECRET);
+    const ghostToken = signJwt({ id: crypto.randomUUID(), type: "User", email: "ghost@example.test" });
     // Right claims, wrong key.
-    const forgedToken = jwt.sign({ id: admin.id, type: "User", email: adminEmail }, `not-${SECRET}`);
+    const forgedToken = jwt.sign({ id: admin.id, type: "User", email: adminEmail }, `not-the-secret-${tag}`);
 
     // ── identification (unchanged) ───────────────────────────────────────────
     for (const p of ["/admin", "/db"]) {

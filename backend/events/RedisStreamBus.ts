@@ -16,24 +16,46 @@ interface RedisStreamBusOptions {
     source?: string;
     /** Unique consumer name within the group. Defaults to hostname+pid. */
     consumer?: string;
-}
-
-/** Domain = text before the first dot → stream `events:<domain>`. */
-function streamFor(event: string): string {
-    return `events:${event.split(".")[0]}`;
+    /**
+     * Environment namespace (e.g. "prod", "dev") for buses that share one
+     * Redis. Every stream key, the consumer group and every Pub/Sub channel
+     * get a `<namespace>:` prefix, so two namespaces never see each other's
+     * events. Unset or blank keeps the un-namespaced names.
+     */
+    namespace?: string;
 }
 
 /**
- * Pub/Sub channel carrying an event name's broadcast fan-out. Channels live in
- * their own namespace (they are not keys), so this never touches a stream.
+ * The names a bus in `namespace` uses on Redis. An unset or blank namespace
+ * keeps the un-namespaced names: streams `events:<domain>`, channels
+ * `events:live:<name>`, the group as given. Otherwise each gets `<namespace>:`
+ * in front.
  */
-function channelFor(event: string): string {
-    return `events:live:${event}`;
+export function busNames(namespace?: string) {
+    const ns = namespace?.trim() ?? "";
+    if (ns && !/^[A-Za-z0-9_-]+$/.test(ns)) {
+        throw new Error(`Event bus namespace may only use letters, digits, '-' and '_' (got "${ns}")`);
+    }
+    const prefix = ns ? `${ns}:` : "";
+    return {
+        namespace: ns,
+        /** Domain = text before the first dot → stream `[<ns>:]events:<domain>`. */
+        stream: (event: string) => `${prefix}events:${event.split(".")[0]}`,
+        /**
+         * Pub/Sub channel carrying an event name's broadcast fan-out. Channels
+         * are not keys and ignore the logical database number, so this prefix
+         * is the only thing keeping namespaces apart on Pub/Sub.
+         */
+        channel: (event: string) => `${prefix}events:live:${event}`,
+        group: (group: string) => `${prefix}${group}`,
+    };
 }
 
 /**
  * Production EventBus on Redis Streams.
  *
+ * - namespace: with one set, every name below carries a `<namespace>:` prefix
+ *   (see busNames); prod and dev share a Redis and must not share events
  * - publish: XADD to `events:<domain>` with MAXLEN ~ trimming
  * - subscribe: consumer-group reads (XREADGROUP), XACK on handler success
  * - recovery: failed/stuck entries are reclaimed with XAUTOCLAIM after 60s idle
@@ -50,6 +72,8 @@ export class RedisStreamBus implements EventBus {
     private group: string;
     private source: string;
     private consumer: string;
+    private streamFor: (event: string) => string;
+    private channelFor: (event: string) => string;
     private handlers = new Map<EventName, Set<EventHandler<any>>>();
     private readers: Redis[] = [];
     private running = false;
@@ -60,8 +84,11 @@ export class RedisStreamBus implements EventBus {
     private channels = new Map<string, Promise<unknown>>();
 
     constructor(opts: RedisStreamBusOptions) {
+        const names = busNames(opts.namespace);
         this.url = opts.url;
-        this.group = opts.group;
+        this.group = names.group(opts.group);
+        this.streamFor = names.stream;
+        this.channelFor = names.channel;
         this.source = opts.source ?? opts.group;
         this.consumer = opts.consumer ?? `${process.env.HOSTNAME ?? "host"}-${process.pid}`;
         this.pub = new Redis(this.url, { lazyConnect: true, maxRetriesPerRequest: 3 });
@@ -76,7 +103,7 @@ export class RedisStreamBus implements EventBus {
             payload: JSON.stringify(payload),
         };
         const id = await this.pub.xadd(
-            streamFor(event),
+            this.streamFor(event),
             "MAXLEN", "~", MAXLEN,
             "*",
             "name", envelope.name,
@@ -87,14 +114,14 @@ export class RedisStreamBus implements EventBus {
         // The event is durable once XADD returns. A failed fan-out only costs
         // live delivery, so it must not tell the caller to publish again.
         await this.pub
-            .publish(channelFor(event), JSON.stringify({ id, ...envelope }))
+            .publish(this.channelFor(event), JSON.stringify({ id, ...envelope }))
             .catch((err) => console.error(`[events] broadcast of ${event} (${id}) failed:`, err.message));
         return id;
     }
 
     async publishEphemeral<K extends EventName>(event: K, payload: EventMap[K]): Promise<string> {
         const id = randomUUID();
-        await this.pub.publish(channelFor(event), JSON.stringify({
+        await this.pub.publish(this.channelFor(event), JSON.stringify({
             id,
             name: event,
             ts: new Date().toISOString(),
@@ -112,7 +139,7 @@ export class RedisStreamBus implements EventBus {
         const entry: EventHandler<K> = (payload, meta) => handler(payload, meta);
         handlers.add(entry);
 
-        const channel = channelFor(event);
+        const channel = this.channelFor(event);
         if (!this.channels.has(channel)) this.channels.set(channel, this.subscriber().subscribe(channel));
         try {
             await this.channels.get(channel);
@@ -144,7 +171,7 @@ export class RedisStreamBus implements EventBus {
         this.running = true;
         await this.pub.connect().catch(() => {/* ioredis auto-retries */});
 
-        const streams = [...new Set([...this.handlers.keys()].map(streamFor))];
+        const streams = [...new Set([...this.handlers.keys()].map(this.streamFor))];
         for (const stream of streams) {
             try {
                 await this.pub.xgroup("CREATE", stream, this.group, "$", "MKSTREAM");

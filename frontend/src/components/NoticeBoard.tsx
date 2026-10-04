@@ -148,7 +148,9 @@ function SuggestVenue({ state, busy, submit, onCancel }: {
     const saved = state.venues.filter(v => !onVote.has(v.id));
     const [mode, setMode] = useState<'saved' | 'new'>(saved.length ? 'saved' : 'new');
     const [venueId, setVenueId] = useState(saved[0]?.id ?? '');
-    const [draft, setDraft] = useState({ name: '', address: '', kind: 'other' as Venue['kind'], hostId: state.viewer.id });
+    // A home's host must be in the party; a stand-in GM or an admin may not be.
+    const defaultHost = state.party.some(p => p.id === state.viewer.id) ? state.viewer.id : state.party[0]?.id ?? '';
+    const [draft, setDraft] = useState({ name: '', address: '', kind: 'other' as Venue['kind'], hostId: defaultHost });
     const name = (id: string) => state.party.find(p => p.id === id)?.name ?? 'someone';
 
     const send = async (e: React.FormEvent) => {
@@ -536,20 +538,21 @@ function PlanningCard({ state, reload }: { state: PlanningState; reload: () => P
 
             {!s.isOnline && (
                 <div className="mt-4 pt-4 border-t-2 border-black/20 dark:border-white/20">
+                    {/* A changed night (#87) keeps the venue it already had: no new venue vote or food step follows. */}
                     <StepHeading n={2} title={stage === 'venue' ? 'Pick the venue' : 'The venue'}
-                        state={stage === 'night' ? 'later' : stage === 'venue' ? 'now' : 'done'}
+                        state={stage === 'venue' ? 'now' : s.venue ? 'done' : 'later'}
                         extra={vPoll && stage === 'venue' && <span className="font-permanent text-[10px] text-zinc-600 dark:text-zinc-300">round {vPoll.round}</span>} />
-                    {stage === 'night' && (
+                    {stage === 'night' && !s.venue && (
                         <p className="font-permanent text-[10px] text-zinc-500 dark:text-zinc-400 uppercase">Once the night is set, the party picks where.</p>
                     )}
                     {stage === 'venue' && <VenueStep state={state} busy={busy} act={act} />}
-                    {stage === 'food' && s.venue && (
+                    {stage !== 'venue' && s.venue && (
                         <VenueLine venue={s.venue} name={name} note={s.hostId ? `host: ${s.hostId === viewer.id ? 'you' : name(s.hostId)}` : undefined} />
                     )}
                 </div>
             )}
 
-            {!s.isOnline && s.foodMode && (
+            {!s.isOnline && s.foodMode && !(stage === 'night' && s.venue) && (
                 <div className="mt-4 pt-4 border-t-2 border-black/20 dark:border-white/20">
                     <StepHeading n={3} title="Food" state={stage === 'food' ? 'now' : 'later'} />
                     <p className="font-permanent text-xs text-zinc-700 dark:text-zinc-300 uppercase flex items-center gap-1.5">

@@ -153,7 +153,8 @@ async function main() {
         const notGm = await kick("p1", { title: "Session 14", isOnline: true });
         check("a player can't start planning, and is told who can (the GM title)",
             notGm.status === 403 && /Host/.test(notGm.json.error), notGm.json);
-        check("in person isn't offered yet (400)", (await kick("gm", { title: "Session 14", isOnline: false })).status === 400);
+        check("an online session can't take a food mode (400; in person is covered by test-venue-vote.ts)",
+            (await kick("gm", { title: "Session 14", isOnline: true, foodMode: "potluck" })).status === 400);
         check("a title is required", (await kick("gm", { isOnline: true })).status === 400);
         check("online or in person must be chosen", (await kick("gm", { title: "Session 14" })).status === 400);
 
@@ -345,8 +346,8 @@ async function main() {
             (await notes("p1", sid19)).some((n) => /was cancelled/.test(n.title)) && (await notes("gm", sid19)).length === 0);
         check("...and Table Talk says planning stopped", (await talk()).some((b) => /Session 19.*cancelled/.test(b)));
 
-        // The in-person stage changes come from the venue step (#92), which isn't
-        // built yet; the announcer reacts to their events all the same.
+        // The announcer's side of the in-person stage changes, published directly
+        // (test-venue-vote.ts drives the venue step that publishes them, #92).
         const { rows: [s20] } = await pool.query(
             `INSERT INTO game_sessions (title, campaign_id, date, end_date, status, planning_stage, is_online)
              VALUES ('Session 20', $1, $2, $3, 'planning', 'venue', false) RETURNING id`, [campaignId, A.start, A.end]);

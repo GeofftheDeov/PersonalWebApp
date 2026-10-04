@@ -115,12 +115,17 @@ export async function openPoll(db: Db, input: {
     return (await getPoll(db, poll.id))!;
 }
 
+/**
+ * clock_timestamp(), not now(): options inserted in one transaction would
+ * otherwise share a created_at, and venue options (which have no time to sort
+ * by) would come back in id order instead of the order they were put up in.
+ */
 async function insertOption(db: Db, pollId: string, o: NewOption): Promise<string> {
     const { rows: [row] } = "venueId" in o
-        ? await db.query(`INSERT INTO poll_options (poll_id, venue_id, suggested_by) VALUES ($1, $2, $3) RETURNING id`,
-            [pollId, o.venueId, o.suggestedBy ?? null])
-        : await db.query(`INSERT INTO poll_options (poll_id, starts_at, ends_at, suggested_by) VALUES ($1, $2, $3, $4) RETURNING id`,
-            [pollId, o.start, o.end, o.suggestedBy ?? null]);
+        ? await db.query(`INSERT INTO poll_options (poll_id, venue_id, suggested_by, created_at)
+                          VALUES ($1, $2, $3, clock_timestamp()) RETURNING id`, [pollId, o.venueId, o.suggestedBy ?? null])
+        : await db.query(`INSERT INTO poll_options (poll_id, starts_at, ends_at, suggested_by, created_at)
+                          VALUES ($1, $2, $3, $4, clock_timestamp()) RETURNING id`, [pollId, o.start, o.end, o.suggestedBy ?? null]);
     return row.id;
 }
 

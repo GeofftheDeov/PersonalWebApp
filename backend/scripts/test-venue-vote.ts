@@ -429,7 +429,11 @@ async function main() {
         announcer.stop();
         uninstall();
         const ids = Object.values(who).map((p) => p.id);
-        for (const id of [campaignId, otherCampaignId]) if (id) await pool.query(`DELETE FROM campaigns WHERE id = $1`, [id]);
+        // Sessions (and their polls) first: a venue still named by a poll option can't go.
+        for (const id of [campaignId, otherCampaignId]) if (id) {
+            await pool.query(`DELETE FROM game_sessions WHERE campaign_id = $1`, [id]);
+            await pool.query(`DELETE FROM campaigns WHERE id = $1`, [id]);
+        }
         if (ids.length) {
             await pool.query(`DELETE FROM api_key_vault WHERE user_id = ANY($1)`, [ids]);
             await pool.query(`DELETE FROM notifications WHERE user_id = ANY($1)`, [ids]);

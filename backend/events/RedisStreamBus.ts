@@ -107,20 +107,23 @@ export class RedisStreamBus implements EventBus {
     async subscribeBroadcast<K extends EventName>(event: K, handler: EventHandler<K>): Promise<() => void> {
         if (!this.broadcasts.has(event)) this.broadcasts.set(event, new Set());
         const handlers = this.broadcasts.get(event)!;
-        handlers.add(handler);
+        // A wrapper per registration, so the same function subscribed twice
+        // needs two unsubscribes, not one.
+        const entry: EventHandler<K> = (payload, meta) => handler(payload, meta);
+        handlers.add(entry);
 
         const channel = channelFor(event);
         if (!this.channels.has(channel)) this.channels.set(channel, this.subscriber().subscribe(channel));
         try {
             await this.channels.get(channel);
         } catch (err) {
-            handlers.delete(handler);
+            handlers.delete(entry);
             this.channels.delete(channel);
             throw err;
         }
 
         return () => {
-            handlers.delete(handler);
+            handlers.delete(entry);
             if (handlers.size > 0 || this.broadcasts.get(event) !== handlers) return;
             this.broadcasts.delete(event);
             this.channels.delete(channel);

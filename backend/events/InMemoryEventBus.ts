@@ -48,8 +48,11 @@ export class InMemoryEventBus implements EventBus {
 
     async subscribeBroadcast<K extends EventName>(event: K, handler: EventHandler<K>): Promise<() => void> {
         if (!this.broadcasts.has(event)) this.broadcasts.set(event, new Set());
-        this.broadcasts.get(event)!.add(handler);
-        return () => this.broadcasts.get(event)?.delete(handler);
+        // A wrapper per registration, so the same function subscribed twice
+        // needs two unsubscribes, not one.
+        const entry: EventHandler<K> = (payload, meta) => handler(payload, meta);
+        this.broadcasts.get(event)!.add(entry);
+        return () => this.broadcasts.get(event)?.delete(entry);
     }
 
     async start(): Promise<void> {

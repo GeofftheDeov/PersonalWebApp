@@ -89,8 +89,10 @@ async function redisChecks() {
     // Once-per-service subscriptions must be registered before start().
     const normalA = recorder();
     const normalB = recorder();
+    const normalTyping = recorder();
     a.subscribe(MESSAGE, normalA.handler);
     b.subscribe(MESSAGE, normalB.handler);
+    a.subscribe(TYPING, normalTyping.handler);
     await a.start();
     await b.start();
 
@@ -115,8 +117,6 @@ async function redisChecks() {
     const typingB = recorder();
     await a.subscribeBroadcast(TYPING, typingA.handler);
     await b.subscribeBroadcast(TYPING, typingB.handler);
-    const normalTyping = recorder();
-    a.subscribe(TYPING, normalTyping.handler);
 
     const lenBefore = await admin.xlen(MESSAGE_STREAM);
     const e1 = `typing-${run}`;
@@ -130,8 +130,8 @@ async function redisChecks() {
       typingB.count(e1) === 1, `got ${typingB.count(e1)}`);
     check("an ephemeral event on a persisted event's name reaches both instances' broadcast subscribers",
       castA.count(e2) === 1 && castB.count(e2) === 1, `A ${castA.count(e2)}, B ${castB.count(e2)}`);
-    check("the ephemeral event's stream was never created",
-      (await admin.exists(TYPING_STREAM)) === 0);
+    check("the ephemeral event's stream holds no entries",
+      (await admin.xlen(TYPING_STREAM)) === 0, `XLEN ${await admin.xlen(TYPING_STREAM)}`);
     const entries = await admin.xrange(MESSAGE_STREAM, "-", "+");
     const leaked = entries.filter(([, f]) => f.join(" ").includes(e2) || f.join(" ").includes(e1));
     check("no Redis stream holds an entry for either ephemeral event",
@@ -173,15 +173,22 @@ async function redisChecks() {
     check("that process does receive events published after it subscribed",
       castC.count(after) === 1, `got ${castC.count(after)}`);
 
-    // 5. Unsubscribing a broadcast handler stops its deliveries.
+    // 5. Unsubscribing a broadcast handler stops its deliveries — per
+    // registration, even when the same function is subscribed twice.
     const castC2 = recorder();
     const off = await c.subscribeBroadcast(MESSAGE, castC2.handler);
     off();
+    const twice = recorder();
+    const offTwiceFirst = await c.subscribeBroadcast(MESSAGE, twice.handler);
+    await c.subscribeBroadcast(MESSAGE, twice.handler);
+    offTwiceFirst();
     const gone = `after-unsub-${run}`;
     await a.publish(MESSAGE, payload(gone));
     await settle(() => castC.count(gone) >= 1);
     check("an unsubscribed broadcast handler gets nothing more; the remaining one still does",
       castC2.count(gone) === 0 && castC.count(gone) === 1, `unsubscribed ${castC2.count(gone)}, remaining ${castC.count(gone)}`);
+    check("a function subscribed twice and unsubscribed once still receives through its other registration",
+      twice.count(gone) === 1, `got ${twice.count(gone)}`);
 
     // 6. Dropping the last handler for a name and subscribing again works.
     const d = redisBus(group, `t96-d-${run}`);

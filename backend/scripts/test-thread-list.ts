@@ -239,6 +239,12 @@ async function main() {
     check("read state is per person: another member's count doesn't change",
       (await unread(bard, strahdKey)) === bardBefore, `got ${await unread(bard, strahdKey)}`);
 
+    const phLatest = (await call("GET", `/api/messages/campaign/${phandelver.id}?limit=1`, player)).json?.[0];
+    const phRead = await call("POST", readPath(phandelverKey), player, { messageId: phLatest?._id });
+    check("marking read up to someone else's message clears it too (the read message itself isn't unread)",
+      phRead.status === 200 && (await unread(player, phandelverKey)) === 0,
+      `got ${phRead.status}, unread ${await unread(player, phandelverKey)}`);
+
     await say(player, { campaign: strahd.id }, "t100 I search the crypt");
     check("your own messages never count as unread", (await unread(player, strahdKey)) === 0);
 

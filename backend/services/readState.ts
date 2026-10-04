@@ -30,20 +30,22 @@ export async function markThreadRead(person: ThreadPerson, threadKey: unknown, m
     if (typeof messageId !== "string" || !isUuid(messageId)) return { ok: false, reason: "invalid-message" };
 
     const { rows: [message] } = thread.kind === "campaign"
-        ? await query(`SELECT id, created_at FROM messages WHERE id = $1 AND campaign_id = $2`, [messageId, thread.campaignId])
-        : await query(`SELECT id, created_at FROM messages WHERE id = $1 AND dm_key = $2`, [messageId, thread.dmKey]);
+        ? await query(`SELECT id FROM messages WHERE id = $1 AND campaign_id = $2`, [messageId, thread.campaignId])
+        : await query(`SELECT id FROM messages WHERE id = $1 AND dm_key = $2`, [messageId, thread.dmKey]);
     if (!message) return { ok: false, reason: "no-such-message" };
 
+    // created_at is copied inside Postgres: a JS Date keeps only milliseconds,
+    // and a truncated position would leave the read message itself unread.
     const { rows: [row] } = await query(
         `INSERT INTO thread_reads (person_id, thread_key, last_read_at, last_read_message_id)
-         VALUES ($1, $2, $3, $4)
+         SELECT $1, $2, m.created_at, m.id FROM messages m WHERE m.id = $3
          ON CONFLICT (person_id, thread_key) DO UPDATE
             SET last_read_at = EXCLUDED.last_read_at,
                 last_read_message_id = EXCLUDED.last_read_message_id,
                 updated_at = now()
           WHERE thread_reads.last_read_at < EXCLUDED.last_read_at
          RETURNING last_read_at, last_read_message_id`,
-        [person.id, key, message.created_at, message.id]);
+        [person.id, key, message.id]);
     // No row back means the stored position was already at or past this message.
     const current = row ?? (await query(
         `SELECT last_read_at, last_read_message_id FROM thread_reads WHERE person_id = $1 AND thread_key = $2`,

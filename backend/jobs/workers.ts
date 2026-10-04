@@ -273,8 +273,8 @@ export function startWorkers(): () => Promise<void> {
         } catch (err) {
             sweepError = err;
         }
-        const r = await runQuestReminders(pool, now);
         if (closed) console.log(`[bullmq] quest-reminders: closed the food step of ${closed} session(s)`);
+        const r = await runQuestReminders(pool, now);
         if (r.sent.length || r.followed.length) {
             console.log(`[bullmq] quest-reminders: sent ${r.sent.length}, moved ${r.followed.length} due time(s)`);
         }

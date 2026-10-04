@@ -21,6 +21,30 @@ export type MarkReadResult =
     | { ok: true; position: ReadPosition }
     | { ok: false; reason: "invalid-thread" | "forbidden" | "invalid-message" | "no-such-message" };
 
+/**
+ * Each person's unread count in one thread: the messages after their read
+ * position that someone else sent (the rule listThreads uses). For the live
+ * channel's `thread.updated` frames (#102). Ids that aren't uuids count 0, and
+ * so does a malformed thread key. One query for all the people.
+ */
+export async function unreadCounts(threadKey: ThreadKey, personIds: string[]): Promise<Map<string, number>> {
+    const counts = new Map<string, number>(personIds.map((id) => [id, 0]));
+    const thread = parseThreadKey(threadKey);
+    const people = [...new Set(personIds)].filter(isUuid);
+    if (!thread || !people.length) return counts;
+    const { rows } = await query<{ person_id: string; unread: number }>(
+        `SELECT p.id AS person_id,
+                (SELECT count(*) FROM messages msg
+                  WHERE ${thread.kind === "campaign" ? "msg.campaign_id = $3::uuid" : "msg.dm_key = $3"}
+                    AND msg.sender_id <> p.id::text
+                    AND msg.created_at > COALESCE(r.last_read_at, '-infinity'))::int AS unread
+           FROM unnest($1::uuid[]) AS p(id)
+           LEFT JOIN thread_reads r ON r.person_id = p.id AND r.thread_key = $2`,
+        [people, threadKey, thread.kind === "campaign" ? thread.campaignId : thread.dmKey]);
+    for (const r of rows) counts.set(String(r.person_id), r.unread);
+    return counts;
+}
+
 /** Marks the thread read up to (and including) `messageId`, which must belong to it. */
 export async function markThreadRead(person: ThreadPerson, threadKey: unknown, messageId: unknown): Promise<MarkReadResult> {
     const thread = parseThreadKey(threadKey);

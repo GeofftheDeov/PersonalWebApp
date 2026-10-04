@@ -6,6 +6,7 @@ import { bus as defaultBus, type EventBus, type EventMap } from "../events/index
 import { verifyJwt } from "../utils/jwt.js";
 import { resolveAccountId } from "../utils/accountRefs.js";
 import { campaignThreadKey, dmThreadKey, visibleThreadKeys, type ThreadKey } from "../services/threads.js";
+import { unreadCounts } from "../services/readState.js";
 
 /**
  * The live channel (#98, spec #58): one authenticated WebSocket per person,
@@ -28,7 +29,8 @@ import { campaignThreadKey, dmThreadKey, visibleThreadKeys, type ThreadKey } fro
  *
  * Adding a server → client frame type: subscribe to its bus event in
  * `attachLiveChannel` (subscribeBroadcast), map the payload to a frame and a
- * thread key, and call `deliver(threadKey, frame)`. Adding a client → server
+ * thread key, and call `deliver(threadKey, frame)` (or `deliverToPerson` for a
+ * frame about one person, like `thread.read`). Adding a client → server
  * frame type: handle it in `onFrame`, and check `canAccessThread` before
  * acting on any thread key a client names.
  */
@@ -72,7 +74,17 @@ export interface LiveMessage {
 export type ServerFrame =
     | { type: "ready"; v: number; threads: ThreadKey[] }
     | { type: "message.created"; thread: ThreadKey; message: LiveMessage }
+    | ThreadListFrame
     | { type: "ping" };
+
+/**
+ * The thread list's frames (#102). `thread.updated` goes to every socket
+ * subscribed to the thread, each with its own person's unread count;
+ * `thread.read` goes to every socket of the one person who read.
+ */
+export type ThreadListFrame =
+    | { type: "thread.updated"; thread: ThreadKey; lastActivityAt: string; unreadCount: number }
+    | { type: "thread.read"; thread: ThreadKey; lastReadAt: string; lastReadMessageId: string | null; unreadCount: number };
 
 interface Connection {
     ws: WebSocket;
@@ -96,6 +108,8 @@ export async function attachLiveChannel(
     const connections = new Set<Connection>();
     /** thread key → the authenticated connections subscribed to it. */
     const byThread = new Map<ThreadKey, Set<Connection>>();
+    /** person id → that person's authenticated connections (every device). */
+    const byPerson = new Map<string, Set<Connection>>();
     const seen = new Set<string>();
 
     function deliver(thread: ThreadKey, frame: ServerFrame) {
@@ -103,6 +117,16 @@ export async function attachLiveChannel(
         if (!subscribers?.size) return;
         const data = JSON.stringify(frame);
         for (const conn of subscribers) {
+            if (conn.ws.readyState === WebSocket.OPEN) conn.ws.send(data);
+        }
+    }
+
+    /** Sends a frame to every authenticated socket of one person. */
+    function deliverToPerson(personId: string, frame: ServerFrame) {
+        const sockets = byPerson.get(personId);
+        if (!sockets?.size) return;
+        const data = JSON.stringify(frame);
+        for (const conn of sockets) {
             if (conn.ws.readyState === WebSocket.OPEN) conn.ws.send(data);
         }
     }
@@ -131,7 +155,67 @@ export async function attachLiveChannel(
             const thread = dmThreadKey(String(payload.sender?.id), String(payload.recipientId));
             deliver(thread, { type: "message.created", thread, message: liveMessage(payload) });
         }),
+        ...(await threadListSubscriptions()),
     ];
+
+    /* ---------------------------------------------------------------- */
+    /* The thread list (#102): thread.updated and thread.read            */
+    /* ---------------------------------------------------------------- */
+
+    /**
+     * A new message changes its thread's last activity and every member's
+     * unread count, so each socket subscribed to the thread gets
+     * `thread.updated` with its own person's count (the sender's doesn't go
+     * up: your own messages are never unread). A read reaches every socket of
+     * the person who read, so their other devices clear the thread too.
+     *
+     * These listen to the same message events as `message.created`, under
+     * their own dedupe key, so one frame kind never suppresses the other.
+     */
+    async function threadListSubscriptions(): Promise<Array<() => void>> {
+        const updated = (thread: ThreadKey, lastActivityAt: string, eventId: string | undefined) => {
+            if (!firstSighting(eventId && `thread.updated:${eventId}`)) return;
+            deliverThreadUpdated(thread, lastActivityAt).catch((err) =>
+                console.error("[live] thread.updated failed:", err.message));
+        };
+        return [
+            await bus.subscribeBroadcast("gamenight.message", (payload, meta) =>
+                updated(campaignThreadKey(payload.campaignId), payload.createdAt, meta?.id)),
+            await bus.subscribeBroadcast("social.dm", (payload, meta) =>
+                updated(dmThreadKey(String(payload.sender?.id), String(payload.recipientId)), payload.createdAt, meta?.id)),
+            await bus.subscribeBroadcast("thread.read", (payload, meta) => {
+                if (!firstSighting(meta?.id && `thread.read:${meta.id}`)) return;
+                deliverToPerson(payload.personId, {
+                    type: "thread.read",
+                    thread: payload.threadKey,
+                    lastReadAt: payload.lastReadAt,
+                    lastReadMessageId: payload.lastReadMessageId,
+                    unreadCount: payload.unreadCount,
+                });
+            }),
+        ];
+    }
+
+    /** One unread-count query for everyone this process holds a socket for on the thread. */
+    async function deliverThreadUpdated(thread: ThreadKey, lastActivityAt: string) {
+        const people = new Map<string, Connection[]>();
+        for (const conn of byThread.get(thread) ?? []) {
+            if (!conn.personId) continue;
+            if (!people.has(conn.personId)) people.set(conn.personId, []);
+            people.get(conn.personId)!.push(conn);
+        }
+        if (!people.size) return;
+        const counts = await unreadCounts(thread, [...people.keys()]);
+        for (const [personId, sockets] of people) {
+            const frame: ServerFrame = {
+                type: "thread.updated",
+                thread,
+                lastActivityAt: new Date(lastActivityAt).toISOString(),
+                unreadCount: counts.get(personId) ?? 0,
+            };
+            for (const conn of sockets) send(conn.ws, frame);
+        }
+    }
 
     function subscribe(conn: Connection, threads: ThreadKey[]) {
         for (const key of threads) {
@@ -143,6 +227,11 @@ export async function attachLiveChannel(
 
     function forget(conn: Connection) {
         connections.delete(conn);
+        if (conn.personId) {
+            const mine = byPerson.get(conn.personId);
+            mine?.delete(conn);
+            if (mine && mine.size === 0) byPerson.delete(conn.personId);
+        }
         for (const key of conn.threads) {
             const set = byThread.get(key);
             set?.delete(conn);
@@ -172,6 +261,8 @@ export async function attachLiveChannel(
         }
         if (conn.ws.readyState !== WebSocket.OPEN) return;
         conn.personId = personId;
+        if (!byPerson.has(personId)) byPerson.set(personId, new Set());
+        byPerson.get(personId)!.add(conn);
         subscribe(conn, threads);
         send(conn.ws, { type: "ready", v: PROTOCOL_VERSION, threads });
     }
@@ -274,6 +365,7 @@ export async function attachLiveChannel(
             for (const conn of connections) conn.ws.close(1001, "server shutting down");
             connections.clear();
             byThread.clear();
+            byPerson.clear();
             await new Promise<void>((resolve) => wss.close(() => resolve()));
         },
     };

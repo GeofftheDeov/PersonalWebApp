@@ -46,6 +46,21 @@ export interface EventMap {
         createdAt: string; // ISO timestamp
     };
 
+    /**
+     * A person's read position in a thread moved forward (#102). Published
+     * with `publishEphemeral`: it only feeds the live channel's `thread.read`
+     * frame to that person's other devices; the position itself is stored in
+     * thread_reads, and no once-per-service consumer needs it.
+     */
+    "thread.read": {
+        personId: string;
+        threadKey: string;
+        lastReadAt: string; // ISO timestamp
+        lastReadMessageId: string | null;
+        /** Messages left unread after this position (newer ones someone else sent). */
+        unreadCount: number;
+    };
+
     /** A notification was created (or refreshed) for a user's bell. */
     "user.notification": {
         notificationId: string;

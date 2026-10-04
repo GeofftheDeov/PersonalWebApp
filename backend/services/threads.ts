@@ -20,6 +20,11 @@ import { findPersonById, personDisplayName } from "../utils/personUtils.js";
  *   - canAccessThread(person, key): campaign threads follow campaign access
  *     (members, and admins for any campaign); DM threads are friends-only and
  *     only for the two people in the pair. Malformed keys are refused.
+ *
+ * And the Letters list built on the first (#100):
+ *   - listThreads(person, filter): visibleThreadKeys narrowed to active
+ *     campaigns and to DMs that have messages, each with title, subtitle, last
+ *     activity and unread count (read state lives in services/readState.ts).
  */
 
 export type ThreadKey = string;

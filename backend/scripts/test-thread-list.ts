@@ -83,10 +83,12 @@ async function cleanup() {
 async function main() {
   const { default: messageRoutes } = await import("../routes/messageRoutes.js");
   const { default: threadRoutes } = await import("../routes/threadRoutes.js");
+  const { default: notificationRoutes } = await import("../routes/notificationRoutes.js");
   const app = express();
   app.use(express.json());
   app.use("/api/messages", messageRoutes);
   app.use("/api/threads", threadRoutes);
+  app.use("/api/notifications", notificationRoutes);
   const server = app.listen(0, "127.0.0.1");
   await new Promise((r) => server.once("listening", r));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -268,6 +270,37 @@ async function main() {
     check("a missing message id is refused (400)", noMessage.status === 400, `got ${noMessage.status}`);
     const badKey = await call("POST", readPath("campaign:not-a-uuid"), player, { messageId: playerLast._id });
     check("a malformed thread key is refused (400)", badKey.status === 400, `got ${badKey.status}`);
+
+    console.log("\nBell notifications\n");
+
+    await say(friend, { friend: player }, "t100 also bring dice");
+    /** The bell's unread message entries, once the off-request-path notify has landed. */
+    const bell = async (who: Person, expect: (n: any[]) => boolean) => {
+      let entries: any[] = [];
+      for (let i = 0; i < 20; i++) {
+        const res = await call("GET", "/api/notifications?limit=100", who);
+        entries = (res.json?.notifications ?? []).filter((n: any) => n.type === "message" && !n.read);
+        if (expect(entries)) break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      return entries;
+    };
+    const forKey = (entries: any[], key: string) => entries.filter((n) => n.sourceKey === key);
+
+    const playerBell = await bell(player, (n) => forKey(n, strahdKey)[0]?.count === 3 && forKey(n, dmKey)[0]?.count === 2);
+    check("campaign messages still ring the bell, one entry per campaign thread",
+      forKey(playerBell, strahdKey).length === 1 && forKey(playerBell, strahdKey)[0].count === 3,
+      `got ${JSON.stringify(forKey(playerBell, strahdKey))}`);
+    check("DMs still ring the bell, collapsing under the DM's thread key",
+      forKey(playerBell, dmKey).length === 1 && forKey(playerBell, dmKey)[0].count === 2,
+      `got ${JSON.stringify(playerBell.map((n) => [n.sourceKey, n.count]))}`);
+    const friendBell = await bell(friend, (n) => forKey(n, dmKey).length > 0);
+    check("...and the other side of the pair collapses under the same key",
+      forKey(friendBell, dmKey).length === 1 && forKey(friendBell, dmKey)[0].count === 1,
+      `got ${JSON.stringify(friendBell.map((n) => [n.sourceKey, n.count]))}`);
+    check("each thread's bell entry is its own",
+      forKey(playerBell, phandelverKey).length === 1 && forKey(playerBell, phandelverKey)[0].count === 1,
+      `got ${JSON.stringify(playerBell.map((n) => [n.sourceKey, n.count]))}`);
   } finally {
     server.closeAllConnections?.();
     server.close();

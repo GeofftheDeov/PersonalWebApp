@@ -1,6 +1,7 @@
+import { query } from "../db/index.js";
 import { isUuid } from "../db/model.js";
 import { getAuthorizedCampaignIds, getMemberCampaignIds } from "../utils/gameNightPlannerUtils.js";
-import { findPersonById } from "../utils/personUtils.js";
+import { findPersonById, personDisplayName } from "../utils/personUtils.js";
 
 /**
  * Threads (#97, spec #58): the one place that decides who sees which
@@ -79,6 +80,134 @@ export async function visibleThreadKeys(person: ThreadPerson): Promise<ThreadKey
         ...[...new Set(campaignIds)].map(campaignThreadKey),
         ...friends.map((f) => dmThreadKey(person.id, f)),
     ];
+}
+
+/* ------------------------------------------------------------------ */
+/* The thread list (#100)                                              */
+/* ------------------------------------------------------------------ */
+
+export type ThreadFilter = "all" | "campaigns" | "friends";
+export const THREAD_FILTERS: readonly ThreadFilter[] = ["all", "campaigns", "friends"];
+
+/** One row of the Letters list. Never carries message text. */
+export type ThreadListEntry = {
+    threadKey: ThreadKey;
+    kind: "campaign" | "dm";
+    /** What to open: the campaign id, or the friend's account id. */
+    targetId: string;
+    title: string;
+    /** Up to two initials to draw an avatar from. */
+    avatarHint: string;
+    subtitle: string;
+    /** The newest message's time, or null for a campaign nobody has written in yet. */
+    lastActivityAt: string | null;
+    /** Messages after the person's read position that someone else sent. */
+    unreadCount: number;
+};
+
+/**
+ * campaigns.status values that mean the game is over. The vocabulary is
+ * 'Not Started' | 'In Progress' | 'Completed'; there is no archived state, so
+ * an active campaign is any that isn't Completed.
+ */
+const FINISHED_CAMPAIGN_STATUSES = ["Completed"];
+
+const initials = (name: string): string =>
+    name.split(/[^\p{L}\p{N}]+/u).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
+
+const toIso = (d: Date | string | null): string | null => (d ? new Date(d).toISOString() : null);
+
+/** The person's active campaigns among `campaignIds`, with party size, last activity and unread count. */
+async function campaignEntries(me: string, campaignIds: string[]): Promise<ThreadListEntry[]> {
+    if (!campaignIds.length) return [];
+    const { rows } = await query<{ id: string; title: string; party: number; last_at: Date | null; unread: number }>(
+        `SELECT c.id, c.title,
+                (SELECT count(DISTINCT m.person_id) FROM campaign_members m
+                  WHERE m.campaign_id = c.id AND m.person_id IS NOT NULL)::int AS party,
+                last.at AS last_at,
+                (SELECT count(*) FROM messages msg
+                  WHERE msg.campaign_id = c.id AND msg.sender_id <> $2
+                    AND msg.created_at > COALESCE(r.last_read_at, '-infinity'))::int AS unread
+           FROM campaigns c
+           LEFT JOIN thread_reads r ON r.person_id = $1 AND r.thread_key = 'campaign:' || c.id
+           LEFT JOIN LATERAL (SELECT created_at AS at FROM messages
+                               WHERE campaign_id = c.id ORDER BY created_at DESC LIMIT 1) last ON true
+          WHERE c.id = ANY($3::uuid[]) AND c.status <> ALL($4::text[])`,
+        [me, me, campaignIds, FINISHED_CAMPAIGN_STATUSES]);
+    return rows.map((r) => ({
+        threadKey: campaignThreadKey(r.id),
+        kind: "campaign",
+        targetId: String(r.id),
+        title: r.title,
+        avatarHint: initials(r.title),
+        subtitle: `Campaign · ${r.party} in the party`,
+        lastActivityAt: toIso(r.last_at),
+        unreadCount: r.unread,
+    }));
+}
+
+/** DM threads among `dms` that have at least one message, titled by the friend. */
+async function dmEntries(me: string, dms: { dmKey: string; friendId: string }[]): Promise<ThreadListEntry[]> {
+    if (!dms.length) return [];
+    const { rows } = await query<{ dm_key: string; last_at: Date; unread: number }>(
+        `SELECT k.dm_key, last.at AS last_at,
+                (SELECT count(*) FROM messages msg
+                  WHERE msg.dm_key = k.dm_key AND msg.sender_id <> $2
+                    AND msg.created_at > COALESCE(r.last_read_at, '-infinity'))::int AS unread
+           FROM unnest($3::text[]) AS k(dm_key)
+           JOIN LATERAL (SELECT created_at AS at FROM messages
+                          WHERE dm_key = k.dm_key ORDER BY created_at DESC LIMIT 1) last ON true
+           LEFT JOIN thread_reads r ON r.person_id = $1 AND r.thread_key = 'dm:' || k.dm_key`,
+        [me, me, dms.map((d) => d.dmKey)]);
+    if (!rows.length) return [];
+
+    const friendOf = new Map(dms.map((d) => [d.dmKey, d.friendId]));
+    const { rows: people } = await query(
+        `SELECT id, handle, name, first_name AS "firstName", last_name AS "lastName", email
+           FROM accounts WHERE id = ANY($1::uuid[])`,
+        [rows.map((r) => friendOf.get(r.dm_key))]);
+    const nameOf = new Map(people.map((p: any) => [String(p.id), personDisplayName(p)]));
+
+    return rows.map((r) => {
+        const friendId = friendOf.get(r.dm_key)!;
+        const title = nameOf.get(friendId) ?? "Unknown Player";
+        return {
+            threadKey: `dm:${r.dm_key}`,
+            kind: "dm",
+            targetId: friendId,
+            title,
+            avatarHint: initials(title),
+            subtitle: "Friend",
+            lastActivityAt: toIso(r.last_at),
+            unreadCount: r.unread,
+        };
+    });
+}
+
+/**
+ * The Letters list: one thread per active campaign the person is a member of
+ * and one per friend they've exchanged messages with, newest activity first.
+ * Built on visibleThreadKeys, so it shows nothing the access rules don't.
+ */
+export async function listThreads(person: ThreadPerson, filter: ThreadFilter = "all"): Promise<ThreadListEntry[]> {
+    const me = String(person?.id ?? "");
+    const campaignIds: string[] = [];
+    const dms: { dmKey: string; friendId: string }[] = [];
+    for (const key of await visibleThreadKeys(person)) {
+        const thread = parseThreadKey(key);
+        if (thread?.kind === "campaign") campaignIds.push(thread.campaignId);
+        else if (thread?.kind === "dm") {
+            dms.push({ dmKey: thread.dmKey, friendId: thread.people[0] === me ? thread.people[1] : thread.people[0] });
+        }
+    }
+
+    const [campaigns, friends] = await Promise.all([
+        filter === "friends" ? [] : campaignEntries(me, campaignIds),
+        filter === "campaigns" ? [] : dmEntries(me, dms),
+    ]);
+
+    const at = (t: ThreadListEntry) => (t.lastActivityAt ? Date.parse(t.lastActivityAt) : -Infinity);
+    return [...campaigns, ...friends].sort((a, b) => at(b) - at(a) || a.title.localeCompare(b.title));
 }
 
 /** Whether the person may read, send to and stream this thread. */

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { LiveClient, type LiveMessage, type LiveStatus, type ThreadStatus } from './liveClient';
 
 export type { LiveMessage, LiveStatus, ThreadStatus } from './liveClient';
-export { campaignThreadKey } from './threadKeys';
+export { campaignThreadKey, dmThreadKey } from './threadKeys';
 
 /**
  * The realtime hook (#98): one live-channel socket per browser tab, shared by

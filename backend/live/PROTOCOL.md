@@ -4,7 +4,7 @@ One WebSocket per signed-in person. It carries live events for every thread that
 
 - Server: `backend/live/liveChannel.ts`
 - Web client: `frontend/src/lib/realtime/liveClient.ts`, wrapped by the `useLiveThread` hook
-- Tests: `backend/scripts/test-live-channel.ts`
+- Tests: `backend/scripts/test-live-channel.ts` (campaigns, auth, heartbeat, client), `backend/scripts/test-live-dms.ts` (DMs)
 
 ## Connecting
 
@@ -54,7 +54,9 @@ Thread keys are `campaign:<campaign id>` and `dm:<id>:<id>`, with the two accoun
   "body": "markdown", "createdAt": "<ISO>", "eventId": "<uuid, optional>" }
 ```
 
-For now only campaign threads carry `message.created`. DM threads are already listed in `ready`, and their messages join the channel with #99. Automated posts, such as the ready check, arrive the same way, with `sender.id` set to `"system"`. Sender email addresses are never sent.
+Campaign threads and DM threads carry the same frame. A DM reaches only its pair: every socket of each of the two people, the sender's own included, so a message sent from a phone also shows on the sender's laptop. `eventId` only appears on campaign messages. Automated posts, such as the ready check, arrive the same way, with `sender.id` set to `"system"`. Sender email addresses are never sent.
+
+This channel is the only live path: the old per-thread SSE streams (`/api/messages/campaign/:id/stream`, `/api/messages/dm/:userId/stream`) were removed with #99.
 
 Clients must ignore frame types they don't know. Later versions of the server will add frames such as `typing`, `thread.read` and `thread.updated` (spec #58) without changing `v`.
 

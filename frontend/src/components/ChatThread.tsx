@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Send, WifiOff } from 'lucide-react';
+import { useLiveThread } from '../lib/realtime/useLiveThread';
+import { threadKeyFor } from '../lib/useThreads';
 
 interface ChatMessage {
     messageId: string;
-    sender: { id: string; name: string; email: string };
+    sender: { id: string; name: string; email?: string };
     body: string;
     createdAt: string;
 }
@@ -24,8 +26,8 @@ const senderLabel = (s: { name?: string }) => {
 
 /**
  * Live chat thread for the Social Hub — campaign Table Talk or a friend DM.
- * History via REST, live updates via SSE, both fed by the backend event bus
- * (gamenight.message / social.dm). Dark styling to sit inside the dock panel.
+ * History via REST; live updates through the realtime hook (the per-user live
+ * channel, backend/live/PROTOCOL.md). Dark styling to sit inside the dock panel.
  */
 export default function ChatThread({ channel, placeholder, onLatestMessage }: {
     channel: ChatChannel;
@@ -36,7 +38,6 @@ export default function ChatThread({ channel, placeholder, onLatestMessage }: {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [draft, setDraft] = useState('');
     const [sending, setSending] = useState(false);
-    const [connected, setConnected] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
     const seen = useRef<Set<string>>(new Set());
@@ -63,16 +64,14 @@ export default function ChatThread({ channel, placeholder, onLatestMessage }: {
         ));
     }, []);
 
-    // Reset on channel switch, then history + SSE subscription.
-    useEffect(() => {
-        setMessages([]);
-        seen.current = new Set();
-        setError(null);
-        setConnected(false);
+    /** The thread on screen, so a history response for one the user has left is dropped. */
+    const currentBase = useRef(base);
 
+    /** The latest page of history. Runs on open and again after every live-channel reconnect. */
+    const loadLatest = useCallback(() => {
         const t = token();
         if (!t || !channel.id) return;
-
+        const forBase = base;
         fetch(`${base}?limit=50`, { headers: { Authorization: `Bearer ${t}` } })
             .then(async res => {
                 if (!res.ok) {
@@ -80,21 +79,35 @@ export default function ChatThread({ channel, placeholder, onLatestMessage }: {
                     throw new Error(err.error || 'history failed');
                 }
                 const rows = await res.json();
+                if (currentBase.current !== forBase) return; // switched threads meanwhile
                 append(rows.map((r: any) => ({
                     messageId: r._id, sender: r.sender, body: r.body, createdAt: r.createdAt,
                 })));
+                setError(null);
             })
-            .catch((err) => setError(err.message === 'history failed' ? 'Could not load chat history' : err.message));
+            .catch((err) => {
+                if (currentBase.current !== forBase) return;
+                setError(err.message === 'history failed' ? 'Could not load chat history' : err.message);
+            });
+    }, [base, channel.id, append]);
 
-        const es = new EventSource(`${base}/stream?token=${encodeURIComponent(t)}`);
-        es.addEventListener('connected', () => { setConnected(true); setError(null); });
-        es.addEventListener('message', (e: MessageEvent) => {
-            try { append([JSON.parse(e.data)]); } catch { /* ignore malformed frame */ }
-        });
-        es.onerror = () => setConnected(false); // EventSource auto-reconnects
+    // Reset on channel switch, then load its history.
+    useEffect(() => {
+        currentBase.current = base;
+        setMessages([]);
+        seen.current = new Set();
+        setError(null);
+        loadLatest();
+    }, [base, loadLatest]);
 
-        return () => es.close();
-    }, [channel.kind, channel.id, base, append]);
+    // Live: the app's one shared WebSocket, the same one Table Talk on a campaign
+    // page uses. Nothing is replayed, so refetch the latest page after a reconnect.
+    const threadKey = channel.id ? threadKeyFor(channel.kind, channel.id) : null;
+    const liveStatus = useLiveThread(threadKey, {
+        onMessage: m => append([{ messageId: m.id, sender: m.sender, body: m.body, createdAt: m.createdAt }]),
+        onReconnect: loadLatest,
+    });
+    const connected = liveStatus === 'open';
 
     // Auto-scroll on new messages
     useEffect(() => {

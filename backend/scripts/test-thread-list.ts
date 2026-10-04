@@ -196,7 +196,78 @@ async function main() {
         && new Date(st.lastActivityAt).getTime() >= new Date(dm?.lastActivityAt).getTime()
         && new Date(dm?.lastActivityAt).getTime() >= new Date(ph?.lastActivityAt).getTime(),
       `got ${st?.lastActivityAt} / ${dm?.lastActivityAt} / ${ph?.lastActivityAt}`);
-    void playerLast; void doneKey; void quietKey;
+    check("a Completed campaign doesn't appear, even with messages", !byKey(all.threads, doneKey));
+    check("a friend with no messages doesn't appear", !byKey(all.threads, quietKey));
+
+    console.log("\nFilters\n");
+
+    const campaignsOnly = await threadsOf(player, "campaigns");
+    check("the campaigns filter returns only campaign threads",
+      campaignsOnly.status === 200 && campaignsOnly.threads.length === 2
+        && campaignsOnly.threads.every((t) => t.kind === "campaign"),
+      `got ${campaignsOnly.status} ${JSON.stringify(campaignsOnly.threads.map((t) => t.threadKey))}`);
+    const friendsOnly = await threadsOf(player, "friends");
+    check("the friends filter returns only DM threads",
+      friendsOnly.status === 200 && friendsOnly.threads.length === 1 && friendsOnly.threads[0].threadKey === dmKey,
+      `got ${friendsOnly.status} ${JSON.stringify(friendsOnly.threads.map((t) => t.threadKey))}`);
+    const explicitAll = await threadsOf(player, "all");
+    check("filter=all is the whole list", explicitAll.threads.length === 3, `got ${explicitAll.threads.length}`);
+    const badFilter = await threadsOf(player, "groups");
+    check("an unknown filter is refused with 400", badFilter.status === 400, `got ${badFilter.status}`);
+
+    const anon = await fetch(`${base}/api/threads`);
+    check("the list needs a signed-in person (401)", anon.status === 401, `got ${anon.status}`);
+
+    console.log("\nRead state\n");
+
+    const readPath = (key: string) => `/api/threads/${encodeURIComponent(key)}/read`;
+    const unread = async (who: Person, key: string) => byKey((await threadsOf(who)).threads, key)?.unreadCount;
+
+    const bardBefore = await unread(bard, strahdKey);
+    check("another member starts with their own count", bardBefore === 2, `got ${bardBefore}`);
+
+    const marked = await call("POST", readPath(strahdKey), player, { messageId: playerLast._id });
+    check("mark read up to the latest message (200)",
+      marked.status === 200 && marked.json?.threadKey === strahdKey && marked.json?.lastReadMessageId === playerLast._id
+        && typeof marked.json?.lastReadAt === "string",
+      `got ${marked.status} ${marked.text}`);
+    check("...clears that thread's unread count", (await unread(player, strahdKey)) === 0);
+    check("...and leaves the other threads alone",
+      (await unread(player, phandelverKey)) === 1 && (await unread(player, dmKey)) === 1);
+    check("read state is per person: another member's count doesn't change",
+      (await unread(bard, strahdKey)) === bardBefore, `got ${await unread(bard, strahdKey)}`);
+
+    await say(player, { campaign: strahd.id }, "t100 I search the crypt");
+    check("your own messages never count as unread", (await unread(player, strahdKey)) === 0);
+
+    const older = (await call("GET", `/api/messages/campaign/${strahd.id}?limit=50`, player)).json as any[];
+    const oldest = older[older.length - 1];
+    const back = await call("POST", readPath(strahdKey), player, { messageId: oldest._id });
+    check("marking read up to an older message never moves the position back",
+      back.status === 200 && back.json?.lastReadMessageId !== oldest._id && (await unread(player, strahdKey)) === 0,
+      `got ${back.status} ${back.text}`);
+
+    await say(gm, { campaign: strahd.id }, "t100 a wolf howls");
+    check("a new message from someone else counts again", (await unread(player, strahdKey)) === 1);
+
+    const dmLatest = (await call("GET", `/api/messages/dm/${friend.id}?limit=1`, player)).json?.[0];
+    const dmRead = await call("POST", readPath(dmKey), player, { messageId: dmLatest?._id });
+    check("mark read works for a DM thread too",
+      dmRead.status === 200 && (await unread(player, dmKey)) === 0, `got ${dmRead.status} ${dmRead.text}`);
+    check("...and only for that side of the pair", (await unread(friend, dmKey)) === 1,
+      `got ${await unread(friend, dmKey)}`);
+
+    const outsider = await account("outsider");
+    const notMine = await call("POST", readPath(strahdKey), outsider, { messageId: playerLast._id });
+    check("someone outside the thread can't mark it read (403)", notMine.status === 403,
+      `got ${notMine.status} ${notMine.text}`);
+    const wrongThread = await call("POST", readPath(phandelverKey), player, { messageId: playerLast._id });
+    check("a message from another thread is refused (404)", wrongThread.status === 404,
+      `got ${wrongThread.status} ${wrongThread.text}`);
+    const noMessage = await call("POST", readPath(strahdKey), player, {});
+    check("a missing message id is refused (400)", noMessage.status === 400, `got ${noMessage.status}`);
+    const badKey = await call("POST", readPath("campaign:not-a-uuid"), player, { messageId: playerLast._id });
+    check("a malformed thread key is refused (400)", badKey.status === 400, `got ${badKey.status}`);
   } finally {
     server.closeAllConnections?.();
     server.close();

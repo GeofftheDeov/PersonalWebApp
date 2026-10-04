@@ -27,11 +27,20 @@ async function isAdmin(user: any): Promise<boolean> {
  */
 export async function getAuthorizedCampaignIds(user: any) {
     if (await isAdmin(user)) return null;
+    return getMemberCampaignIds(user);
+}
 
+/**
+ * Campaign ids this person is a member of, admin or not. Letters threads
+ * (services/threads.ts) are membership-only, so an admin's live channel doesn't
+ * carry every campaign on the site.
+ */
+export async function getMemberCampaignIds(user: any): Promise<string[]> {
+    if (!user?.id) return [];
     // Membership was a four-way OR across { email, lead, contact, account },
     // including an unindexed email match. One person column, one indexed lookup.
     const memberships = await CampaignMember.find({ person: user.id }).select("campaign");
-    return memberships.map((m: any) => m.campaign);
+    return memberships.map((m: any) => String(m.campaign));
 }
 
 /**

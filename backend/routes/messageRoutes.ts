@@ -4,7 +4,7 @@ import { isUuid } from "../db/model.js";
 import Message from "../models/Message.js";
 import Campaign from "../models/Campaign.js";
 import { auth } from "../middleware/auth.js";
-import { getAuthorizedCampaignIds } from "../utils/gameNightPlannerUtils.js";
+import { canAccessThread, campaignThreadKey, dmKeyFor, dmThreadKey } from "../services/threads.js";
 import { bus } from "../events/index.js";
 import { notify } from "../utils/notify.js";
 import { findPersonById, findCampaignPeopleIds, personDisplayName } from "../utils/personUtils.js";
@@ -35,9 +35,6 @@ function fanOut(map: Map<string, Set<Response>>, key: string, payload: unknown) 
 
 bus.subscribe("gamenight.message", (payload) => fanOut(sseClients, payload.campaignId, payload));
 bus.subscribe("social.dm", (payload) => fanOut(dmClients, payload.dmKey, payload));
-
-/** Canonical DM channel key: both participant ids, sorted. */
-const dmKeyFor = (a: string, b: string) => [String(a), String(b)].sort().join(":");
 
 /** Shared SSE plumbing: headers, registration, heartbeat, cleanup. */
 function openSse(map: Map<string, Set<Response>>, key: string, res: Response, label: string) {
@@ -90,12 +87,9 @@ function sseAuth(req: any, res: Response): boolean {
     }
 }
 
-/** Auth check on the campaign, shared by all three endpoints. */
+/** Auth check on the campaign, shared by all three endpoints. Threads owns the rule. */
 async function assertCampaignAccess(user: any, campaignId: string): Promise<boolean> {
-    if (!isUuid(campaignId)) return false;
-    const authorized = await getAuthorizedCampaignIds(user);
-    if (authorized === null) return true; // admin
-    return authorized.some((id: any) => String(id) === String(campaignId));
+    return canAccessThread(user, campaignThreadKey(campaignId));
 }
 
 /* ------------------------------------------------------------------ */
@@ -219,11 +213,9 @@ router.get("/campaign/:campaignId/stream", async (req: any, res) => {
 /* Direct messages                                                     */
 /* ================================================================== */
 
-/** DMs are friends-only; returns the canonical dmKey or null. */
+/** DMs are friends-only (Threads owns the rule); returns the canonical dmKey or null. */
 async function assertDmAccess(userId: string, otherUserId: string): Promise<string | null> {
-    if (!isUuid(otherUserId) || String(otherUserId) === String(userId)) return null;
-    const me = await findPersonById(userId, "friends");
-    if (!me?.doc?.friends?.some((f: any) => String(f) === String(otherUserId))) return null;
+    if (!(await canAccessThread({ id: userId }, dmThreadKey(userId, otherUserId)))) return null;
     return dmKeyFor(userId, otherUserId);
 }
 

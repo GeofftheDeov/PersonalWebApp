@@ -90,6 +90,40 @@ async function cleanup() {
 
 const tokenFor = (p: Person) => signJwt({ id: p.id, email: p.email });
 
+/** Every table's exact row count, so "no rows written" covers tables nobody thought of. */
+async function rowCounts(): Promise<Record<string, number>> {
+  const { rows: tables } = await pool.query(
+    `SELECT quote_ident(table_name) AS t FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_type = 'BASE TABLE'`);
+  const counts: Record<string, number> = {};
+  for (const { t } of tables) {
+    const { rows } = await pool.query(`SELECT count(*)::int AS n FROM ${t}`);
+    counts[t] = rows[0].n;
+  }
+  return counts;
+}
+
+/** Every Redis stream on the server and its entries, each flattened to one string. */
+async function streamEntries(): Promise<Record<string, string[]>> {
+  const { default: Redis } = await import("ioredis");
+  const redis = new Redis(process.env.REDIS_URL!);
+  try {
+    const out: Record<string, string[]> = {};
+    let cursor = "0";
+    do {
+      const [next, keys] = await redis.scan(cursor, "TYPE", "stream", "COUNT", 500);
+      cursor = next;
+      for (const key of keys) {
+        const entries = await redis.xrange(key, "-", "+");
+        out[key] = entries.map(([id, fields]) => `${id} ${fields.join(" ")}`);
+      }
+    } while (cursor !== "0");
+    return out;
+  } finally {
+    redis.disconnect();
+  }
+}
+
 type Frame = { type: string; [k: string]: any };
 
 /** A raw protocol client that authenticates with the first frame and records every frame. */
@@ -134,6 +168,7 @@ async function main() {
     const table = await campaign("Curse of Strahd");
     for (const p of [alice, bob, mara]) await member(table, p);
     const tableThread = campaignThreadKey(table);
+    const rowsBefore = await rowCounts();
 
     console.log(`\nTyping reaches only thread members${process.env.REDIS_URL ? " (Redis bus)" : " (in-memory bus)"}\n`);
 
@@ -163,6 +198,75 @@ async function main() {
     check("none of alice's own sockets receive it, the one she typed on included",
       aliceLaptop.of("typing").length === 0 && alicePhone.of("typing").length === 0,
       `laptop ${JSON.stringify(aliceLaptop.frames)} phone ${JSON.stringify(alicePhone.frames)}`);
+
+    // A friend DM: only the other one of the pair hears about it.
+    await befriend(alice, bob);
+    await befriend(bob, mara); // bob's other friend, not in the alice–bob DM
+    const dmThread = dmThreadKey(alice.id, bob.id);
+    const aliceDm = open(alice);
+    const bobDm = open(bob);
+    const maraDm = open(mara);
+    await Promise.all([aliceDm, bobDm, maraDm].map((c) => c.ready()));
+    bobDm.typing(dmThread);
+    // (Sockets opened before the friendship aren't subscribed to the DM until #105.)
+    check("bob typing in his DM with alice reaches alice",
+      await until(() => typingIn(aliceDm, dmThread).length === 1), JSON.stringify(aliceDm.frames));
+    check("...naming bob", typingIn(aliceDm, dmThread)[0]?.personId === bob.id
+      && typingIn(aliceDm, dmThread)[0]?.name === bob.handle, JSON.stringify(typingIn(aliceDm, dmThread)[0]));
+    await sleep(300);
+    check("bob's other friend and bob's own sockets never receive it",
+      [maraDm, maraSocket, bobDm, bobSocket].every((c) => typingIn(c, dmThread).length === 0),
+      [maraDm, maraSocket, bobDm, bobSocket].map((c) => typingIn(c, dmThread).length).join(","));
+
+    console.log("\nTyping for a thread the sender can't see is dropped\n");
+
+    const beforeDrops = [aliceLaptop, bobSocket, maraSocket].map((c) => c.of("typing").length);
+    outsiderSocket.typing(tableThread);                     // not a member
+    outsiderSocket.typing(dmThreadKey(alice.id, bob.id));    // someone else's DM
+    outsiderSocket.typing(dmThreadKey(outsider.id, alice.id)); // a DM with someone who isn't a friend
+    outsiderSocket.typing("campaign:not-a-uuid");            // malformed
+    outsiderSocket.ws.send(JSON.stringify({ type: "typing" })); // no thread at all
+    await sleep(500);
+    check("an outsider's typing frames reach nobody",
+      [aliceLaptop, bobSocket, maraSocket].every((c, i) => c.of("typing").length === beforeDrops[i]),
+      [aliceLaptop, bobSocket, maraSocket].map((c, i) => `${c.of("typing").length - beforeDrops[i]}`).join(","));
+    check("...and the outsider's socket stays open", outsiderSocket.ws.readyState === WebSocket.OPEN);
+
+    console.log("\nA client that floods typing frames\n");
+
+    const flood = open(mara);
+    await flood.ready();
+    const beforeFlood = typingIn(bobSocket, tableThread).length;
+    for (let i = 0; i < 20; i++) flood.typing(tableThread);
+    await sleep(500);
+    check("twenty frames in a burst reach the thread once",
+      typingIn(bobSocket, tableThread).length - beforeFlood === 1,
+      `${typingIn(bobSocket, tableThread).length - beforeFlood} delivered`);
+
+    console.log("\nTyping is ephemeral\n");
+
+    const rowsAfter = await rowCounts();
+    const changed = Object.keys({ ...rowsBefore, ...rowsAfter }).filter((t) => rowsBefore[t] !== rowsAfter[t]);
+    check("all that typing left no database rows: every table's row count is unchanged", changed.length === 0,
+      changed.map((t) => `${t}: ${rowsBefore[t]} -> ${rowsAfter[t]}`).join(", "));
+
+    if (process.env.REDIS_URL) {
+      // A real message goes through the stream, so the scan below is looking in the right place.
+      const sent = await fetch(`http://127.0.0.1:${port}/api/messages/campaign/${table}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${tokenFor(alice)}`, "content-type": "application/json" },
+        body: JSON.stringify({ body: `a real message ${RUN}` }),
+      });
+      check("a real message is saved", sent.status === 201, `status ${sent.status}`);
+      const streams = await streamEntries();
+      const gamenight = Object.entries(streams).find(([key]) => key.endsWith("events:gamenight"));
+      check("...and lands in the Redis stream history (so the scan sees streams)",
+        !!gamenight?.[1].some((e) => e.includes(`a real message ${RUN}`)), Object.keys(streams).join(", "));
+      const typingKeys = Object.keys(streams).filter((k) => /letters|typing/.test(k));
+      const typingEntries = Object.values(streams).flat().filter((e) => /letters\.typing|"typing"/.test(e));
+      check("no Redis stream holds anything typing-related", typingKeys.length === 0 && typingEntries.length === 0,
+        `streams ${typingKeys.join(", ")}; entries ${typingEntries.slice(0, 3).join(" | ")}`);
+    }
   } finally {
     for (const c of opened) c.ws.terminate();
     await live.close();

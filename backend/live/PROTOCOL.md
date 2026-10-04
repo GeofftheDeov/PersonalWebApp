@@ -4,7 +4,7 @@ One WebSocket per signed-in person. It carries live events for every thread that
 
 - Server: `backend/live/liveChannel.ts`
 - Web client: `frontend/src/lib/realtime/liveClient.ts`, wrapped by the `useLiveThread` hook
-- Tests: `backend/scripts/test-live-channel.ts`
+- Tests: `backend/scripts/test-live-channel.ts` (campaigns, auth, heartbeat, client), `backend/scripts/test-live-dms.ts` (DMs)
 
 ## Connecting
 
@@ -35,7 +35,7 @@ When auth succeeds, the server answers:
 { "type": "ready", "v": 1, "threads": ["campaign:<id>", "dm:<a>:<b>"] }
 ```
 
-`threads` lists the thread keys this socket will receive events for: every campaign the person belongs to, whatever its status, plus one DM thread per friend. The server works this out once, when the socket connects. Admins get no extra campaigns. A thread missing from `threads` gets no live events on this socket, so clients should show it as not live (the web client's `threadStatus` reports `unavailable`). Until #105 recomputes subscriptions on membership and friendship events, joining a campaign or adding a friend only takes effect on the next connect, and so does leaving one.
+`threads` lists the thread keys this socket will receive events for: every campaign the person belongs to, whatever its status, plus one DM thread per friend. The server works this out once, when the socket connects. Admins get no extra campaigns. A thread missing from `threads` gets no live events on this socket, so clients should show it as not live (the web client's `threadStatus` reports `unavailable`). Until #105 recomputes subscriptions on membership and friendship events, joining a campaign or adding a friend only takes effect on the next connect, and so does leaving one. To cover the gap, the web client reconnects once when something subscribes to a thread the open socket's `ready` left out (a DM with a friend added a minute ago); a thread still missing after that stays `unavailable` until it is subscribed again.
 
 Thread keys are `campaign:<campaign id>` and `dm:<id>:<id>`, with the two account ids sorted.
 
@@ -54,7 +54,9 @@ Thread keys are `campaign:<campaign id>` and `dm:<id>:<id>`, with the two accoun
   "body": "markdown", "createdAt": "<ISO>", "eventId": "<uuid, optional>" }
 ```
 
-For now only campaign threads carry `message.created`. DM threads are already listed in `ready`, and their messages join the channel with #99. Automated posts, such as the ready check, arrive the same way, with `sender.id` set to `"system"`. Sender email addresses are never sent.
+Campaign threads and DM threads carry the same frame. A DM reaches only its pair: every socket of each of the two people, the sender's own included, so a message sent from a phone also shows on the sender's laptop. `eventId` only appears on campaign messages. Automated posts, such as the ready check, arrive the same way, with `sender.id` set to `"system"`. Sender email addresses are never sent.
+
+This channel is the only live path: the old per-thread SSE streams (`/api/messages/campaign/:id/stream`, `/api/messages/dm/:userId/stream`) were removed with #99.
 
 Clients must ignore frame types they don't know. Later versions of the server will add frames such as `typing`, `thread.read` and `thread.updated` (spec #58) without changing `v`.
 

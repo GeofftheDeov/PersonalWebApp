@@ -1,5 +1,4 @@
-import express, { Response } from "express";
-import { verifyJwt } from "../utils/jwt.js";
+import express from "express";
 import { isUuid } from "../db/model.js";
 import Message from "../models/Message.js";
 import Campaign from "../models/Campaign.js";
@@ -9,85 +8,16 @@ import { bus } from "../events/index.js";
 import { notify } from "../utils/notify.js";
 import { findPersonById, findCampaignPeopleIds, personDisplayName } from "../utils/personUtils.js";
 
+/*
+ * Campaign chat (Table Talk) and friend DMs: history and send over REST. Live
+ * delivery is the live channel's job (backend/live/liveChannel.ts): sending
+ * publishes gamenight.message / social.dm on the bus, and the channel forwards
+ * each one to the sockets subscribed to its thread. The SSE streams that used
+ * to live here were retired with #99.
+ */
 const router = express.Router();
 
-/* ------------------------------------------------------------------ */
-/* SSE hubs: channel key → set of open SSE responses. Campaign chat    */
-/* keys are campaign ids; DMs use the sorted-id dmKey. Fed by the      */
-/* event bus, so it works identically whether the message was posted   */
-/* by this process or (later) another service on the bus.              */
-/* ------------------------------------------------------------------ */
-const sseClients = new Map<string, Set<Response>>();
-const dmClients = new Map<string, Set<Response>>();
-
-function fanOut(map: Map<string, Set<Response>>, key: string, payload: unknown) {
-    const clients = map.get(key);
-    if (!clients?.size) return;
-    const frame = `event: message\ndata: ${JSON.stringify(payload)}\n\n`;
-    for (const res of clients) {
-        try {
-            res.write(frame);
-        } catch {
-            clients.delete(res);
-        }
-    }
-}
-
-bus.subscribe("gamenight.message", (payload) => fanOut(sseClients, payload.campaignId, payload));
-bus.subscribe("social.dm", (payload) => fanOut(dmClients, payload.dmKey, payload));
-
-/** Shared SSE plumbing: headers, registration, heartbeat, cleanup. */
-function openSse(map: Map<string, Set<Response>>, key: string, res: Response, label: string) {
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache, no-transform");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("X-Accel-Buffering", "no");
-    (res as any).flushHeaders?.();
-
-    res.write(`event: connected\ndata: ${JSON.stringify({ channel: key })}\n\n`);
-
-    if (!map.has(key)) map.set(key, new Set());
-    map.get(key)!.add(res);
-    console.log(`[messages] SSE open — ${label}=${key} clients=${map.get(key)!.size}`);
-
-    const heartbeat = setInterval(() => {
-        try {
-            res.write(": ping\n\n");
-        } catch {
-            /* socket closed; cleanup below */
-        }
-    }, 15_000);
-
-    res.on("close", () => {
-        clearInterval(heartbeat);
-        const clients = map.get(key);
-        clients?.delete(res);
-        if (clients && clients.size === 0) map.delete(key);
-        console.log(`[messages] SSE closed — ${label}=${key}`);
-    });
-}
-
-/** Manual auth for SSE endpoints (EventSource can't set headers): header OR ?token=. */
-function sseAuth(req: any, res: Response): boolean {
-    const headerToken = req.headers.authorization?.startsWith("Bearer ")
-        ? req.headers.authorization.split(" ")[1]
-        : undefined;
-    const token = headerToken || (req.query.token as string | undefined);
-    if (!token) {
-        res.status(401).json({ error: "Unauthorized: No token provided" });
-        return false;
-    }
-    try {
-        const decoded = verifyJwt(token);
-        req.user = { id: decoded.id, email: decoded.email, type: decoded.type };
-        return true;
-    } catch {
-        res.status(401).json({ error: "Unauthorized: Invalid token" });
-        return false;
-    }
-}
-
-/** Auth check on the campaign, shared by all three endpoints. Threads owns the rule. */
+/** Auth check on the campaign, shared by both campaign endpoints. Threads owns the rule. */
 async function assertCampaignAccess(user: any, campaignId: string): Promise<boolean> {
     return canAccessThread(user, campaignThreadKey(campaignId));
 }
@@ -193,22 +123,6 @@ async function notifyCampaignMembers(campaignId: string, senderId: string, sende
     }
 }
 
-/* ------------------------------------------------------------------ */
-/* GET /api/messages/campaign/:campaignId/stream — SSE live feed       */
-/* EventSource can't set headers, so this endpoint also accepts        */
-/* ?token=<jwt> (same pattern as the admin UI's query-param token).    */
-/* ------------------------------------------------------------------ */
-router.get("/campaign/:campaignId/stream", async (req: any, res) => {
-    if (!sseAuth(req, res)) return;
-
-    const { campaignId } = req.params;
-    if (!(await assertCampaignAccess(req.user, campaignId))) {
-        return res.status(403).json({ error: "Not a member of this campaign" });
-    }
-
-    openSse(sseClients, campaignId, res, "campaign");
-});
-
 /* ================================================================== */
 /* Direct messages                                                     */
 /* ================================================================== */
@@ -294,18 +208,6 @@ router.post("/dm/:userId", auth, async (req: any, res) => {
         console.error("[messages] dm send error:", err);
         res.status(500).json({ error: "Failed to send message", details: err.message });
     }
-});
-
-/* ------------------------------------------------------------------ */
-/* GET /api/messages/dm/:userId/stream — SSE live feed (?token= ok)    */
-/* ------------------------------------------------------------------ */
-router.get("/dm/:userId/stream", async (req: any, res) => {
-    if (!sseAuth(req, res)) return;
-
-    const key = await assertDmAccess(req.user.id, req.params.userId);
-    if (!key) return res.status(403).json({ error: "You can only message friends" });
-
-    openSse(dmClients, key, res, "dm");
 });
 
 export default router;

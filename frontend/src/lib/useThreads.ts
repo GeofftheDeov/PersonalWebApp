@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { campaignThreadKey, dmThreadKey } from './realtime/threadKeys';
 
 /**
  * Letters thread list (#100, spec #58), headless.
@@ -42,9 +43,9 @@ function myAccountId(): string | null {
 
 /** The thread key for a campaign chat or a DM with a friend, matching the server's. */
 export function threadKeyFor(kind: 'campaign' | 'dm', id: string): string | null {
-  if (kind === 'campaign') return `campaign:${id}`;
+  if (kind === 'campaign') return campaignThreadKey(id);
   const me = myAccountId();
-  return me ? `dm:${[me, id].sort().join(':')}` : null;
+  return me ? dmThreadKey(me, id) : null;
 }
 
 const matches = (filter: ThreadFilter) => (t: ThreadSummary) =>

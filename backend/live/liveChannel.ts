@@ -5,7 +5,7 @@ import { WebSocketServer, WebSocket, type RawData } from "ws";
 import { bus as defaultBus, type EventBus, type EventMap } from "../events/index.js";
 import { verifyJwt } from "../utils/jwt.js";
 import { resolveAccountId } from "../utils/accountRefs.js";
-import { campaignThreadKey, visibleThreadKeys, type ThreadKey } from "../services/threads.js";
+import { campaignThreadKey, dmThreadKey, visibleThreadKeys, type ThreadKey } from "../services/threads.js";
 
 /**
  * The live channel (#98, spec #58): one authenticated WebSocket per person,
@@ -18,9 +18,9 @@ import { campaignThreadKey, visibleThreadKeys, type ThreadKey } from "../service
  *   - authenticates with the JWT from the first frame (or, less preferred, the
  *     `token` query parameter), through utils/jwt.ts like every other route;
  *   - asks Threads which threads the person can see, once, at connect;
- *   - listens on a broadcast bus subscription, so every backend task sees every
- *     message event, and forwards each one only to sockets subscribed to its
- *     thread;
+ *   - listens on broadcast bus subscriptions (campaign messages and friend
+ *     DMs), so every backend task sees every message event, and forwards each
+ *     one only to sockets subscribed to its thread;
  *   - pings every 25 seconds and drops a socket that has sent nothing since
  *     the previous ping.
  *
@@ -124,6 +124,12 @@ export async function attachLiveChannel(
                 thread: campaignThreadKey(payload.campaignId),
                 message: liveMessage(payload),
             });
+        }),
+        // A DM thread's subscribers are its pair (every device of each) and nobody else.
+        await bus.subscribeBroadcast("social.dm", (payload, meta) => {
+            if (!firstSighting(meta?.id)) return;
+            const thread = dmThreadKey(String(payload.sender?.id), String(payload.recipientId));
+            deliver(thread, { type: "message.created", thread, message: liveMessage(payload) });
         }),
     ];
 
@@ -277,12 +283,13 @@ function send(ws: WebSocket, frame: ServerFrame) {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(frame));
 }
 
-function liveMessage(payload: EventMap["gamenight.message"]): LiveMessage {
+/** Campaign messages and DMs share one frame shape; only campaign messages can name an event. */
+function liveMessage(payload: EventMap["gamenight.message"] | EventMap["social.dm"]): LiveMessage {
     return {
         id: payload.messageId,
         sender: { id: String(payload.sender?.id), name: String(payload.sender?.name ?? "") },
         body: payload.body,
         createdAt: payload.createdAt,
-        ...(payload.eventId ? { eventId: payload.eventId } : {}),
+        ...("eventId" in payload && payload.eventId ? { eventId: payload.eventId } : {}),
     };
 }

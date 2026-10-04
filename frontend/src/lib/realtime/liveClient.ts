@@ -77,6 +77,8 @@ export class LiveClient {
     private threads = new Map<string, Set<ThreadHandlers>>();
     /** The thread keys the server's last `ready` subscribed this socket to. */
     private serverThreads = new Set<string>();
+    /** Threads that already cost one reconnect while subscribed (see `subscribe`); not retried until re-subscribed. */
+    private refreshedFor = new Set<string>();
     private statusListeners = new Set<(status: LiveStatus) => void>();
     private attempt = 0;
     private everReady = false;
@@ -98,18 +100,46 @@ export class LiveClient {
         };
     }
 
-    /** Listen to `message.created` for one thread. Connects if needed. */
+    /**
+     * Listen to `message.created` for one thread. Connects if needed.
+     *
+     * The server works out a socket's threads once, at connect, so a thread
+     * that became visible since (a friend just added, a campaign just joined)
+     * is missing from the open socket. Subscribing to such a thread reconnects
+     * once to pick it up; if it is still missing after that, it really is
+     * unavailable, and stays so without further retries until it is
+     * subscribed afresh. (#105 will have the server follow these changes live.)
+     */
     subscribe(thread: string, handlers: ThreadHandlers): () => void {
         if (!this.threads.has(thread)) this.threads.set(thread, new Set());
         this.threads.get(thread)!.add(handlers);
         this.cancelIdleClose();
         if (this.status === "idle" || this.status === "unauthorized") this.connect();
+        else if (this.status === "open" && !this.serverThreads.has(thread) && !this.refreshedFor.has(thread)) {
+            this.refreshedFor.add(thread);
+            this.reopen();
+        }
         return () => {
             const set = this.threads.get(thread);
             set?.delete(handlers);
-            if (set && set.size === 0) this.threads.delete(thread);
+            if (set && set.size === 0) {
+                this.threads.delete(thread);
+                this.refreshedFor.delete(thread);
+            }
             if (this.threads.size === 0) this.scheduleIdleClose();
         };
+    }
+
+    /** Replace the open socket with a new one straight away, so the server works out its threads again. */
+    private reopen() {
+        const socket = this.socket;
+        if (!socket) return;
+        this.socket = null;
+        this.clearStale();
+        socket.onclose = null;
+        socket.onmessage = null; // frames still in flight on the old socket would duplicate the new one's
+        try { socket.close(1000, "refreshing threads"); } catch { /* already gone */ }
+        this.connect();
     }
 
     /**

@@ -522,6 +522,8 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
             if (!role.member && !visible.length && !upcoming.length) throw new PlanningError(403, "Only the party can see the Notice Board.");
             return {
                 canPlan: role.gm, gmTitle: c.gm_title,
+                /** Who kickoff can name as the food owner (#92); only the party sees it. */
+                party: role.member ? await campaignParty(campaignId) : [],
                 planning: await Promise.all(visible.map((r) => state(actor, r.id))),
                 /** Scheduled sessions still to come; the Game Master can change their night (#87). */
                 upcoming: upcoming.map((r) => ({

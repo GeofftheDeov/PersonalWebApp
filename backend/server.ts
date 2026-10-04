@@ -40,6 +40,7 @@ import paperclipRoutes from "./routes/paperclipRoutes.js";
 import apiKeyRoutes from "./routes/apiKeyRoutes.js";
 import googleCalendarRoutes from "./routes/googleCalendarRoutes.js";
 import messageRoutes from "./routes/messageRoutes.js";
+import threadRoutes from "./routes/threadRoutes.js";
 import notificationRoutes from "./routes/notificationRoutes.js";
 import inviteRoutes from "./routes/inviteRoutes.js";
 import { snapshotAlpacaNow } from "./routes/adminRoutes.js";
@@ -127,6 +128,7 @@ app.use("/api/paperclip", paperclipRoutes);
 app.use("/api/api-keys", apiKeyRoutes);
 app.use("/api/google-calendar", googleCalendarRoutes);
 app.use("/api/messages", messageRoutes);
+app.use("/api/threads", threadRoutes); // Letters thread list + read state (#100)
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/campaign-invites", inviteRoutes);
 app.use("/api/runner", runnerRoutes); // PC skill runner (agentic OS); RUNNER_TOKEN auth

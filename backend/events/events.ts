@@ -4,6 +4,7 @@
  * Conventions (see Obsidian vault: concepts/redis-streams-event-bus):
  *  - Names are past-tense and dot-namespaced: `<domain>.<happened>`
  *  - The domain (text before the first dot) maps to a Redis stream: `events:<domain>`
+ *    (`<namespace>:events:<domain>` when EVENT_BUS_NAMESPACE is set; see NAMESPACES.md)
  *  - Payloads must be JSON-serializable
  */
 export interface EventMap {

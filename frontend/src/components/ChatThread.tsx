@@ -27,7 +27,12 @@ const senderLabel = (s: { name?: string }) => {
  * History via REST, live updates via SSE, both fed by the backend event bus
  * (gamenight.message / social.dm). Dark styling to sit inside the dock panel.
  */
-export default function ChatThread({ channel, placeholder }: { channel: ChatChannel; placeholder?: string }) {
+export default function ChatThread({ channel, placeholder, onLatestMessage }: {
+    channel: ChatChannel;
+    placeholder?: string;
+    /** Called with the newest message's id whenever it changes while the thread is open (to mark it read). */
+    onLatestMessage?: (messageId: string) => void;
+}) {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [draft, setDraft] = useState('');
     const [sending, setSending] = useState(false);
@@ -95,6 +100,14 @@ export default function ChatThread({ channel, placeholder }: { channel: ChatChan
     useEffect(() => {
         scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
     }, [messages]);
+
+    // Report the newest message, so whoever opened the thread can mark it read.
+    const onLatest = useRef(onLatestMessage);
+    onLatest.current = onLatestMessage;
+    const latestId = messages.length ? messages[messages.length - 1].messageId : null;
+    useEffect(() => {
+        if (latestId) onLatest.current?.(latestId);
+    }, [latestId]);
 
     const handleSend = async (e: React.FormEvent) => {
         e.preventDefault();

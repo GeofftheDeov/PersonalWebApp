@@ -645,6 +645,20 @@ CREATE TABLE notifications (
 CREATE INDEX idx_notifications_bell   ON notifications (user_id, read, created_at DESC);
 CREATE INDEX idx_notifications_dedupe ON notifications (user_id, type, source_key, read);
 
+-- Letters read state (#100, spec #58): how far each person has read each
+-- thread. thread_key is `campaign:<campaign id>` or `dm:<dm_key>`
+-- (services/threads.ts). Unread = messages after last_read_at sent by someone
+-- else. Only your own position is tracked; nobody else ever sees it.
+CREATE TABLE thread_reads (
+  id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  person_id            uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  thread_key           text NOT NULL,
+  last_read_at         timestamptz NOT NULL,
+  last_read_message_id uuid REFERENCES messages(id) ON DELETE SET NULL,
+  updated_at           timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT thread_reads_person_thread UNIQUE (person_id, thread_key)
+);
+
 -- ============================================================
 -- Integrations / trading
 -- ============================================================

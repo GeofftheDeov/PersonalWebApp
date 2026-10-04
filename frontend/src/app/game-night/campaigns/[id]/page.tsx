@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
-import { Map, ArrowLeft, Calendar, Book, Users, Shield, ChevronRight, Crown, Save, X, Pencil, UserPlus, Check, Copy, Link2, Plus, Wifi, Flame } from 'lucide-react';
+import { Map, ArrowLeft, Calendar, Book, Users, Shield, ChevronRight, Crown, Save, X, Pencil, UserPlus, Check, Copy, Link2, Plus, Wifi, Flame, ImagePlus } from 'lucide-react';
 import CampaignChat from '@/components/CampaignChat';
+import CampaignBanner from '@/components/CampaignBanner';
+import BannerEditor from '@/components/BannerEditor';
 import NoticeBoard from '@/components/NoticeBoard';
 import { sessionWhen } from '@/lib/sessions';
 import { DEFAULT_GM_TITLE, gmTitleOf, roleLabel } from '@/lib/campaigns';
@@ -101,6 +103,7 @@ export default function CampaignDetailPage() {
     const [torchFrom, setTorchFrom] = useState('');
     const [torchBusy, setTorchBusy] = useState(false);
     const [torchError, setTorchError] = useState<string | null>(null);
+    const [showBannerEditor, setShowBannerEditor] = useState(false);
 
     const EMPTY_SESSION = { title: '', date: '', endDate: '', location: '', isOnline: false, agenda: '', createDiscordEvent: false, createGoogleEvent: false };
     const [showSessionModal, setShowSessionModal] = useState(false);
@@ -320,6 +323,27 @@ export default function CampaignDetailPage() {
                         <ArrowLeft className="w-4 h-4" /> BACK TO GAME NIGHT
                     </Link>
                 </div>
+
+                {/* Banner (#81): the owner's image, or a fallback in the campaign's colours */}
+                <CampaignBanner url={campaign.bannerUrl} seed={id} title={campaign.title} className="mb-8 border-4 border-black shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]">
+                    {isOwner && (
+                        <button
+                            type="button"
+                            onClick={() => setShowBannerEditor(true)}
+                            className="absolute bottom-2 right-2 sm:bottom-3 sm:right-3 flex items-center gap-1.5 px-3 py-1.5 border-2 border-black bg-yellow-400 text-black font-permanent text-xs uppercase hover:bg-white transition-colors shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]"
+                        >
+                            <ImagePlus className="w-4 h-4" /> {campaign.bannerUrl ? 'Change banner' : 'Add banner'}
+                        </button>
+                    )}
+                </CampaignBanner>
+                {showBannerEditor && (
+                    <BannerEditor
+                        campaignId={id}
+                        hasBanner={!!campaign.bannerKey}
+                        onClose={() => setShowBannerEditor(false)}
+                        onSaved={banner => { setCampaign((c: any) => ({ ...c, ...banner })); setShowBannerEditor(false); }}
+                    />
+                )}
 
                 {/* Header */}
                 <div className="mb-8 pb-6 border-b-8 border-black flex flex-wrap items-start justify-between gap-4">

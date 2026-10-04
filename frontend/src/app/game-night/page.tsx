@@ -8,6 +8,7 @@ import QuestLog from '@/components/QuestLog';
 import Link from 'next/link';
 import { sessionWhen } from '@/lib/sessions';
 import { DEFAULT_GM_TITLE } from '@/lib/campaigns';
+import CampaignBanner from '@/components/CampaignBanner';
 
 interface Campaign {
     _id: string;
@@ -18,6 +19,7 @@ interface Campaign {
     endDate: string;
     discordGuildId?: string;
     discordChannelId?: string;
+    bannerUrl?: string | null;
 }
 
 interface Session {
@@ -295,6 +297,7 @@ export default function GameNightPage() {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 {campaigns.map(c => (
                                     <Link key={c._id} href={`/game-night/campaigns/${c._id}`} className="relative p-6 border-4 border-black bg-white dark:bg-slate-800 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] hover:-translate-y-1 transition-transform group block">
+                                        <CampaignBanner url={c.bannerUrl} seed={c._id} title={c.title} className="-mx-6 -mt-6 mb-4 border-b-4 border-black" />
                                         <div className="flex justify-between items-start gap-2 mb-3">
                                             <h3 className="font-permanent text-xl text-black dark:text-white uppercase leading-tight group-hover:text-teal-600 transition-colors break-words min-w-0">{c.title}</h3>
                                             <span className={`px-2 py-1 text-xs font-permanent uppercase border-2 border-black whitespace-nowrap shrink-0 ${statusColor(c.status)}`}>

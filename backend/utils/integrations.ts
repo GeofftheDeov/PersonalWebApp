@@ -1,4 +1,6 @@
 import { OAuth2Client } from 'google-auth-library';
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 /**
  * Everything the app sends to or reads from an outside service for tabletop
@@ -26,6 +28,14 @@ import { OAuth2Client } from 'google-auth-library';
  * Moving a session's night (#87) PATCHes both kinds of event with only the
  * changed fields, and cancelling one DELETEs them. A delete of an event
  * that's already gone succeeds.
+ *
+ * S3 uploads (#81)          — one private bucket, reached with the AWS SDK v3.
+ *   UPLOADS_BUCKET   the bucket; unset or empty means uploads are off ("not configured")
+ *   UPLOADS_REGION   its region (else AWS_REGION, else us-east-2)
+ *   UPLOADS_CDN_URL  optional CloudFront origin (e.g. https://dxxxx.cloudfront.net) in
+ *                    front of the bucket; reads use it instead of a presigned GET
+ *   Credentials come from the SDK's default chain: the ECS task role in AWS,
+ *   AWS_ACCESS_KEY_ID / AWS_PROFILE locally. The bucket is never public.
  */
 
 const DISCORD_API = 'https://discord.com/api/v10';
@@ -289,6 +299,80 @@ export interface PresignedPut {
     expiresAt: Date;
 }
 
+export interface ReadUrlInput {
+    key: string;
+    /** How long a presigned GET works. Default 3600 seconds. Ignored behind CloudFront. */
+    expiresInSeconds?: number;
+}
+
+export interface ReadUrl {
+    url: string;
+    /** When a presigned URL stops working; null for a CloudFront URL, which doesn't. */
+    expiresAt: Date | null;
+}
+
+/** Uploads are switched off: no bucket is configured for this environment. */
+export class UploadsNotConfiguredError extends Error {
+    constructor() { super('S3 uploads are not configured yet (UPLOADS_BUCKET is unset)'); }
+}
+
+function uploadsConfig() {
+    const bucket = process.env.UPLOADS_BUCKET?.trim();
+    if (!bucket) throw new UploadsNotConfiguredError();
+    const region = process.env.UPLOADS_REGION?.trim() || process.env.AWS_REGION?.trim() || 'us-east-2';
+    const cdn = process.env.UPLOADS_CDN_URL?.trim().replace(/\/+$/, '') || null;
+    return { bucket, region, cdn };
+}
+
+const s3Clients = new Map<string, S3Client>();
+function s3(region: string): S3Client {
+    let client = s3Clients.get(region);
+    if (!client) {
+        client = new S3Client({
+            region,
+            // Without these the SDK adds a CRC32 of the (empty) body to presigned
+            // PUT URLs, and S3 then rejects the browser's real upload.
+            requestChecksumCalculation: 'WHEN_REQUIRED',
+            responseChecksumValidation: 'WHEN_REQUIRED',
+        });
+        s3Clients.set(region, client);
+    }
+    return client;
+}
+
+async function presignS3Put(input: PresignPutInput): Promise<PresignedPut> {
+    const { bucket, region } = uploadsConfig();
+    const expiresIn = input.expiresInSeconds ?? 300;
+    const url = await getSignedUrl(
+        s3(region),
+        new PutObjectCommand({ Bucket: bucket, Key: input.key, ContentType: input.contentType, ContentLength: input.contentLength }),
+        // Both headers are part of the signature, so S3 refuses an upload whose
+        // type or byte count differs from what the caller checked.
+        { expiresIn, signableHeaders: new Set(['content-type', 'content-length']) },
+    );
+    return {
+        url,
+        method: 'PUT',
+        // The browser sets Content-Length itself from the body; it must match.
+        headers: { 'Content-Type': input.contentType },
+        key: input.key,
+        expiresAt: new Date(Date.now() + expiresIn * 1000),
+    };
+}
+
+async function s3ReadUrl(input: ReadUrlInput): Promise<ReadUrl> {
+    const { bucket, region, cdn } = uploadsConfig();
+    if (cdn) return { url: `${cdn}/${input.key.split('/').map(encodeURIComponent).join('/')}`, expiresAt: null };
+    const expiresIn = input.expiresInSeconds ?? 3600;
+    const url = await getSignedUrl(s3(region), new GetObjectCommand({ Bucket: bucket, Key: input.key }), { expiresIn });
+    return { url, expiresAt: new Date(Date.now() + expiresIn * 1000) };
+}
+
+async function s3DeleteObject(key: string): Promise<void> {
+    const { bucket, region } = uploadsConfig();
+    await s3(region).send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+}
+
 export interface Integrations {
     discord: {
         createScheduledEvent(input: DiscordEventInput): Promise<{ id: string }>;
@@ -308,6 +392,10 @@ export interface Integrations {
     uploads: {
         /** A URL the browser PUTs one object to directly. The caller checks type and size first. */
         presignPut(input: PresignPutInput): Promise<PresignedPut>;
+        /** A URL that reads one object: through CloudFront when configured, else a presigned GET. */
+        readUrl(input: ReadUrlInput): Promise<ReadUrl>;
+        /** Remove an object (e.g. the banner a new one replaced). Missing objects are not an error. */
+        deleteObject(key: string): Promise<void>;
     };
 }
 
@@ -322,13 +410,7 @@ export const realIntegrations: Integrations = {
         updateCalendarEvent: updateGoogleCalendarEvent,
         deleteCalendarEvent: deleteGoogleCalendarEvent,
     },
-    uploads: {
-        // The bucket, its CORS rule, the task role's s3:PutObject grant and the
-        // AWS SDK arrive with banners (#81). Until then nothing calls this.
-        async presignPut() {
-            throw new Error('S3 uploads are not configured yet');
-        },
-    },
+    uploads: { presignPut: presignS3Put, readUrl: s3ReadUrl, deleteObject: s3DeleteObject },
 };
 
 let active: Integrations = realIntegrations;

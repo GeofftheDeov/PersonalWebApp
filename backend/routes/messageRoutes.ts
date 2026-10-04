@@ -184,7 +184,7 @@ async function notifyCampaignMembers(campaignId: string, senderId: string, sende
                     title: `New message in "${campaign?.title || 'a campaign'}"`,
                     body: `${senderName}: ${preview}`,
                     link: `/game-night/campaigns/${campaignId}`,
-                    sourceKey: `campaign:${campaignId}`,
+                    sourceKey: campaignThreadKey(campaignId),
                     meta: { campaignId },
                 }))
         );
@@ -284,7 +284,8 @@ router.post("/dm/:userId", auth, async (req: any, res) => {
             type: "message",
             title: `New message from @${senderName}`,
             body: preview,
-            sourceKey: `dm:${req.user.id}`,
+            // Collapses per thread key, the same key the Letters list uses.
+            sourceKey: dmThreadKey(req.user.id, otherUserId),
             meta: { fromUserId: req.user.id },
         }).catch(() => { /* logged inside */ });
 

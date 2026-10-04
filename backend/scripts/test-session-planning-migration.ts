@@ -20,7 +20,13 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import pg from "pg";
 
-const MIGRATION = resolve(dirname(fileURLToPath(import.meta.url)), "../db/migrations/2026-10-01-session-planning.sql");
+const MIGRATIONS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../db/migrations");
+const MIGRATION = resolve(MIGRATIONS_DIR, "2026-10-01-session-planning.sql");
+/** Later session-planning migrations, applied after it in order, so schema.sql parity covers them too. */
+const FOLLOW_UPS = [
+    "2026-10-03-busy-sources.sql",      // #84
+    "2026-10-03-quest-reminders.sql",   // #91
+].map((f) => resolve(MIGRATIONS_DIR, f));
 const local = /(\/\/|@)(127\.0\.0\.1|localhost)[:/]/;
 const { MIGRATED_URL, FRESH_URL } = process.env;
 if (!MIGRATED_URL || !FRESH_URL || !local.test(MIGRATED_URL) || !local.test(FRESH_URL)) {
@@ -115,6 +121,30 @@ async function main() {
         sessions.length === 2 && sessions.every((s) => s.status === "scheduled" && s.planning_stage === null && s.date),
         JSON.stringify(sessions));
 
+    // ── follow-up migrations, in order, each twice ──────────────────────────
+    // #91 anchors quest due times to their session's start. Seed one quest
+    // with a due time and one without (added while the night was being voted on).
+    const { rows: [fixed] } = await migrated.query(`SELECT id, date FROM game_sessions WHERE title = 'fixed date'`);
+    await migrated.query(`
+        INSERT INTO session_tasks (session_id, kind, title, due_at, assignee_id) VALUES
+          ($1, 'custom', 'has a due time', $2, $3), ($1, 'custom', 'no due time yet', NULL, $3)`,
+        [fixed.id, new Date(+fixed.date - 60 * 60 * 1000), a.id]);
+    for (const file of FOLLOW_UPS) {
+        const name = file.split(/[\\/]/).pop();
+        const followUp = readFileSync(file, "utf8");
+        for (const attempt of ["applies", "re-applies as a no-op"]) {
+            let error = "";
+            try { await migrated.query(followUp); } catch (e: any) { error = e.message; await migrated.query("ROLLBACK").catch(() => {}); }
+            check(`${name} ${attempt}`, !error, error);
+        }
+    }
+    const anchors = Object.fromEntries((await migrated.query(
+        `SELECT title, due_anchor FROM session_tasks`)).rows.map((r) => [r.title, r.due_anchor]));
+    check("#91: a quest with a due time is anchored to its session's start",
+        +anchors["has a due time"] === +fixed.date, anchors);
+    check("#91: a quest with no due time stays unanchored, so it takes the session's start",
+        anchors["no due time yet"] === null, anchors);
+
     // ── parity with schema.sql ──────────────────────────────────────────────
     const [m, f] = await Promise.all([schemaOf(migrated), schemaOf(fresh)]);
     const onlyMigrated = m.filter((x) => !f.includes(x));
@@ -151,6 +181,17 @@ async function main() {
     check("busy_blocks has no column a calendar event title could land in",
         (await fresh.query(`SELECT column_name FROM information_schema.columns WHERE table_name = 'busy_blocks'`))
             .rows.every((r) => !/title|summary|name|description/.test(r.column_name)));
+    check("a busy source is on once per person and source",
+        !await refuses(fresh, `INSERT INTO busy_sources (person_id, source) VALUES ($1, 'google')`, [p.id]) &&
+        await refuses(fresh, `INSERT INTO busy_sources (person_id, source) VALUES ($1, 'google')`, [p.id]));
+    check("busy sources are google or discord only",
+        await refuses(fresh, `INSERT INTO busy_sources (person_id, source) VALUES ($1, 'outlook')`, [p.id]));
+    check("a sync records its time and the stretch it covered together",
+        await refuses(fresh, `UPDATE busy_sources SET synced_at = now() WHERE person_id = $1`, [p.id]) &&
+        await refuses(fresh, `UPDATE busy_sources SET synced_at = now(), synced_from = '2026-10-02Z', synced_to = '2026-10-01Z'
+                               WHERE person_id = $1`, [p.id]) &&
+        !await refuses(fresh, `UPDATE busy_sources SET synced_at = now(), synced_from = '2026-10-01Z', synced_to = '2026-10-30Z'
+                                WHERE person_id = $1`, [p.id]));
 
     const { rows: [sess] } = await fresh.query(
         `INSERT INTO game_sessions (title, campaign_id, date, status, planning_stage)

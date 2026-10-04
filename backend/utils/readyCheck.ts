@@ -22,17 +22,25 @@ export function startReadyCheckLoop() {
     console.log("[BACKEND] Ready-check loop scheduled (every 60s, T-30min window).");
 }
 
-export async function runReadyCheckSweep() {
-    const now = new Date();
-    const windowEnd = new Date(now.getTime() + READY_WINDOW_MS);
-
-    // Scheduled only (#57): a session still being planned has no night yet,
-    // and a cancelled one is not happening.
-    const due = await Session.find({
-        status: "scheduled",
-        date: { $gt: now, $lte: windowEnd },
+/**
+ * Sessions due a ready check at `now`: starting within the next 30 minutes,
+ * not yet sent, and happening -- scheduled (#57), or in the food step (#93).
+ * A session still on its night or venue isn't settled, and a cancelled one
+ * isn't happening. The food step closes by itself only at the session's
+ * start, so without the second arm a session whose food was still open at
+ * T-30 would miss its ready check; by the food step its night and venue are
+ * settled, so it gets one like any scheduled session.
+ */
+export function readyCheckDueFilter(now: Date) {
+    return {
+        $or: [{ status: "scheduled" }, { status: "planning", planningStage: "food" }],
+        date: { $gt: now, $lte: new Date(now.getTime() + READY_WINDOW_MS) },
         "readyCheck.sentAt": { $exists: false },
-    }).populate("campaign", "title");
+    };
+}
+
+export async function runReadyCheckSweep() {
+    const due = await Session.find(readyCheckDueFilter(new Date())).populate("campaign", "title");
 
     for (const session of due) {
         try {

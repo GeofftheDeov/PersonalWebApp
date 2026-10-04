@@ -4,7 +4,7 @@
  *
  * Weekly windows are replaced as a set (the editor saves the whole week at
  * once); exceptions are added and removed one at a time. Busy blocks are
- * written by the calendar sync, never by a person, and only ever leave this
+ * written by the calendar sync (busySources.ts), never by a person, and only ever leave this
  * module as bare intervals: the overlap reports free / busy / unknown and
  * nothing about why.
  *
@@ -15,6 +15,8 @@ import { query, withTransaction } from "../db/index.js";
 import { isUuid } from "../db/model.js";
 import { bus } from "../events/index.js";
 import { personDisplayName } from "../utils/personUtils.js";
+import { busySkipKey, refreshBusy } from "./busySources.js";
+import { discordOverlapNotes } from "./discordBusySource.js";
 import {
     computeOverlap, isValidTimeZone, parseTimeOfDay, resolveQuorum, MAX_RANGE_DAYS,
     type AvailabilityException, type BusyBlock, type Slot, type WeeklyWindow,
@@ -161,8 +163,16 @@ export async function removeException(personId: string, id: string): Promise<boo
 
 // ── feeding the math ────────────────────────────────────────────────────────
 
-/** Everything the availability math needs about these people around `range`. */
-export async function loadAvailability(personIds: string[], range: { start: Date; end: Date }) {
+/**
+ * Everything the availability math needs about these people around `range`.
+ * `skip` holds "<personId>|<source>" pairs whose busy blocks are left out
+ * (their calendar couldn't be read just now; see busySources.refreshBusy).
+ * With `campaignId`, Discord busy time from that campaign's own session
+ * events (game_sessions.discord_event_id) is left out too: being interested
+ * in a session must not block planning it (#85).
+ */
+export async function loadAvailability(personIds: string[], range: { start: Date; end: Date }, skip: Set<string> = new Set(),
+                                       campaignId: string | null = null) {
     // A day of slack either side: an exception or busy block can reach in from
     // just outside the range.
     const from = new Date(range.start.getTime() - DAY), to = new Date(range.end.getTime() + DAY);
@@ -170,8 +180,11 @@ export async function loadAvailability(personIds: string[], range: { start: Date
         query(`SELECT * FROM availability_windows WHERE person_id = ANY($1)`, [personIds]),
         query(`SELECT * FROM availability_exceptions
                 WHERE person_id = ANY($1) AND ends_at > $2 AND starts_at < $3`, [personIds, from, to]),
-        query(`SELECT person_id, starts_at, ends_at FROM busy_blocks
-                WHERE person_id = ANY($1) AND ends_at > $2 AND starts_at < $3`, [personIds, from, to]),
+        query(`SELECT b.person_id, b.source, b.starts_at, b.ends_at FROM busy_blocks b
+                WHERE b.person_id = ANY($1) AND b.ends_at > $2 AND b.starts_at < $3
+                  AND NOT (b.source = 'discord' AND b.external_id IS NOT NULL AND EXISTS (
+                      SELECT 1 FROM game_sessions s WHERE s.campaign_id = $4 AND s.discord_event_id = b.external_id))`,
+              [personIds, from, to, campaignId]),
     ]);
     const windows: WeeklyWindow[] = w.rows.map((r) => ({
         personId: r.person_id, weekday: r.weekday, start: hhmm(r.start_time), end: hhmm(r.end_time), timeZone: r.time_zone,
@@ -179,7 +192,10 @@ export async function loadAvailability(personIds: string[], range: { start: Date
     const exceptions: AvailabilityException[] = x.rows.map((r) => ({
         personId: r.person_id, start: r.starts_at, end: r.ends_at, kind: r.kind,
     }));
-    const busy: BusyBlock[] = b.rows.map((r) => ({ personId: r.person_id, start: r.starts_at, end: r.ends_at }));
+    // Only the interval goes on: the math never learns where busy time came from.
+    const busy: BusyBlock[] = b.rows
+        .filter((r) => !skip.has(busySkipKey(r.person_id, r.source)))
+        .map((r) => ({ personId: r.person_id, start: r.starts_at, end: r.ends_at }));
     return { windows, exceptions, busy };
 }
 
@@ -232,19 +248,32 @@ const toSlotJson = (s: Slot) => ({
 /**
  * When the campaign's party is free over `range`: every slot, ranked by
  * headcount, with who is free / busy / unknown. Never says why someone is
- * busy -- the data to say so is not loaded, let alone returned.
+ * busy -- the data to say so is not loaded, let alone returned. Busy sources
+ * are synced first when stale (busySources.ts); one that fails falls back to
+ * that person's windows and exceptions rather than failing the overlap.
  */
-export async function campaignOverlap(campaignId: string, opts: ReturnType<typeof cleanRange>) {
+export async function campaignOverlap(campaignId: string, opts: ReturnType<typeof cleanRange>, now = new Date()) {
     const { rows: [campaign] } = await query(`SELECT quorum FROM campaigns WHERE id = $1`, [campaignId]);
     if (!campaign) throw new AvailabilityError(404, "Campaign not found.");
     const party = await campaignParty(campaignId);
     const ids = party.map((p) => p.id);
     const quorum = resolveQuorum(campaign.quorum, ids.length);
-    const slots = computeOverlap({ party: ids, ...await loadAvailability(ids, opts.range), quorum, ...opts });
+    const skip = await refreshBusy(ids, opts.range, now);
+    const [availability, notes] = await Promise.all([
+        loadAvailability(ids, opts.range, skip, campaignId),
+        // A note for the Game Master can't fail the overlap.
+        discordOverlapNotes(campaignId, ids).catch((err: any) => {
+            console.error("[availability] Discord notes failed:", err.message);
+            return [] as string[];
+        }),
+    ]);
+    const slots = computeOverlap({ party: ids, ...availability, quorum, ...opts });
     return {
         range: { start: opts.range.start.toISOString(), end: opts.range.end.toISOString() },
         slotMinutes: opts.slotMinutes, stepMinutes: opts.stepMinutes,
         quorum, party, slots: slots.map(toSlotJson),
+        /** Why some busy time is missing (e.g. Discord can't be read), for the Game Master. Never names a player. */
+        notes,
     };
 }
 
@@ -253,9 +282,10 @@ export async function campaignOverlap(campaignId: string, opts: ReturnType<typeo
  * over `range`, as contiguous runs in time order -- exactly what an overlap
  * would report for me, and no more.
  */
-export async function myPreview(personId: string, opts: ReturnType<typeof cleanRange>) {
+export async function myPreview(personId: string, opts: ReturnType<typeof cleanRange>, now = new Date()) {
+    const skip = await refreshBusy([personId], opts.range, now);
     const slots = computeOverlap({
-        party: [personId], ...await loadAvailability([personId], opts.range),
+        party: [personId], ...await loadAvailability([personId], opts.range, skip),
         quorum: 1, range: opts.range, slotMinutes: opts.stepMinutes, stepMinutes: opts.stepMinutes,
     }).sort((a, b) => a.start.getTime() - b.start.getTime());
     const runs: { start: string; end: string; presence: "free" | "busy" | "unknown" }[] = [];

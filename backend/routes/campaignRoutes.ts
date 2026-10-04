@@ -7,7 +7,10 @@ import Account from "../models/Account.js";
 import { auth } from "../middleware/auth.js";
 import { getAuthorizedCampaignIds } from "../utils/gameNightPlannerUtils.js";
 import { personDisplayName } from "../utils/personUtils.js";
-import { SettingsError, updateCampaignSettings } from "../planning/campaignSettings.js";
+import { SettingsError, cleanGmTitle, updateCampaignSettings } from "../planning/campaignSettings.js";
+import { clearBanner, requestBannerUpload, setBanner, withBannerUrl } from "../planning/campaignBanner.js";
+import { bus } from "../events/index.js";
+import { TorchError, passTorchPermanently } from "../planning/torch.js";
 
 /**
  * Phase 3 (#35, plan §3.4). Auto-enrolment used to branch on req.user.type to
@@ -46,6 +49,8 @@ router.post("/", auth, async (req: any, res) => {
 
         // The creator owns the campaign (#57): the banner and GM title are
         // theirs, and stay theirs if the torch later passes to someone else.
+        // They may name the Game Master role now; left blank, it's the default.
+        const gmTitle = cleanGmTitle(req.body.gmTitle, { optional: true });
         const campaign = new Campaign({
             title,
             description,
@@ -53,12 +58,14 @@ router.post("/", auth, async (req: any, res) => {
             startDate,
             endDate,
             owner: req.user.id,
+            gmTitle,
         });
         await campaign.save();
 
         // Auto-enroll creator as Game Master
         const memberFields = await memberFieldsFor(req.user, campaign._id, "Game Master");
         await new CampaignMember(memberFields).save();
+        bus.publish("campaign.changed", { campaignId: String(campaign._id), action: "created" }).catch(() => { /* non-fatal */ });
 
         res.status(201).json({
             message: "Campaign created successfully!",
@@ -68,10 +75,13 @@ router.post("/", auth, async (req: any, res) => {
                 description: campaign.description,
                 status: campaign.status,
                 startDate: campaign.startDate,
-                endDate: campaign.endDate
+                endDate: campaign.endDate,
+                owner: campaign.owner,
+                gmTitle: campaign.gmTitle,
             }
         });
     } catch (error: any) {
+        if (error instanceof SettingsError) return res.status(error.status).json({ error: error.message });
         console.error("Error creating campaign:", error);
         res.status(500).json({ error: "Failed to create campaign", details: error.message });
     }
@@ -84,7 +94,7 @@ router.get("/", auth, async (req: any, res) => {
         const query = campaignIds ? { _id: { $in: campaignIds } } : {};
 
         const campaigns = await Campaign.find(query).sort({ startDate: -1 });
-        res.json(campaigns);
+        res.json(await Promise.all(campaigns.map((c: any) => withBannerUrl(c.toJSON()))));
     } catch (error: any) {
         console.error("Error fetching campaigns:", error);
         res.status(500).json({ error: "Failed to fetch campaigns", details: error.message });
@@ -98,7 +108,11 @@ router.get("/:id", auth, async (req: any, res) => {
         if (!campaign) {
             return res.status(404).json({ error: "Campaign not found" });
         }
-        res.json(campaign);
+        // Anyone signed in can read a campaign (the invite page needs it before
+        // joining), but only the party (and admins) get a link to its banner.
+        const campaignIds = await getAuthorizedCampaignIds(req.user);
+        const inParty = !campaignIds || campaignIds.some((cid: any) => cid.toString() === String(campaign._id));
+        res.json(inParty ? await withBannerUrl(campaign.toJSON()) : { ...campaign.toJSON(), bannerUrl: null });
     } catch (error: any) {
         console.error("Error fetching campaign:", error);
         res.status(500).json({ error: "Failed to fetch campaign", details: error.message });
@@ -119,7 +133,7 @@ router.put("/:id", auth, async (req: any, res) => {
             { new: true }
         );
         if (!campaign) return res.status(404).json({ error: "Campaign not found" });
-        res.json(campaign);
+        res.json(await withBannerUrl(campaign.toJSON()));
     } catch (error: any) {
         console.error("Error updating campaign:", error);
         res.status(500).json({ error: "Failed to update campaign", details: error.message });
@@ -136,6 +150,33 @@ router.patch("/:id/settings", auth, async (req: any, res) => {
         res.status(500).json({ error: "Failed to update campaign settings" });
     }
 });
+
+// Pass the torch permanently (#89): { to, from? }. GM or admin; ownership stays put.
+router.post("/:id/torch", auth, async (req: any, res) => {
+    try {
+        res.json(await passTorchPermanently(req.user.id, req.params.id, req.body));
+    } catch (error: any) {
+        if (error instanceof TorchError) return res.status(error.status).json({ error: error.message });
+        console.error("Error passing the torch:", error);
+        res.status(500).json({ error: "Failed to pass the torch" });
+    }
+});
+
+// Campaign banner (#81), owner-only like the settings above. The browser asks
+// for an upload URL, PUTs the cropped image straight to S3, then saves the key.
+const bannerRoute = (fn: (actorId: string, campaignId: string, body: any) => Promise<unknown>) =>
+    async (req: any, res: any) => {
+        try {
+            res.json(await fn(req.user.id, req.params.id, req.body));
+        } catch (error: any) {
+            if (error instanceof SettingsError) return res.status(error.status).json({ error: error.message });
+            console.error("Error updating campaign banner:", error);
+            res.status(500).json({ error: "Failed to update the campaign banner" });
+        }
+    };
+router.post("/:id/banner/upload-url", auth, bannerRoute(requestBannerUpload));
+router.put("/:id/banner", auth, bannerRoute(setBanner));
+router.delete("/:id/banner", auth, bannerRoute(clearBanner));
 
 // Get sessions for a specific campaign
 router.get("/:id/sessions", auth, async (req: any, res) => {

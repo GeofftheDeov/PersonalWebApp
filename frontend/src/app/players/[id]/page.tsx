@@ -4,12 +4,14 @@ import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, User, Map, Crown, Shield, Gamepad2, Calendar, Lock } from 'lucide-react';
+import { gmTitleOf } from '@/lib/campaigns';
 
 interface SharedCampaign {
     _id: string;
     title: string;
     status: string;
     isGameMaster: boolean;
+    gmTitle?: string;
 }
 
 interface PlayerProfile {
@@ -156,7 +158,7 @@ export default function PlayerProfilePage() {
                                     </div>
                                     <div className="min-w-0 flex-grow">
                                         <p className="font-permanent text-sm text-black dark:text-white uppercase truncate group-hover:text-teal-600 transition-colors">{c.title}</p>
-                                        <p className="text-xs font-permanent text-teal-600 dark:text-yellow-400 uppercase">{c.isGameMaster ? 'Game Master' : 'Player'} · {c.status}</p>
+                                        <p className="text-xs font-permanent text-teal-600 dark:text-yellow-400 uppercase">{c.isGameMaster ? gmTitleOf(c) : 'Player'} · {c.status}</p>
                                     </div>
                                 </Link>
                             ))}

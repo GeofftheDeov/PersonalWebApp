@@ -3,10 +3,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
-import { Map, ArrowLeft, Calendar, Book, Users, Shield, ChevronRight, Crown, Save, X, Pencil, UserPlus, Check, Copy, Link2, Plus, Wifi } from 'lucide-react';
+import { Map, ArrowLeft, Calendar, Book, Users, Shield, ChevronRight, Crown, Save, X, Pencil, UserPlus, Check, Copy, Link2, Plus, Wifi, Flame, ImagePlus } from 'lucide-react';
 import CampaignChat from '@/components/CampaignChat';
+import CampaignBanner from '@/components/CampaignBanner';
+import BannerEditor from '@/components/BannerEditor';
 import NoticeBoard from '@/components/NoticeBoard';
 import { sessionWhen } from '@/lib/sessions';
+import { DEFAULT_GM_TITLE, gmTitleOf, roleLabel } from '@/lib/campaigns';
 import { canAdmin, fetchCapabilities } from '@/lib/capabilities';
 
 interface Session {
@@ -17,6 +20,7 @@ interface Session {
     isOnline?: boolean;
     summary?: string;
     status?: string;
+    gmOverride?: string | null;
 }
 
 interface Member {
@@ -93,6 +97,13 @@ export default function CampaignDetailPage() {
     const [isGM, setIsGM] = useState(false);
     const [isOwner, setIsOwner] = useState(false);
     const [settingsError, setSettingsError] = useState<string | null>(null);
+    // Passing the torch permanently (#89): the chosen player while the GM is choosing, else null.
+    const [torchTo, setTorchTo] = useState<string | null>(null);
+    // An admin who isn't a GM names who steps down when there's more than one.
+    const [torchFrom, setTorchFrom] = useState('');
+    const [torchBusy, setTorchBusy] = useState(false);
+    const [torchError, setTorchError] = useState<string | null>(null);
+    const [showBannerEditor, setShowBannerEditor] = useState(false);
 
     const EMPTY_SESSION = { title: '', date: '', endDate: '', location: '', isOnline: false, agenda: '', createDiscordEvent: false, createGoogleEvent: false };
     const [showSessionModal, setShowSessionModal] = useState(false);
@@ -116,7 +127,7 @@ export default function CampaignDetailPage() {
             if (!campRes.ok) { router.push('/game-night'); return; }
             const c = await campRes.json();
             setCampaign(c);
-            setForm({ title: c.title, description: c.description || '', status: c.status, startDate: toDateInput(c.startDate), endDate: toDateInput(c.endDate), discordGuildId: c.discordGuildId || '', discordChannelId: c.discordChannelId || '', quorum: c.quorum ?? '', tableLink: c.tableLink || '' });
+            setForm({ title: c.title, description: c.description || '', status: c.status, startDate: toDateInput(c.startDate), endDate: toDateInput(c.endDate), discordGuildId: c.discordGuildId || '', discordChannelId: c.discordChannelId || '', quorum: c.quorum ?? '', tableLink: c.tableLink || '', gmTitle: c.gmTitle || DEFAULT_GM_TITLE });
             // Planning settings belong to the campaign's owner or an admin (#57).
             // Display only: the server enforces it.
             const me = JSON.parse(localStorage.getItem('user') || 'null');
@@ -137,11 +148,50 @@ export default function CampaignDetailPage() {
         if (res.ok) setSessions(await res.json());
     }, [id]);
 
+    const reloadMembers = useCallback(async () => {
+        const res = await fetch(`/api/campaigns/${id}/members`, { headers: { Authorization: `Bearer ${token()}` } });
+        if (!res.ok) return;
+        const memberRows = await res.json();
+        setMembers(memberRows);
+        setIsGM(computeIsGM(memberRows));
+    }, [id]);
+
+    const handlePassTorch = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const target = members.find(m => m.playerId === torchTo);
+        if (!target) return;
+        const title = gmTitleOf(campaign);
+        // A GM passing it steps down themselves; an admin who isn't one names who does.
+        const meId = JSON.parse(localStorage.getItem('user') || 'null')?.id;
+        const gms = members.filter(m => m.status === 'Game Master' && m.playerId);
+        const iAmGm = gms.some(m => m.playerId === meId);
+        const from = iAmGm ? null : gms.length === 1 ? gms[0] : gms.find(m => m.playerId === torchFrom);
+        if (!iAmGm && gms.length > 1 && !from) { setTorchError(`Choose which ${title} steps down.`); return; }
+        const stepsDown = iAmGm ? 'you become a player' : from ? `${memberName(from)} becomes a player` : 'no one steps down';
+        if (!window.confirm(`Pass the torch to ${memberName(target)}? They become the ${title} and ${stepsDown}. Ownership doesn't change.`)) return;
+        setTorchBusy(true);
+        setTorchError(null);
+        try {
+            const res = await fetch(`/api/campaigns/${id}/torch`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+                body: JSON.stringify(from ? { to: torchTo, from: from.playerId } : { to: torchTo }),
+            });
+            if (!res.ok) { setTorchError((await res.json().catch(() => ({}))).error || 'Could not pass the torch.'); return; }
+            setTorchTo(null);
+            await reloadMembers();
+        } catch {
+            setTorchError('Could not reach the server.');
+        } finally {
+            setTorchBusy(false);
+        }
+    };
+
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
         setSaving(true);
         setSettingsError(null);
-        const { quorum, tableLink, ...details } = form;
+        const { quorum, tableLink, gmTitle, ...details } = form;
         const res = await fetch(`/api/campaigns/${id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
@@ -154,13 +204,13 @@ export default function CampaignDetailPage() {
             const settings = await fetch(`/api/campaigns/${id}/settings`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-                body: JSON.stringify({ quorum: quorum === '' ? null : Number(quorum), tableLink }),
+                body: JSON.stringify({ quorum: quorum === '' ? null : Number(quorum), tableLink, gmTitle }),
             });
             const body = await settings.json().catch(() => ({}));
             settingsOk = settings.ok;
             updated = settings.ok
-                ? { ...updated, quorum: body.quorum, tableLink: body.tableLink }
-                : { ...updated, quorum: campaign.quorum, tableLink: campaign.tableLink };
+                ? { ...updated, quorum: body.quorum, tableLink: body.tableLink, gmTitle: body.gmTitle }
+                : { ...updated, quorum: campaign.quorum, tableLink: campaign.tableLink, gmTitle: campaign.gmTitle };
             if (!settings.ok) setSettingsError(body.error || 'Could not save the planning settings.');
         }
         setCampaign(updated);
@@ -251,6 +301,18 @@ export default function CampaignDetailPage() {
 
     if (loading) return <div className="min-h-screen flex items-center justify-center"><span className="text-3xl font-permanent text-teal-600 animate-pulse">LOADING CAMPAIGN...</span></div>;
     if (!campaign) return null;
+    // The owner is separate from the Game Master (#80): who set the campaign up.
+    const ownerMember = campaign.owner ? members.find(m => m.playerId === campaign.owner) : undefined;
+    // Who the torch can pass to (#89): party members with an account who aren't a GM already.
+    const torchCandidates = members.filter(m => m.playerId && m.status !== 'Game Master');
+    const gmMembers = members.filter(m => m.status === 'Game Master' && m.playerId);
+    const viewerId = JSON.parse(localStorage.getItem('user') || 'null')?.id;
+    const torchNeedsFrom = gmMembers.length > 1 && !gmMembers.some(m => m.playerId === viewerId);
+    const gmIds = members.filter(m => m.status === 'Game Master').map(m => m._id).join();
+    const standInName = (personId: string) => {
+        const m = members.find(x => x.playerId === personId);
+        return m ? memberName(m) : 'someone';
+    };
 
     return (
         <div className="min-h-[calc(100vh-76px)] flex flex-col">
@@ -261,6 +323,27 @@ export default function CampaignDetailPage() {
                         <ArrowLeft className="w-4 h-4" /> BACK TO GAME NIGHT
                     </Link>
                 </div>
+
+                {/* Banner (#81): the owner's image, or a fallback in the campaign's colours */}
+                <CampaignBanner url={campaign.bannerUrl} seed={id} title={campaign.title} className="mb-8 border-4 border-black shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]">
+                    {isOwner && (
+                        <button
+                            type="button"
+                            onClick={() => setShowBannerEditor(true)}
+                            className="absolute bottom-2 right-2 sm:bottom-3 sm:right-3 flex items-center gap-1.5 px-3 py-1.5 border-2 border-black bg-yellow-400 text-black font-permanent text-xs uppercase hover:bg-white transition-colors shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]"
+                        >
+                            <ImagePlus className="w-4 h-4" /> {campaign.bannerUrl ? 'Change banner' : 'Add banner'}
+                        </button>
+                    )}
+                </CampaignBanner>
+                {showBannerEditor && (
+                    <BannerEditor
+                        campaignId={id}
+                        hasBanner={!!campaign.bannerKey}
+                        onClose={() => setShowBannerEditor(false)}
+                        onSaved={banner => { setCampaign((c: any) => ({ ...c, ...banner })); setShowBannerEditor(false); }}
+                    />
+                )}
 
                 {/* Header */}
                 <div className="mb-8 pb-6 border-b-8 border-black flex flex-wrap items-start justify-between gap-4">
@@ -309,6 +392,10 @@ export default function CampaignDetailPage() {
                             <div className="pt-2 border-t-2 border-white/10">
                                 <p className="font-permanent text-xs text-teal-400 uppercase mb-3">Planning</p>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div className="sm:col-span-2">
+                                        <label className={LABEL_CLS}>Game Master title</label>
+                                        <input required maxLength={40} className={INPUT_CLS} placeholder={DEFAULT_GM_TITLE.toUpperCase()} value={form.gmTitle} onChange={e => setForm({ ...form, gmTitle: e.target.value })} />
+                                    </div>
                                     <div>
                                         <label className={LABEL_CLS}>Quorum (players a night needs)</label>
                                         <input type="number" min={1} max={50} className={INPUT_CLS} placeholder={`WHOLE PARTY (${members.length})`} value={form.quorum} onChange={e => setForm({ ...form, quorum: e.target.value })} />
@@ -319,7 +406,7 @@ export default function CampaignDetailPage() {
                                     </div>
                                 </div>
                                 <p className="text-[10px] text-zinc-500 mt-2 font-permanent uppercase leading-relaxed">
-                                    Leave quorum empty to need the whole party. The table link (Foundry, Roll20, a Discord voice channel) shows on every online session.
+                                    The Game Master title is what this campaign calls its Game Master: Dungeon Master, Host, Organizer. Leave quorum empty to need the whole party. The table link (Foundry, Roll20, a Discord voice channel) shows on every online session.
                                 </p>
                                 {settingsError && <p role="alert" className="mt-2 font-permanent text-xs text-red-400 uppercase">{settingsError}</p>}
                             </div>
@@ -384,6 +471,52 @@ export default function CampaignDetailPage() {
                                 <p className="font-permanent text-black dark:text-white uppercase text-sm">{new Date(campaign.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }).toUpperCase()}</p>
                             </div>
                             <div>
+                                <p className="font-permanent text-xs text-zinc-400 uppercase mb-1">{gmTitleOf(campaign)}</p>
+                                <p className="font-permanent text-black dark:text-white uppercase text-sm">
+                                    {members.filter(m => m.status === 'Game Master').map(memberName).join(', ') || 'None yet'}
+                                </p>
+                                {isGM && torchTo === null && torchCandidates.length > 0 && (
+                                    <button type="button" onClick={() => { setTorchTo(''); setTorchError(null); }}
+                                        className="mt-1 flex items-center gap-1 font-permanent text-[10px] uppercase text-orange-600 dark:text-orange-400 hover:underline">
+                                        <Flame className="w-3 h-3" /> Pass the torch
+                                    </button>
+                                )}
+                                {torchTo !== null && (
+                                    <form onSubmit={handlePassTorch} className="mt-2 flex flex-wrap items-center gap-2">
+                                        <label htmlFor="torch-to" className="sr-only">New {gmTitleOf(campaign)}</label>
+                                        <select id="torch-to" value={torchTo} onChange={e => setTorchTo(e.target.value)}
+                                            className="p-1.5 border-2 border-black bg-white text-black font-permanent text-xs uppercase outline-none focus:border-teal-500 max-w-full">
+                                            <option value="">New {gmTitleOf(campaign)}…</option>
+                                            {torchCandidates.map(m => <option key={m._id} value={m.playerId!}>{memberName(m)}</option>)}
+                                        </select>
+                                        {torchNeedsFrom && (
+                                            <>
+                                                <label htmlFor="torch-from" className="sr-only">Who steps down</label>
+                                                <select id="torch-from" value={torchFrom} onChange={e => setTorchFrom(e.target.value)}
+                                                    className="p-1.5 border-2 border-black bg-white text-black font-permanent text-xs uppercase outline-none focus:border-teal-500 max-w-full">
+                                                    <option value="">Who steps down…</option>
+                                                    {gmMembers.map(m => <option key={m._id} value={m.playerId!}>{memberName(m)}</option>)}
+                                                </select>
+                                            </>
+                                        )}
+                                        <button type="submit" disabled={torchBusy || !torchTo || (torchNeedsFrom && !torchFrom)}
+                                            className="flex items-center gap-1 px-2 py-1 border-2 border-black bg-orange-500 text-black font-permanent uppercase text-[10px] hover:bg-white disabled:opacity-40 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
+                                            <Flame className="w-3 h-3" /> Pass it
+                                        </button>
+                                        <button type="button" onClick={() => setTorchTo(null)} aria-label="Cancel" className="text-zinc-400 hover:text-black dark:hover:text-white">
+                                            <X className="w-4 h-4" />
+                                        </button>
+                                    </form>
+                                )}
+                                {torchError && <p role="alert" className="mt-1 font-permanent text-[10px] text-red-600 uppercase">{torchError}</p>}
+                            </div>
+                            <div>
+                                <p className="font-permanent text-xs text-zinc-400 uppercase mb-1">Owner</p>
+                                <p className="font-permanent text-black dark:text-white uppercase text-sm">
+                                    {!campaign.owner ? 'Admin-managed' : ownerMember ? memberName(ownerMember) : 'Not in the party'}
+                                </p>
+                            </div>
+                            <div>
                                 <p className="font-permanent text-xs text-zinc-400 uppercase mb-1">Quorum</p>
                                 <p className="font-permanent text-black dark:text-white uppercase text-sm">{campaign.quorum ? `${campaign.quorum} of the party` : 'Whole party'}</p>
                             </div>
@@ -405,7 +538,8 @@ export default function CampaignDetailPage() {
 
                 {/* The Notice Board: session planning (#57) */}
                 <div id="notice-board" className="mb-10 scroll-mt-24">
-                    <NoticeBoard campaignId={id} onSessionsChanged={reloadSessions} />
+                    {/* Keyed on the GM title and the GMs, so a rename or a torch pass re-reads the board. */}
+                    <NoticeBoard key={`${gmTitleOf(campaign)}|${gmIds}`} campaignId={id} onSessionsChanged={reloadSessions} />
                 </div>
 
                 {/* Table Talk + Players */}
@@ -438,7 +572,11 @@ export default function CampaignDetailPage() {
                                             </div>
                                             <div className="flex-grow min-w-0">
                                                 <p className="font-permanent text-sm text-black dark:text-white uppercase truncate">{memberName(m)}</p>
-                                                {m.status && <p className="text-xs font-permanent text-teal-600 dark:text-yellow-400 uppercase">{m.status}</p>}
+                                                {(m.status || m === ownerMember) && (
+                                                    <p className="text-xs font-permanent text-teal-600 dark:text-yellow-400 uppercase">
+                                                        {[roleLabel(m.status, campaign), m === ownerMember ? 'Owner' : ''].filter(Boolean).join(' · ')}
+                                                    </p>
+                                                )}
                                             </div>
                                         </>
                                     );
@@ -506,6 +644,11 @@ export default function CampaignDetailPage() {
                                             {s.isOnline && (
                                                 <span className="flex items-center gap-1 px-1.5 text-xs font-permanent uppercase border-2 border-black bg-teal-500 text-white">
                                                     <Wifi className="w-3 h-3" /> ONLINE
+                                                </span>
+                                            )}
+                                            {s.gmOverride && (
+                                                <span className="flex items-center gap-1 text-xs font-permanent uppercase text-orange-600 dark:text-orange-400">
+                                                    <Flame className="w-3 h-3" /> {gmTitleOf(campaign)} for this session: {standInName(s.gmOverride)}
                                                 </span>
                                             )}
                                         </div>

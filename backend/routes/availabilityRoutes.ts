@@ -2,10 +2,14 @@ import express from "express";
 import { auth } from "../middleware/auth.js";
 import { isUuid } from "../db/model.js";
 import { isCampaignGameMaster } from "../utils/gameNightPlannerUtils.js";
+import { gmTitleOf } from "../planning/campaignSettings.js";
 import {
     AvailabilityError, addException, campaignOverlap, cleanRange, getWindows, listExceptions,
     myPreview, removeException, replaceWindows,
 } from "../planning/availabilityStore.js";
+import {
+    BusySourceError, disableBusySource, enableBusySource, listBusySources, syncBusySourceNow,
+} from "../planning/busySources.js";
 
 /**
  * Regular availability (#57). Thin wrappers over planning/availabilityStore:
@@ -16,13 +20,20 @@ import {
  *   POST   /api/availability/me/exceptions         add one           { start, end, kind, note? }
  *   DELETE /api/availability/me/exceptions/:id     remove one
  *   GET    /api/availability/me/preview            what the party sees about me  ?start&end
- *   GET    /api/availability/campaigns/:id         the party overlap (Game Master only)
+ *   GET    /api/availability/me/busy-sources       my outside calendars (#84): on/off, connection, last sync
+ *   PUT    /api/availability/me/busy-sources/:src  turn one on (and sync it now)       src: google, discord
+ *   DELETE /api/availability/me/busy-sources/:src  turn one off, deleting its busy blocks
+ *   POST   /api/availability/me/busy-sources/:src/sync   re-read it now
+ *   GET    /api/availability/campaigns/:id         the party overlap (Game Master only), with notes on missing busy time
  *                                                  ?start&end[&slotMinutes=240][&stepMinutes=30]
+ *
+ * Busy sources are only ever about "me": nobody can see which sources anyone
+ * else uses, and the overlap and preview report busy without saying why.
  */
 const router = express.Router();
 
 function fail(res: express.Response, err: any, what: string) {
-    if (err instanceof AvailabilityError) return res.status(err.status).json({ error: err.message });
+    if (err instanceof AvailabilityError || err instanceof BusySourceError) return res.status(err.status).json({ error: err.message });
     console.error(`[availability] ${what} failed:`, err.message);
     return res.status(500).json({ error: `Failed to ${what}` });
 }
@@ -81,6 +92,39 @@ router.get("/me/preview", auth, async (req: any, res) => {
     }
 });
 
+router.get("/me/busy-sources", auth, async (req: any, res) => {
+    try {
+        res.json({ sources: await listBusySources(req.user.id) });
+    } catch (err: any) {
+        fail(res, err, "load busy sources");
+    }
+});
+
+router.put("/me/busy-sources/:source", auth, async (req: any, res) => {
+    try {
+        res.json({ source: await enableBusySource(req.user.id, req.params.source, new Date()) });
+    } catch (err: any) {
+        fail(res, err, "turn on the busy source");
+    }
+});
+
+router.delete("/me/busy-sources/:source", auth, async (req: any, res) => {
+    try {
+        await disableBusySource(req.user.id, req.params.source);
+        res.status(204).end();
+    } catch (err: any) {
+        fail(res, err, "turn off the busy source");
+    }
+});
+
+router.post("/me/busy-sources/:source/sync", auth, async (req: any, res) => {
+    try {
+        res.json({ source: await syncBusySourceNow(req.user.id, req.params.source, new Date()) });
+    } catch (err: any) {
+        fail(res, err, "sync the busy source");
+    }
+});
+
 router.get("/campaigns/:campaignId", auth, async (req: any, res) => {
     try {
         const { campaignId } = req.params;
@@ -88,7 +132,7 @@ router.get("/campaigns/:campaignId", auth, async (req: any, res) => {
         // The grid shows every player's free / busy / unknown, so it is the
         // Game Master's planning tool rather than something the party browses.
         if (!(await isCampaignGameMaster(req.user, campaignId))) {
-            return res.status(403).json({ error: "Only the Game Master can see the party's availability" });
+            return res.status(403).json({ error: `Only the ${await gmTitleOf(campaignId)} can see the party's availability` });
         }
         res.json(await campaignOverlap(campaignId, cleanRange(req.query, { slotMinutes: 240, stepMinutes: 30 })));
     } catch (err: any) {

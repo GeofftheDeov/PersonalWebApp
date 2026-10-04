@@ -44,6 +44,7 @@ import notificationRoutes from "./routes/notificationRoutes.js";
 import inviteRoutes from "./routes/inviteRoutes.js";
 import { snapshotAlpacaNow } from "./routes/adminRoutes.js";
 import { startEventBus, stopEventBus } from "./events/index.js";
+import { attachLiveChannel, LIVE_PATH, type LiveChannel } from "./live/liveChannel.js";
 import { startReadyCheckLoop } from "./utils/readyCheck.js";
 import { startWorkers } from "./jobs/workers.js";
 import { startVaultSyncLoop } from "./services/vaultSync.js";
@@ -145,23 +146,37 @@ registerRepeatableJobs().catch((err) =>
     console.error("[BACKEND] Failed to register repeatable jobs:", err)
 );
 
+// The live channel (#98) shares the HTTP(S) servers: WebSocket upgrades on
+// LIVE_PATH. It subscribes to the bus itself (broadcast), before or after start.
+let liveChannel: LiveChannel | null = null;
+
 process.on("SIGTERM", () => {
-    Promise.all([stopEventBus(), stopWorkers(), closeBullConnection()])
+    Promise.all([liveChannel?.close(), stopEventBus(), stopWorkers(), closeBullConnection()])
         .finally(() => process.exit(0));
 });
 
+const servers: (http.Server | https.Server)[] = [];
 
 if (hasCerts) {
     const httpsServer = https.createServer(credentials, app);
+    servers.push(httpsServer);
     httpsServer.listen(httpsPort, () => {
         console.log(`HTTPS server listening on https://localhost:${httpsPort}`);
     });
 }
 
 const httpServer = http.createServer(app);
+servers.push(httpServer);
 httpServer.listen(httpPort, hostname, () => {
     console.log(`[BACKEND] HTTP server listening on http://${hostname}:${httpPort}`);
 });
+
+attachLiveChannel(servers)
+    .then((channel) => {
+        liveChannel = channel;
+        console.log(`[BACKEND] Live channel accepting WebSocket upgrades on ${LIVE_PATH}.`);
+    })
+    .catch((err) => console.error("[BACKEND] Live channel failed to start:", err));
 
 // Alpaca snapshots: capture account + positions every 5 minutes so the dashboard
 // can chart per-symbol position values over time. Only runs when keys are set.

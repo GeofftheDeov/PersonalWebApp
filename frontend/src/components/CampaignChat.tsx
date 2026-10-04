@@ -6,10 +6,11 @@ import StarterKit from '@tiptap/starter-kit';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MessageSquare, Send, WifiOff, Bold, Italic, Code, List, ListOrdered } from 'lucide-react';
+import { useLiveThread, campaignThreadKey } from '@/lib/realtime/useLiveThread';
 
 interface ChatMessage {
     messageId: string;
-    sender: { id: string; name: string; email: string };
+    sender: { id: string; name: string; email?: string };
     body: string;
     createdAt: string;
 }
@@ -80,7 +81,6 @@ const ToolbarBtn = ({
 export default function CampaignChat({ campaignId }: { campaignId: string }) {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [sending, setSending] = useState(false);
-    const [connected, setConnected] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
     const seen = useRef<Set<string>>(new Set());
@@ -122,10 +122,10 @@ export default function CampaignChat({ campaignId }: { campaignId: string }) {
         ));
     }, []);
 
-    useEffect(() => {
+    /** The latest page of history. Runs on mount and again after every live-channel reconnect. */
+    const loadLatest = useCallback(() => {
         const t = token();
         if (!t || !campaignId) return;
-
         fetch(`/api/messages/campaign/${campaignId}?limit=50`, { headers: { Authorization: `Bearer ${t}` } })
             .then(async res => {
                 if (!res.ok) throw new Error('history failed');
@@ -133,18 +133,19 @@ export default function CampaignChat({ campaignId }: { campaignId: string }) {
                 append(rows.map((r: any) => ({
                     messageId: r._id, sender: r.sender, body: r.body, createdAt: r.createdAt,
                 })));
+                setError(null);
             })
             .catch(() => setError('Could not load chat history'));
-
-        const es = new EventSource(`/api/messages/campaign/${campaignId}/stream?token=${encodeURIComponent(t)}`);
-        es.addEventListener('connected', () => { setConnected(true); setError(null); });
-        es.addEventListener('message', (e: MessageEvent) => {
-            try { append([JSON.parse(e.data)]); } catch { /* ignore */ }
-        });
-        es.onerror = () => setConnected(false);
-
-        return () => es.close();
     }, [campaignId, append]);
+
+    useEffect(() => { loadLatest(); }, [loadLatest]);
+
+    // Live: one shared WebSocket for the whole app; no replay, so refetch after a reconnect.
+    const liveStatus = useLiveThread(campaignId ? campaignThreadKey(campaignId) : null, {
+        onMessage: m => append([{ messageId: m.id, sender: m.sender, body: m.body, createdAt: m.createdAt }]),
+        onReconnect: loadLatest,
+    });
+    const connected = liveStatus === 'open';
 
     useEffect(() => {
         scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });

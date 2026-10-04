@@ -35,7 +35,7 @@ When auth succeeds, the server answers:
 { "type": "ready", "v": 1, "threads": ["campaign:<id>", "dm:<a>:<b>"] }
 ```
 
-`threads` lists the thread keys this socket will receive events for: every campaign the person belongs to, whatever its status, plus one DM thread per friend. The server works this out once, when the socket connects. Admins get no extra campaigns. A thread missing from `threads` gets no live events on this socket, so clients should show it as not live (the web client's `threadStatus` reports `unavailable`). Until #105 recomputes subscriptions on membership and friendship events, joining a campaign or adding a friend only takes effect on the next connect, and so does leaving one.
+`threads` lists the thread keys this socket will receive events for: every campaign the person belongs to, whatever its status, plus one DM thread per friend. The server works this out once, when the socket connects. Admins get no extra campaigns. A thread missing from `threads` gets no live events on this socket, so clients should show it as not live (the web client's `threadStatus` reports `unavailable`). Until #105 recomputes subscriptions on membership and friendship events, joining a campaign or adding a friend only takes effect on the next connect, and so does leaving one. To cover the gap, the web client reconnects once when something subscribes to a thread the open socket's `ready` left out (a DM with a friend added a minute ago); a thread still missing after that stays `unavailable` until it is subscribed again.
 
 Thread keys are `campaign:<campaign id>` and `dm:<id>:<id>`, with the two account ids sorted.
 

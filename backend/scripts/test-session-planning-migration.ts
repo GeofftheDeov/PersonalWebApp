@@ -22,8 +22,11 @@ import pg from "pg";
 
 const MIGRATIONS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../db/migrations");
 const MIGRATION = resolve(MIGRATIONS_DIR, "2026-10-01-session-planning.sql");
-/** Later session-planning migrations, applied after the first so schema.sql parity covers them too. */
-const FOLLOW_UPS = ["2026-10-03-busy-sources.sql"].map((f) => resolve(MIGRATIONS_DIR, f));
+/** Later session-planning migrations, applied after it in order, so schema.sql parity covers them too. */
+const FOLLOW_UPS = [
+    "2026-10-03-busy-sources.sql",      // #84
+    "2026-10-03-quest-reminders.sql",   // #91
+].map((f) => resolve(MIGRATIONS_DIR, f));
 const local = /(\/\/|@)(127\.0\.0\.1|localhost)[:/]/;
 const { MIGRATED_URL, FRESH_URL } = process.env;
 if (!MIGRATED_URL || !FRESH_URL || !local.test(MIGRATED_URL) || !local.test(FRESH_URL)) {
@@ -102,16 +105,6 @@ async function main() {
     try { await migrated.query(sql); } catch (e: any) { secondError = e.message; await migrated.query("ROLLBACK").catch(() => {}); }
     check("applying it a second time is a no-op, not an error", !secondError, secondError);
 
-    for (const file of FOLLOW_UPS) {
-        const name = file.split(/[\\/]/).pop();
-        const followUp = readFileSync(file, "utf8");
-        const errors: string[] = [];
-        for (let i = 0; i < 2; i++) {
-            try { await migrated.query(followUp); } catch (e: any) { errors.push(e.message); await migrated.query("ROLLBACK").catch(() => {}); }
-        }
-        check(`${name} applies, and applies again as a no-op`, errors.length === 0, errors.join("; "));
-    }
-
     // ── backfill ────────────────────────────────────────────────────────────
     const owners = Object.fromEntries((await migrated.query(
         `SELECT title, owner_id, gm_title, quorum FROM campaigns`)).rows.map((r) => [r.title, r]));
@@ -127,6 +120,30 @@ async function main() {
     check("existing sessions backfill as scheduled, with no planning stage",
         sessions.length === 2 && sessions.every((s) => s.status === "scheduled" && s.planning_stage === null && s.date),
         JSON.stringify(sessions));
+
+    // ── follow-up migrations, in order, each twice ──────────────────────────
+    // #91 anchors quest due times to their session's start. Seed one quest
+    // with a due time and one without (added while the night was being voted on).
+    const { rows: [fixed] } = await migrated.query(`SELECT id, date FROM game_sessions WHERE title = 'fixed date'`);
+    await migrated.query(`
+        INSERT INTO session_tasks (session_id, kind, title, due_at, assignee_id) VALUES
+          ($1, 'custom', 'has a due time', $2, $3), ($1, 'custom', 'no due time yet', NULL, $3)`,
+        [fixed.id, new Date(+fixed.date - 60 * 60 * 1000), a.id]);
+    for (const file of FOLLOW_UPS) {
+        const name = file.split(/[\\/]/).pop();
+        const followUp = readFileSync(file, "utf8");
+        for (const attempt of ["applies", "re-applies as a no-op"]) {
+            let error = "";
+            try { await migrated.query(followUp); } catch (e: any) { error = e.message; await migrated.query("ROLLBACK").catch(() => {}); }
+            check(`${name} ${attempt}`, !error, error);
+        }
+    }
+    const anchors = Object.fromEntries((await migrated.query(
+        `SELECT title, due_anchor FROM session_tasks`)).rows.map((r) => [r.title, r.due_anchor]));
+    check("#91: a quest with a due time is anchored to its session's start",
+        +anchors["has a due time"] === +fixed.date, anchors);
+    check("#91: a quest with no due time stays unanchored, so it takes the session's start",
+        anchors["no due time yet"] === null, anchors);
 
     // ── parity with schema.sql ──────────────────────────────────────────────
     const [m, f] = await Promise.all([schemaOf(migrated), schemaOf(fresh)]);

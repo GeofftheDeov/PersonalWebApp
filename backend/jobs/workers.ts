@@ -3,6 +3,8 @@ import Task from "../models/Task.js";
 import { pullNotionTasks, pushTaskToNotion } from "../services/notionSync.js";
 import { pushTaskToSalesforce, pullTasksFromSalesforce } from "../services/salesforceService.js";
 import { runPersonSync } from "./personSync.js";
+import pool from "../db/index.js";
+import { runQuestReminders } from "../planning/questReminders.js";
 import {
     getBullConnectionOptions,
     QUEUE_NAMES,
@@ -15,6 +17,7 @@ let _sfWritebackWorker: Worker | null = null;
 let _notionWritebackWorker: Worker | null = null;
 let _sfPollWorker: Worker | null = null;
 let _personSyncWorker: Worker | null = null;
+let _questReminderWorker: Worker | null = null;
 
 /**
  * Pull all Notion tasks and upsert into MongoDB.
@@ -255,8 +258,20 @@ export function startWorkers(): () => Promise<void> {
         console.error(`[bullmq] person-sync failed: ${err.message}`)
     );
 
+    // Quest reminders (#91): the real clock here; tests call runQuestReminders with their own.
+    _questReminderWorker = new Worker(QUEUE_NAMES.QUEST_REMINDERS, async () => {
+        const r = await runQuestReminders(pool, new Date());
+        if (r.sent.length || r.followed.length) {
+            console.log(`[bullmq] quest-reminders: sent ${r.sent.length}, moved ${r.followed.length} due time(s)`);
+        }
+        return { sent: r.sent.length, followed: r.followed.length };
+    }, { connection: opts, concurrency: 1 });
+    _questReminderWorker.on("failed", (job, err) =>
+        console.error(`[bullmq] quest-reminders failed: ${err.message}`)
+    );
+
     console.log(
-        "[bullmq] Workers started: notion-sync (c=1), sf-writeback (c=3), notion-writeback (c=2), sf-poll (c=1), person-sync (c=1)"
+        "[bullmq] Workers started: notion-sync (c=1), sf-writeback (c=3), notion-writeback (c=2), sf-poll (c=1), person-sync (c=1), quest-reminders (c=1)"
     );
 
     return async () => {
@@ -266,12 +281,14 @@ export function startWorkers(): () => Promise<void> {
             _notionWritebackWorker?.close(),
             _sfPollWorker?.close(),
             _personSyncWorker?.close(),
+            _questReminderWorker?.close(),
         ]);
         _notionSyncWorker = null;
         _sfWritebackWorker = null;
         _notionWritebackWorker = null;
         _sfPollWorker = null;
         _personSyncWorker = null;
+        _questReminderWorker = null;
         console.log("[bullmq] Workers shut down");
     };
 }

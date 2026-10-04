@@ -1,6 +1,7 @@
 import express from "express";
 import { auth } from "../middleware/auth.js";
 import { createQuests, QuestError, type Quests } from "../planning/quests.js";
+import { subscribeQuestSchedule } from "../planning/questReminders.js";
 
 /**
  * Quests (#90, part of #57). Thin wrappers over planning/quests.ts:
@@ -11,6 +12,7 @@ import { createQuests, QuestError, type Quests } from "../planning/quests.js";
  *   POST  /api/quests/sessions/:sessionId  GM: add a custom quest   { title, assigneeId, notes?, dueAt? }
  *   PATCH /api/quests/:questId             GM: edit or reassign     { title?, notes?, dueAt?, assigneeId? }
  *   POST  /api/quests/:questId/done        its owner or the GM: mark it done
+ *   PUT   /api/quests/:questId/reminders   its owner: when to be reminded (#91)   { offsets: minutes before due[] }
  *
  * Built from a quests instance so tests can hand it one with an injected clock.
  */
@@ -40,8 +42,13 @@ export function buildQuestRouter(quests: Quests) {
         (req) => quests.update(req.user, req.params.questId, req.body)));
     router.post("/:questId/done", auth, handle("mark the quest done",
         (req) => quests.complete(req.user, req.params.questId)));
+    router.put("/:questId/reminders", auth, handle("save the reminders",
+        (req) => quests.setReminders(req.user, req.params.questId, req.body)));
 
     return router;
 }
+
+// Due times follow the night (#91). Registered at import, before server.ts starts the bus.
+subscribeQuestSchedule();
 
 export default buildQuestRouter(createQuests());

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ScrollText, Check, Plus, X } from 'lucide-react';
 import { KIND_LABEL, questApi, questDue, type Quest } from '@/lib/quests';
+import QuestReminders from './QuestReminders';
 
 /**
  * A session's quests (#90), on the session page. The party sees every quest;
@@ -156,6 +157,12 @@ export default function SessionQuests({ sessionId }: { sessionId: string }) {
                                         <span>{q.assignee ? (q.assignee.id === viewer.id ? 'You' : q.assignee.name) : 'Unclaimed'}</span>
                                         <span>{done ? 'Done' : questDue(q)}</span>
                                     </p>
+                                    {/* Reminder timing is the owner's own choice (#91). */}
+                                    {q.status === 'open' && q.assignee?.id === viewer.id && (
+                                        <QuestReminders quest={q} onChange={next => setState(prev => prev && ({
+                                            ...prev, quests: prev.quests.map(x => x.id === next.id ? next : x),
+                                        }))} />
+                                    )}
                                     {viewer.isGameMaster && !done && (
                                         <label className="mt-2 flex items-center gap-2 font-permanent text-[10px] uppercase text-zinc-600 dark:text-zinc-300">
                                             Hand to

@@ -168,7 +168,7 @@ async function main() {
         check("an online session has no food step (400)",
             (await kick("gm", { isOnline: true, foodMode: "potluck" })).status === 400);
         check("a player can't start planning in person either (403)",
-            (await kick("p1", { isOnline: false })).status === 403);
+            (await kick("p1", { isOnline: false, foodMode: "potluck" })).status === 403);
         const sessionsBefore = Number((await pool.query(`SELECT count(*) FROM game_sessions WHERE campaign_id = $1`, [campaignId])).rows[0].count);
         check("...none of those made a session", sessionsBefore === 0, sessionsBefore);
 
@@ -331,7 +331,10 @@ async function main() {
         // ── tie-break, force-advance and no food mode (straight to scheduled) ──
         console.log("\n  force-advance and a tie, no food step");
         const B = slot(4);
-        const { sid: sid2, state: s2 } = await toVenueStep("Night of Masks", B);
+        const { sid: sid2, state: s2 } = await toVenueStep("Night of Masks", B, { foodMode: "potluck" });
+        // Kickoff now requires a food mode in person (#93); a session planned without
+        // one still has its venue confirmation schedule it straight away.
+        await pool.query(`UPDATE game_sessions SET food_mode = NULL WHERE id = $1`, [sid2]);
         check("the most recently used venue now leads the pre-filled shortlist",
             s2.venue.options[0]?.venueId === samId && s2.venue.options.length === 4, s2.venue.options.map((o: any) => o.venue.name));
         check("a player can't move the venue vote forward (403)", (await call("POST", P(sid2, "advance"), "p1")).status === 403);
@@ -391,7 +394,7 @@ async function main() {
             adv3.json.venue.closedReason === "gm_advanced" && adv3.json.venue.result === "winner" &&
                 c3.venue_id === library && c3.planning_stage === "food" && c3.host_id === null, { venue: adv3.json.venue, c3 });
         check("...a store has no host, so no prep quest",
-            (await pool.query(`SELECT count(*)::int AS n FROM session_tasks WHERE session_id = $1`, [sid3])).rows[0].n === 0);
+            (await pool.query(`SELECT count(*)::int AS n FROM session_tasks WHERE session_id = $1 AND kind = 'host_prep'`, [sid3])).rows[0].n === 0);
         check("...its Google event is at the library", fake.calls("google.createCalendarEvent")[0]?.args[1].location === "Town Library, 40 Shelf Ave");
         check("moving forward again is a 409", (await call("POST", P(sid3, "advance"), "gm")).status === 409);
         fake.clear();
@@ -402,7 +405,7 @@ async function main() {
 
         // An empty shortlist: no recent venues in a fresh campaign.
         await pool.query(`UPDATE venues SET last_used_at = NULL WHERE campaign_id = $1`, [campaignId]);
-        const { sid: sid4, state: s4 } = await toVenueStep("Quiet Night", slot(8));
+        const { sid: sid4, state: s4 } = await toVenueStep("Quiet Night", slot(8), { foodMode: "potluck" });
         check("with no recent venues the vote opens empty, waiting for a suggestion", s4.venue.status === "open" && s4.venue.options.length === 0, s4.venue);
         check("...and can't be moved forward until it has a venue (409)", (await call("POST", P(sid4, "advance"), "gm")).status === 409);
         const cx4 = await call("POST", P(sid4, "cancel"), "gm");

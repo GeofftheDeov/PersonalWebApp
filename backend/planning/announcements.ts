@@ -15,6 +15,7 @@
  *   stage_changed scheduled        it's on: when (and where, or the table link)
  *     ...nightChange "kept"        a re-planned night came out the same: it stays on
  *     ...nightChange "moved"       nothing here: night_moved announces it
+ *     ...closedBy "session_start"  nothing: the food step closed as the session began (#93)
  *   night_moved                    the night moved: the new night, and what it was (#87)
  *   stage_changed cancelled        planning has stopped
  *   poll_closed tie / no_quorum    the Game Master has to act
@@ -129,6 +130,10 @@ async function onStageChanged(e: EventMap["planning.stage_changed"]) {
             `**The venue is set** for "${s.title}": ${where(s)}. Next, the food — see the [Notice Board](${board}).`);
     } else if (e.status === "scheduled" && e.nightChange === "moved") {
         return;   // planning.night_moved announces it, with the old and new times
+    } else if (e.status === "scheduled" && e.closedBy === "session_start") {
+        // The food step closed by itself as the session started (#93): the party
+        // already knows the night and the venue, and had the ready check at T-30.
+        return;
     } else if (e.status === "scheduled" && e.nightChange === "kept") {
         await notifyParty(s, undefined, `"${s.title}" stays on ${await when(s)}`,
             `${s.campaign_title} — the vote kept the same night.`);

@@ -129,6 +129,14 @@ export async function getQuest(db: Db, questId: string): Promise<QuestJson | nul
     return r ? toQuestJson(r) : null;
 }
 
+/** A session's quests of one kind, oldest first, cancelled ones left out (the food step's slots, #93). */
+export async function sessionQuests(db: Db, sessionId: string, kind: QuestKind): Promise<QuestJson[]> {
+    const { rows } = await db.query(
+        `${QUEST_SQL} WHERE t.session_id = $1 AND t.kind = $2 AND t.status <> 'cancelled' ORDER BY t.created_at, t.id`,
+        [sessionId, kind]);
+    return rows.map(toQuestJson);
+}
+
 const SESSION_SQL = `
     SELECT s.id, s.title, s.date, s.end_date, s.status, s.campaign_id, s.gm_override_id,
            c.title AS campaign_title, c.gm_title
@@ -198,9 +206,11 @@ export interface NewQuest {
 
 /** Inserts a quest and returns its id. */
 export async function insertQuest(db: Db, q: NewQuest): Promise<string> {
+    // clock_timestamp(), not the column's now(): quests made in one transaction
+    // (a seeded potluck, #93) keep the order they were made in.
     const { rows: [r] } = await db.query(
-        `INSERT INTO session_tasks (session_id, kind, title, notes, assignee_id, due_at, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+        `INSERT INTO session_tasks (session_id, kind, title, notes, assignee_id, due_at, created_by, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, clock_timestamp()) RETURNING id`,
         [q.sessionId, q.kind, q.title, q.notes ?? null, q.assigneeId, q.dueAt, q.createdBy]);
     return r.id;
 }

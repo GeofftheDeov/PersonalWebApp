@@ -87,6 +87,12 @@ export interface EventMap {
         nightChange?: "reopened" | "moved" | "kept";
         /** With "reopened": the confirmed night that stands until a new one is (ISO date-time). */
         standingStart?: string;
+        /**
+         * "session_start" on the scheduled transition when the food step
+         * closed by itself as the session started (#93), rather than the Game
+         * Master confirming it (which carries `actorId`).
+         */
+        closedBy?: "session_start";
     };
     /**
      * A scheduled session's night moved (#87): published once the new night
@@ -151,7 +157,10 @@ export interface EventMap {
      * owner changed. Published by planning/quests.ts. `assigneeId` is null
      * when a potluck slot is left unclaimed; `previousAssigneeId` is null for
      * a new quest; `assignedBy` is null when the app did it (e.g. a host-prep
-     * quest on venue confirmation).
+     * quest on venue confirmation, or the food owner's quest under food
+     * provided). Potluck claims and un-claims (#93) publish this too: a claim
+     * has assigneeId = assignedBy = the claimer; an un-claim has assigneeId
+     * null and previousAssigneeId = assignedBy = whoever backed out.
      */
     "quest.assigned": {
         questId: string;

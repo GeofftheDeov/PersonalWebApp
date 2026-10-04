@@ -17,7 +17,13 @@
  *                         (no Discord event in person); then food if a food
  *                         mode was chosen at kickoff, else scheduled
  *          : a tie    ? the GM picks
- *   food: the GM confirms -> scheduled (the food step itself is #93)
+ *   food (#93): potluck -- the Game Master seeds slots, anyone in the party
+ *          claims one, adds their own, or un-claims one they hold -- or food
+ *          provided, where the food owner got one provisioning quest as the
+ *          venue was confirmed. Every slot and the provisioning are `food`
+ *          quests, so they show in the owner's Quest Log and on the Almanac.
+ *          -(the GM confirms | the session starts: closeDueFoodSteps)->
+ *          scheduled. Unclaimed slots never hold it up; they stay open.
  *   scheduled -(GM changes the night)-> night (a new round; the old night
  *            stands) -(confirmed)-> scheduled, its date and its Discord and
  *            Google events moved to the new night (#87)
@@ -28,6 +34,14 @@
  * night. While the venue (or food) step is still running, the night can't be
  * changed (409): an open venue vote was put to the party for the night they
  * just confirmed, so the Game Master cancels and plans again instead.
+ *
+ * The food step and the ready check (#93). The ready check (T-30 minutes)
+ * fires for scheduled sessions, and the food step closes by itself only at
+ * the session's start -- so a session still in the food step at T-30 would
+ * miss it. Rather than close the food step early, the ready check also
+ * covers sessions in the food step (utils/readyCheck.ts): by then the night
+ * and the venue are settled, so the session is happening; only who brings
+ * what is still open.
  *
  * Every mutation locks the session row for its transaction, so concurrent
  * votes, advances and cancels apply one at a time. Side effects -- Discord
@@ -52,7 +66,7 @@ import {
     addOption, breakTie, castBallot, closePoll, everyoneVoted, latestPoll, openPoll, openPollOf, pollJson, pollsOf,
     type CloseReason, type NewOption, type Poll,
 } from "./poll.js";
-import { announceAssigned, getQuest, insertQuest } from "./quests.js";
+import { announceAssigned, getQuest, insertQuest, MAX_TITLE, sessionQuests, setAssignee, type QuestJson } from "./quests.js";
 import { roleIn } from "./roles.js";
 
 type Db = Pick<pg.PoolClient, "query">;
@@ -67,6 +81,11 @@ export const MAX_VENUE_SHORTLIST = 6;
 /** Suggestions stop once a venue vote has this many options. */
 export const MAX_VENUE_OPTIONS = 10;
 export const FOOD_MODES = ["potluck", "provided"] as const;
+/** A potluck holds at most this many slots (#93); the Game Master seeds at most this many at once. */
+export const MAX_FOOD_SLOTS = 20;
+export const MAX_FOOD_SEED = 10;
+/** The food owner's quest under food provided (#93). */
+export const PROVISION_TITLE = "Provide the food";
 const VENUE_KINDS = ["home", "store", "other"] as const;
 const HOUR = 60 * 60 * 1000;
 
@@ -209,6 +228,65 @@ async function venueToSuggest(db: Db, actorId: string, isGm: boolean, campaignId
     return v.id;
 }
 
+function cleanSlotTitle(raw: unknown): string {
+    const title = typeof raw === "string" ? raw.trim() : "";
+    if (!title) throw new PlanningError(400, "Name the dish or the job (say, Snacks).");
+    if (title.length > MAX_TITLE) throw new PlanningError(400, `Food slots are limited to ${MAX_TITLE} characters.`);
+    return title;
+}
+
+/** The Game Master's seed list: 1 to MAX_FOOD_SEED distinct titles. */
+function cleanSeedTitles(raw: unknown): string[] {
+    if (!Array.isArray(raw) || raw.length < 1 || raw.length > MAX_FOOD_SEED) {
+        throw new PlanningError(400, `Seed 1 to ${MAX_FOOD_SEED} slots.`);
+    }
+    const titles = raw.map(cleanSlotTitle);
+    if (new Set(titles.map((t) => t.toLowerCase())).size !== titles.length) {
+        throw new PlanningError(400, "The same slot is on the list twice.");
+    }
+    return titles;
+}
+
+/** A food quest as the Notice Board shows it: a potluck slot (null assignee: unclaimed), or the provisioning. */
+const foodQuestJson = (q: QuestJson) => ({
+    id: q.id, title: q.title, notes: q.notes, assignee: q.assignee, status: q.status, dueAt: q.dueAt, createdBy: q.createdBy,
+});
+
+/**
+ * The food step ends (#93): the session is scheduled. The Game Master's
+ * confirm and the automatic close at the session's start both go through
+ * this; the stage guard makes each a no-op on a session already past it.
+ * Unclaimed potluck slots never hold it up.
+ */
+const END_FOOD_STEP = `UPDATE game_sessions SET status = 'scheduled', planning_stage = NULL
+                        WHERE status = 'planning' AND planning_stage = 'food'`;
+
+const foodStepEnded = (s: { id: string; campaign_id: string }, by: { actorId: string } | { closedBy: "session_start" }):
+    EventMap["planning.stage_changed"] => ({ sessionId: s.id, campaignId: s.campaign_id, status: "scheduled", stage: null, ...by });
+
+/**
+ * The automatic close (#93): every session still in the food step whose start
+ * is at or before `now` is scheduled, and a stage_changed is published for
+ * each (closedBy "session_start"). Idempotent -- a session it has closed is no
+ * longer in the food step -- so it's safe to run every minute, twice, or late.
+ * A single UPDATE: it waits for any planner mutation holding a session's lock,
+ * then re-checks the stage, so a GM confirm landing at the same moment wins
+ * cleanly rather than being announced twice.
+ *
+ * Run from the planning-sweep BullMQ job (jobs/workers.ts) with the real
+ * clock; tests pass their own `now`. Pass the pool, not a transaction's
+ * client: the events go out as soon as the UPDATE returns.
+ */
+export async function closeDueFoodSteps(db: Db, now: Date): Promise<{ closed: string[] }> {
+    const { rows } = await db.query(`${END_FOOD_STEP} AND date <= $1 RETURNING id, campaign_id`, [now]);
+    for (const s of rows) {
+        await bus.publish("planning.stage_changed", foodStepEnded(s, { closedBy: "session_start" })).catch((err: any) => {
+            console.error(`[planning] publishing the food step's close for ${s.id} failed:`, err?.message ?? err);
+        });
+    }
+    return { closed: rows.map((s) => s.id as string) };
+}
+
 // ── the planner ─────────────────────────────────────────────────────────────
 
 export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, now: () => new Date() }) {
@@ -285,8 +363,9 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
      * the venue's last-used time moves to now (so it's offered first next
      * time), and a home's host becomes the session's host, with a "prep the
      * space" quest. A Google event goes out with the venue as its location --
-     * in person there's no Discord event. Then the food step, if the Game
-     * Master chose a food mode at kickoff, else scheduled.
+     * in person there's no Discord event. Then the food step (with the food
+     * owner's quest under food provided, #93); a session kicked off before
+     * the food mode was required may have none, and is scheduled straight away.
      */
     async function confirmVenue(db: Db, s: any, poll: Poll, effects: Effect[]) {
         const option = poll.options.find((o) => o.id === poll.winningOptionId)!;
@@ -306,6 +385,18 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
                 sessionId: s.id, kind: "host_prep", title: "Prep the space",
                 notes: `Get ${v.name} ready for "${s.title}".`,
                 assigneeId: hostId, dueAt: s.date, createdBy: null,
+            });
+            const quest = (await getQuest(db, questId))!;
+            effects.push(() => announceAssigned(quest, null, null));
+        }
+
+        // Food provided (#93): the food owner's one quest, made as the food step opens.
+        // (Should the owner's account be gone, the quest waits unclaimed; the GM can reassign it.)
+        if (nextStage && s.food_mode === "provided") {
+            const questId = await insertQuest(db, {
+                sessionId: s.id, kind: "food", title: PROVISION_TITLE,
+                notes: `Food for "${s.title}" at ${v.name}.`,
+                assigneeId: s.food_owner_id, dueAt: s.date, createdBy: null,
             });
             const quest = (await getQuest(db, questId))!;
             effects.push(() => announceAssigned(quest, null, null));
@@ -452,9 +543,10 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
         const s = await loadSession(pool, sessionId, false);
         const role = await roleIn(pool, actor.id, s.campaign_id, s.gm_override_id);
         if (!role.member) throw new PlanningError(403, "Only the party can see this session's planning.");
-        const [party, rounds, venueRounds, venues] = await Promise.all([
+        const [party, rounds, venueRounds, venues, foodQuests] = await Promise.all([
             campaignParty(s.campaign_id), pollsOf(pool, s.id, "night"), pollsOf(pool, s.id, "venue"),
             s.is_online ? [] : campaignVenues(pool, s.campaign_id),
+            s.food_mode ? sessionQuests(pool, s.id, "food") : [],
         ]);
         const night = rounds.at(-1) ?? null;
         const venuePoll = venueRounds.at(-1) ?? null;
@@ -496,7 +588,62 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
             venueRounds: venueRounds.map(venuePollJson),
             /** In person: the campaign's saved venues, most recently used first, to shortlist or suggest from. */
             venues: venues.map((v: any) => venueJson(v, showAddress.has(v.id))),
+            /**
+             * In person (#93): how food works, and its quests in the order they
+             * were made -- potluck slots (an unclaimed one has a null
+             * assignee), or the food owner's provisioning quest.
+             */
+            food: s.food_mode ? { mode: s.food_mode, ownerId: s.food_owner_id, quests: foodQuests.map(foodQuestJson) } : null,
         };
+    }
+
+    /**
+     * The potluck as it stands, for a food-step action (#93): the session,
+     * locked, on its food step with a potluck. `who` says who may act --
+     * "gm" the Game Master (the campaign's, the session's stand-in, or an
+     * admin); "party" a party member, since claims are quests and quests go
+     * only to the party.
+     */
+    async function lockPotluck(db: Db, actor: Actor, sessionId: string, who: "gm" | "party") {
+        const s = await loadSession(db, sessionId, true);
+        if (who === "gm") await requireGm(db, actor, s);
+        else if (!(await isPartyMember(db, s.campaign_id, actor.id))) throw new PlanningError(403, "Only the party can bring food.");
+        requireStage(s, "food");
+        if (s.food_mode !== "potluck") throw new PlanningError(409, "This session's food is provided, not a potluck.");
+        return s;
+    }
+
+    /** A potluck slot of this session, its row locked; 404 if it isn't one. */
+    async function lockSlot(db: Db, sessionId: string, questId: string) {
+        const { rows: [t] } = isUuid(questId) ? await db.query(
+            `SELECT id, status, assignee_id FROM session_tasks WHERE id = $1 AND session_id = $2 AND kind = 'food' FOR UPDATE`,
+            [questId, sessionId]) : { rows: [] };
+        if (!t) throw new PlanningError(404, "That food slot isn't on this session.");
+        if (t.status !== "open") throw new PlanningError(409, `That slot is ${t.status}.`);
+        return t as { id: string; status: string; assignee_id: string | null };
+    }
+
+    /** 409 if a title is already one of the potluck's open slots (case-insensitive). */
+    async function requireNewSlots(db: Db, sessionId: string, titles: string[], hint: string) {
+        const { rows } = await db.query(
+            `SELECT title FROM session_tasks WHERE session_id = $1 AND kind = 'food' AND status = 'open'`, [sessionId]);
+        const taken = new Set(rows.map((r) => r.title.toLowerCase()));
+        const clash = titles.find((t) => taken.has(t.toLowerCase()));
+        if (clash) throw new PlanningError(409, `There's already a "${clash}" slot${hint}.`);
+        if (rows.length + titles.length > MAX_FOOD_SLOTS) {
+            throw new PlanningError(409, `A potluck holds up to ${MAX_FOOD_SLOTS} slots.`);
+        }
+    }
+
+    /** Adds potluck slots, owned by `assigneeId` or unclaimed, and announces each after the commit. */
+    async function addSlots(db: Db, s: any, titles: string[], assigneeId: string | null, actor: Actor, effects: Effect[]) {
+        for (const title of titles) {
+            const id = await insertQuest(db, {
+                sessionId: s.id, kind: "food", title, assigneeId, dueAt: s.date, createdBy: actor.id,
+            });
+            const quest = (await getQuest(db, id))!;
+            effects.push(() => announceAssigned(quest, actor.id, null));
+        }
     }
 
     return {
@@ -541,16 +688,16 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
 
         /**
          * Start planning: online (night -> scheduled) or in person (night ->
-         * venue -> food -> scheduled). In person, the Game Master may choose
-         * how food works now -- potluck, or provided by one person in the
-         * party (the GM included) -- and the food step follows the venue only
-         * when they did (#93 builds that step).
+         * venue -> food -> scheduled). In person, the Game Master chooses how
+         * food works now (#93): potluck, or provided by one person in the
+         * party (the GM included).
          */
         async kickoff(actor: Actor, campaignId: string, body: any) {
             if (!isUuid(campaignId)) throw new PlanningError(404, "Campaign not found.");
             const title = cleanTitle(body?.title);
             if (typeof body?.isOnline !== "boolean") throw new PlanningError(400, "Choose online or in person.");
             const foodMode = body.foodMode ?? null;
+            if (foodMode === null && !body.isOnline) throw new PlanningError(400, "Choose how food works: potluck or food provided.");
             if (foodMode !== null) {
                 if (body.isOnline) throw new PlanningError(400, "Only in-person sessions have a food step.");
                 if (!FOOD_MODES.includes(foodMode)) throw new PlanningError(400, "Food is potluck or provided.");
@@ -632,16 +779,68 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
             return state(actor, sessionId);
         },
 
-        /** The Game Master settles the food step (#93 builds it): the session is scheduled. */
+        /**
+         * The Game Master settles the food step at any time (#93): the session
+         * is scheduled, whether or not every potluck slot is claimed.
+         * Otherwise it closes by itself at the session's start (closeDueFoodSteps).
+         */
         async confirmFood(actor: Actor, sessionId: string) {
             await mutate(async (db, effects) => {
                 const s = await loadSession(db, sessionId, true);
                 await requireGm(db, actor, s);
                 requireStage(s, "food");
-                await db.query(`UPDATE game_sessions SET status = 'scheduled', planning_stage = NULL WHERE id = $1`, [s.id]);
-                effects.push(publish("planning.stage_changed", {
-                    sessionId: s.id, campaignId: s.campaign_id, status: "scheduled", stage: null, actorId: actor.id,
-                }));
+                await db.query(`${END_FOOD_STEP} AND id = $1`, [s.id]);
+                effects.push(publish("planning.stage_changed", foodStepEnded(s, { actorId: actor.id })));
+            });
+            return state(actor, sessionId);
+        },
+
+        /** Potluck (#93): the Game Master seeds slots ({ titles: ["Main", "Snacks", "Drinks"] }), each unclaimed. */
+        async seedFood(actor: Actor, sessionId: string, body: any) {
+            const titles = cleanSeedTitles(body?.titles);
+            await mutate(async (db, effects) => {
+                const s = await lockPotluck(db, actor, sessionId, "gm");
+                await requireNewSlots(db, s.id, titles, "");
+                await addSlots(db, s, titles, null, actor, effects);
+            });
+            return state(actor, sessionId);
+        },
+
+        /** Potluck (#93): someone in the party adds a slot of their own ({ title }), claimed by them. */
+        async addFood(actor: Actor, sessionId: string, body: any) {
+            const title = cleanSlotTitle(body?.title);
+            await mutate(async (db, effects) => {
+                const s = await lockPotluck(db, actor, sessionId, "party");
+                await requireNewSlots(db, s.id, [title], " — claim it instead");
+                await addSlots(db, s, [title], actor.id, actor, effects);
+            });
+            return state(actor, sessionId);
+        },
+
+        /** Potluck (#93): someone in the party claims an open slot; it becomes their quest. */
+        async claimFood(actor: Actor, sessionId: string, questId: string) {
+            await mutate(async (db, effects) => {
+                const s = await lockPotluck(db, actor, sessionId, "party");
+                const slot = await lockSlot(db, s.id, questId);
+                if (slot.assignee_id === actor.id) return;   // already theirs: nothing to do
+                if (slot.assignee_id) throw new PlanningError(409, "Someone has already claimed that slot.");
+                await setAssignee(db, slot.id, actor.id);
+                const quest = (await getQuest(db, slot.id))!;
+                effects.push(() => announceAssigned(quest, actor.id, null));
+            });
+            return state(actor, sessionId);
+        },
+
+        /** Potluck (#93): whoever holds a slot backs out of it; it's open (and highlighted) again. */
+        async unclaimFood(actor: Actor, sessionId: string, questId: string) {
+            await mutate(async (db, effects) => {
+                const s = await lockPotluck(db, actor, sessionId, "party");
+                const slot = await lockSlot(db, s.id, questId);
+                if (!slot.assignee_id) throw new PlanningError(409, "Nobody has claimed that slot.");
+                if (slot.assignee_id !== actor.id) throw new PlanningError(403, "Only whoever claimed a slot can un-claim it.");
+                await setAssignee(db, slot.id, null);
+                const quest = (await getQuest(db, slot.id))!;
+                effects.push(() => announceAssigned(quest, actor.id, actor.id));
             });
             return state(actor, sessionId);
         },

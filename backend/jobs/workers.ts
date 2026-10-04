@@ -3,6 +3,8 @@ import Task from "../models/Task.js";
 import { pullNotionTasks, pushTaskToNotion } from "../services/notionSync.js";
 import { pushTaskToSalesforce, pullTasksFromSalesforce } from "../services/salesforceService.js";
 import { runPersonSync } from "./personSync.js";
+import pool from "../db/index.js";
+import { closeDueFoodSteps } from "../planning/planner.js";
 import {
     getBullConnectionOptions,
     QUEUE_NAMES,
@@ -15,6 +17,7 @@ let _sfWritebackWorker: Worker | null = null;
 let _notionWritebackWorker: Worker | null = null;
 let _sfPollWorker: Worker | null = null;
 let _personSyncWorker: Worker | null = null;
+let _planningSweepWorker: Worker | null = null;
 
 /**
  * Pull all Notion tasks and upsert into MongoDB.
@@ -255,8 +258,18 @@ export function startWorkers(): () => Promise<void> {
         console.error(`[bullmq] person-sync failed: ${err.message}`)
     );
 
+    // Planning sweep (#93): the real clock here; tests call closeDueFoodSteps with their own.
+    _planningSweepWorker = new Worker(QUEUE_NAMES.PLANNING_SWEEP, async () => {
+        const r = await closeDueFoodSteps(pool, new Date());
+        if (r.closed.length) console.log(`[bullmq] planning-sweep: closed the food step of ${r.closed.length} session(s)`);
+        return { closed: r.closed.length };
+    }, { connection: opts, concurrency: 1 });
+    _planningSweepWorker.on("failed", (job, err) =>
+        console.error(`[bullmq] planning-sweep failed: ${err.message}`)
+    );
+
     console.log(
-        "[bullmq] Workers started: notion-sync (c=1), sf-writeback (c=3), notion-writeback (c=2), sf-poll (c=1), person-sync (c=1)"
+        "[bullmq] Workers started: notion-sync (c=1), sf-writeback (c=3), notion-writeback (c=2), sf-poll (c=1), person-sync (c=1), planning-sweep (c=1)"
     );
 
     return async () => {
@@ -266,12 +279,14 @@ export function startWorkers(): () => Promise<void> {
             _notionWritebackWorker?.close(),
             _sfPollWorker?.close(),
             _personSyncWorker?.close(),
+            _planningSweepWorker?.close(),
         ]);
         _notionSyncWorker = null;
         _sfWritebackWorker = null;
         _notionWritebackWorker = null;
         _sfPollWorker = null;
         _personSyncWorker = null;
+        _planningSweepWorker = null;
         console.log("[bullmq] Workers shut down");
     };
 }

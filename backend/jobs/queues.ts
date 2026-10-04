@@ -6,6 +6,7 @@ export const QUEUE_NAMES = {
     NOTION_WRITEBACK: "notion-writeback",
     SF_POLL: "salesforce-poll",
     PERSON_SYNC: "person-sync",
+    PLANNING_SWEEP: "planning-sweep",
 } as const;
 
 export const DEFAULT_JOB_OPTS = {
@@ -23,6 +24,26 @@ let _sfQueue: Queue | null = null;
 let _notionWritebackQueue: Queue | null = null;
 let _sfPollQueue: Queue | null = null;
 let _personSyncQueue: Queue | null = null;
+let _planningSweepQueue: Queue | null = null;
+
+/**
+ * Planning sweep (#93): once a minute, close the food step of every in-person
+ * session that has reached its start (planning/planner.ts closeDueFoodSteps).
+ * attempts: 1 -- the next minute's run is the retry, and the close is
+ * idempotent. Without Redis (local dev) nothing closes the food step by
+ * itself; the ready check still covers those sessions (utils/readyCheck.ts).
+ */
+const PLANNING_SWEEP_EVERY_MS = 60 * 1000;
+const PLANNING_SWEEP_JOB_OPTS = { attempts: 1, removeOnComplete: { count: 20 }, removeOnFail: { count: 50 } };
+
+export function getPlanningSweepQueue(): Queue | null {
+    const opts = getBullConnectionOptions();
+    if (!opts) return null;
+    if (!_planningSweepQueue) {
+        _planningSweepQueue = new Queue(QUEUE_NAMES.PLANNING_SWEEP, { connection: opts });
+    }
+    return _planningSweepQueue;
+}
 
 /**
  * Person sync (#35, plan §2.8): nightly drain of person_outbox to Salesforce,
@@ -149,6 +170,16 @@ export async function registerRepeatableJobs(): Promise<void> {
         );
         console.log("[bullmq] Registered nightly person-sync job (03:00 America/Chicago)");
     }
+
+    const planningQ = getPlanningSweepQueue();
+    if (planningQ) {
+        await planningQ.upsertJobScheduler(
+            "planning-sweep",
+            { every: PLANNING_SWEEP_EVERY_MS },
+            { name: "planning-sweep", data: {}, opts: PLANNING_SWEEP_JOB_OPTS }
+        );
+        console.log("[bullmq] Registered repeatable planning-sweep job (every 60s)");
+    }
 }
 
 export async function closeBullConnection(): Promise<void> {
@@ -158,9 +189,12 @@ export async function closeBullConnection(): Promise<void> {
         _notionWritebackQueue?.close(),
         _sfPollQueue?.close(),
         _personSyncQueue?.close(),
+        _planningSweepQueue?.close(),
     ]);
     _notionQueue = null;
     _sfQueue = null;
     _notionWritebackQueue = null;
     _sfPollQueue = null;
+    _personSyncQueue = null;
+    _planningSweepQueue = null;
 }

@@ -16,6 +16,8 @@ import { PollError } from "../planning/poll.js";
  *   POST /api/planning/sessions/:sessionId/tiebreak     GM: { optionId }
  *   POST /api/planning/sessions/:sessionId/reopen       GM: change a scheduled session's night; { options } opens a new round
  *   POST /api/planning/sessions/:sessionId/cancel       GM
+ *   POST   /api/planning/sessions/:sessionId/torch      campaign GM: { to }  one-session torch pass (#89)
+ *   DELETE /api/planning/sessions/:sessionId/torch      campaign GM or the stand-in: take it back
  *
  * Built from a planner so tests can hand it one with fake integrations.
  */
@@ -55,6 +57,11 @@ export function buildPlanningRouter(planner: Planner) {
         (req) => planner.reopen(req.user, req.params.sessionId, req.body)));
     router.post("/sessions/:sessionId/cancel", auth, handle("cancel planning",
         (req) => planner.cancel(req.user, req.params.sessionId)));
+
+    router.post("/sessions/:sessionId/torch", auth, handle("pass the torch",
+        (req) => planner.passSession(req.user, req.params.sessionId, req.body)));
+    router.delete("/sessions/:sessionId/torch", auth, handle("take the torch back",
+        (req) => planner.clearSessionPass(req.user, req.params.sessionId)));
 
     return router;
 }

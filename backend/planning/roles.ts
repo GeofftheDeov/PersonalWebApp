@@ -1,9 +1,7 @@
 /**
  * Who someone is to a campaign (#57): the Game Master, a party member, or
- * neither. Used by the quests module. It mirrors the planner's private
- * roleIn exactly; the planner should import this one instead once the
- * in-flight planner changes (#117) have merged, so the two can't drift on who
- * counts as the Game Master.
+ * neither. Shared by the planner and the quests module, so the two can't
+ * drift on who counts as the Game Master.
  */
 import type pg from "pg";
 
@@ -11,9 +9,11 @@ type Db = Pick<pg.PoolClient, "query">;
 
 export interface Role {
     admin: boolean;
-    /** The campaign's Game Master, this session's stand-in GM, or an admin. */
+    /** The campaign's own Game Master, or an admin: who can pass the torch (#89). */
+    campaignGm: boolean;
+    /** The campaign's Game Master, this session's stand-in GM (while still in the party), or an admin. */
     gm: boolean;
-    /** In the party, or GM by any of the routes above. */
+    /** In the party, or the campaign's GM or an admin. */
     member: boolean;
 }
 
@@ -24,6 +24,9 @@ export async function roleIn(db: Db, actorId: string, campaignId: string, gmOver
     const { rows: memberships } = await db.query(
         `SELECT status FROM campaign_members WHERE campaign_id = $1 AND person_id = $2`, [campaignId, actorId]);
     const admin = acct?.app_role === "admin";
-    const gm = admin || gmOverrideId === actorId || memberships.some((m) => m.status === "Game Master");
-    return { admin, gm, member: gm || memberships.length > 0 };
+    const campaignGm = admin || memberships.some((m) => m.status === "Game Master");
+    const seated = memberships.length > 0;
+    // A one-session stand-in counts only while they're still in the party.
+    const gm = campaignGm || (seated && gmOverrideId === actorId);
+    return { admin, campaignGm, gm, member: campaignGm || seated };
 }

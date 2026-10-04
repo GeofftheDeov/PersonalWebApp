@@ -377,7 +377,7 @@ router.get("/players/:id", auth, async (req: any, res) => {
             return res.status(403).json({ error: "You can only view profiles of friends or campaign-mates" });
         }
 
-        const sharedCampaigns = await Campaign.find({ _id: { $in: sharedIds } }).select("title status");
+        const sharedCampaigns = await Campaign.find({ _id: { $in: sharedIds } }).select("title status gmTitle");
         const gmCampaignIds = new Set(
             targetMemberships.filter((m: any) => m.status === "Game Master").map((m: any) => String(m.campaign))
         );
@@ -390,6 +390,7 @@ router.get("/players/:id", auth, async (req: any, res) => {
                 title: c.title,
                 status: c.status,
                 isGameMaster: gmCampaignIds.has(String(c._id)),
+                gmTitle: c.gmTitle, // what this campaign calls its Game Master (#57)
             })),
         });
     } catch (err) {

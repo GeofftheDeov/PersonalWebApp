@@ -24,6 +24,27 @@ export interface CampaignSettings {
     tableLink: string | null;
 }
 
+/** What the Game Master is called until the owner says otherwise. */
+export const DEFAULT_GM_TITLE = "Dungeon Master";
+
+/**
+ * A GM title as given, trimmed. At creation it's optional, so a missing or
+ * blank one means the default; as a settings change it must be there.
+ */
+export function cleanGmTitle(raw: unknown, { optional = false } = {}): string {
+    if (optional && (raw === undefined || raw === null || (typeof raw === "string" && !raw.trim()))) return DEFAULT_GM_TITLE;
+    const title = typeof raw === "string" ? raw.trim() : "";
+    if (!title || title.length > 40) throw new SettingsError(400, "The Game Master title must be 1 to 40 characters.");
+    return title;
+}
+
+/** The campaign's word for its Game Master, for messages that name the role. */
+export async function gmTitleOf(campaignId: unknown): Promise<string> {
+    if (!isUuid(String(campaignId))) return DEFAULT_GM_TITLE;
+    const { rows: [c] } = await query(`SELECT gm_title FROM campaigns WHERE id = $1`, [String(campaignId)]);
+    return c?.gm_title || DEFAULT_GM_TITLE;
+}
+
 const toSettings = (r: any): CampaignSettings => ({
     owner: r.owner_id, gmTitle: r.gm_title, quorum: r.quorum, tableLink: r.table_link,
 });
@@ -43,11 +64,7 @@ function clean(body: any): Record<string, unknown> {
         else if (typeof link === "string" && link.length <= 500 && /^https?:\/\/\S+$/i.test(link)) out.table_link = link;
         else throw new SettingsError(400, "The table link must be an http(s) URL of up to 500 characters.");
     }
-    if ("gmTitle" in body) {
-        const title = typeof body.gmTitle === "string" ? body.gmTitle.trim() : "";
-        if (!title || title.length > 40) throw new SettingsError(400, "The Game Master title must be 1 to 40 characters.");
-        out.gm_title = title;
-    }
+    if ("gmTitle" in body) out.gm_title = cleanGmTitle(body.gmTitle);
     if (!Object.keys(out).length) throw new SettingsError(400, "Nothing to change: send quorum, tableLink or gmTitle.");
     return out;
 }

@@ -2,6 +2,7 @@ import express from "express";
 import { auth } from "../middleware/auth.js";
 import { isUuid } from "../db/model.js";
 import { isCampaignGameMaster } from "../utils/gameNightPlannerUtils.js";
+import { gmTitleOf } from "../planning/campaignSettings.js";
 import {
     AvailabilityError, addException, campaignOverlap, cleanRange, getWindows, listExceptions,
     myPreview, removeException, replaceWindows,
@@ -88,7 +89,7 @@ router.get("/campaigns/:campaignId", auth, async (req: any, res) => {
         // The grid shows every player's free / busy / unknown, so it is the
         // Game Master's planning tool rather than something the party browses.
         if (!(await isCampaignGameMaster(req.user, campaignId))) {
-            return res.status(403).json({ error: "Only the Game Master can see the party's availability" });
+            return res.status(403).json({ error: `Only the ${await gmTitleOf(campaignId)} can see the party's availability` });
         }
         res.json(await campaignOverlap(campaignId, cleanRange(req.query, { slotMinutes: 240, stepMinutes: 30 })));
     } catch (err: any) {

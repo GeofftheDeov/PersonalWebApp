@@ -17,6 +17,8 @@
  *   night_moved                    the night moved: the new night, and what it was (#87)
  *   stage_changed cancelled        planning has stopped
  *   poll_closed tie / no_quorum    the Game Master has to act
+ *   campaign.torch_passed session  the new one-session stand-in hears they have the
+ *                                  torch (#89); just them, not the party
  *
  * The planner never calls this module, so the planner doesn't know notifications
  * exist. Every handler swallows its own errors: a failed announcement can't
@@ -199,6 +201,18 @@ async function onPollClosed(e: EventMap["planning.poll_closed"]) {
     }
 }
 
+/** A one-session torch pass (#89): the new stand-in hears they have the torch for this session. */
+async function onTorchPassed(e: EventMap["campaign.torch_passed"]) {
+    if (e.scope !== "session" || !e.sessionId || !e.toId) return;   // taken back, or a permanent pass (torch.ts)
+    const s = await loadSession(e.sessionId);
+    if (!s) return;
+    await notify(e.toId, {
+        type: "system", title: `You're the ${s.gm_title} for "${s.title}"`,
+        body: `${s.campaign_title} — you have the torch for this session only.`,
+        link: noticeBoardLink(s.campaign_id), meta: { sessionId: s.id, campaignId: s.campaign_id },
+    });
+}
+
 /**
  * Subscribes the announcements to the bus. Call once at boot, before the bus
  * starts. `idle()` resolves once every announcement in flight has finished,
@@ -221,6 +235,7 @@ export function startPlanningAnnouncements() {
         on("planning.poll_opened", onPollOpened),
         on("planning.poll_closed", onPollClosed),
         on("planning.night_moved", onNightMoved),
+        on("campaign.torch_passed", onTorchPassed),
     ];
 
     return {

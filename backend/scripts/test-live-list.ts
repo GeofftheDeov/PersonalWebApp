@@ -223,8 +223,8 @@ async function main() {
     check("the frame carries no message text",
       !JSON.stringify(updatesFor(gmLaptop, thread)).includes(`first ${RUN}`), JSON.stringify(updatesFor(gmLaptop, thread)));
 
-    await send(`/api/messages/campaign/${table}`, player, `second ${RUN}`);
-    await send(`/api/messages/campaign/${table}`, bard, `third ${RUN}`);
+    const second = await send(`/api/messages/campaign/${table}`, player, `second ${RUN}`);
+    const third = await send(`/api/messages/campaign/${table}`, bard, `third ${RUN}`);
     check("unread counts are per person: the GM has 3, the player 1 (the bard's), the bard 2 (the player's)",
       await until(() => updatesFor(gmLaptop, thread).at(-1)?.unreadCount === 3
         && updatesFor(playerSocket, thread).at(-1)?.unreadCount === 1
@@ -255,6 +255,49 @@ async function main() {
     await sleep(300);
     check("a friend of one of them gets nothing for the pair's DM", updatesFor(bardDm, dm).length === 0,
       JSON.stringify(bardDm.of("thread.updated")));
+
+    console.log("\nthread.read: reading on one device syncs the person's others\n");
+
+    const gmSockets = [gmLaptop, gmPhone, gmDm];
+    const others = [playerSocket, bardSocket, outsiderSocket, playerDm, bardDm];
+    const readsFor = (c: ReturnType<typeof client>, t: string) => c.of("thread.read").filter((f) => f.thread === t);
+
+    // The GM reads the campaign thread up to the newest message on their laptop (an HTTP call, as the dock makes).
+    const marked = await post(`/api/threads/${encodeURIComponent(thread)}/read`, gm, { messageId: third._id });
+    check("the GM marks the campaign thread read", marked.status === 200, `status ${marked.status}`);
+    check("every one of the GM's sockets gets thread.read, the other devices included",
+      await until(() => gmSockets.every((c) => readsFor(c, thread).length === 1)),
+      gmSockets.map((c) => JSON.stringify(c.of("thread.read"))).join(" | "));
+    const read = readsFor(gmPhone, thread)[0];
+    check("...naming the message read up to, with nothing left unread",
+      read?.lastReadMessageId === third._id && read?.unreadCount === 0, JSON.stringify(read));
+    check("...and the read position's time (the message's own time)",
+      read?.lastReadAt === new Date(third.createdAt).toISOString(), `${read?.lastReadAt} vs ${third.createdAt}`);
+    await sleep(300);
+    check("no one else's socket gets it", others.every((c) => c.of("thread.read").length === 0),
+      others.map((c) => JSON.stringify(c.of("thread.read"))).join(" | "));
+
+    // The bard reads only up to the first message: the player's second is still unread.
+    await post(`/api/threads/${encodeURIComponent(thread)}/read`, bard, { messageId: first._id });
+    check("a partial read reports what is left unread after it (the bard: 1)",
+      await until(() => [bardSocket, bardDm].every((c) => readsFor(c, thread).at(-1)?.unreadCount === 1)),
+      [bardSocket, bardDm].map((c) => JSON.stringify(c.of("thread.read"))).join(" | "));
+
+    // A device that is behind marks an older message: the position doesn't move, so nothing is sent.
+    await post(`/api/threads/${encodeURIComponent(thread)}/read`, gm, { messageId: second._id });
+    await sleep(300);
+    check("a read that doesn't move the position forward sends nothing",
+      gmSockets.every((c) => readsFor(c, thread).length === 1), gmSockets.map((c) => readsFor(c, thread).length).join(","));
+
+    // DMs: the recipient reads; only the recipient's sockets hear about it.
+    const dmMessages = await fetch(`${base}/api/messages/dm/${gm.id}?limit=1`,
+      { headers: { authorization: `Bearer ${tokenFor(player)}` } }).then((r) => r.json()) as Array<{ _id: string }>;
+    await post(`/api/threads/${encodeURIComponent(dm)}/read`, player, { messageId: dmMessages[0]?._id });
+    check("reading a DM syncs the reader's sockets", await until(() => [playerSocket, playerDm].every((c) =>
+      readsFor(c, dm).at(-1)?.unreadCount === 0)), JSON.stringify(playerDm.of("thread.read")));
+    await sleep(300);
+    check("...and not the other party's", gmSockets.every((c) => readsFor(c, dm).length === 0),
+      gmSockets.map((c) => JSON.stringify(readsFor(c, dm))).join(" | "));
   } finally {
     for (const c of opened) c.ws.terminate();
     await live.close();

@@ -4,7 +4,7 @@ One WebSocket per signed-in person. It carries live events for every thread that
 
 - Server: `backend/live/liveChannel.ts`
 - Web client: `frontend/src/lib/realtime/liveClient.ts`, wrapped by the `useLiveThread` hook
-- Tests: `backend/scripts/test-live-channel.ts` (campaigns, auth, heartbeat, client), `backend/scripts/test-live-dms.ts` (DMs)
+- Tests: `backend/scripts/test-live-channel.ts` (campaigns, auth, heartbeat, client), `backend/scripts/test-live-dms.ts` (DMs), `backend/scripts/test-live-typing.ts` (typing)
 
 ## Connecting
 
@@ -45,6 +45,7 @@ Thread keys are `campaign:<campaign id>` and `dm:<id>:<id>`, with the two accoun
 |---|---|---|
 | `ready` | `v`, `threads` | Auth succeeded. Events start flowing. |
 | `message.created` | `thread`, `message` | A message was posted to a thread you can see. |
+| `typing` | `thread`, `personId`, `name`, `expiresInMs` | Someone else is writing in a thread you can see (see Typing). |
 | `ping` | none | Heartbeat. Answer with `pong`. |
 
 `message` is:
@@ -58,7 +59,7 @@ Campaign threads and DM threads carry the same frame. A DM reaches only its pair
 
 This channel is the only live path: the old per-thread SSE streams (`/api/messages/campaign/:id/stream`, `/api/messages/dm/:userId/stream`) were removed with #99.
 
-Clients must ignore frame types they don't know. Later versions of the server will add frames such as `typing`, `thread.read` and `thread.updated` (spec #58) without changing `v`.
+Clients must ignore frame types they don't know. Later versions of the server will add frames such as `thread.read` and `thread.updated` (spec #58) without changing `v`.
 
 ## Client → server frames
 
@@ -66,8 +67,33 @@ Clients must ignore frame types they don't know. Later versions of the server wi
 |---|---|---|
 | `auth` | `v`, `token` | The first frame only. |
 | `pong` | none | Answer to `ping`. |
+| `typing` | `thread` | You are writing in this thread (see Typing). |
 
-The server ignores types it doesn't know. When later frames name a thread (for example `typing`), the server drops any frame for a thread the person can't access.
+The server ignores types it doesn't know. When a frame names a thread, the server drops it if the person can't access that thread.
+
+## Typing
+
+Added with #103. While someone types in a thread, their client sends
+
+```json
+{ "type": "typing", "thread": "campaign:<id>" }
+```
+
+at most once every **3 seconds**, and only while the draft has text. The server:
+
+- drops the frame silently (the socket stays open) if the thread key is missing or malformed, or if the person can't access the thread (the same `canAccessThread` check the REST endpoints use);
+- drops frames for one thread on one socket that arrive less than 1 second after the last one it accepted, before any access check;
+- otherwise publishes it on the event bus's ephemeral path (`letters.typing`, Pub/Sub only), so it reaches the thread on every backend task. It is never written to the database or to a Redis stream.
+
+Every socket subscribed to the thread then gets
+
+```json
+{ "type": "typing", "thread": "campaign:<id>", "personId": "<account id>", "name": "Theo", "expiresInMs": 5000 }
+```
+
+except the typist's own sockets, on any device: nobody sees themselves typing. A DM's `typing` reaches only the other one of the pair. `name` is the person's display name, never an email address.
+
+Clients show "Theo is writing…" and take it down `expiresInMs` (5 seconds) after that person's last `typing` frame, or as soon as a `message.created` from that person arrives on the thread. Nothing is replayed: a socket that connects mid-burst sees the indicator at the typist's next frame. The web client's logic is in `frontend/src/lib/realtime/typing.ts` (`TypingTracker`), wrapped by the `useTyping` hook.
 
 ## Heartbeat
 

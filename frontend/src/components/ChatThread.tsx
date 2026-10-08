@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Send, WifiOff } from 'lucide-react';
 import { useLiveThread } from '../lib/realtime/useLiveThread';
 import { threadKeyFor } from '../lib/useThreads';
+import { useTyping } from '../lib/realtime/useTyping';
 
 interface ChatMessage {
     messageId: string;
@@ -109,6 +110,9 @@ export default function ChatThread({ channel, placeholder, onLatestMessage }: {
     });
     const connected = liveStatus === 'open';
 
+    // "Theo is writing…" (#103): announce while the draft has text; others' indicators beside the badge.
+    const { label: typingText, typing, sent: typingSent } = useTyping(threadKey);
+
     // Auto-scroll on new messages
     useEffect(() => {
         scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -140,6 +144,7 @@ export default function ChatThread({ channel, placeholder, onLatestMessage }: {
             }
             const saved = await res.json();
             append([{ messageId: saved._id, sender: saved.sender, body: saved.body, createdAt: saved.createdAt }]);
+            typingSent();
             setDraft('');
         } catch (err: any) {
             setError(err.message || 'Failed to send');
@@ -153,7 +158,11 @@ export default function ChatThread({ channel, placeholder, onLatestMessage }: {
 
     return (
         <div className="flex flex-col h-full min-h-0">
-            <div className="flex justify-end mb-2">
+            <div className="flex justify-end items-center gap-2 mb-2">
+                {/* Who else is writing (#103) */}
+                <span aria-live="polite" className="mr-auto min-w-0 truncate text-[10px] font-bold italic text-zinc-400">
+                    {typingText}
+                </span>
                 <span className={`flex items-center gap-1.5 px-2 py-0.5 border-2 border-black font-black text-[10px] uppercase ${connected ? 'bg-teal-500 text-white' : 'bg-zinc-600 text-zinc-200'}`}>
                     {connected ? 'LIVE' : <><WifiOff className="w-3 h-3" /> OFFLINE</>}
                 </span>
@@ -183,7 +192,7 @@ export default function ChatThread({ channel, placeholder, onLatestMessage }: {
             <form onSubmit={handleSend} className="flex border-4 border-t-0 border-black">
                 <input
                     value={draft}
-                    onChange={e => setDraft(e.target.value)}
+                    onChange={e => { setDraft(e.target.value); if (e.target.value.trim()) typing(); }}
                     placeholder={placeholder || 'TYPE A MESSAGE…'}
                     maxLength={4000}
                     className="flex-grow min-w-0 p-2.5 bg-black text-white font-bold text-sm outline-none placeholder-zinc-600 focus:bg-zinc-900"

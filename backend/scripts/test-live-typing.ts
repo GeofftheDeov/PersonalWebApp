@@ -9,8 +9,14 @@
  *   - a `typing` frame in a campaign thread reaches the other members' sockets,
  *     and not an outsider's, nor any of the typist's own sockets;
  *   - the same in a friend DM: only the other one of the pair;
- *   - a typing frame for a thread the sender can't see is dropped;
+ *   - a typing frame for a thread the sender can't see is dropped, and a
+ *     burst of frames from one socket reaches the thread once;
  *   - typing leaves no database rows and, on Redis, no stream entries;
+ *   - the frontend's LiveClient and TypingTracker (frontend/src/lib/realtime/
+ *     typing.ts), on an injected clock: holding a key down sends one frame
+ *     every 3 s; the indicator clears 5 s after the last frame, a refresh
+ *     extends it, and the typist's message clears it at once; the same in a
+ *     campaign thread (Table Talk) and a friend DM (the dock).
  *
  * Run against a throwaway database loaded from db/schema.sql (it refuses to run
  * against anything but localhost). It deletes every row it creates.
@@ -27,6 +33,59 @@ import pool from "../db/index.js";
 import { signJwt } from "../utils/jwt.js";
 import { attachLiveChannel, LIVE_PATH, PROTOCOL_VERSION } from "../live/liveChannel.js";
 import { campaignThreadKey, dmThreadKey } from "../services/threads.js";
+
+/**
+ * The frontend's realtime client and typing tracker, loaded by path at run
+ * time (the backend's Docker build sees only backend/; see test-live-channel.ts).
+ */
+type LiveClientLike = {
+  status: string;
+  threadStatus(thread: string): string;
+  close(): void;
+};
+type LiveClientCtor = new (opts: { url: string; getToken: () => string | null; WebSocket: unknown }) => LiveClientLike;
+type Typist = { personId: string; name: string };
+type TrackerLike = {
+  readonly typists: Typist[];
+  onChange(listener: (typists: Typist[]) => void): () => void;
+  typing(): void;
+  sent(): void;
+  dispose(): void;
+};
+type TypingModule = {
+  TypingTracker: new (opts: { client: LiveClientLike; thread: string; clock?: Clock }) => TrackerLike;
+  typingLabel(typists: Typist[]): string;
+  TYPING_THROTTLE_MS: number;
+  TYPING_EXPIRY_MS: number;
+};
+const LIVE_CLIENT = new URL("../../frontend/src/lib/realtime/liveClient.ts", import.meta.url).href;
+const TYPING = new URL("../../frontend/src/lib/realtime/typing.ts", import.meta.url).href;
+
+/** An injected clock: time only moves when the test says so. */
+type Clock = { now(): number; setTimeout(fn: () => void, ms: number): unknown; clearTimeout(handle: unknown): void };
+function fakeClock() {
+  let now = 0;
+  let nextId = 0;
+  const timers = new Map<number, { at: number; fn: () => void }>();
+  return {
+    now: () => now,
+    setTimeout: (fn: () => void, ms: number) => { timers.set(++nextId, { at: now + ms, fn }); return nextId; },
+    clearTimeout: (handle: unknown) => { timers.delete(handle as number); },
+    pending: () => timers.size,
+    /** Move time forward, firing due timers in order. */
+    advance(ms: number) {
+      const end = now + ms;
+      for (;;) {
+        const due = [...timers.entries()].filter(([, t]) => t.at <= end).sort((a, b) => a[1].at - b[1].at)[0];
+        if (!due) break;
+        timers.delete(due[0]);
+        now = due[1].at;
+        due[1].fn();
+      }
+      now = end;
+    },
+  };
+}
 
 if (!/(\/\/|@)(127\.0\.0\.1|localhost)[:/]/.test(process.env.DATABASE_URL ?? "")) {
   console.error("\n  Refusing to run: DATABASE_URL must be a local throwaway database.\n");
@@ -111,7 +170,7 @@ async function streamEntries(): Promise<Record<string, string[]>> {
     const out: Record<string, string[]> = {};
     let cursor = "0";
     do {
-      const [next, keys] = await redis.scan(cursor, "TYPE", "stream", "COUNT", 500);
+      const [next, keys] = await redis.scan(cursor, "COUNT", 500, "TYPE", "stream");
       cursor = next;
       for (const key of keys) {
         const entries = await redis.xrange(key, "-", "+");
@@ -245,23 +304,148 @@ async function main() {
 
     console.log("\nTyping is ephemeral\n");
 
+    // Everything up to here was typing (and opening sockets); messages come later.
     const rowsAfter = await rowCounts();
     const changed = Object.keys({ ...rowsBefore, ...rowsAfter }).filter((t) => rowsBefore[t] !== rowsAfter[t]);
     check("all that typing left no database rows: every table's row count is unchanged", changed.length === 0,
       changed.map((t) => `${t}: ${rowsBefore[t]} -> ${rowsAfter[t]}`).join(", "));
 
+    console.log("\nThe client: throttling, expiry, clearing\n");
+
+    const { LiveClient } = await import(LIVE_CLIENT) as { LiveClient: LiveClientCtor };
+    const { TypingTracker, typingLabel, TYPING_THROTTLE_MS, TYPING_EXPIRY_MS } =
+      await import(TYPING) as TypingModule;
+    check("the client's constants match the spec: refresh every 3 s, expire after 5 s",
+      TYPING_THROTTLE_MS === 3_000 && TYPING_EXPIRY_MS === 5_000, `${TYPING_THROTTLE_MS} ${TYPING_EXPIRY_MS}`);
+
+    /** Counts the typing frames a client actually puts on the wire. */
+    const wire: Record<string, number> = {};
+    const countingSocket = (who: string) => class extends WebSocket {
+      send(data: any, ...rest: any[]) {
+        try { if (JSON.parse(String(data)).type === "typing") wire[who] = (wire[who] ?? 0) + 1; } catch { /* not JSON */ }
+        return (super.send as any)(data, ...rest);
+      }
+    };
+    const aliceClock = fakeClock();
+    const bobClock = fakeClock();
+    const aliceClient = new LiveClient({ url: wsUrl, getToken: () => tokenFor(alice), WebSocket: countingSocket("alice") });
+    const bobClient = new LiveClient({ url: wsUrl, getToken: () => tokenFor(bob), WebSocket: countingSocket("bob") });
+    const aliceTable = new TypingTracker({ client: aliceClient, thread: tableThread, clock: aliceClock });
+    const bobTable = new TypingTracker({ client: bobClient, thread: tableThread, clock: bobClock });
+    const bobChanges: string[][] = [];
+    bobTable.onChange((t) => bobChanges.push(t.map((p) => p.name)));
+    check("both clients connect", await until(() => aliceClient.status === "open" && bobClient.status === "open"),
+      `${aliceClient.status} ${bobClient.status}`);
+
+    // Key repeat: a keystroke every 50 ms for 7 seconds of (fake) time.
+    for (let t = 0; t <= 7_000; t += 50) { aliceTable.typing(); aliceClock.advance(50); }
+    check("holding a key down for 7 s sends 3 typing frames (at 0, 3 and 6 s), not one per keystroke",
+      wire.alice === 3, `${wire.alice} frames`);
+    check("bob's indicator shows alice", await until(() => bobTable.typists.some((p) => p.personId === alice.id)),
+      JSON.stringify(bobTable.typists));
+    check("...by display name: \"<name> is writing…\"", typingLabel(bobTable.typists) === `${alice.handle} is writing…`,
+      typingLabel(bobTable.typists));
+    check("alice's own indicator stays empty", aliceTable.typists.length === 0, JSON.stringify(aliceTable.typists));
+    check("bob's tracker announced the change", bobChanges.at(-1)?.[0] === alice.handle, JSON.stringify(bobChanges));
+
+    bobClock.advance(4_999);
+    check("it is still showing 4.999 s after the last frame", bobTable.typists.length === 1,
+      JSON.stringify(bobTable.typists));
+    bobClock.advance(1);
+    check("it clears 5 s after the last frame, on its own", bobTable.typists.length === 0,
+      JSON.stringify(bobTable.typists));
+    check("...and announces that", bobChanges.at(-1)?.length === 0, JSON.stringify(bobChanges));
+
+    // A refresh pushes the expiry out: frames at 0 and 3 s keep it up until 8 s.
+    await sleep(1_100); // past the server's per-socket guard, which runs on real time
+    aliceClock.advance(3_000);
+    aliceTable.typing();
+    check("a new frame shows alice again", await until(() => bobTable.typists.length === 1));
+    bobClock.advance(3_000);
+    await sleep(1_100);
+    aliceClock.advance(3_000);
+    const bobChangesBefore = bobChanges.length;
+    aliceTable.typing();
+    await until(() => false, 300); // let the refresh arrive (it changes nothing visible)
+    check("a refresh doesn't flicker the indicator", bobChanges.length === bobChangesBefore, JSON.stringify(bobChanges));
+    bobClock.advance(4_000);
+    check("a refresh 3 s in keeps it showing 7 s after the first frame", bobTable.typists.length === 1);
+    bobClock.advance(1_000);
+    check("...and it clears 5 s after the refresh", bobTable.typists.length === 0);
+
+    // Alice's message clears her indicator at once, without waiting out the 5 s.
+    await sleep(1_100);
+    aliceClock.advance(3_000);
+    aliceTable.typing();
+    check("alice is writing again", await until(() => bobTable.typists.length === 1));
+    const posted = await fetch(`http://127.0.0.1:${port}/api/messages/campaign/${table}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${tokenFor(alice)}`, "content-type": "application/json" },
+      body: JSON.stringify({ body: `there ${RUN}` }),
+    });
+    check("alice's message is saved", posted.status === 201, `status ${posted.status}`);
+    check("her message arriving clears her indicator immediately (no clock advanced)",
+      await until(() => bobTable.typists.length === 0), JSON.stringify(bobTable.typists));
+
+    // Sending ends the typing burst: the next keystroke announces at once.
+    const sentBefore = wire.alice;
+    aliceTable.typing(); // within 3 s of the last frame: throttled
+    aliceTable.sent();
+    aliceTable.typing();
+    check("after sending, the next keystroke sends a frame without waiting out the 3 s",
+      wire.alice === sentBefore + 1, `${wire.alice - sentBefore} frames`);
+
+    console.log("\nThe client in a dock DM\n");
+
+    // Fresh sockets: these clients' DM subscriptions date from after the friendship.
+    const aliceDmClock = fakeClock();
+    const bobDmClock = fakeClock();
+    const aliceDmTyping = new TypingTracker({ client: aliceClient, thread: dmThread, clock: aliceDmClock });
+    const bobDmTyping = new TypingTracker({ client: bobClient, thread: dmThread, clock: bobDmClock });
+    check("both clients carry the DM thread",
+      await until(() => aliceClient.threadStatus(dmThread) === "open" && bobClient.threadStatus(dmThread) === "open"),
+      `${aliceClient.threadStatus(dmThread)} ${bobClient.threadStatus(dmThread)}`);
+    await sleep(1_100);
+    bobDmTyping.typing();
+    check("bob typing in the DM shows on alice's side",
+      await until(() => aliceDmTyping.typists.some((p) => p.personId === bob.id)), JSON.stringify(aliceDmTyping.typists));
+    check("...and not in alice's Table Talk indicator", aliceTable.typists.length === 0 && bobTable.typists.length === 0);
+    aliceDmClock.advance(5_000);
+    check("it expires after 5 s in the DM too", aliceDmTyping.typists.length === 0);
+    await sleep(1_100);
+    bobDmClock.advance(3_000);
+    bobDmTyping.typing();
+    await until(() => aliceDmTyping.typists.length === 1);
+    const dm = await fetch(`http://127.0.0.1:${port}/api/messages/dm/${alice.id}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${tokenFor(bob)}`, "content-type": "application/json" },
+      body: JSON.stringify({ body: `dm ${RUN}` }),
+    });
+    check("bob's DM is saved", dm.status === 201, `status ${dm.status}`);
+    check("bob's DM arriving clears his indicator immediately", await until(() => aliceDmTyping.typists.length === 0),
+      JSON.stringify(aliceDmTyping.typists));
+
+    for (const t of [aliceTable, bobTable, aliceDmTyping, bobDmTyping]) t.dispose();
+    check("disposing a tracker cancels its expiry timers", [aliceClock, bobClock, aliceDmClock, bobDmClock]
+      .every((c) => c.pending() === 0), [aliceClock, bobClock, aliceDmClock, bobDmClock].map((c) => c.pending()).join(","));
+    aliceClient.close();
+    bobClient.close();
+
+    check("labels: nobody, one, two, several",
+      typingLabel([]) === ""
+        && typingLabel([{ personId: "1", name: "Theo" }]) === "Theo is writing…"
+        && typingLabel([{ personId: "1", name: "Theo" }, { personId: "2", name: "Mara" }]) === "Theo and Mara are writing…"
+        && typingLabel([{ personId: "1", name: "Theo" }, { personId: "2", name: "Mara" }, { personId: "3", name: "Ash" }])
+          === "Several people are writing…");
+
     if (process.env.REDIS_URL) {
-      // A real message goes through the stream, so the scan below is looking in the right place.
-      const sent = await fetch(`http://127.0.0.1:${port}/api/messages/campaign/${table}`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${tokenFor(alice)}`, "content-type": "application/json" },
-        body: JSON.stringify({ body: `a real message ${RUN}` }),
-      });
-      check("a real message is saved", sent.status === 201, `status ${sent.status}`);
+      console.log("\nTyping is ephemeral on Redis\n");
+
       const streams = await streamEntries();
+      // Alice's real message went through the stream, so the scan is looking in the right place.
       const gamenight = Object.entries(streams).find(([key]) => key.endsWith("events:gamenight"));
-      check("...and lands in the Redis stream history (so the scan sees streams)",
-        !!gamenight?.[1].some((e) => e.includes(`a real message ${RUN}`)), Object.keys(streams).join(", "));
+      check("alice's real message is in the Redis stream history (so the scan sees streams)",
+        !!gamenight?.[1].some((e) => e.includes(`there ${RUN}`)), Object.keys(streams).join(", "));
       const typingKeys = Object.keys(streams).filter((k) => /letters|typing/.test(k));
       const typingEntries = Object.values(streams).flat().filter((e) => /letters\.typing|"typing"/.test(e));
       check("no Redis stream holds anything typing-related", typingKeys.length === 0 && typingEntries.length === 0,

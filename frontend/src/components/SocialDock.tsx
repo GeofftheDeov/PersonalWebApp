@@ -66,14 +66,18 @@ export default function SocialDock() {
 
   const panelRef = useRef<HTMLDivElement>(null);
 
+  // No polling (#102). Chats follow the live channel through useThreads.
+  // Friends and requests load once for the badge, then again whenever the
+  // dock opens, along with the thread list as a cheap catch-up.
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      fetchSocialData();
-      const interval = setInterval(fetchSocialData, 30000); // Poll every 30s
-      return () => clearInterval(interval);
-    }
+    if (localStorage.getItem('token')) fetchSocialData();
   }, []);
+
+  useEffect(() => {
+    if (!isOpen || !localStorage.getItem('token')) return;
+    fetchSocialData();
+    refreshThreads();
+  }, [isOpen, refreshThreads]);
 
   const fetchSocialData = async () => {
     const token = localStorage.getItem('token');

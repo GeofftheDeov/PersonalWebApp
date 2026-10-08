@@ -622,10 +622,13 @@ CREATE TABLE messages (
   sender_email text NOT NULL,
   body         text NOT NULL CHECK (char_length(body) <= 4000),
   created_at   timestamptz NOT NULL DEFAULT now(),
+  -- The sender's own id for this message, so a resend is stored once (#101).
+  client_id    text CHECK (client_id IS NULL OR char_length(client_id) <= 64),
   CHECK (campaign_id IS NOT NULL OR dm_key IS NOT NULL)
 );
 CREATE INDEX idx_messages_campaign_created ON messages (campaign_id, created_at DESC);
 CREATE INDEX idx_messages_dm_created       ON messages (dm_key, created_at DESC);
+CREATE UNIQUE INDEX idx_messages_sender_client ON messages (sender_id, client_id) WHERE client_id IS NOT NULL;
 
 CREATE TABLE notifications (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),

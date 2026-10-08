@@ -79,10 +79,10 @@ Added with #103. While someone types in a thread, their client sends
 { "type": "typing", "thread": "campaign:<id>" }
 ```
 
-at most once every **3 seconds**, and only while the draft has text. The server:
+at most once every **3 seconds**, and only while the draft has text. Sending a message resets that, so the first keystroke of the next message announces at once. The server:
 
 - drops the frame silently (the socket stays open) if the thread key is missing or malformed, or if the person can't access the thread (the same `canAccessThread` check the REST endpoints use);
-- drops frames for one thread on one socket that arrive less than 1 second after the last one it accepted, before any access check;
+- drops frames for one thread on one socket that arrive less than 250 ms after the last one it accepted, before any access check (flood control; a well-behaved client never comes that close);
 - otherwise publishes it on the event bus's ephemeral path (`letters.typing`, Pub/Sub only), so it reaches the thread on every backend task. It is never written to the database or to a Redis stream.
 
 Every socket subscribed to the thread then gets

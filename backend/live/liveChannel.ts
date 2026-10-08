@@ -46,8 +46,13 @@ export const CLOSE_UNSUPPORTED_VERSION = 4002;
 export const DEFAULT_PING_INTERVAL_MS = 25_000;
 /** How long a `typing` frame shows without a refresh (#103). Clients refresh every 3 s. */
 export const TYPING_EXPIRES_IN_MS = 5_000;
-/** Typing frames for one thread on one socket closer together than this are dropped. */
-export const TYPING_MIN_INTERVAL_MS = 1_000;
+/**
+ * Typing frames for one thread on one socket closer together than this are
+ * dropped: flood control only. Kept well under a second, because a client
+ * resets its 3 s throttle when its person sends, and the first keystroke of
+ * the next message can follow the last frame closely.
+ */
+export const TYPING_MIN_INTERVAL_MS = 250;
 export const DEFAULT_AUTH_TIMEOUT_MS = 10_000;
 /** Client frames are tiny (auth, pong, later typing); anything bigger is not ours. */
 const MAX_FRAME_BYTES = 16 * 1024;
@@ -179,8 +184,8 @@ export async function attachLiveChannel(
         if (!personId || typeof thread !== "string") return;
         let state = typists.get(conn);
         if (!state) typists.set(conn, (state = { lastAt: new Map() }));
-        // Clients send at most one frame every 3 s; anything much faster is
-        // dropped here, before it costs an access check.
+        // Clients send at most one frame every 3 s (sooner only after sending
+        // a message); a flood is dropped here, before it costs an access check.
         const now = Date.now();
         if (now - (state.lastAt.get(thread) ?? -Infinity) < TYPING_MIN_INTERVAL_MS) return;
         state.lastAt.set(thread, now);

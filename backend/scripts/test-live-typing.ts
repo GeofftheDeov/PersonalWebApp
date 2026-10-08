@@ -31,8 +31,11 @@ import type { AddressInfo } from "net";
 import WebSocket from "ws";
 import pool from "../db/index.js";
 import { signJwt } from "../utils/jwt.js";
-import { attachLiveChannel, LIVE_PATH, PROTOCOL_VERSION } from "../live/liveChannel.js";
+import { attachLiveChannel, LIVE_PATH, PROTOCOL_VERSION, TYPING_MIN_INTERVAL_MS } from "../live/liveChannel.js";
 import { campaignThreadKey, dmThreadKey } from "../services/threads.js";
+
+/** Past the server's per-socket typing guard, which runs on real time. */
+const PAST_GUARD = TYPING_MIN_INTERVAL_MS + 150;
 
 /**
  * The frontend's realtime client and typing tracker, loaded by path at run
@@ -357,12 +360,12 @@ async function main() {
     check("...and announces that", bobChanges.at(-1)?.length === 0, JSON.stringify(bobChanges));
 
     // A refresh pushes the expiry out: frames at 0 and 3 s keep it up until 8 s.
-    await sleep(1_100); // past the server's per-socket guard, which runs on real time
+    await sleep(PAST_GUARD);
     aliceClock.advance(3_000);
     aliceTable.typing();
     check("a new frame shows alice again", await until(() => bobTable.typists.length === 1));
     bobClock.advance(3_000);
-    await sleep(1_100);
+    await sleep(PAST_GUARD);
     aliceClock.advance(3_000);
     const bobChangesBefore = bobChanges.length;
     aliceTable.typing();
@@ -374,7 +377,7 @@ async function main() {
     check("...and it clears 5 s after the refresh", bobTable.typists.length === 0);
 
     // Alice's message clears her indicator at once, without waiting out the 5 s.
-    await sleep(1_100);
+    await sleep(PAST_GUARD);
     aliceClock.advance(3_000);
     aliceTable.typing();
     check("alice is writing again", await until(() => bobTable.typists.length === 1));
@@ -391,9 +394,14 @@ async function main() {
     const sentBefore = wire.alice;
     aliceTable.typing(); // within 3 s of the last frame: throttled
     aliceTable.sent();
+    await sleep(400); // a quick typist starting the next message
     aliceTable.typing();
     check("after sending, the next keystroke sends a frame without waiting out the 3 s",
       wire.alice === sentBefore + 1, `${wire.alice - sentBefore} frames`);
+    check("...and the server lets it through, so bob sees alice writing again",
+      await until(() => bobTable.typists.length === 1, 1_500), JSON.stringify(bobTable.typists));
+    bobClock.advance(5_000);
+    check("...until it expires like any other", bobTable.typists.length === 0, JSON.stringify(bobTable.typists));
 
     console.log("\nThe client in a dock DM\n");
 
@@ -405,14 +413,14 @@ async function main() {
     check("both clients carry the DM thread",
       await until(() => aliceClient.threadStatus(dmThread) === "open" && bobClient.threadStatus(dmThread) === "open"),
       `${aliceClient.threadStatus(dmThread)} ${bobClient.threadStatus(dmThread)}`);
-    await sleep(1_100);
+    await sleep(PAST_GUARD);
     bobDmTyping.typing();
     check("bob typing in the DM shows on alice's side",
       await until(() => aliceDmTyping.typists.some((p) => p.personId === bob.id)), JSON.stringify(aliceDmTyping.typists));
     check("...and not in alice's Table Talk indicator", aliceTable.typists.length === 0 && bobTable.typists.length === 0);
     aliceDmClock.advance(5_000);
     check("it expires after 5 s in the DM too", aliceDmTyping.typists.length === 0);
-    await sleep(1_100);
+    await sleep(PAST_GUARD);
     bobDmClock.advance(3_000);
     bobDmTyping.typing();
     await until(() => aliceDmTyping.typists.length === 1);

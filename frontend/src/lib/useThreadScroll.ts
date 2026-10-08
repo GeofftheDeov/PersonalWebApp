@@ -20,8 +20,9 @@ export function useThreadScroll(
     entries: readonly { key: string; state?: string }[],
     { onNearTop, canLoadMore, thresholdPx = 64 }: { onNearTop: () => void; canLoadMore: boolean; thresholdPx?: number },
 ) {
-    const last = useRef<{ first: string | null; last: string | null; height: number; top: number; atBottom: boolean }>(
-        { first: null, last: null, height: 0, top: 0, atBottom: true });
+    const last = useRef<{
+        first: string | null; last: string | null; lastState?: string; height: number; top: number; atBottom: boolean;
+    }>({ first: null, last: null, height: 0, top: 0, atBottom: true });
     const nearTop = useRef(onNearTop);
     nearTop.current = onNearTop;
 
@@ -49,9 +50,12 @@ export function useThreadScroll(
             el.scrollTop = prev.top + (el.scrollHeight - prev.height); // older loaded above: stay put
         } else if (newest && newest.key !== prev.last && (prev.atBottom || newest.state === 'sending')) {
             el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+        } else if (newest && newest.key === prev.last && newest.state !== prev.lastState) {
+            el.scrollTop = el.scrollHeight; // your send just settled (sent, or failed with Resend): keep it in view
         }
         last.current.first = first;
         last.current.last = newest?.key ?? null;
+        last.current.lastState = newest?.state;
         remember(el);
         // The box isn't full yet, so there's no scrolling to ask for more.
         if (canLoadMore && el.scrollHeight <= el.clientHeight) nearTop.current();

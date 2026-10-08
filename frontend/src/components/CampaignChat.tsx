@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import ReactMarkdown from 'react-markdown';
@@ -86,8 +86,11 @@ export default function CampaignChat({ campaignId }: { campaignId: string }) {
     const connected = thread.status === 'open';
     const onScroll = useThreadScroll(scrollRef, messages, { onNearTop: thread.loadOlder, canLoadMore: thread.hasMore });
 
+    // Tiptap 3 doesn't re-render on keystrokes, so track emptiness for the SEND button here.
+    const [isDraftEmpty, setDraftEmpty] = useState(true);
     const editor = useEditor({
         extensions: [StarterKit],
+        onUpdate: ({ editor }) => setDraftEmpty(editor.isEmpty),
         editorProps: {
             attributes: {
                 class: 'flex-grow p-3 bg-white dark:bg-slate-900 text-black dark:text-white font-permanent text-sm outline-none min-h-[44px] max-h-40 overflow-y-auto focus:bg-yellow-50 dark:focus:bg-slate-800 prose prose-sm dark:prose-invert max-w-none',
@@ -108,13 +111,15 @@ export default function CampaignChat({ campaignId }: { campaignId: string }) {
         e?.preventDefault();
         if (!editor) return;
         // The message stays in the log (sending, then sent or failed), so the editor clears at once.
-        if (thread.send(docToMarkdown(editor.getJSON()))) editor.commands.clearContent();
+        if (thread.send(docToMarkdown(editor.getJSON()))) {
+            editor.commands.clearContent();
+            setDraftEmpty(true);
+        }
     };
 
     const fmtTime = (iso: string) =>
         new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }).toUpperCase();
 
-    const isDraftEmpty = !editor || editor.isEmpty;
 
     return (
         <div>

@@ -219,9 +219,30 @@ export async function sendThreadMessage(
         return { ok: true, row: stored, created: false };
     }
 
+    try {
+        await publishAndNotify(inserted, thread, person, senderName, email);
+    } catch (err) {
+        // Not delivered, so not stored: a resend with this clientId must
+        // publish afresh, not find this row and report it sent.
+        await query(`DELETE FROM messages WHERE id = $1`, [inserted.id]).catch(() => { /* the throw below reports it */ });
+        throw err;
+    }
+    return { ok: true, row: inserted, created: true };
+}
+
+/** Live delivery (the bus event the live channel forwards) and the bell. Throws if the publish fails. */
+async function publishAndNotify(
+    inserted: MessageRow,
+    thread: ParsedThreadKey,
+    person: ThreadPerson,
+    senderName: string,
+    email: string,
+) {
+    const body = inserted.body;
+    const recipient = inserted.recipient;
     const createdAt = new Date(inserted.created_at).toISOString();
     const senderRef = { id: String(person.id), name: senderName, email };
-    if (isCampaign) {
+    if (thread.kind === "campaign") {
         await bus.publish("gamenight.message", {
             messageId: String(inserted.id),
             campaignId: thread.campaignId,
@@ -250,8 +271,6 @@ export async function sendThreadMessage(
             meta: { fromUserId: person.id },
         }).catch(() => { /* logged inside */ });
     }
-
-    return { ok: true, row: inserted, created: true };
 }
 
 const preview = (body: string) => (body.length > 80 ? `${body.slice(0, 77)}...` : body);

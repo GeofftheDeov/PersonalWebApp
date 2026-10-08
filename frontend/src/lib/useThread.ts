@@ -63,7 +63,10 @@ const newClientId = (): string => {
     return `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
 };
 
-const messagesUrl = (threadKey: string) => `/api/threads/${encodeURIComponent(threadKey)}/messages`;
+/** How many older pages a reconnect fetches to close the gap before starting the log afresh. */
+const MAX_CATCH_UP_PAGES = 4;
+
+const messagesUrl =(threadKey: string) => `/api/threads/${encodeURIComponent(threadKey)}/messages`;
 
 const fromServer = (m: LiveMessage, key = m.id): ThreadEntry => ({
     key, id: m.id, sender: m.sender, body: m.body, createdAt: m.createdAt,
@@ -101,20 +104,27 @@ export function useThread(threadKey: string | null, { pageSize = 50, markRead }:
     const olderInFlight = useRef(false);
     const firstPageLoaded = useRef(false);
 
+    const sentRef = useRef(sent);
+    sentRef.current = sent;
+
     /**
-     * Adds stored messages. One of yours still showing as `sending` with the
-     * same body is the same message (its live echo beat the POST response), so
-     * it takes that entry's place and key instead of showing twice.
+     * Adds stored messages. For a live echo (`echo`), a new message of yours
+     * whose body matches a send still in flight is that send (the echo beat the
+     * POST response), so it takes that entry's place and key instead of
+     * showing twice. History pages never do this: an old message with the same
+     * text is a different message.
      */
-    const addSent = useCallback((msgs: LiveMessage[]) => {
+    const addSent = useCallback((msgs: LiveMessage[], { echo = false } = {}) => {
         if (!msgs.length) return;
-        const me = myAccountId();
         const absorbed = new Map<string, string>(); // message id → pending key
-        const waiting = pendingRef.current.filter((p) => p.state === 'sending');
-        for (const m of msgs) {
-            if (m.sender?.id !== me) continue;
-            const i = waiting.findIndex((p) => p.body === m.body);
-            if (i >= 0) absorbed.set(m.id, waiting.splice(i, 1)[0].key);
+        if (echo) {
+            const me = myAccountId();
+            const waiting = pendingRef.current.filter((p) => p.state === 'sending');
+            for (const m of msgs) {
+                if (m.sender?.id !== me || sentRef.current.has(m.id)) continue;
+                const i = waiting.findIndex((p) => p.body === m.body);
+                if (i >= 0) absorbed.set(m.id, waiting.splice(i, 1)[0].key);
+            }
         }
         setSent((prev) => {
             let next: Map<string, ThreadEntry> | null = null;
@@ -141,7 +151,12 @@ export function useThread(threadKey: string | null, { pageSize = 50, markRead }:
         return { messages: (data.messages ?? []) as LiveMessage[], hasMore: !!data.hasMore };
     }, [pageSize]);
 
-    /** The latest page. On open, and after every reconnect. */
+    /**
+     * The latest page. On open, and after every reconnect. After a reconnect it
+     * pages back until it meets what's already held, so nothing missed while
+     * offline is skipped; after MAX_CATCH_UP_PAGES it starts the log afresh
+     * from the latest pages instead (scrolling up loads the rest).
+     */
     const loadLatest = useCallback(async () => {
         if (!threadKey) return;
         const gen = generation.current;
@@ -149,13 +164,25 @@ export function useThread(threadKey: string | null, { pageSize = 50, markRead }:
         try {
             const page = await fetchPage(threadKey);
             if (gen !== generation.current) return;
-            addSent(page.messages);
-            // Only the first page decides whether there's older history; a
-            // reconnect's refetch overlaps what's already held.
+            const fetched = [...page.messages]; // newest first
+            let more = page.hasMore;
             if (!firstPageLoaded.current) {
                 firstPageLoaded.current = true;
-                setHasMore(page.hasMore);
+                setHasMore(more);
+            } else if (sentRef.current.size) {
+                const meets = () => fetched.some((m) => sentRef.current.has(m.id));
+                for (let n = 0; more && !meets() && n < MAX_CATCH_UP_PAGES; n++) {
+                    const older = await fetchPage(threadKey, fetched[fetched.length - 1].id);
+                    if (gen !== generation.current) return;
+                    fetched.push(...older.messages);
+                    more = older.hasMore;
+                }
+                if (more && !meets()) {
+                    setSent(new Map()); // too far behind: drop the stale log and page back from here
+                    setHasMore(true);
+                }
             }
+            addSent(fetched);
             setError(null);
         } catch (err: any) {
             if (gen === generation.current) setError(err.message || 'Could not load messages');
@@ -209,7 +236,7 @@ export function useThread(threadKey: string | null, { pageSize = 50, markRead }:
     }, [loadLatest]);
 
     const status: ThreadStatus = useLiveThread(threadKey, {
-        onMessage: (m) => addSent([m]),
+        onMessage: (m) => addSent([m], { echo: true }),
         onReconnect: () => { loadLatest(); },
     });
 
@@ -239,8 +266,10 @@ export function useThread(threadKey: string | null, { pageSize = 50, markRead }:
             const m: LiveMessage = data.message;
             setSent((prev) => {
                 if (prev.has(m.id)) return prev;
+                // Keep React keys unique if an echo of a look-alike message took this key.
+                const keyTaken = [...prev.values()].some((e) => e.key === entry.key);
                 const next = new Map(prev);
-                next.set(m.id, fromServer(m, entry.key));
+                next.set(m.id, fromServer(m, keyTaken ? m.id : entry.key));
                 return next;
             });
             settle(null);

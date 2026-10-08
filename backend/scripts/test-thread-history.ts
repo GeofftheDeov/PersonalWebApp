@@ -278,6 +278,28 @@ async function main() {
     const elsewhere = await send(player, dmKey, { body: "t101 resend me", clientId: `t101-${RUN}-a` });
     check("reusing a clientId in another thread is refused (409)", elsewhere.status === 409,
       `got ${elsewhere.status} ${elsewhere.text}`);
+    // The bus fails once, after the insert: the send reports an error, and the
+    // resend must deliver it live rather than find a stored row nobody saw.
+    const realPublish = bus.publish.bind(bus);
+    let failNext = true;
+    (bus as any).publish = async (...args: Parameters<typeof bus.publish>) => {
+      if (failNext) { failNext = false; throw new Error("t101 bus down"); }
+      return realPublish(...args);
+    };
+    const quietErrors = console.error;
+    console.error = () => {};
+    const busDown = await send(player, strahdKey, { body: "t101 bus hiccup", clientId: `t101-${RUN}-b` });
+    console.error = quietErrors;
+    check("a send whose live publish fails reports a server error (500)", busDown.status === 500,
+      `got ${busDown.status} ${busDown.text}`);
+    const afterBusDown = await send(player, strahdKey, { body: "t101 bus hiccup", clientId: `t101-${RUN}-b` });
+    (bus as any).publish = realPublish;
+    check("...and its resend is stored and published as new (201), once",
+      afterBusDown.status === 201 && (await published("gamenight.message", afterBusDown.json?.message?.id)).length === 1,
+      `got ${afterBusDown.status} ${afterBusDown.text}`);
+    const hiccups = (await history(player, strahdKey, "?limit=200")).json?.messages?.filter((m: any) => m.body === "t101 bus hiccup");
+    check("...so the thread holds it exactly once", hiccups?.length === 1, `got ${hiccups?.length}`);
+
     const badClientId = await send(player, strahdKey, { body: "t101 x", clientId: "a b" });
     check("a malformed clientId is refused (400)", badClientId.status === 400, `got ${badClientId.status}`);
 

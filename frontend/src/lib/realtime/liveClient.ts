@@ -9,11 +9,16 @@
  * - Reconnects with exponential backoff and full jitter, except after an auth
  *   or protocol-version refusal: retrying with the same token can't help.
  * - Dispatches `message.created` to the handlers subscribed to its thread.
+ * - Dispatches frames about the person rather than one thread
+ *   (`thread.updated`, `thread.read`) to person-level subscribers
+ *   (`subscribePerson`), which the thread list uses (#102).
  * - There is no server-side replay. After a reconnect every subscriber's
- *   `onReconnect` runs so the open thread can refetch its latest page.
+ *   `onReconnect` runs so the open thread can refetch its latest page and the
+ *   thread list can refetch itself.
  *
- * The connection opens with the first subscription and closes a little after
- * the last one goes (so moving between pages doesn't churn the socket).
+ * The connection opens with the first subscription (thread or person) and
+ * closes a little after the last one goes (so moving between pages doesn't
+ * churn the socket).
  */
 
 export const PROTOCOL_VERSION = 1;
@@ -34,6 +39,34 @@ export interface LiveMessage {
 
 export interface ThreadHandlers {
     onMessage?: (message: LiveMessage, thread: string) => void;
+    /** The socket came back after a drop: refetch, since nothing is replayed. */
+    onReconnect?: () => void;
+}
+
+/** `thread.updated`: a thread's last activity, and this person's unread count in it, changed. */
+export interface ThreadUpdate {
+    thread: string;
+    lastActivityAt: string;
+    unreadCount: number;
+}
+
+/** `thread.read`: this person read a thread on some device (this one included). */
+export interface ThreadRead {
+    thread: string;
+    lastReadAt: string;
+    lastReadMessageId: string | null;
+    /** What's left unread after the position (newer messages someone else sent). */
+    unreadCount: number;
+}
+
+/**
+ * Handlers for frames about the signed-in person rather than one thread's
+ * conversation. They arrive for every thread the socket is subscribed to, so
+ * a list can follow all of them without subscribing to each.
+ */
+export interface PersonHandlers {
+    onThreadUpdated?: (update: ThreadUpdate) => void;
+    onThreadRead?: (read: ThreadRead) => void;
     /** The socket came back after a drop: refetch, since nothing is replayed. */
     onReconnect?: () => void;
 }
@@ -75,6 +108,8 @@ export class LiveClient {
     };
     private socket: SocketLike | null = null;
     private threads = new Map<string, Set<ThreadHandlers>>();
+    /** Person-level subscribers (see `subscribePerson`). */
+    private people = new Set<PersonHandlers>();
     /** The thread keys the server's last `ready` subscribed this socket to. */
     private serverThreads = new Set<string>();
     /** Threads that already cost one reconnect while subscribed (see `subscribe`); not retried until re-subscribed. */
@@ -126,8 +161,28 @@ export class LiveClient {
                 this.threads.delete(thread);
                 this.refreshedFor.delete(thread);
             }
-            if (this.threads.size === 0) this.scheduleIdleClose();
+            if (!this.hasSubscribers()) this.scheduleIdleClose();
         };
+    }
+
+    /**
+     * Listen to frames about the signed-in person rather than one thread
+     * (`thread.updated`, `thread.read`; see PersonHandlers). Connects if
+     * needed, and keeps the socket open like a thread subscription does, so a
+     * thread list stays live with no thread open.
+     */
+    subscribePerson(handlers: PersonHandlers): () => void {
+        this.people.add(handlers);
+        this.cancelIdleClose();
+        if (this.status === "idle" || this.status === "unauthorized") this.connect();
+        return () => {
+            this.people.delete(handlers);
+            if (!this.hasSubscribers()) this.scheduleIdleClose();
+        };
+    }
+
+    private hasSubscribers(): boolean {
+        return this.threads.size > 0 || this.people.size > 0;
     }
 
     /** Replace the open socket with a new one straight away, so the server works out its threads again. */
@@ -226,6 +281,7 @@ export class LiveClient {
                     for (const set of [...this.threads.values()]) {
                         for (const h of [...set]) safely(() => h.onReconnect?.());
                     }
+                    for (const h of [...this.people]) safely(() => h.onReconnect?.());
                 }
                 return;
             }
@@ -238,13 +294,31 @@ export class LiveClient {
                 for (const h of [...handlers]) safely(() => h.onMessage?.(frame.message, frame.thread));
                 return;
             }
+            // The thread list's frames (#102): about the person, so they go to person-level subscribers.
+            case "thread.updated": {
+                const update: ThreadUpdate = {
+                    thread: String(frame.thread), lastActivityAt: String(frame.lastActivityAt),
+                    unreadCount: Number(frame.unreadCount) || 0,
+                };
+                for (const h of [...this.people]) safely(() => h.onThreadUpdated?.(update));
+                return;
+            }
+            case "thread.read": {
+                const read: ThreadRead = {
+                    thread: String(frame.thread), lastReadAt: String(frame.lastReadAt),
+                    lastReadMessageId: frame.lastReadMessageId == null ? null : String(frame.lastReadMessageId),
+                    unreadCount: Number(frame.unreadCount) || 0,
+                };
+                for (const h of [...this.people]) safely(() => h.onThreadRead?.(read));
+                return;
+            }
             default:
                 return; // unknown frame types are ignored, so the server can add them
         }
     }
 
     private scheduleReconnect() {
-        if (this.threads.size === 0) return this.setStatus("idle");
+        if (!this.hasSubscribers()) return this.setStatus("idle");
         const ceiling = Math.min(this.opts.maxMs, this.opts.baseMs * 2 ** this.attempt);
         this.attempt++;
         const delay = Math.round(this.opts.random() * ceiling);
@@ -274,7 +348,7 @@ export class LiveClient {
 
     private scheduleIdleClose() {
         this.cancelIdleClose();
-        this.idleTimer = setTimeout(() => { this.idleTimer = null; if (this.threads.size === 0) this.close(); },
+        this.idleTimer = setTimeout(() => { this.idleTimer = null; if (!this.hasSubscribers()) this.close(); },
             this.opts.idleCloseMs);
     }
 

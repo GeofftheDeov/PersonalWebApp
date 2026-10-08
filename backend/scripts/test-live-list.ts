@@ -298,6 +298,55 @@ async function main() {
     await sleep(300);
     check("...and not the other party's", gmSockets.every((c) => readsFor(c, dm).length === 0),
       gmSockets.map((c) => JSON.stringify(readsFor(c, dm))).join(" | "));
+
+    console.log("\nRealtime client: the person-level subscription the thread list uses\n");
+
+    const { LiveClient } = await import(LIVE_CLIENT) as { LiveClient: LiveClientCtor };
+    const network = await flakyNetwork(port);
+    const lc = new LiveClient({
+      url: `ws://127.0.0.1:${network.port}${LIVE_PATH}`,
+      getToken: () => tokenFor(bard),
+      WebSocket,
+      backoff: { baseMs: 100, maxMs: 400 },
+      idleCloseMs: 200,
+    });
+    const listUpdates: Array<{ thread: string; unreadCount: number }> = [];
+    const listReads: Array<{ thread: string; unreadCount: number }> = [];
+    const listReconnects: number[] = [];
+    // No thread subscription at all: a closed dock still keeps its badge live.
+    const offPerson = lc.subscribePerson({
+      onThreadUpdated: (u) => listUpdates.push(u),
+      onThreadRead: (r) => listReads.push(r),
+      onReconnect: () => listReconnects.push(Date.now()),
+    });
+    check("a person-level subscription alone opens the socket", await until(() => lc.status === "open"), lc.status);
+
+    await send(`/api/messages/campaign/${table}`, gm, `to the list ${RUN}`);
+    check("it receives thread.updated with the person's unread count (the bard: 2)",
+      await until(() => listUpdates.some((u) => u.thread === thread && u.unreadCount === 2)), JSON.stringify(listUpdates));
+    const latest = await fetch(`${base}/api/messages/campaign/${table}?limit=1`,
+      { headers: { authorization: `Bearer ${tokenFor(bard)}` } }).then((r) => r.json()) as Array<{ _id: string }>;
+    // The bard reads on another device: an HTTP mark-read, not through this client.
+    await post(`/api/threads/${encodeURIComponent(thread)}/read`, bard, { messageId: latest[0]?._id });
+    check("it receives thread.read from the person's other device",
+      await until(() => listReads.some((r) => r.thread === thread && r.unreadCount === 0)), JSON.stringify(listReads));
+    check("the first connect isn't reported as a reconnect", listReconnects.length === 0);
+
+    await network.drop();
+    check("the client notices the network drop", await until(() => lc.status !== "open"), lc.status);
+    await sleep(300);
+    await network.restore();
+    check("after it reconnects on its own, the list's onReconnect runs once (so it refetches)",
+      await until(() => lc.status === "open" && listReconnects.length === 1), `${lc.status} ${listReconnects.length}`);
+    await send(`/api/messages/campaign/${table}`, gm, `after the drop ${RUN}`);
+    check("thread.updated flows again after the reconnect",
+      await until(() => listUpdates.some((u) => u.thread === thread && u.unreadCount === 1)), JSON.stringify(listUpdates));
+
+    offPerson();
+    check("when the last person-level subscription goes, the socket closes after the idle delay",
+      await until(() => lc.status === "idle", 2_000), lc.status);
+    lc.close();
+    await network.close();
   } finally {
     for (const c of opened) c.ws.terminate();
     await live.close();

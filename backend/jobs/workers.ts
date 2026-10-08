@@ -4,7 +4,7 @@ import { pullNotionTasks, pushTaskToNotion } from "../services/notionSync.js";
 import { pushTaskToSalesforce, pullTasksFromSalesforce } from "../services/salesforceService.js";
 import { runPersonSync } from "./personSync.js";
 import {
-    getBullConnectionOptions,
+    getBullOptions,
     QUEUE_NAMES,
     enqueueSFWriteback,
     enqueueNotionWriteback,
@@ -191,14 +191,14 @@ async function sfPollProcessor(_job: Job): Promise<void> {
  * No-op (returns a no-op teardown) when Redis is unavailable.
  */
 export function startWorkers(): () => Promise<void> {
-    const opts = getBullConnectionOptions();
+    const opts = getBullOptions();
     if (!opts) {
         console.log("[bullmq] No Redis — workers not started (local dev mode)");
         return async () => {};
     }
 
     _notionSyncWorker = new Worker(QUEUE_NAMES.NOTION_SYNC, notionSyncProcessor, {
-        connection: opts,
+        ...opts,
         concurrency: 1, // Notion API rate-limited; one run at a time
     });
     _notionSyncWorker.on("completed", (job) =>
@@ -209,7 +209,7 @@ export function startWorkers(): () => Promise<void> {
     );
 
     _sfWritebackWorker = new Worker(QUEUE_NAMES.SF_WRITEBACK, sfWritebackProcessor, {
-        connection: opts,
+        ...opts,
         concurrency: 3,
     });
     _sfWritebackWorker.on("completed", (job) =>
@@ -220,7 +220,7 @@ export function startWorkers(): () => Promise<void> {
     );
 
     _notionWritebackWorker = new Worker(QUEUE_NAMES.NOTION_WRITEBACK, notionWritebackProcessor, {
-        connection: opts,
+        ...opts,
         concurrency: 2,
     });
     _notionWritebackWorker.on("completed", (job) =>
@@ -231,7 +231,7 @@ export function startWorkers(): () => Promise<void> {
     );
 
     _sfPollWorker = new Worker(QUEUE_NAMES.SF_POLL, sfPollProcessor, {
-        connection: opts,
+        ...opts,
         concurrency: 1,
     });
     _sfPollWorker.on("completed", (job) =>
@@ -250,7 +250,7 @@ export function startWorkers(): () => Promise<void> {
             `(created ${r.drain!.created}, updated ${r.drain!.updated}, failed ${r.drain!.failed}); ` +
             `merge updated ${r.merge!.updated}, created ${r.merge!.created}`);
         return r;
-    }, { connection: opts, concurrency: 1 });
+    }, { ...opts, concurrency: 1 });
     _personSyncWorker.on("failed", (job, err) =>
         console.error(`[bullmq] person-sync failed: ${err.message}`)
     );

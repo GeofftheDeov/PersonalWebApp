@@ -38,12 +38,42 @@ export const PERSON_SYNC_SCHEDULE = { pattern: "0 3 * * *", tz: "America/Chicago
 const PERSON_SYNC_JOB_OPTS = { attempts: 1, removeOnComplete: { count: 30 }, removeOnFail: { count: 60 } };
 
 export function getPersonSyncQueue(): Queue | null {
-    const opts = getBullConnectionOptions();
+    const opts = getBullOptions();
     if (!opts) return null;
     if (!_personSyncQueue) {
-        _personSyncQueue = new Queue(QUEUE_NAMES.PERSON_SYNC, { connection: opts });
+        _personSyncQueue = new Queue(QUEUE_NAMES.PERSON_SYNC, opts);
     }
     return _personSyncQueue;
+}
+
+/**
+ * BullMQ key prefix (#129). Prod and dev share one Redis, and BullMQ's default
+ * prefix is `bull`, so without this both environments would read and write the
+ * same queues: either environment's worker could run the other's Salesforce and
+ * Notion jobs against its own database and credentials. BULLMQ_NAMESPACE puts
+ * the environment in front, `prod` → `prod:bull:<queue>:…`, the same shape as
+ * the event bus namespace, so `prod:*` / `dev:*` find only one environment's
+ * keys. Unset or blank keeps `bull` (local dev). Anything but letters, digits,
+ * `-` and `_` throws, so a task fails at boot rather than running on the wrong
+ * keys. Cutover: jobs/NAMESPACES.md.
+ */
+export function getBullPrefix(): string {
+    const ns = process.env.BULLMQ_NAMESPACE?.trim();
+    if (!ns) return "bull";
+    if (!/^[A-Za-z0-9_-]+$/.test(ns)) {
+        throw new Error(`BULLMQ_NAMESPACE may only use letters, digits, "-" and "_" (got ${JSON.stringify(ns)})`);
+    }
+    return `${ns}:bull`;
+}
+
+/**
+ * Options for every BullMQ Queue and Worker: the Redis connection and the
+ * per-environment prefix. Null when REDIS_URL is unset (local dev).
+ */
+export function getBullOptions() {
+    const connection = getBullConnectionOptions();
+    if (!connection) return null;
+    return { connection, prefix: getBullPrefix() };
 }
 
 /**
@@ -62,37 +92,37 @@ export function getBullConnectionOptions(): { url: string; maxRetriesPerRequest:
 }
 
 export function getNotionSyncQueue(): Queue | null {
-    const opts = getBullConnectionOptions();
+    const opts = getBullOptions();
     if (!opts) return null;
     if (!_notionQueue) {
-        _notionQueue = new Queue(QUEUE_NAMES.NOTION_SYNC, { connection: opts });
+        _notionQueue = new Queue(QUEUE_NAMES.NOTION_SYNC, opts);
     }
     return _notionQueue;
 }
 
 export function getSFWritebackQueue(): Queue | null {
-    const opts = getBullConnectionOptions();
+    const opts = getBullOptions();
     if (!opts) return null;
     if (!_sfQueue) {
-        _sfQueue = new Queue(QUEUE_NAMES.SF_WRITEBACK, { connection: opts });
+        _sfQueue = new Queue(QUEUE_NAMES.SF_WRITEBACK, opts);
     }
     return _sfQueue;
 }
 
 export function getNotionWritebackQueue(): Queue | null {
-    const opts = getBullConnectionOptions();
+    const opts = getBullOptions();
     if (!opts) return null;
     if (!_notionWritebackQueue) {
-        _notionWritebackQueue = new Queue(QUEUE_NAMES.NOTION_WRITEBACK, { connection: opts });
+        _notionWritebackQueue = new Queue(QUEUE_NAMES.NOTION_WRITEBACK, opts);
     }
     return _notionWritebackQueue;
 }
 
 export function getSFPollQueue(): Queue | null {
-    const opts = getBullConnectionOptions();
+    const opts = getBullOptions();
     if (!opts) return null;
     if (!_sfPollQueue) {
-        _sfPollQueue = new Queue(QUEUE_NAMES.SF_POLL, { connection: opts });
+        _sfPollQueue = new Queue(QUEUE_NAMES.SF_POLL, opts);
     }
     return _sfPollQueue;
 }

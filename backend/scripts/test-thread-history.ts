@@ -215,8 +215,9 @@ async function main() {
     console.log("\nSend by thread key\n");
 
     const seen: any[] = [];
-    const offCampaign = bus.subscribe("gamenight.message", (p) => { seen.push(["gamenight.message", p]); });
-    const offDm = bus.subscribe("social.dm", (p) => { seen.push(["social.dm", p]); });
+    // Broadcast subscriptions are what the live channel listens on, on either bus.
+    const offCampaign = await bus.subscribeBroadcast("gamenight.message", (p) => { seen.push(["gamenight.message", p]); });
+    const offDm = await bus.subscribeBroadcast("social.dm", (p) => { seen.push(["social.dm", p]); });
     const published = async (name: string, messageId: string) => {
       for (let i = 0; i < 20 && !seen.some(([n, p]) => n === name && p.messageId === messageId); i++) {
         await new Promise((r) => setTimeout(r, 25));

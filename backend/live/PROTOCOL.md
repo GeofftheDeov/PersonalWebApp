@@ -4,7 +4,7 @@ One WebSocket per signed-in person. It carries live events for every thread that
 
 - Server: `backend/live/liveChannel.ts`
 - Web client: `frontend/src/lib/realtime/liveClient.ts`, wrapped by the `useLiveThread` hook (threads), `useTyping` (typing) and `useThreads` (the thread list)
-- Tests: `backend/scripts/test-live-channel.ts` (campaigns, auth, heartbeat, client), `backend/scripts/test-live-dms.ts` (DMs), `backend/scripts/test-live-typing.ts` (typing), `backend/scripts/test-live-list.ts` (`thread.updated`, `thread.read`), `backend/scripts/test-live-two-tasks.ts` (every frame across two backend processes), `backend/scripts/test-live-redis-recovery.ts` (Redis outages), `backend/scripts/test-live-access.ts` (access changes, token expiry)
+- Tests: `backend/scripts/test-live-channel.ts` (campaigns, auth, heartbeat, client), `backend/scripts/test-live-dms.ts` (DMs), `backend/scripts/test-live-typing.ts` (typing), `backend/scripts/test-live-list.ts` (`thread.updated`, `thread.read`), `backend/scripts/test-live-two-tasks.ts` (every frame across two backend processes), `backend/scripts/test-live-redis-recovery.ts` (Redis outages), `backend/scripts/test-live-access.ts` (access changes, token expiry), `backend/scripts/test-live-combined.ts` (how the tickets' frames combine: access changes with the thread list and typing, resends with unread counts, namespaces, per-stream dedupe)
 
 ## Connecting
 

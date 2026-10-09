@@ -20,7 +20,12 @@
  *   - a friend DM sent through task A reaches the other one of the pair on
  *     task B, and DM typing crosses back;
  *   - each task's log names the people whose sockets it holds, and the task
- *     (what the dev check reads from CloudWatch).
+ *     (what the dev check reads from CloudWatch);
+ *   - access follows membership across tasks (#105): someone who leaves
+ *     through task A stops getting the campaign's messages, thread.updated
+ *     and typing on task B, on the same socket; and a socket whose token
+ *     expires is closed (4001) by its task while the person's other sockets,
+ *     on either task, carry on.
  *
  * Needs a throwaway database loaded from db/schema.sql and a local Redis (it
  * refuses anything but localhost for either). It deletes every row it creates.
@@ -52,12 +57,14 @@ async function runTask() {
   const http = await import("http");
   const { default: messageRoutes } = await import("../routes/messageRoutes.js");
   const { default: threadRoutes } = await import("../routes/threadRoutes.js");
+  const { default: campaignMemberRoutes } = await import("../routes/campaignMemberRoutes.js");
   const { startEventBus, stopEventBus } = await import("../events/index.js");
   const { startLiveChannel } = await import("../live/startLiveChannel.js");
   const app = express();
   app.use(express.json());
   app.use("/api/messages", messageRoutes);
   app.use("/api/threads", threadRoutes);
+  app.use("/api/campaign-members", campaignMemberRoutes);
   await startEventBus();
   const server = http.createServer(app);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
@@ -100,7 +107,10 @@ type Frame = { type: string; [k: string]: any };
 type Client = {
   ws: WebSocket;
   frames: Frame[];
+  readonly closeCode: number | null;
   ready(): Promise<boolean>;
+  /** The threads the latest `ready` listed. */
+  threads(): string[];
   of(type: string, thread?: string): Frame[];
   typing(thread: string): void;
 };
@@ -174,14 +184,17 @@ async function main() {
     await pool.query(`DELETE FROM campaigns WHERE id = ANY($1::uuid[])`, [campaigns]);
     await pool.query(`DELETE FROM accounts WHERE id = ANY($1::uuid[])`, [accounts]);
   };
-  const tokenFor = (p: Person) => signJwt({ id: p.id, email: p.email });
+  const tokenFor = (p: Person, expiresIn?: number) =>
+    signJwt({ id: p.id, email: p.email }, expiresIn ? { expiresIn } : undefined);
 
   const opened: Client[] = [];
-  function client(task: Task, who: Person): Client {
+  function client(task: Task, who: Person, token = tokenFor(who)): Client {
     const ws = new WebSocket(task.wsUrl);
     const frames: Frame[] = [];
+    let closeCode: number | null = null;
     ws.on("error", () => { /* surfaces as close */ });
-    ws.on("open", () => ws.send(JSON.stringify({ type: "auth", v: PROTOCOL_VERSION, token: tokenFor(who) })));
+    ws.on("close", (code) => { closeCode = code; });
+    ws.on("open", () => ws.send(JSON.stringify({ type: "auth", v: PROTOCOL_VERSION, token })));
     ws.on("message", (data) => {
       let frame: Frame;
       try { frame = JSON.parse(String(data)); } catch { return; }
@@ -190,7 +203,9 @@ async function main() {
     });
     const c: Client = {
       ws, frames,
+      get closeCode() { return closeCode; },
       ready: () => until(() => frames.some((f) => f.type === "ready")),
+      threads: () => frames.filter((f) => f.type === "ready").at(-1)?.threads ?? [],
       of: (type: string, thread?: string) => frames.filter((f) => f.type === type && (!thread || f.thread === thread)),
       typing: (thread: string) => ws.send(JSON.stringify({ type: "typing", thread })),
     };
@@ -328,6 +343,42 @@ async function main() {
       await until(() => A.log.some((l) => /^\[live\] socket closed: person \S+, code \d+, after \d+s, task \S+$/.test(l)
         && l.includes(outsider.id))),
       A.log.filter((l) => l.startsWith("[live]")).join("\n          "));
+
+    // Cross-ticket (integration, spec #58): #105's access changes and token
+    // expiry on #106's two tasks.
+    console.log("\naccess changes and token expiry cross tasks\n");
+
+    const { rows: [maraMembership] } = await pool.query(
+      `SELECT id FROM campaign_members WHERE campaign_id = $1 AND person_id = $2`, [table, mara.id]);
+    const leave = await fetch(`${A.base}/api/campaign-members/${maraMembership.id}`,
+      { method: "DELETE", headers: { authorization: `Bearer ${tokenFor(mara)}` } });
+    check("mara leaves the campaign through task A", leave.ok, `status ${leave.status}`);
+    check("...and her socket on task B gets a fresh ready without it, on the same connection",
+      await until(() => !maraSocket.threads().includes(thread)) && maraSocket.ws.readyState === WebSocket.OPEN,
+      JSON.stringify(maraSocket.threads()));
+    const maraBefore = { updated: maraSocket.of("thread.updated", thread).length, typing: maraSocket.of("typing", thread).length };
+    const bobTypingBefore = typing(bobSocket).length;
+    const afterLeave = await sendTo(A, thread, alice, `after mara left ${RUN}`);
+    await sleep(300); // past the server's typing guard since alice's last frame
+    aliceLaptop.typing(thread);
+    check("a message and typing through task A after she left still reach bob on task B",
+      await until(() => got(bobSocket, afterLeave.id) === 1 && typing(bobSocket).length === bobTypingBefore + 1),
+      `${got(bobSocket, afterLeave.id)} / ${typing(bobSocket).length}`);
+    await sleep(400);
+    check("...but not mara: no message.created, thread.updated or typing",
+      got(maraSocket, afterLeave.id) === 0
+        && maraSocket.of("thread.updated", thread).length === maraBefore.updated
+        && maraSocket.of("typing", thread).length === maraBefore.typing,
+      JSON.stringify(maraSocket.frames.slice(-5)));
+
+    const shortLived = client(B, alice, tokenFor(alice, 2));
+    check("alice opens a third socket on task B with a token about to expire", await shortLived.ready());
+    check("...task B closes it with 4001 when the token expires",
+      await until(() => shortLived.closeCode === 4001, 5_000), `close code ${shortLived.closeCode}`);
+    const afterExpiry = await sendTo(B, thread, bob, `after expiry ${RUN}`);
+    check("...while her other sockets, on both tasks, stay open and keep getting messages",
+      await until(() => got(aliceLaptop, afterExpiry.id) === 1 && got(alicePhone, afterExpiry.id) === 1)
+        && aliceLaptop.ws.readyState === WebSocket.OPEN && alicePhone.ws.readyState === WebSocket.OPEN);
   } finally {
     for (const c of opened) c.ws.terminate();
     for (const t of tasks) {

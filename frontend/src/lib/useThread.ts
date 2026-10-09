@@ -23,6 +23,8 @@ import { useLiveThread, type LiveMessage, type ThreadStatus } from './realtime/u
  *   arrives while the thread is open. Pass `markRead` (e.g. useThreads'
  *   markRead, which also clears the list's count at once); without it the hook
  *   posts the read position itself.
+ * - `onSent` runs once per send the server confirms, after `send` or `resend`;
+ *   never for a failed one.
  */
 
 export interface ThreadEntry {
@@ -42,6 +44,8 @@ export interface ThreadEntry {
 export interface UseThreadOptions {
     pageSize?: number;
     markRead?: (threadKey: string, messageId: string) => void;
+    /** Runs when the server confirms one of your sends (a first send or a resend), e.g. useTyping's `sent` (#103). */
+    onSent?: (message: LiveMessage) => void;
 }
 
 const token = () => (typeof window !== 'undefined' ? localStorage.getItem('token') : null);
@@ -87,7 +91,7 @@ async function postRead(threadKey: string, messageId: string) {
     }).catch(() => { /* the next open marks it again */ });
 }
 
-export function useThread(threadKey: string | null, { pageSize = 50, markRead }: UseThreadOptions = {}) {
+export function useThread(threadKey: string | null, { pageSize = 50, markRead, onSent }: UseThreadOptions = {}) {
     /** Stored messages by id. */
     const [sent, setSent] = useState<Map<string, ThreadEntry>>(() => new Map());
     /** Your sends the server hasn't confirmed, in the order you sent them. */
@@ -242,6 +246,9 @@ export function useThread(threadKey: string | null, { pageSize = 50, markRead }:
 
     /* -------------------------------- send ------------------------------- */
 
+    const onSentRef = useRef(onSent);
+    onSentRef.current = onSent;
+
     const post = useCallback(async (entry: ThreadEntry) => {
         if (!threadKey) return;
         const gen = generation.current;
@@ -273,6 +280,7 @@ export function useThread(threadKey: string | null, { pageSize = 50, markRead }:
                 return next;
             });
             settle(null);
+            try { onSentRef.current?.(m); } catch { /* the caller's problem, not the send's */ }
         } catch {
             const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
             settle({ state: 'failed', error: offline ? "Not sent: you're offline" : 'Not sent: no connection to the server' });

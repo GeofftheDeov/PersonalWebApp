@@ -6,6 +6,8 @@ import { bus as defaultBus, type EventBus, type EventMap } from "../events/index
 import { verifyJwt } from "../utils/jwt.js";
 import { resolveAccountId } from "../utils/accountRefs.js";
 import { campaignThreadKey, dmThreadKey, visibleThreadKeys, type ThreadKey } from "../services/threads.js";
+import { canAccessThread } from "../services/threads.js";
+import { findPersonById, personDisplayName } from "../utils/personUtils.js";
 
 /**
  * The live channel (#98, spec #58): one authenticated WebSocket per person,
@@ -42,6 +44,15 @@ export const CLOSE_UNAUTHORIZED = 4001;
 export const CLOSE_UNSUPPORTED_VERSION = 4002;
 
 export const DEFAULT_PING_INTERVAL_MS = 25_000;
+/** How long a `typing` frame shows without a refresh (#103). Clients refresh every 3 s. */
+export const TYPING_EXPIRES_IN_MS = 5_000;
+/**
+ * Typing frames for one thread on one socket closer together than this are
+ * dropped: flood control only. Kept well under a second, because a client
+ * resets its 3 s throttle when its person sends, and the first keystroke of
+ * the next message can follow the last frame closely.
+ */
+export const TYPING_MIN_INTERVAL_MS = 250;
 export const DEFAULT_AUTH_TIMEOUT_MS = 10_000;
 /** Client frames are tiny (auth, pong, later typing); anything bigger is not ours. */
 const MAX_FRAME_BYTES = 16 * 1024;
@@ -72,7 +83,17 @@ export interface LiveMessage {
 export type ServerFrame =
     | { type: "ready"; v: number; threads: ThreadKey[] }
     | { type: "message.created"; thread: ThreadKey; message: LiveMessage }
-    | { type: "ping" };
+    | { type: "ping" }
+    | TypingFrame;
+
+/** Someone else is typing in a thread you can see (#103). */
+export interface TypingFrame {
+    type: "typing";
+    thread: ThreadKey;
+    personId: string;
+    name: string;
+    expiresInMs: number;
+}
 
 interface Connection {
     ws: WebSocket;
@@ -132,6 +153,66 @@ export async function attachLiveChannel(
             deliver(thread, { type: "message.created", thread, message: liveMessage(payload) });
         }),
     ];
+
+    /* ---------------- typing (#103) ---------------- */
+    // A client's `typing` frame is checked, then published on the bus's
+    // ephemeral path, so it reaches the thread on every backend task and is
+    // never stored. Each process delivers it to the thread's subscribers
+    // except the typist's own sockets: nobody needs to see themselves typing.
+
+    /** Per connection: the display name (looked up once) and when each thread last accepted a frame. */
+    const typists = new WeakMap<Connection, { name?: Promise<string>; lastAt: Map<ThreadKey, number> }>();
+
+    // No `firstSighting` here: a typing event is published once, a duplicate
+    // would only refresh an indicator, and its ids would crowd message ids out
+    // of the shared seen set.
+    unsubscribes.push(await bus.subscribeBroadcast("letters.typing", (payload) => {
+        const frame: TypingFrame = {
+            type: "typing",
+            thread: payload.threadKey,
+            personId: payload.personId,
+            name: payload.name,
+            expiresInMs: payload.expiresInMs,
+        };
+        const data = JSON.stringify(frame);
+        for (const conn of byThread.get(payload.threadKey) ?? []) {
+            if (conn.personId === payload.personId) continue;
+            if (conn.ws.readyState === WebSocket.OPEN) conn.ws.send(data);
+        }
+    }));
+
+    async function onTyping(conn: Connection, thread: unknown) {
+        const personId = conn.personId;
+        // Only threads this socket is subscribed to: nobody else could see the
+        // typing anyway, and it bounds what an arbitrary key can cost (the
+        // guard map below, the access check).
+        if (!personId || typeof thread !== "string" || !conn.threads.has(thread)) return;
+        let state = typists.get(conn);
+        if (!state) typists.set(conn, (state = { lastAt: new Map() }));
+        // Clients send at most one frame every 3 s (sooner only after sending
+        // a message); a flood is dropped here, before it costs an access check.
+        const now = Date.now();
+        if (now - (state.lastAt.get(thread) ?? -Infinity) < TYPING_MIN_INTERVAL_MS) return;
+        state.lastAt.set(thread, now);
+        // Subscriptions are fixed at connect; access may have ended since (a campaign left).
+        if (!(await canAccessThread({ id: personId }, thread))) return;
+        const lookup = state.name ??= findPersonById(personId, "name firstName lastName handle email")
+            .then((person) => personDisplayName(person?.doc));
+        let name: string;
+        try {
+            name = await lookup;
+        } catch (err) {
+            if (state.name === lookup) state.name = undefined; // try again on the next frame
+            throw err;
+        }
+        await bus.publishEphemeral("letters.typing", {
+            threadKey: thread,
+            personId,
+            name,
+            expiresInMs: TYPING_EXPIRES_IN_MS,
+        });
+    }
+    /* ---------------- end typing ---------------- */
 
     function subscribe(conn: Connection, threads: ThreadKey[]) {
         for (const key of threads) {
@@ -231,8 +312,11 @@ export async function attachLiveChannel(
     });
 
     /** Client → server frames after auth. `pong` needs nothing beyond marking the socket alive. */
-    function onFrame(_conn: Connection, _frame: any) {
+    function onFrame(conn: Connection, frame: any) {
         /* pong: handled by `alive`; unknown types are ignored for forward compatibility */
+        if (frame?.type === "typing") {
+            onTyping(conn, frame.thread).catch((err) => console.error("[live] typing failed:", err?.message));
+        }
     }
 
     const heartbeat = setInterval(() => {

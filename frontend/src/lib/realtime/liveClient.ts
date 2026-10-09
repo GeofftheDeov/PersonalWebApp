@@ -9,6 +9,7 @@
  * - Reconnects with exponential backoff and full jitter, except after an auth
  *   or protocol-version refusal: retrying with the same token can't help.
  * - Dispatches `message.created` to the handlers subscribed to its thread.
+ * - Sends `typing` (`sendTyping`) and dispatches others' `typing` to `onTyping` (#103).
  * - There is no server-side replay. After a reconnect every subscriber's
  *   `onReconnect` runs so the open thread can refetch its latest page.
  *
@@ -32,10 +33,19 @@ export interface LiveMessage {
     eventId?: string;
 }
 
+/** Someone else is typing in a thread (#103); the server never sends you your own. */
+export interface LiveTyping {
+    personId: string;
+    name: string;
+    expiresInMs: number;
+}
+
 export interface ThreadHandlers {
     onMessage?: (message: LiveMessage, thread: string) => void;
     /** The socket came back after a drop: refetch, since nothing is replayed. */
     onReconnect?: () => void;
+    /** A `typing` frame for this thread (#103). typing.ts turns these into an indicator. */
+    onTyping?: (typing: LiveTyping, thread: string) => void;
 }
 
 /** The slice of the browser WebSocket this client uses; `ws` fits it too. */
@@ -153,6 +163,18 @@ export class LiveClient {
         return this.serverThreads.has(thread) ? "open" : "unavailable";
     }
 
+    /**
+     * Tell the thread's other members you're typing (#103). Sends straight
+     * away; throttling to one frame every 3 s is the caller's job (see
+     * typing.ts). Returns false when there is no open socket to send on.
+     */
+    sendTyping(thread: string): boolean {
+        const socket = this.socket;
+        if (this.status !== "open" || !socket || socket.readyState !== OPEN) return false;
+        socket.send(JSON.stringify({ type: "typing", thread }));
+        return true;
+    }
+
     onStatus(listener: (status: LiveStatus) => void): () => void {
         this.statusListeners.add(listener);
         return () => this.statusListeners.delete(listener);
@@ -236,6 +258,17 @@ export class LiveClient {
                 const handlers = this.threads.get(frame.thread);
                 if (!handlers) return;
                 for (const h of [...handlers]) safely(() => h.onMessage?.(frame.message, frame.thread));
+                return;
+            }
+            case "typing": { // #103
+                const handlers = this.threads.get(frame.thread);
+                if (!handlers) return;
+                const typing: LiveTyping = {
+                    personId: String(frame.personId),
+                    name: String(frame.name ?? ""),
+                    expiresInMs: Number(frame.expiresInMs),
+                };
+                for (const h of [...handlers]) safely(() => h.onTyping?.(typing, frame.thread));
                 return;
             }
             default:

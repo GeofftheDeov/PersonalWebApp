@@ -7,6 +7,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MessageSquare, Send, WifiOff, Bold, Italic, Code, List, ListOrdered } from 'lucide-react';
 import { campaignThreadKey } from '@/lib/realtime/threadKeys';
+import { useTyping } from '@/lib/realtime/useTyping';
 import { myAccountId, useThread } from '@/lib/useThread';
 import { useThreadScroll } from '@/lib/useThreadScroll';
 
@@ -81,16 +82,24 @@ export default function CampaignChat({ campaignId }: { campaignId: string }) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const myId = myAccountId();
 
-    const thread = useThread(campaignId ? campaignThreadKey(campaignId) : null);
+    const threadKey = campaignId ? campaignThreadKey(campaignId) : null;
+    // "Theo is writing…" (#103): announce while the draft has text; others' indicators below the history.
+    const { label: typingText, typing, sent: typingSent } = useTyping(threadKey);
+    // A confirmed send (or resend) ends the typing burst, so the next keystroke announces at once.
+    const thread = useThread(threadKey, { onSent: typingSent });
     const { messages } = thread;
     const connected = thread.status === 'open';
     const onScroll = useThreadScroll(scrollRef, messages, { onNearTop: thread.loadOlder, canLoadMore: thread.hasMore });
 
-    // Tiptap 3 doesn't re-render on keystrokes, so track emptiness for the SEND button here.
+    // Tiptap 3 doesn't re-render on keystrokes, so track emptiness for the SEND button here,
+    // and announce typing (#103) from the same place while the draft has text.
     const [isDraftEmpty, setDraftEmpty] = useState(true);
     const editor = useEditor({
         extensions: [StarterKit],
-        onUpdate: ({ editor }) => setDraftEmpty(editor.isEmpty),
+        onUpdate: ({ editor }) => {
+            setDraftEmpty(editor.isEmpty);
+            if (!editor.isEmpty) typing();
+        },
         editorProps: {
             attributes: {
                 class: 'flex-grow p-3 bg-white dark:bg-slate-900 text-black dark:text-white font-permanent text-sm outline-none min-h-[44px] max-h-40 overflow-y-auto focus:bg-yellow-50 dark:focus:bg-slate-800 prose prose-sm dark:prose-invert max-w-none',
@@ -184,6 +193,11 @@ export default function CampaignChat({ campaignId }: { campaignId: string }) {
                         );
                     })}
                 </div>
+
+                {/* Who else is writing (#103); fixed height so the layout doesn't jump */}
+                <p aria-live="polite" className="h-6 px-4 font-permanent text-[11px] italic text-zinc-500 dark:text-zinc-400 truncate">
+                    {typingText}
+                </p>
 
                 {/* Formatting toolbar */}
                 <div className="flex gap-1 px-3 py-2 border-t-2 border-black/20 dark:border-white/10 bg-zinc-50 dark:bg-slate-900">

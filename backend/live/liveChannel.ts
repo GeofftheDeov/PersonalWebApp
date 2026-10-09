@@ -1,6 +1,7 @@
 import type { IncomingMessage, Server as HttpServer } from "http";
 import type { Server as HttpsServer } from "https";
 import type { Duplex } from "stream";
+import os from "os";
 import { WebSocketServer, WebSocket, type RawData } from "ws";
 import { bus as defaultBus, type EventBus, type EventMap } from "../events/index.js";
 import { verifyJwt } from "../utils/jwt.js";
@@ -60,6 +61,11 @@ export const DEFAULT_AUTH_TIMEOUT_MS = 10_000;
 const MAX_FRAME_BYTES = 16 * 1024;
 /** Recent event ids, so an event that reaches this process twice is sent once. */
 const SEEN_EVENT_IDS = 1_000;
+/**
+ * Names this backend task in the socket open/closed log lines (#106), so the
+ * logs show which task holds whose socket when more than one runs.
+ */
+const TASK = `${process.env.HOSTNAME || os.hostname()}/${process.pid}`;
 
 export interface LiveChannelOptions {
     path?: string;
@@ -346,6 +352,7 @@ export async function attachLiveChannel(
         byPerson.get(personId)!.add(conn);
         subscribe(conn, threads);
         send(conn.ws, { type: "ready", v: PROTOCOL_VERSION, threads });
+        console.log(`[live] socket open: person ${personId}, ${threads.length} threads, task ${TASK}`);
     }
 
     wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
@@ -395,8 +402,13 @@ export async function attachLiveChannel(
             onFrame(conn, frame);
         });
 
-        ws.on("close", () => {
+        const openedAt = Date.now();
+        ws.on("close", (code: number) => {
             clearTimeout(authTimer);
+            if (conn.personId) {
+                const secs = Math.round((Date.now() - openedAt) / 1000);
+                console.log(`[live] socket closed: person ${conn.personId}, code ${code}, after ${secs}s, task ${TASK}`);
+            }
             forget(conn);
         });
         ws.on("error", () => { /* followed by close */ });

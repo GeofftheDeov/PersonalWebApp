@@ -1,213 +1,93 @@
 import express from "express";
-import { isUuid } from "../db/model.js";
-import Message from "../models/Message.js";
-import Campaign from "../models/Campaign.js";
 import { auth } from "../middleware/auth.js";
-import { canAccessThread, campaignThreadKey, dmKeyFor, dmThreadKey } from "../services/threads.js";
-import { bus } from "../events/index.js";
-import { notify } from "../utils/notify.js";
-import { findPersonById, findCampaignPeopleIds, personDisplayName } from "../utils/personUtils.js";
+import { campaignThreadKey, dmThreadKey } from "../services/threads.js";
+import {
+    sendThreadMessage,
+    threadHistory,
+    type HistoryResult,
+    type MessageRow,
+    type SendResult,
+} from "../services/threadMessages.js";
 
 /*
- * Campaign chat (Table Talk) and friend DMs: history and send over REST. Live
- * delivery is the live channel's job (backend/live/liveChannel.ts): sending
- * publishes gamenight.message / social.dm on the bus, and the channel forwards
- * each one to the sockets subscribed to its thread. The SSE streams that used
- * to live here were retired with #99.
+ * Campaign chat (Table Talk) and friend DMs by campaign / friend id: thin
+ * aliases over the thread-keyed endpoints (#101; routes/threadRoutes.ts,
+ * services/threadMessages.ts) until every client has moved to those. They
+ * answer as they always have: a bare array of messages in the model's shape
+ * for history, the saved message for send, and the same error strings.
+ * Live delivery is the live channel's job (backend/live/liveChannel.ts).
  */
 const router = express.Router();
 
-/** Auth check on the campaign, shared by both campaign endpoints. Threads owns the rule. */
-async function assertCampaignAccess(user: any, campaignId: string): Promise<boolean> {
-    return canAccessThread(user, campaignThreadKey(campaignId));
+type Kind = "campaign" | "dm";
+
+const FORBIDDEN: Record<Kind, string> = {
+    campaign: "Not a member of this campaign",
+    dm: "You can only message friends",
+};
+
+/** A message as these endpoints always returned it: the Message model's document. */
+const legacyMessage = (row: MessageRow) => ({
+    campaign: row.campaign_id,
+    event: row.event_id,
+    dmKey: row.dm_key,
+    recipient: row.recipient,
+    sender: { id: row.sender_id, name: row.sender_name, email: row.sender_email },
+    body: row.body,
+    createdAt: row.created_at,
+    _id: row.id,
+    id: row.id,
+});
+
+function legacyError(kind: Kind, reason: Exclude<HistoryResult | SendResult, { ok: true }>["reason"]): [number, string] {
+    switch (reason) {
+        // A malformed id was always just "not yours".
+        case "invalid-thread": case "forbidden": return [403, FORBIDDEN[kind]];
+        case "empty-body": return [400, "body is required"];
+        case "body-too-long": return [400, "body is too long (4000 characters at most)"];
+        case "invalid-before": return [400, "before must be a message id in this thread or a timestamp"];
+        case "invalid-client-id": return [400, "clientId must be 8-64 letters, digits, '-' or '_'"];
+        case "client-id-conflict": return [409, "That clientId was already used for another message"];
+    }
 }
 
-/* ------------------------------------------------------------------ */
-/* GET /api/messages/campaign/:campaignId — history (newest first)     */
-/* Query: ?limit=50&before=<ISO date or message id>                    */
-/* ------------------------------------------------------------------ */
-router.get("/campaign/:campaignId", auth, async (req: any, res) => {
+const threadKeyOf = (kind: Kind, req: any) =>
+    kind === "campaign" ? campaignThreadKey(req.params.campaignId) : dmThreadKey(req.user.id, req.params.userId);
+
+/** GET history, newest first. Query: ?limit=50&before=<ISO date or message id> */
+const history = (kind: Kind) => async (req: any, res: any) => {
     try {
-        const { campaignId } = req.params;
-        if (!(await assertCampaignAccess(req.user, campaignId))) {
-            return res.status(403).json({ error: "Not a member of this campaign" });
+        const result = await threadHistory(req.user, threadKeyOf(kind, req), req.query);
+        if (!result.ok) {
+            const [status, error] = legacyError(kind, result.reason);
+            return res.status(status).json({ error });
         }
-
-        const limit = Math.min(Number(req.query.limit) || 50, 200);
-        const query: any = { campaign: campaignId };
-        if (req.query.before) {
-            const before = String(req.query.before);
-            query.createdAt = {
-                $lt: isUuid(before)
-                    ? (await Message.findById(before).select("createdAt"))?.createdAt ?? new Date()
-                    : new Date(before),
-            };
-        }
-
-        const messages = await Message.find(query).sort({ createdAt: -1 }).limit(limit);
-        res.json(messages);
+        res.json(result.rows.map(legacyMessage));
     } catch (err: any) {
-        console.error("[messages] history error:", err);
+        console.error(`[messages] ${kind} history error:`, err);
         res.status(500).json({ error: "Failed to fetch messages", details: err.message });
     }
-});
+};
 
-/* ------------------------------------------------------------------ */
-/* POST /api/messages/campaign/:campaignId — send a message            */
-/* Body: { body: string, eventId?: string }                            */
-/* ------------------------------------------------------------------ */
-router.post("/campaign/:campaignId", auth, async (req: any, res) => {
+/** POST send. Body: { body, eventId? (campaigns), clientId? } */
+const send = (kind: Kind) => async (req: any, res: any) => {
     try {
-        const { campaignId } = req.params;
-        const { body, eventId } = req.body as { body?: string; eventId?: string };
-
-        if (!body?.trim()) return res.status(400).json({ error: "body is required" });
-        if (!(await assertCampaignAccess(req.user, campaignId))) {
-            return res.status(403).json({ error: "Not a member of this campaign" });
+        const { body, eventId, clientId } = req.body ?? {};
+        const result = await sendThreadMessage(req.user, threadKeyOf(kind, req), { body, eventId, clientId });
+        if (!result.ok) {
+            const [status, error] = legacyError(kind, result.reason);
+            return res.status(status).json({ error });
         }
-
-        // Senders may be Users, Leads, Contacts, or Accounts — always display
-        // the handle (or name), never the email address.
-        const sender = await findPersonById(req.user.id, "name firstName lastName handle email");
-        const senderName = sender ? personDisplayName(sender.doc) : String(req.user.email).split("@")[0];
-
-        const message = await Message.create({
-            campaign: campaignId,
-            event: eventId && isUuid(eventId) ? eventId : undefined,
-            sender: { id: req.user.id, name: senderName, email: req.user.email },
-            body: body.trim(),
-        });
-
-        await bus.publish("gamenight.message", {
-            messageId: String(message._id),
-            campaignId,
-            eventId: message.event ? String(message.event) : undefined,
-            sender: message.sender as any,
-            body: message.body,
-            createdAt: message.createdAt.toISOString(),
-        });
-
-        // Bell notifications for the other party members — best-effort, off
-        // the request path so chat latency stays flat.
-        notifyCampaignMembers(campaignId, req.user.id, senderName, body.trim()).catch(() => { /* logged inside */ });
-
-        res.status(201).json(message);
+        res.status(result.created ? 201 : 200).json(legacyMessage(result.row));
     } catch (err: any) {
-        console.error("[messages] send error:", err);
+        console.error(`[messages] ${kind} send error:`, err);
         res.status(500).json({ error: "Failed to send message", details: err.message });
     }
-});
+};
 
-/** One bell entry per campaign per member, collapsing while unread. */
-async function notifyCampaignMembers(campaignId: string, senderId: string, senderName: string, body: string) {
-    try {
-        const [campaign, peopleIds] = await Promise.all([
-            Campaign.findById(campaignId).select("title"),
-            findCampaignPeopleIds(campaignId),
-        ]);
-        const preview = body.length > 80 ? `${body.slice(0, 77)}...` : body;
-        await Promise.all(
-            peopleIds
-                .filter(id => id !== String(senderId))
-                .map(id => notify(id, {
-                    type: "message",
-                    title: `New message in "${campaign?.title || 'a campaign'}"`,
-                    body: `${senderName}: ${preview}`,
-                    link: `/game-night/campaigns/${campaignId}`,
-                    sourceKey: campaignThreadKey(campaignId),
-                    meta: { campaignId },
-                }))
-        );
-    } catch (err: any) {
-        console.error("[messages] campaign notify failed:", err.message);
-    }
-}
-
-/* ================================================================== */
-/* Direct messages                                                     */
-/* ================================================================== */
-
-/** DMs are friends-only (Threads owns the rule); returns the canonical dmKey or null. */
-async function assertDmAccess(userId: string, otherUserId: string): Promise<string | null> {
-    if (!(await canAccessThread({ id: userId }, dmThreadKey(userId, otherUserId)))) return null;
-    return dmKeyFor(userId, otherUserId);
-}
-
-/* ------------------------------------------------------------------ */
-/* GET /api/messages/dm/:userId — history (newest first)               */
-/* Query: ?limit=50&before=<ISO date or message id>                    */
-/* ------------------------------------------------------------------ */
-router.get("/dm/:userId", auth, async (req: any, res) => {
-    try {
-        const key = await assertDmAccess(req.user.id, req.params.userId);
-        if (!key) return res.status(403).json({ error: "You can only message friends" });
-
-        const limit = Math.min(Number(req.query.limit) || 50, 200);
-        const query: any = { dmKey: key };
-        if (req.query.before) {
-            const before = String(req.query.before);
-            query.createdAt = {
-                $lt: isUuid(before)
-                    ? (await Message.findById(before).select("createdAt"))?.createdAt ?? new Date()
-                    : new Date(before),
-            };
-        }
-
-        const messages = await Message.find(query).sort({ createdAt: -1 }).limit(limit);
-        res.json(messages);
-    } catch (err: any) {
-        console.error("[messages] dm history error:", err);
-        res.status(500).json({ error: "Failed to fetch messages", details: err.message });
-    }
-});
-
-/* ------------------------------------------------------------------ */
-/* POST /api/messages/dm/:userId — send a direct message               */
-/* Body: { body: string }                                              */
-/* ------------------------------------------------------------------ */
-router.post("/dm/:userId", auth, async (req: any, res) => {
-    try {
-        const { body } = req.body as { body?: string };
-        if (!body?.trim()) return res.status(400).json({ error: "body is required" });
-
-        const otherUserId = req.params.userId;
-        const key = await assertDmAccess(req.user.id, otherUserId);
-        if (!key) return res.status(403).json({ error: "You can only message friends" });
-
-        const sender = await findPersonById(req.user.id, "name firstName lastName handle email");
-        const senderName = sender ? personDisplayName(sender.doc) : String(req.user.email).split("@")[0];
-
-        const message = await Message.create({
-            dmKey: key,
-            recipient: String(otherUserId),
-            sender: { id: req.user.id, name: senderName, email: req.user.email },
-            body: body.trim(),
-        });
-
-        await bus.publish("social.dm", {
-            messageId: String(message._id),
-            dmKey: key,
-            recipientId: String(otherUserId),
-            sender: message.sender as any,
-            body: message.body,
-            createdAt: message.createdAt.toISOString(),
-        });
-
-        const preview = message.body.length > 80 ? `${message.body.slice(0, 77)}...` : message.body;
-        notify(otherUserId, {
-            type: "message",
-            title: `New message from @${senderName}`,
-            body: preview,
-            // Collapses per thread key, the same key the Letters list uses.
-            sourceKey: dmThreadKey(req.user.id, otherUserId),
-            meta: { fromUserId: req.user.id },
-        }).catch(() => { /* logged inside */ });
-
-        res.status(201).json(message);
-    } catch (err: any) {
-        console.error("[messages] dm send error:", err);
-        res.status(500).json({ error: "Failed to send message", details: err.message });
-    }
-});
+router.get("/campaign/:campaignId", auth, history("campaign"));
+router.post("/campaign/:campaignId", auth, send("campaign"));
+router.get("/dm/:userId", auth, history("dm"));
+router.post("/dm/:userId", auth, send("dm"));
 
 export default router;

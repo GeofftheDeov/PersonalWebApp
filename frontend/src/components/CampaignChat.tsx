@@ -1,19 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MessageSquare, Send, WifiOff, Bold, Italic, Code, List, ListOrdered } from 'lucide-react';
-import { useLiveThread, campaignThreadKey } from '@/lib/realtime/useLiveThread';
-
-interface ChatMessage {
-    messageId: string;
-    sender: { id: string; name: string; email?: string };
-    body: string;
-    createdAt: string;
-}
+import { campaignThreadKey } from '@/lib/realtime/threadKeys';
+import { myAccountId, useThread } from '@/lib/useThread';
+import { useThreadScroll } from '@/lib/useThreadScroll';
 
 /** Older messages stored the sender's email as the name — show the handle-ish local part instead. */
 const senderLabel = (s: { name?: string }) => {
@@ -78,25 +73,24 @@ const ToolbarBtn = ({
     </button>
 );
 
+/**
+ * Table Talk on a campaign page. History, live updates, send and mark-read all
+ * come from useThread, the same hook the dock's thread view uses.
+ */
 export default function CampaignChat({ campaignId }: { campaignId: string }) {
-    const [messages, setMessages] = useState<ChatMessage[]>([]);
-    const [sending, setSending] = useState(false);
-    const [error, setError] = useState<string | null>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
-    const seen = useRef<Set<string>>(new Set());
+    const myId = myAccountId();
 
-    const token = () => (typeof window !== 'undefined' ? localStorage.getItem('token') : null);
+    const thread = useThread(campaignId ? campaignThreadKey(campaignId) : null);
+    const { messages } = thread;
+    const connected = thread.status === 'open';
+    const onScroll = useThreadScroll(scrollRef, messages, { onNearTop: thread.loadOlder, canLoadMore: thread.hasMore });
 
-    const myId = useRef<string | null>(null);
-    useEffect(() => {
-        try {
-            const t = token();
-            if (t) myId.current = JSON.parse(atob(t.split('.')[1]))?.id ?? null;
-        } catch { /* cosmetic */ }
-    }, []);
-
+    // Tiptap 3 doesn't re-render on keystrokes, so track emptiness for the SEND button here.
+    const [isDraftEmpty, setDraftEmpty] = useState(true);
     const editor = useEditor({
         extensions: [StarterKit],
+        onUpdate: ({ editor }) => setDraftEmpty(editor.isEmpty),
         editorProps: {
             attributes: {
                 class: 'flex-grow p-3 bg-white dark:bg-slate-900 text-black dark:text-white font-permanent text-sm outline-none min-h-[44px] max-h-40 overflow-y-auto focus:bg-yellow-50 dark:focus:bg-slate-800 prose prose-sm dark:prose-invert max-w-none',
@@ -113,75 +107,19 @@ export default function CampaignChat({ campaignId }: { campaignId: string }) {
         },
     });
 
-    const append = useCallback((msgs: ChatMessage[]) => {
-        const fresh = msgs.filter(m => !seen.current.has(m.messageId));
-        if (!fresh.length) return;
-        fresh.forEach(m => seen.current.add(m.messageId));
-        setMessages(prev => [...prev, ...fresh].sort(
-            (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-        ));
-    }, []);
-
-    /** The latest page of history. Runs on mount and again after every live-channel reconnect. */
-    const loadLatest = useCallback(() => {
-        const t = token();
-        if (!t || !campaignId) return;
-        fetch(`/api/messages/campaign/${campaignId}?limit=50`, { headers: { Authorization: `Bearer ${t}` } })
-            .then(async res => {
-                if (!res.ok) throw new Error('history failed');
-                const rows = await res.json();
-                append(rows.map((r: any) => ({
-                    messageId: r._id, sender: r.sender, body: r.body, createdAt: r.createdAt,
-                })));
-                setError(null);
-            })
-            .catch(() => setError('Could not load chat history'));
-    }, [campaignId, append]);
-
-    useEffect(() => { loadLatest(); }, [loadLatest]);
-
-    // Live: one shared WebSocket for the whole app; no replay, so refetch after a reconnect.
-    const liveStatus = useLiveThread(campaignId ? campaignThreadKey(campaignId) : null, {
-        onMessage: m => append([{ messageId: m.id, sender: m.sender, body: m.body, createdAt: m.createdAt }]),
-        onReconnect: loadLatest,
-    });
-    const connected = liveStatus === 'open';
-
-    useEffect(() => {
-        scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-    }, [messages]);
-
-    const handleSend = async (e?: React.FormEvent) => {
+    const handleSend = (e?: React.FormEvent) => {
         e?.preventDefault();
-        if (!editor || sending) return;
-        const body = docToMarkdown(editor.getJSON()).trim();
-        if (!body) return;
-        setSending(true);
-        setError(null);
-        try {
-            const res = await fetch(`/api/messages/campaign/${campaignId}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-                body: JSON.stringify({ body }),
-            });
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                throw new Error(err.error || 'Failed to send');
-            }
-            const saved = await res.json();
-            append([{ messageId: saved._id, sender: saved.sender, body: saved.body, createdAt: saved.createdAt }]);
+        if (!editor) return;
+        // The message stays in the log (sending, then sent or failed), so the editor clears at once.
+        if (thread.send(docToMarkdown(editor.getJSON()))) {
             editor.commands.clearContent();
-        } catch (err: any) {
-            setError(err.message || 'Failed to send');
-        } finally {
-            setSending(false);
+            setDraftEmpty(true);
         }
     };
 
     const fmtTime = (iso: string) =>
         new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }).toUpperCase();
 
-    const isDraftEmpty = !editor || editor.isEmpty;
 
     return (
         <div>
@@ -196,19 +134,25 @@ export default function CampaignChat({ campaignId }: { campaignId: string }) {
 
             <div className="border-4 border-black bg-white dark:bg-slate-800 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
                 {/* Message history */}
-                <div ref={scrollRef} className="h-72 overflow-y-auto p-4 space-y-3">
+                <div ref={scrollRef} onScroll={onScroll} className="h-72 overflow-y-auto p-4 space-y-3">
+                    {thread.loadingOlder && (
+                        <p className="font-permanent text-[10px] text-zinc-400 uppercase text-center">Loading older messages…</p>
+                    )}
                     {messages.length === 0 ? (
                         <p className="font-permanent text-sm text-zinc-400 uppercase text-center pt-24">
                             No messages yet. Say hello to the party.
                         </p>
                     ) : messages.map(m => {
-                        const mine = myId.current != null && m.sender.id === myId.current;
+                        const mine = m.state !== 'sent' || (myId != null && m.sender.id === myId);
+                        const failed = m.state === 'failed';
                         return (
-                            <div key={m.messageId} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
-                                <div className={`max-w-[80%] p-2.5 border-2 border-black ${mine ? 'bg-teal-500 text-white' : 'bg-yellow-50 dark:bg-slate-700 text-black dark:text-white'}`}>
+                            <div key={m.key} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`max-w-[80%] p-2.5 border-2 ${failed ? 'border-red-500 bg-red-50 dark:bg-slate-900 text-black dark:text-white' : `border-black ${mine ? 'bg-teal-500 text-white' : 'bg-yellow-50 dark:bg-slate-700 text-black dark:text-white'}`} ${m.state === 'sending' ? 'opacity-60' : ''}`}>
                                     <div className="flex items-baseline gap-2 mb-1">
-                                        <span className={`font-permanent text-xs uppercase ${mine ? 'text-yellow-300' : 'text-teal-600 dark:text-yellow-400'}`}>{senderLabel(m.sender)}</span>
-                                        <span className={`text-[10px] font-permanent ${mine ? 'text-teal-100' : 'text-zinc-400'}`}>{fmtTime(m.createdAt)}</span>
+                                        <span className={`font-permanent text-xs uppercase ${failed ? 'text-red-600 dark:text-red-400' : mine ? 'text-yellow-300' : 'text-teal-600 dark:text-yellow-400'}`}>{senderLabel(m.sender)}</span>
+                                        <span className={`text-[10px] font-permanent ${mine && !failed ? 'text-teal-100' : 'text-zinc-400'}`}>
+                                            {m.state === 'sending' ? 'SENDING…' : fmtTime(m.createdAt)}
+                                        </span>
                                     </div>
                                     <div className="text-sm break-words">
                                         <ReactMarkdown
@@ -228,6 +172,13 @@ export default function CampaignChat({ campaignId }: { campaignId: string }) {
                                             }}
                                         >{m.body}</ReactMarkdown>
                                     </div>
+                                    {failed && (
+                                        <div className="mt-1 flex items-center gap-2 font-permanent text-[10px] uppercase">
+                                            <span className="text-red-600 dark:text-red-400">{m.error || 'Not sent'}</span>
+                                            <button type="button" onClick={() => thread.resend(m.key)} className="underline text-teal-600 dark:text-yellow-400 hover:text-black dark:hover:text-white">Resend</button>
+                                            <button type="button" onClick={() => thread.discard(m.key)} className="underline text-zinc-500 hover:text-black dark:hover:text-white">Discard</button>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         );
@@ -265,14 +216,14 @@ export default function CampaignChat({ campaignId }: { campaignId: string }) {
                     <button
                         id="chat-send-btn"
                         type="submit"
-                        disabled={sending || isDraftEmpty}
+                        disabled={isDraftEmpty}
                         className="px-5 py-3 bg-yellow-400 text-black border-l-4 border-black font-permanent uppercase text-xs flex items-center gap-2 hover:bg-white transition-colors disabled:opacity-50 disabled:hover:bg-yellow-400 self-stretch"
                     >
                         <Send className="w-4 h-4" /> SEND
                     </button>
                 </form>
             </div>
-            {error && <p className="mt-2 font-permanent text-xs text-red-500 uppercase">{error}</p>}
+            {thread.error && <p className="mt-2 font-permanent text-xs text-red-500 uppercase">{thread.error}</p>}
         </div>
     );
 }

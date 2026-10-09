@@ -354,24 +354,30 @@ export async function attachLiveChannel(
     // person who left. Gaining access waits for the recompute, so a thread is
     // only ever added once the database says so.
 
-    /** People whose threads are being recomputed; `again` when another event came in meanwhile. */
-    const refreshing = new Map<string, { again: boolean; done: Promise<void> }>();
+    /**
+     * People whose threads are being recomputed: `again` when another event
+     * or connect came in meanwhile, `event` once an access event asked.
+     */
+    const refreshing = new Map<string, { again: boolean; event: boolean; done: Promise<void> }>();
 
     /**
      * Recomputes one person's threads and applies them to every socket of
      * theirs on this process. Runs one at a time per person: an event that
      * arrives during a recompute makes it run again, and a result read before
-     * that event is thrown away rather than applied. Never rejects: if the
-     * threads can't be worked out, the person's sockets close with 1011 so the
-     * client reconnects and the next connect tries again.
+     * that event is thrown away rather than applied. Never rejects. If the
+     * threads can't be worked out, sockets still waiting for their first
+     * `ready` close with 1011 (the client retries); after an access event,
+     * so do the person's other sockets, which would otherwise miss the
+     * change until they reconnect. A connect alone leaves those alone.
      */
-    function refreshPerson(personId: string): Promise<void> {
+    function refreshPerson(personId: string, { event = false } = {}): Promise<void> {
         const running = refreshing.get(personId);
         if (running) {
             running.again = true;
+            running.event ||= event;
             return running.done;
         }
-        const state = { again: true, done: Promise.resolve() };
+        const state = { again: true, event, done: Promise.resolve() };
         refreshing.set(personId, state);
         state.done = (async () => {
             try {
@@ -382,7 +388,9 @@ export async function attachLiveChannel(
                         threads = await visibleThreadKeys({ id: personId });
                     } catch (err: any) {
                         console.error("[live] could not work out threads:", err?.message);
-                        for (const conn of byPerson.get(personId) ?? []) conn.ws.close(1011, "server error");
+                        for (const conn of byPerson.get(personId) ?? []) {
+                            if (!conn.ready || state.event) conn.ws.close(1011, "server error");
+                        }
                         return;
                     }
                     if (!state.again) applyThreads(personId, threads);
@@ -415,7 +423,9 @@ export async function attachLiveChannel(
     }
 
     function refreshAll(people: Iterable<string>) {
-        for (const personId of new Set(people)) if (byPerson.has(personId)) void refreshPerson(personId);
+        for (const personId of new Set(people)) {
+            if (byPerson.has(personId)) void refreshPerson(personId, { event: true });
+        }
     }
 
     // No `firstSighting`: these are idempotent (a duplicate costs one more

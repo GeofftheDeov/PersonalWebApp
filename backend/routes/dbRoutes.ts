@@ -13,6 +13,8 @@ import { requireAdmin } from '../middleware/auth.js';
 import { resolveAccountId } from '../utils/accountRefs.js';
 import { toCsv } from '../utils/csv.js';
 import { publishFriendshipChanged, publishMembershipChanged } from '../services/accessEvents.js';
+import { getMemberCampaignIds } from '../utils/gameNightPlannerUtils.js';
+import { isUuid } from '../db/model.js';
 import { workshopClientJs } from '../utils/workshopClient.js';
 import { listViews, createView, updateView, deleteView, ListViewError } from '../services/listViews.js';
 import Account from "../models/Account.js";
@@ -1027,8 +1029,11 @@ router.post('/:collection/update/:id', async (req, res) => {
 router.post('/:collection/delete/:id', async (req, res) => {
     const { collection, id } = req.params;
     try {
+        // Deleting an account cascades to its memberships: note them first.
+        const campaignsOf = collection === 'accounts' && isUuid(id) ? await getMemberCampaignIds({ id }) : [];
         const removed = await modelFor(collection).findByIdAndDelete(id);
         await publishAccessChanges(collection, removed?.toObject?.() ?? null, null);
+        if (removed) for (const campaignId of campaignsOf) await publishMembershipChanged(campaignId, 'member-removed', id);
         res.sendStatus(200);
     } catch (err) {
         res.status(500).send('Delete failed');

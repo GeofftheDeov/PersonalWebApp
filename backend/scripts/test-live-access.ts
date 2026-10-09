@@ -11,7 +11,8 @@
  *   - every path that changes membership or friendship publishes its event:
  *     create campaign, add member, join by link, accept invite, remove member
  *     (yourself or by the GM), delete campaign (the admin table browser, the
- *     only place a campaign is deleted), accept friend request, remove friend;
+ *     only place a campaign is deleted), accept friend request, remove friend,
+ *     and deleting an account there (its memberships go with it);
  *   - each one changes the open sockets' threads in place: a fresh `ready`
  *     with the new list, on the same connection, no reconnect;
  *   - a member who leaves stops getting the campaign's `message.created` and
@@ -344,6 +345,27 @@ async function main() {
       && !got(sockets.pat, dm, "go away") && sockets.pat.of("typing").length === lateTyping);
     check("no socket reconnected for any of it", upgrades === upgradesAtStart
       && Object.values(sockets).every((c) => c.ws.readyState === WebSocket.OPEN), `${upgrades - upgradesAtStart} upgrades`);
+
+    console.log("\nDeleting an account\n");
+
+    const second = await call("POST", "/api/campaigns", gm,
+      { title: `t105 second ${RUN}`, description: "test", status: "In Progress", startDate: new Date().toISOString() });
+    const secondId = String((await second.json() as any)?.campaign?.id);
+    if (second.ok) created.campaigns.push(secondId);
+    const secondTable = campaignThreadKey(secondId);
+    await call("POST", "/api/campaign-members", gm, { campaign: secondId, person: outsider.id, status: "Player" });
+    check("the outsider joins a second campaign", await until(() => sockets.outsider.threads().includes(secondTable)));
+    const delAccount = await fetch(`${base}/db/accounts/delete/${outsider.id}?token=${encodeURIComponent(tokenFor(admin))}`,
+      { method: "POST" });
+    check("an admin deletes the outsider's account in the table browser", delAccount.ok, `status ${delAccount.status}`);
+    check("deleting it publishes campaign.changed (member-removed) for each of its memberships",
+      await published("campaign.changed", (p) => p.campaignId === secondId && p.action === "member-removed" && p.personId === outsider.id));
+    check("the deleted account's open socket drops the campaign", await until(() => !sockets.outsider.threads().includes(secondTable)));
+    const afterDelete = `after the outsider went ${RUN}`;
+    await sendTo(secondTable, gm, afterDelete);
+    await until(() => got(sockets.gm, secondTable, afterDelete));
+    await sleep(200);
+    check("...and gets none of its messages", !got(sockets.outsider, secondTable, afterDelete));
 
     console.log("\nToken expiry\n");
 

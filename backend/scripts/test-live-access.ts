@@ -48,6 +48,7 @@ type LiveClientLike = {
     onMessage?: (m: { body: string }, thread: string) => void; onReconnect?: () => void;
   }): () => void;
   onThreads(listener: (threads: string[]) => void): () => void;
+  resume(): void;
   close(): void;
 };
 type LiveClientCtor = new (opts: { url: string; getToken: () => string | null; WebSocket: unknown }) => LiveClientLike;
@@ -382,6 +383,26 @@ async function main() {
     check("...and is closed with 4001 once the token expires", await until(() => shortLived.closeCode === 4001, 4_000),
       `close code ${shortLived.closeCode}`);
     check("a socket with a current token stays open", sockets.ivy.ws.readyState === WebSocket.OPEN);
+
+    {
+      // The web client after its token expires: it stops (4001), and a
+      // thread list subscribed once (the dock's useThreads) must come back
+      // once the person signs in again, without a page reload.
+      const { LiveClient } = await import(LIVE_CLIENT) as { LiveClient: LiveClientCtor };
+      let token = tokenFor(ivy, 2);
+      const expiring = new LiveClient({ url: wsUrl, getToken: () => token, WebSocket });
+      let refetches = 0;
+      const off = expiring.subscribe(table, { onReconnect: () => { refetches++; } });
+      check("a LiveClient whose token expires connects, then stops as unauthorized",
+        await until(() => expiring.status === "open") && await until(() => expiring.status === "unauthorized", 4_000),
+        expiring.status);
+      token = tokenFor(ivy);
+      expiring.resume(); // what a sign-in's authChange event does
+      check("...and after signing in again (resume) it reconnects with the new token and its subscribers refetch",
+        await until(() => expiring.status === "open" && refetches === 1), `${expiring.status}, ${refetches} refetches`);
+      off();
+      expiring.close();
+    }
 
     console.log("\nThe web client follows the change\n");
 

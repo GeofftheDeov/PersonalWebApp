@@ -29,6 +29,11 @@ export function getLiveClient(): LiveClient {
                 try { return window.localStorage.getItem('token'); } catch { return null; }
             },
         });
+        // A socket closed for an expired token (4001) stays closed; once the
+        // person signs in again (this tab or another), pick up the new token.
+        const client = shared;
+        window.addEventListener('authChange', () => client.resume());
+        window.addEventListener('storage', (e) => { if (e.key === 'token' || e.key === null) client.resume(); });
     }
     return shared;
 }

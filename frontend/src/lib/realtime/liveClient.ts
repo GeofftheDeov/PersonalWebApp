@@ -230,6 +230,19 @@ export class LiveClient {
         return () => this.statusListeners.delete(listener);
     }
 
+    /**
+     * A new token may be available (the person signed in again). If the
+     * client stopped on an auth refusal (4001: say, its token expired while
+     * the socket was open) and something is still subscribed, connect again
+     * now; subscribers then get `onReconnect` and refetch, as after any drop.
+     * Subscriptions made before the refusal (a thread list mounted once)
+     * would otherwise stay dead until the page reloads.
+     */
+    resume(): void {
+        if (this.socket || !this.hasSubscribers()) return;
+        if (this.status === "unauthorized" || this.status === "idle") this.connect();
+    }
+
     /** Open the socket now (a no-op while one is open or connecting). */
     connect(): void {
         if (this.socket) return;

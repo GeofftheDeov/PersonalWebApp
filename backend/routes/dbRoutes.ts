@@ -12,7 +12,7 @@ import { renderPage } from '../utils/adminUi.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { resolveAccountId } from '../utils/accountRefs.js';
 import { toCsv } from '../utils/csv.js';
-import { publishFriendshipChanged, publishMembershipChanged } from '../services/accessEvents.js';
+import { publishAccountDeleted, publishFriendshipChanged, publishMembershipChanged } from '../services/accessEvents.js';
 import { getMemberCampaignIds } from '../utils/gameNightPlannerUtils.js';
 import { isUuid } from '../db/model.js';
 import { workshopClientJs } from '../utils/workshopClient.js';
@@ -1034,6 +1034,7 @@ router.post('/:collection/delete/:id', async (req, res) => {
         const removed = await modelFor(collection).findByIdAndDelete(id);
         await publishAccessChanges(collection, removed?.toObject?.() ?? null, null);
         if (removed) for (const campaignId of campaignsOf) await publishMembershipChanged(campaignId, 'member-removed', id);
+        if (removed && collection === 'accounts') await publishAccountDeleted(id);
         res.sendStatus(200);
     } catch (err) {
         res.status(500).send('Delete failed');

@@ -42,7 +42,19 @@ export async function publishFriendshipChanged(a: string, b: string, action: "ad
     await publishSafely("friendship.changed", { personIds: [String(a), String(b)], action });
 }
 
-async function publishSafely<K extends "campaign.changed" | "friendship.changed">(event: K, payload: EventMap[K]) {
+/**
+ * An account was deleted: its open sockets are closed (4001), because its
+ * token names nobody now. Publish its membership and friendship changes too;
+ * this only ends the sockets.
+ */
+export async function publishAccountDeleted(personId: string): Promise<void> {
+    await publishSafely("account.deleted", { personId: String(personId) });
+}
+
+async function publishSafely<K extends "campaign.changed" | "friendship.changed" | "account.deleted">(
+    event: K,
+    payload: EventMap[K],
+) {
     try {
         await bus.publish(event, payload);
     } catch (err: any) {

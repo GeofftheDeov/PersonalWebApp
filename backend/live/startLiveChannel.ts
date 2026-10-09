@@ -18,7 +18,8 @@ import { attachLiveChannel, type LiveChannel, type LiveChannelOptions } from "./
  *
  * After attaching, a dropped Redis connection needs nothing from here: the
  * Redis bus's subscriber connection (ioredis) reconnects and re-subscribes
- * every channel on its own.
+ * every channel on its own, and the channel then closes its sockets with 1012
+ * so clients reconnect and refetch what they missed (onBroadcastResumed).
  */
 export interface StartLiveChannelOptions extends LiveChannelOptions {
     /** Backoff base: attempt n waits a random time in [0, min(maxRetryMs, retryMs × 2^n)). Default 1 s. */
@@ -113,6 +114,14 @@ function trackBroadcasts(bus: EventBus) {
         start: () => bus.start(),
         stop: () => bus.stop(),
     };
+    if (bus.onBroadcastResumed) {
+        tracked.onBroadcastResumed = (listener) => {
+            const off = bus.onBroadcastResumed!(listener);
+            if (released) off();
+            else held.push(off);
+            return off;
+        };
+    }
     return {
         bus: tracked,
         release() {

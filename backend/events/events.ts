@@ -42,6 +42,15 @@ export interface EventMap {
         action: "added" | "removed";
     };
 
+    /**
+     * An account was deleted (spec #58). Published through
+     * services/accessEvents.ts; the live channel closes that person's open
+     * sockets with 4001, since their token now names nobody.
+     */
+    "account.deleted": {
+        personId: string;
+    };
+
     /** A chat message was posted in a campaign's Game Night channel. */
     "gamenight.message": {
         messageId: string;

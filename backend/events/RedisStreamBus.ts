@@ -61,6 +61,9 @@ export function busNames(namespace?: string) {
  * - broadcast: publish also PUBLISHes the envelope on `events:live:<name>`;
  *   every process with a broadcast subscription SUBSCRIBEs to that channel.
  *   publishEphemeral only PUBLISHes, so it never reaches a stream.
+ * - broadcast outage: when the Pub/Sub connection comes back after a drop,
+ *   onBroadcastResumed listeners hear of it once the channels are subscribed
+ *   again (what was PUBLISHed meanwhile is lost)
  *
  * Delivery is at-least-once for `subscribe` (handlers must be idempotent) and
  * at-most-once for `subscribeBroadcast` (Pub/Sub keeps no history).
@@ -81,6 +84,8 @@ export class RedisStreamBus implements EventBus {
     private broadcasts = new Map<EventName, Set<EventHandler<any>>>();
     /** Per channel, the SUBSCRIBE in flight or done; awaited by later subscribers. */
     private channels = new Map<string, Promise<unknown>>();
+    /** Told when the Pub/Sub connection is back after a drop (see onBroadcastResumed). */
+    private resumedListeners = new Set<() => void>();
 
     constructor(opts: RedisStreamBusOptions) {
         const names = busNames(opts.namespace);
@@ -159,6 +164,11 @@ export class RedisStreamBus implements EventBus {
         };
     }
 
+    onBroadcastResumed(listener: () => void): () => void {
+        this.resumedListeners.add(listener);
+        return () => this.resumedListeners.delete(listener);
+    }
+
     subscribe<K extends EventName>(event: K, handler: EventHandler<K>): () => void {
         if (!this.handlers.has(event)) this.handlers.set(event, new Set());
         this.handlers.get(event)!.add(handler);
@@ -205,8 +215,37 @@ export class RedisStreamBus implements EventBus {
         const sub = this.pub.duplicate();
         sub.on("error", (err) => console.error("[events] redis (sub) error:", err.message));
         sub.on("message", (_channel: string, message: string) => this.fanOut(message));
+        // The first `ready` is the first connect; any later one is a reconnect
+        // after a drop, and whatever was PUBLISHed in between is gone.
+        let connectedBefore = false;
+        sub.on("ready", () => {
+            if (!connectedBefore) { connectedBefore = true; return; }
+            if (this.sub !== sub) return;
+            this.resumed(sub);
+        });
         this.sub = sub;
         return sub;
+    }
+
+    /**
+     * After a reconnect, ioredis re-subscribes every channel by itself; this
+     * subscribes them again and waits for the reply (commands answer in
+     * order, so ioredis's own re-subscribe is through by then), and only
+     * then tells the onBroadcastResumed listeners, so anything they make
+     * clients refetch is read after the subscriptions are back. A failed
+     * SUBSCRIBE means the connection dropped again; the next `ready` retries.
+     */
+    private resumed(sub: Redis): void {
+        const channels = [...this.channels.keys()];
+        console.warn(`[events] broadcast subscriber reconnected; events published while it was down were not delivered`);
+        (channels.length ? sub.subscribe(...channels) : Promise.resolve())
+            .then(() => {
+                if (this.sub !== sub) return;
+                for (const listener of [...this.resumedListeners]) {
+                    try { listener(); } catch (err) { console.error("[events] onBroadcastResumed listener failed:", err); }
+                }
+            })
+            .catch((err) => console.error("[events] re-subscribing after a reconnect failed:", err.message));
     }
 
     private fanOut(message: string): void {

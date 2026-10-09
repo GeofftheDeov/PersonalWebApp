@@ -21,7 +21,8 @@
  *   - after unfriending neither socket gets the other's DMs and a DM send is
  *     403; becoming friends makes the DM live for both;
  *   - an admin's socket never picks up a campaign it isn't a member of;
- *   - a socket closes with 4001 when its token expires;
+ *   - a socket closes with 4001 when its token expires, or its account is
+ *     deleted;
  *   - the frontend's LiveClient follows a re-sent `ready` without
  *     reconnecting, and catches up the thread that became available.
  *
@@ -167,6 +168,7 @@ async function main() {
   const offEvents = [
     await bus.subscribeBroadcast("campaign.changed", (payload) => { events.push({ name: "campaign.changed", payload }); }),
     await bus.subscribeBroadcast("friendship.changed", (payload) => { events.push({ name: "friendship.changed", payload }); }),
+    await bus.subscribeBroadcast("account.deleted", (payload) => { events.push({ name: "account.deleted", payload }); }),
   ];
   const published = (name: string, match: (p: any) => boolean) =>
     until(() => events.some((e) => e.name === name && match(e.payload)));
@@ -366,6 +368,12 @@ async function main() {
     await until(() => got(sockets.gm, secondTable, afterDelete));
     await sleep(200);
     check("...and gets none of its messages", !got(sockets.outsider, secondTable, afterDelete));
+    check("deleting it publishes account.deleted",
+      await published("account.deleted", (p) => p.personId === outsider.id));
+    check("...and the deleted account's open socket is closed with 4001, as an expired token's is",
+      await until(() => sockets.outsider.closeCode === 4001), `close code ${sockets.outsider.closeCode}`);
+    check("...while everyone else's stay open",
+      [sockets.gm, sockets.ivy, sockets.pat, sockets.ned, sockets.admin].every((c) => c.ws.readyState === WebSocket.OPEN));
 
     console.log("\nToken expiry\n");
 

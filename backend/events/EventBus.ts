@@ -48,6 +48,16 @@ export interface EventBus {
      */
     publishEphemeral<K extends EventName>(event: K, payload: EventMap[K]): Promise<string>;
 
+    /**
+     * Optional: calls `listener` each time the broadcast path comes back after
+     * losing its connection, once every broadcast subscription is in place
+     * again. Broadcast events published while it was down were lost (there is
+     * no replay), so a listener that relays them to clients (the live channel)
+     * should tell those clients to refetch. Returns an unsubscribe function.
+     * A bus whose broadcast path can't drop (in memory) leaves it out.
+     */
+    onBroadcastResumed?(listener: () => void): () => void;
+
     /** Begin consuming (no-op for in-memory). Call after subscriptions are registered. */
     start(): Promise<void>;
 

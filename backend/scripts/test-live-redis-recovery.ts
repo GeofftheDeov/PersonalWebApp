@@ -9,7 +9,9 @@
  *     backoff; once Redis is reachable it attaches, and messages, thread list
  *     updates and typing reach a socket, each exactly once;
  *   - Redis dropping every connection after boot: the subscriptions come back
- *     by themselves (no new socket needed) and delivery resumes;
+ *     by themselves, and then every socket on the task is closed with 1012,
+ *     because events published meanwhile were lost; the frontend's LiveClient
+ *     reconnects and calls onReconnect (refetch), and delivery resumes;
  *   - a subscription that fails half-way through attaching leaves nothing
  *     subscribed behind it, so retries never pile up handlers;
  *   - closing the channel while it is still retrying stops the retries and
@@ -38,6 +40,16 @@ import { startLiveChannel } from "../live/startLiveChannel.js";
 import { InMemoryEventBus } from "../events/InMemoryEventBus.js";
 import { createEventBus, type EventBus } from "../events/index.js";
 import { campaignThreadKey } from "../services/threads.js";
+
+type LiveClientLike = {
+  status: string;
+  subscribe(thread: string, handlers: { onMessage?: (m: { id: string }) => void; onReconnect?: () => void }): () => void;
+  close(): void;
+};
+type LiveClientCtor = new (opts: {
+  url: string; getToken: () => string | null; WebSocket: unknown; backoff?: { baseMs?: number; maxMs?: number };
+}) => LiveClientLike;
+const LIVE_CLIENT = new URL("../../frontend/src/lib/realtime/liveClient.ts", import.meta.url).href;
 
 if (!/(\/\/|@)(127\.0\.0\.1|localhost)[:/]/.test(process.env.DATABASE_URL ?? "")) {
   console.error("\n  Refusing to run: DATABASE_URL must be a local throwaway database.\n");
@@ -108,8 +120,9 @@ function client(url: string, who: Person) {
   const ws = new WebSocket(url);
   const frames: Frame[] = [];
   let closed = false;
+  let closeCode: number | null = null;
   ws.on("error", () => { /* surfaces as close */ });
-  ws.on("close", () => { closed = true; });
+  ws.on("close", (code) => { closed = true; closeCode = code; });
   ws.on("open", () => ws.send(JSON.stringify({ type: "auth", v: PROTOCOL_VERSION, token: tokenFor(who) })));
   ws.on("message", (data) => {
     let frame: Frame;
@@ -120,6 +133,7 @@ function client(url: string, who: Person) {
   return {
     ws, frames,
     get closed() { return closed; },
+    get closeCode() { return closeCode; },
     ready: (ms?: number) => until(() => frames.some((f) => f.type === "ready"), ms),
     of: (type: string) => frames.filter((f) => f.type === type),
     typing: (thread: string) => ws.send(JSON.stringify({ type: "typing", thread })),
@@ -281,26 +295,44 @@ async function main() {
 
     console.log("\nRedis drops every connection after boot\n");
 
+    // The frontend's LiveClient on the same task, to see what a browser does.
+    const { LiveClient } = await import(LIVE_CLIENT) as { LiveClient: LiveClientCtor };
+    const lc = new LiveClient({ url: wsUrl, getToken: () => tokenFor(gm), WebSocket, backoff: { baseMs: 50, maxMs: 200 } });
+    let lcReconnects = 0;
+    const lcMessages: string[] = [];
+    const offLc = lc.subscribe(thread, { onMessage: (m) => lcMessages.push(m.id), onReconnect: () => { lcReconnects++; } });
+    check("a LiveClient on the task connects", await until(() => lc.status === "open"), lc.status);
+
     await hop.down();
+    // Sent while this task's subscriber is cut off: it reaches Redis (the
+    // process bus talks to it directly), but nothing replays it to this task.
+    const missed = await send(base, player, table, `missed ${RUN}`);
     await sleep(500);
     await hop.up();
-    // Pub/Sub keeps nothing for a subscriber that is away, so probe with
-    // typing (no rows) until the resubscription is through.
-    const typingBefore = gmSocket.of("typing").length;
-    let probes = 0;
-    const back = await until(() => {
-      if (gmSocket.of("typing").length > typingBefore) return true;
-      if (probes++ % 15 === 0) playerSocket.typing(thread); // every ~300 ms, past the server's 250 ms guard
-      return false;
-    }, 20_000);
-    check("the subscriptions come back by themselves (typing flows again)", back,
-      `${gmSocket.of("typing").length} typing frames`);
-    check("...on the same sockets, which never closed", !gmSocket.closed && !playerSocket.closed);
+    check("once the subscriptions are back, every socket on the task is closed with 1012 (events may have been missed)",
+      await until(() => gmSocket.closeCode === 1012 && playerSocket.closeCode === 1012, 20_000),
+      `gm ${gmSocket.closeCode}, player ${playerSocket.closeCode}`);
+    check("...and the message sent during the outage was indeed never delivered live",
+      messagesWith(gmSocket, missed._id).length === 0 && !lcMessages.includes(missed._id));
+    check("the LiveClient reconnects by itself and asks the thread to refetch (onReconnect), once",
+      await until(() => lc.status === "open" && lcReconnects === 1, 10_000) && (await sleep(300), lcReconnects === 1),
+      `status ${lc.status}, ${lcReconnects} onReconnect calls`);
+
+    const gmAgain = open(wsUrl, gm);
+    const playerAgain = open(wsUrl, player);
+    check("new sockets connect and get ready", await gmAgain.ready() && await playerAgain.ready());
+    playerAgain.typing(thread);
+    check("typing flows again (the subscriptions came back by themselves)",
+      await until(() => gmAgain.of("typing").some((f) => f.thread === thread && f.personId === player.id)),
+      JSON.stringify(gmAgain.frames));
     const second = await send(base, player, table, `second ${RUN}`);
-    check("a message after the outage reaches the gm exactly once",
-      await until(() => messagesWith(gmSocket, second._id).length === 1)
-        && (await sleep(300), messagesWith(gmSocket, second._id).length === 1),
-      JSON.stringify(gmSocket.of("message.created")));
+    check("a message after the outage reaches the gm exactly once, and the LiveClient too",
+      await until(() => messagesWith(gmAgain, second._id).length === 1 && lcMessages.includes(second._id))
+        && (await sleep(300), messagesWith(gmAgain, second._id).length === 1
+          && lcMessages.filter((id) => id === second._id).length === 1),
+      JSON.stringify(gmAgain.of("message.created")));
+    offLc();
+    lc.close();
 
     console.log("\nA subscription failing half-way leaves nothing behind\n");
 

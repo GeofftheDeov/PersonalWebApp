@@ -24,7 +24,10 @@ import { unreadCounts } from "../services/readState.js";
  *   - asks Threads which threads the person can see, at connect and again
  *     whenever a membership or friendship event names them (#105), and
  *     re-sends `ready` when a socket's set changes;
- *   - closes a socket with 4001 when its token expires (#105);
+ *   - closes a socket with 4001 when its token expires (#105), or when its
+ *     account is deleted;
+ *   - closes every socket with 1012 when its broadcast subscriptions come
+ *     back after a Redis outage, so clients reconnect and refetch;
  *   - listens on broadcast bus subscriptions (campaign messages and friend
  *     DMs), so every backend task sees every message event, and forwards each
  *     one only to sockets subscribed to its thread;
@@ -48,6 +51,12 @@ export const PROTOCOL_VERSION = 1;
 export const CLOSE_UNAUTHORIZED = 4001;
 /** The auth frame asked for a protocol version this server doesn't speak. */
 export const CLOSE_UNSUPPORTED_VERSION = 4002;
+/**
+ * The event stream this task relays was interrupted (Redis Pub/Sub dropped
+ * and came back), so events may have been missed: reconnect and refetch.
+ * The standard "service restart" code, which clients already retry.
+ */
+export const CLOSE_EVENTS_MISSED = 1012;
 
 export const DEFAULT_PING_INTERVAL_MS = 25_000;
 /** How long a `typing` frame shows without a refresh (#103). Clients refresh every 3 s. */
@@ -169,18 +178,25 @@ export async function attachLiveChannel(
         }
     }
 
-    /** True the first time an event id is seen; at-most-once per process. */
-    function firstSighting(id: string | undefined): boolean {
+    /**
+     * True the first time a frame kind sees an event id; at-most-once per
+     * process. Redis stream ids are only unique within one stream, and
+     * `gamenight.message` and `social.dm` live on different streams, so the
+     * key is the frame kind and the event name as well as the id: an id seen
+     * on one stream never suppresses the same id on another.
+     */
+    function firstSighting(kind: string, event: string, id: string | undefined): boolean {
         if (!id) return true;
-        if (seen.has(id)) return false;
-        seen.add(id);
+        const key = `${kind}:${event}:${id}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
         if (seen.size > SEEN_EVENT_IDS) seen.delete(seen.values().next().value as string);
         return true;
     }
 
     const unsubscribes = [
         await bus.subscribeBroadcast("gamenight.message", (payload, meta) => {
-            if (!firstSighting(meta?.id)) return;
+            if (!firstSighting("message.created", "gamenight.message", meta?.id)) return;
             deliver(campaignThreadKey(payload.campaignId), {
                 type: "message.created",
                 thread: campaignThreadKey(payload.campaignId),
@@ -189,7 +205,7 @@ export async function attachLiveChannel(
         }),
         // A DM thread's subscribers are its pair (every device of each) and nobody else.
         await bus.subscribeBroadcast("social.dm", (payload, meta) => {
-            if (!firstSighting(meta?.id)) return;
+            if (!firstSighting("message.created", "social.dm", meta?.id)) return;
             const thread = dmThreadKey(String(payload.sender?.id), String(payload.recipientId));
             deliver(thread, { type: "message.created", thread, message: liveMessage(payload) });
         }),
@@ -272,18 +288,19 @@ export async function attachLiveChannel(
      * their own dedupe key, so one frame kind never suppresses the other.
      */
     async function threadListSubscriptions(): Promise<Array<() => void>> {
-        const updated = (thread: ThreadKey, lastActivityAt: string, eventId: string | undefined) => {
-            if (!firstSighting(eventId && `thread.updated:${eventId}`)) return;
+        const updated = (event: string, thread: ThreadKey, lastActivityAt: string, eventId: string | undefined) => {
+            if (!firstSighting("thread.updated", event, eventId)) return;
             deliverThreadUpdated(thread, lastActivityAt).catch((err) =>
                 console.error("[live] thread.updated failed:", err.message));
         };
         return [
             await bus.subscribeBroadcast("gamenight.message", (payload, meta) =>
-                updated(campaignThreadKey(payload.campaignId), payload.createdAt, meta?.id)),
+                updated("gamenight.message", campaignThreadKey(payload.campaignId), payload.createdAt, meta?.id)),
             await bus.subscribeBroadcast("social.dm", (payload, meta) =>
-                updated(dmThreadKey(String(payload.sender?.id), String(payload.recipientId)), payload.createdAt, meta?.id)),
+                updated("social.dm", dmThreadKey(String(payload.sender?.id), String(payload.recipientId)),
+                    payload.createdAt, meta?.id)),
             await bus.subscribeBroadcast("thread.read", (payload, meta) => {
-                if (!firstSighting(meta?.id && `thread.read:${meta.id}`)) return;
+                if (!firstSighting("thread.read", "thread.read", meta?.id)) return;
                 deliverToPerson(payload.personId, {
                     type: "thread.read",
                     thread: payload.threadKey,
@@ -461,7 +478,23 @@ export async function attachLiveChannel(
             }
             refreshAll([a, b]);
         }),
+        // A deleted account's token names nobody now: end its sockets, as an
+        // expired token would, rather than leave them open with no threads.
+        await bus.subscribeBroadcast("account.deleted", ({ personId }) => {
+            for (const conn of byPerson.get(String(personId)) ?? []) conn.ws.close(CLOSE_UNAUTHORIZED, "account deleted");
+        }),
     );
+
+    // Events published while this task's broadcast subscriptions were down
+    // (a Redis blip) never reached its sockets, and nothing replays them. Once
+    // the subscriptions are back, close every socket with 1012: clients
+    // reconnect after their backoff and refetch what's on screen.
+    const offResumed = bus.onBroadcastResumed?.(() => {
+        if (!connections.size) return;
+        console.warn(`[live] event stream resumed after an outage: closing ${connections.size} sockets (1012) so they refetch, task ${TASK}`);
+        for (const conn of connections) conn.ws.close(CLOSE_EVENTS_MISSED, "events may have been missed");
+    });
+    if (offResumed) unsubscribes.push(offResumed);
 
     /** Closes the socket with 4001 once its token's `exp` passes, so a socket can't outlive its token. */
     function closeAtExpiry(conn: Connection, exp: unknown) {

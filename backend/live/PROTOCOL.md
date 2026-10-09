@@ -27,7 +27,7 @@ The client's first frame carries its JWT:
 - `v` is the protocol version the client speaks. A version the server doesn't speak closes the socket with **4002**.
 - A token in the query string (`/api/live?token=<jwt>`) also works, but use the first frame where possible: URLs end up in logs.
 - A missing, malformed, expired or wrong-secret token, or one whose subject isn't an account, closes the socket with **4001**. So does a first frame that isn't an auth frame, and a connection that sends nothing for 10 seconds.
-- A socket doesn't outlive its token: when the token's `exp` passes, the server closes the socket with **4001** (#105). Reconnect with a fresh token.
+- A socket doesn't outlive its token: when the token's `exp` passes, the server closes the socket with **4001** (#105). Reconnect with a fresh token. Deleting the account closes its open sockets with **4001** too.
 - The 10 seconds cover the whole handshake. If the server is still checking a token when they run out (a slow database), it closes with **1011** instead, and the client should retry.
 
 When auth succeeds, the server answers:
@@ -130,7 +130,7 @@ Clients should also give up on a socket that has received nothing for about 60 s
 
 Every frame works across backend tasks: each task subscribes to the event bus's broadcast path (Redis Pub/Sub), so a message, read or typing frame from a socket on one task reaches sockets on every task. In memory (no `REDIS_URL`) there is only ever one process.
 
-The channel takes upgrades only once those subscriptions are in place. If Redis is unreachable when a task boots, the task keeps retrying (backoff up to 30 s) and `/api/live` refuses upgrades until it succeeds; clients just keep reconnecting. If Redis drops later, the subscriptions come back by themselves when it does. Events published while they were down are not delivered (there is no replay), and open sockets are not told.
+The channel takes upgrades only once those subscriptions are in place. If Redis is unreachable when a task boots, the task keeps retrying (backoff up to 30 s) and `/api/live` refuses upgrades until it succeeds; clients just keep reconnecting. If Redis drops later, the subscriptions come back by themselves when it does. Events published while they were down are not delivered (there is no replay), so once the subscriptions are back the task closes every socket it holds with **1012**. Clients reconnect after their usual backoff and refetch, as after any reconnect. Every task whose subscriber dropped does this, so after a Redis restart every client reconnects once; the full-jitter backoff spreads them out.
 
 Each task logs `[live] socket open: person <id>, <n> threads, task <host>/<pid>` when a socket is ready, and `[live] socket closed: person <id>, code <code>, after <s>s, task <host>/<pid>` when it closes.
 
@@ -142,7 +142,8 @@ Each task logs `[live] socket open: person <id>, <n> threads, task <host>/<pid>`
 | 1001 | Server shutting down (deploy). | Reconnect. |
 | 1006 | Connection lost, or dropped for missing pings. | Reconnect. |
 | 1011 | Server error while setting up the socket. | Reconnect. |
-| 4001 | Unauthorized: bad, expired or missing token, or the token expired while the socket was open. | Stop. Get a fresh token (sign in again) before retrying. |
+| 1012 | The server's event stream was interrupted (a Redis outage), so events may have been missed. | Reconnect, then refetch (as after any reconnect). |
+| 4001 | Unauthorized: bad, expired or missing token, the token expired while the socket was open, or the account was deleted. | Stop. Get a fresh token (sign in again) before retrying. |
 | 4002 | Unsupported protocol version. | Stop. The client is too old or too new. |
 
 ## Reconnecting

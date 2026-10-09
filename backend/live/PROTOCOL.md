@@ -3,8 +3,8 @@
 One WebSocket per signed-in person. It carries live events for every thread that person can see. The web app uses it now. The VTT, Electron and React Native clients will use it later, so keep it small, and change the version when it changes in a way old clients can't ignore.
 
 - Server: `backend/live/liveChannel.ts`
-- Web client: `frontend/src/lib/realtime/liveClient.ts`, wrapped by the `useLiveThread` hook
-- Tests: `backend/scripts/test-live-channel.ts` (campaigns, auth, heartbeat, client), `backend/scripts/test-live-dms.ts` (DMs), `backend/scripts/test-live-typing.ts` (typing)
+- Web client: `frontend/src/lib/realtime/liveClient.ts`, wrapped by the `useLiveThread` hook (threads), `useTyping` (typing) and `useThreads` (the thread list)
+- Tests: `backend/scripts/test-live-channel.ts` (campaigns, auth, heartbeat, client), `backend/scripts/test-live-dms.ts` (DMs), `backend/scripts/test-live-typing.ts` (typing), `backend/scripts/test-live-list.ts` (`thread.updated`, `thread.read`)
 
 ## Connecting
 
@@ -46,6 +46,8 @@ Thread keys are `campaign:<campaign id>` and `dm:<id>:<id>`, with the two accoun
 | `ready` | `v`, `threads` | Auth succeeded. Events start flowing. |
 | `message.created` | `thread`, `message` | A message was posted to a thread you can see. |
 | `typing` | `thread`, `personId`, `name`, `expiresInMs` | Someone else is writing in a thread you can see (see Typing). |
+| `thread.updated` | `thread`, `lastActivityAt`, `unreadCount` | A thread's last activity and your unread count in it changed (a new message). |
+| `thread.read` | `thread`, `lastReadAt`, `lastReadMessageId`, `unreadCount` | You read a thread, on this or another device. |
 | `ping` | none | Heartbeat. Answer with `pong`. |
 
 `message` is:
@@ -59,7 +61,21 @@ Campaign threads and DM threads carry the same frame. A DM reaches only its pair
 
 This channel is the only live path: the old per-thread SSE streams (`/api/messages/campaign/:id/stream`, `/api/messages/dm/:userId/stream`) were removed with #99.
 
-Clients must ignore frame types they don't know. Later versions of the server will add frames such as `thread.read` and `thread.updated` (spec #58) without changing `v`.
+### The thread list: `thread.updated` and `thread.read` (#102)
+
+These keep a thread list (unread markers, newest-first order) current without polling. Neither carries message text.
+
+```json
+{ "type": "thread.updated", "thread": "campaign:<id>", "lastActivityAt": "<ISO>", "unreadCount": 3 }
+{ "type": "thread.read", "thread": "campaign:<id>", "lastReadAt": "<ISO>", "lastReadMessageId": "<uuid>", "unreadCount": 0 }
+```
+
+- **`thread.updated`** follows every `message.created`, to every socket subscribed to the thread, the sender's own included. `lastActivityAt` is the new message's `createdAt`. `unreadCount` is worked out per person: the messages after that person's read position that someone else sent, so the sender's count doesn't go up. It can arrive for a thread a list doesn't show (a first DM, a completed campaign the socket is still subscribed to); clients refetch the list or ignore it.
+- **`thread.read`** goes to every socket of the person who read, and to nobody else, when a mark-read (`POST /api/threads/:threadKey/read`) moves their read position forward. A mark-read that doesn't move it (a device that is behind) sends nothing. `lastReadAt` is the read message's `createdAt`; `unreadCount` is what's left unread after the position. Your read position is never sent to other people.
+- If a `thread.read` and a `thread.updated` for the same thread cross, a client can trust the read when `lastReadAt` is at or after the update's `lastActivityAt` (the web client does: the count stays 0).
+- Both are live-only, like everything here. After a reconnect, refetch the list (`GET /api/threads`).
+
+Clients must ignore frame types they don't know. Later versions of the server will add frames (spec #58) without changing `v`.
 
 ## Client → server frames
 
@@ -116,7 +132,7 @@ Clients should also give up on a socket that has received nothing for about 60 s
 
 Reconnect with exponential backoff and full jitter. The web client waits a random time between 0 and `min(30 s, 0.5 s × 2^attempt)`, and resets the attempt count on `ready`.
 
-**The server doesn't replay missed events.** After a reconnect, refetch what's on screen: the open thread's latest page (and, from #102, the thread list). The web client calls every subscriber's `onReconnect` when a later `ready` arrives.
+**The server doesn't replay missed events.** After a reconnect, refetch what's on screen: the open thread's latest page and the thread list. The web client calls every subscriber's `onReconnect` (thread subscribers and person-level ones, `LiveClient.subscribePerson`) when a later `ready` arrives.
 
 ## Versioning
 

@@ -273,7 +273,8 @@ async function main() {
     const maraDm = open(mara);
     await Promise.all([aliceDm, bobDm, maraDm].map((c) => c.ready()));
     bobDm.typing(dmThread);
-    // (Sockets opened before the friendship aren't subscribed to the DM until #105.)
+    // (Sockets opened after the friendship: befriend() writes SQL directly and
+    // publishes no friendship event, so earlier sockets wouldn't follow it.)
     check("bob typing in his DM with alice reaches alice",
       await until(() => typingIn(aliceDm, dmThread).length === 1), JSON.stringify(aliceDm.frames));
     check("...naming bob", typingIn(aliceDm, dmThread)[0]?.personId === bob.id
@@ -330,8 +331,10 @@ async function main() {
 
     console.log("\nAccess that ended since the socket connected\n");
 
-    // Subscriptions are fixed at connect, so the leaver's socket still lists the
-    // campaign; the access check at typing time is what stops this.
+    // The row is deleted behind the routes' back, so no access event is
+    // published and the leaver's socket still lists the campaign; the access
+    // check at typing time is what stops this. (With the event, #105 drops the
+    // subscription itself: test-live-access.ts.)
     const leaverSocket = open(leaver);
     await leaverSocket.ready();
     check("the leaver's socket was subscribed to Table Talk", leaverSocket.of("ready")[0]?.threads?.includes(tableThread));

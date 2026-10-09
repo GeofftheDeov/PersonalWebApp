@@ -484,9 +484,10 @@ async function main() {
 
       const streams = await streamEntries();
       // Alice's real message went through the stream, so the scan is looking in the right place.
-      const gamenight = Object.entries(streams).find(([key]) => key.endsWith("events:gamenight"));
+      // Other runs' namespaces can leave their own gamenight streams, so look in all of them.
+      const gamenight = Object.entries(streams).filter(([key]) => key.endsWith("events:gamenight"));
       check("alice's real message is in the Redis stream history (so the scan sees streams)",
-        !!gamenight?.[1].some((e) => e.includes(`there ${RUN}`)), Object.keys(streams).join(", "));
+        gamenight.some(([, entries]) => entries.some((e) => e.includes(`there ${RUN}`))), Object.keys(streams).join(", "));
       const typingKeys = Object.keys(streams).filter((k) => /letters|typing/.test(k));
       const typingEntries = Object.values(streams).flat().filter((e) => /letters\.typing|"typing"/.test(e));
       check("no Redis stream holds anything typing-related", typingKeys.length === 0 && typingEntries.length === 0,

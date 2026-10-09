@@ -361,6 +361,17 @@ async function main() {
     await handle.close();
     for (const ch of channels) await ch.close().catch(() => {});
     for (const b of busesToStop) await b.stop().catch(() => {});
+    if (REDIS_URL && busesToStop.length) {
+      // The throwaway namespaces' streams (XADDed by the publishes above).
+      const { Redis } = await import("ioredis");
+      const redis = new Redis(REDIS_URL);
+      const ns = process.env.EVENT_BUS_NAMESPACE || "t58";
+      for (const suffix of ["x", "y"]) {
+        const keys = await redis.keys(`${ns}-${suffix}${RUN}:*`).catch(() => [] as string[]);
+        if (keys.length) await redis.del(...keys).catch(() => {});
+      }
+      await redis.quit().catch(() => {});
+    }
     for (const server of servers) { server.closeAllConnections?.(); server.close(); }
     await cleanup().catch((e) => console.error("cleanup failed:", e));
     await stopEventBus();

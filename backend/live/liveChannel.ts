@@ -163,8 +163,10 @@ export async function attachLiveChannel(
     /** Per connection: the display name (looked up once) and when each thread last accepted a frame. */
     const typists = new WeakMap<Connection, { name?: Promise<string>; lastAt: Map<ThreadKey, number> }>();
 
-    unsubscribes.push(await bus.subscribeBroadcast("letters.typing", (payload, meta) => {
-        if (!firstSighting(meta?.id)) return;
+    // No `firstSighting` here: a typing event is published once, a duplicate
+    // would only refresh an indicator, and its ids would crowd message ids out
+    // of the shared seen set.
+    unsubscribes.push(await bus.subscribeBroadcast("letters.typing", (payload) => {
         const frame: TypingFrame = {
             type: "typing",
             thread: payload.threadKey,
@@ -181,7 +183,10 @@ export async function attachLiveChannel(
 
     async function onTyping(conn: Connection, thread: unknown) {
         const personId = conn.personId;
-        if (!personId || typeof thread !== "string") return;
+        // Only threads this socket is subscribed to: nobody else could see the
+        // typing anyway, and it bounds what an arbitrary key can cost (the
+        // guard map below, the access check).
+        if (!personId || typeof thread !== "string" || !conn.threads.has(thread)) return;
         let state = typists.get(conn);
         if (!state) typists.set(conn, (state = { lastAt: new Map() }));
         // Clients send at most one frame every 3 s (sooner only after sending
@@ -189,13 +194,21 @@ export async function attachLiveChannel(
         const now = Date.now();
         if (now - (state.lastAt.get(thread) ?? -Infinity) < TYPING_MIN_INTERVAL_MS) return;
         state.lastAt.set(thread, now);
+        // Subscriptions are fixed at connect; access may have ended since (a campaign left).
         if (!(await canAccessThread({ id: personId }, thread))) return;
-        state.name ??= findPersonById(personId, "name firstName lastName handle email")
+        const lookup = state.name ??= findPersonById(personId, "name firstName lastName handle email")
             .then((person) => personDisplayName(person?.doc));
+        let name: string;
+        try {
+            name = await lookup;
+        } catch (err) {
+            if (state.name === lookup) state.name = undefined; // try again on the next frame
+            throw err;
+        }
         await bus.publishEphemeral("letters.typing", {
             threadKey: thread,
             personId,
-            name: await state.name,
+            name,
             expiresInMs: TYPING_EXPIRES_IN_MS,
         });
     }

@@ -114,11 +114,12 @@ const RUN = Math.random().toString(36).slice(2, 8);
 type Person = { id: string; email: string; handle: string };
 const created = { accounts: [] as string[], campaigns: [] as string[] };
 
-async function account(name: string): Promise<Person> {
+async function account(name: string, appRole: "user" | "admin" = "user"): Promise<Person> {
   const handle = `t103-${name}-${RUN}`;
   const { rows } = await pool.query(
-    `INSERT INTO accounts (id, handle, name, email) VALUES (gen_random_uuid(), $1, $2, $3) RETURNING id, email`,
-    [handle, `${name} name`, `t103.${name}.${RUN}@example.test`]);
+    `INSERT INTO accounts (id, handle, name, email, app_role) VALUES (gen_random_uuid(), $1, $2, $3, $4)
+     RETURNING id, email`,
+    [handle, `${name} name`, `t103.${name}.${RUN}@example.test`, appRole]);
   created.accounts.push(rows[0].id);
   return { id: rows[0].id, email: rows[0].email, handle };
 }
@@ -227,8 +228,10 @@ async function main() {
     const bob = await account("bob");
     const mara = await account("mara");
     const outsider = await account("outsider");
+    const admin = await account("admin", "admin");
+    const leaver = await account("leaver");
     const table = await campaign("Curse of Strahd");
-    for (const p of [alice, bob, mara]) await member(table, p);
+    for (const p of [alice, bob, mara, leaver]) await member(table, p);
     const tableThread = campaignThreadKey(table);
     const rowsBefore = await rowCounts();
 
@@ -294,6 +297,18 @@ async function main() {
       [aliceLaptop, bobSocket, maraSocket].map((c, i) => `${c.of("typing").length - beforeDrops[i]}`).join(","));
     check("...and the outsider's socket stays open", outsiderSocket.ws.readyState === WebSocket.OPEN);
 
+    // An admin may read any campaign's history, but a socket only types in the
+    // threads its `ready` subscribed it to (which also bounds the work an
+    // arbitrary thread key can cost the server).
+    const adminSocket = open(admin);
+    await adminSocket.ready();
+    const beforeAdmin = typingIn(bobSocket, tableThread).length;
+    adminSocket.typing(tableThread);
+    await sleep(500);
+    check("an admin who isn't a member: typing in that campaign reaches nobody",
+      typingIn(bobSocket, tableThread).length === beforeAdmin,
+      `${typingIn(bobSocket, tableThread).length - beforeAdmin} delivered`);
+
     console.log("\nA client that floods typing frames\n");
 
     const flood = open(mara);
@@ -312,6 +327,21 @@ async function main() {
     const changed = Object.keys({ ...rowsBefore, ...rowsAfter }).filter((t) => rowsBefore[t] !== rowsAfter[t]);
     check("all that typing left no database rows: every table's row count is unchanged", changed.length === 0,
       changed.map((t) => `${t}: ${rowsBefore[t]} -> ${rowsAfter[t]}`).join(", "));
+
+    console.log("\nAccess that ended since the socket connected\n");
+
+    // Subscriptions are fixed at connect, so the leaver's socket still lists the
+    // campaign; the access check at typing time is what stops this.
+    const leaverSocket = open(leaver);
+    await leaverSocket.ready();
+    check("the leaver's socket was subscribed to Table Talk", leaverSocket.of("ready")[0]?.threads?.includes(tableThread));
+    await pool.query(`DELETE FROM campaign_members WHERE campaign_id = $1 AND person_id = $2`, [table, leaver.id]);
+    const beforeLeft = typingIn(bobSocket, tableThread).length;
+    leaverSocket.typing(tableThread);
+    await sleep(500);
+    check("after leaving the campaign, their typing there reaches nobody",
+      typingIn(bobSocket, tableThread).length === beforeLeft,
+      `${typingIn(bobSocket, tableThread).length - beforeLeft} delivered`);
 
     console.log("\nThe client: throttling, expiry, clearing\n");
 

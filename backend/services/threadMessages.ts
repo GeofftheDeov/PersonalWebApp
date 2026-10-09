@@ -1,4 +1,4 @@
-import { query } from "../db/index.js";
+import pool, { query } from "../db/index.js";
 import { isUuid } from "../db/model.js";
 import Campaign from "../models/Campaign.js";
 import { bus } from "../events/index.js";
@@ -200,34 +200,81 @@ export async function sendThreadMessage(
     const recipient = isCampaign ? null : thread.people.find((p) => p !== String(person.id))!;
     const eventId = isCampaign && typeof input.eventId === "string" && isUuid(input.eventId) ? input.eventId : null;
 
-    const { rows: [inserted] } = await query<MessageRow>(
-        `INSERT INTO messages (campaign_id, event_id, dm_key, recipient, sender_id, sender_name, sender_email, body, client_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         ON CONFLICT (sender_id, client_id) WHERE client_id IS NOT NULL DO NOTHING
-         RETURNING *`,
-        [isCampaign ? thread.campaignId : null, eventId, isCampaign ? null : thread.dmKey, recipient,
-            String(person.id), senderName, email, body, clientId]);
+    // Store, publish, and on a failed publish take the row back, all under the
+    // (sender, clientId) lock: a resend that arrives meanwhile waits for the
+    // outcome instead of reporting a row that may yet be deleted.
+    return withSendLock(String(person.id), clientId, async (db): Promise<SendResult> => {
+        const { rows: [inserted] } = await db.query<MessageRow>(
+            `INSERT INTO messages (campaign_id, event_id, dm_key, recipient, sender_id, sender_name, sender_email, body, client_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             ON CONFLICT (sender_id, client_id) WHERE client_id IS NOT NULL DO NOTHING
+             RETURNING *`,
+            [isCampaign ? thread.campaignId : null, eventId, isCampaign ? null : thread.dmKey, recipient,
+                String(person.id), senderName, email, body, clientId]);
 
-    if (!inserted) {
-        // A resend: hand back what's stored, if it's this thread's.
-        const { rows: [stored] } = await query<MessageRow>(
-            `SELECT m.* FROM messages m WHERE m.sender_id = $1 AND m.client_id = $2`, [String(person.id), clientId]);
-        const sameThread = stored && (isCampaign
-            ? String(stored.campaign_id) === thread.campaignId
-            : stored.dm_key === thread.dmKey);
-        if (!sameThread) return { ok: false, reason: "client-id-conflict" };
-        return { ok: true, row: stored, created: false };
-    }
+        if (!inserted) {
+            // A resend of a send that has finished (it held the lock until it
+            // did): hand back what's stored, if it's this thread's.
+            const { rows: [stored] } = await db.query<MessageRow>(
+                `SELECT m.* FROM messages m WHERE m.sender_id = $1 AND m.client_id = $2`, [String(person.id), clientId]);
+            const sameThread = stored && (isCampaign
+                ? String(stored.campaign_id) === thread.campaignId
+                : stored.dm_key === thread.dmKey);
+            if (!sameThread) return { ok: false, reason: "client-id-conflict" };
+            return { ok: true, row: stored, created: false };
+        }
 
+        try {
+            await publishAndNotify(inserted, thread, person, senderName, email);
+        } catch (err) {
+            // Not delivered, so not stored: a resend with this clientId must
+            // publish afresh, not find this row and report it sent.
+            await db.query(`DELETE FROM messages WHERE id = $1`, [inserted.id]).catch(() => { /* the throw below reports it */ });
+            throw err;
+        }
+        return { ok: true, row: inserted, created: true };
+    });
+}
+
+/** What a send runs its queries on: the pool, or the one connection holding its lock. */
+type Queryable = { query: typeof query };
+
+/**
+ * Runs a send while holding a Postgres advisory lock on (sender, clientId), on
+ * one pooled connection that the send also runs its own queries on.
+ *
+ * A send stores its row before it publishes and deletes the row again if the
+ * publish fails. Without the lock, a resend with the same clientId that
+ * arrives while the first send is still publishing finds the row and answers
+ * 200 ("already sent"), and then the first send deletes it: the person sees a
+ * message as sent that nobody received and that no longer exists. With it,
+ * the resend waits for the first send to finish. If that one published, the
+ * resend gets the stored message (200); if it failed and took the row back,
+ * the resend stores and publishes it afresh (201). Advisory locks are
+ * database-wide, so this holds across backend tasks too.
+ *
+ * It is a session lock on this connection, so a connection that dies mid-send
+ * gives it up. The send's queries run on the same connection, so a waiting
+ * resend holds one pooled connection and never needs a second one. Sends
+ * without a clientId can't be resent; they skip the lock and use the pool.
+ */
+async function withSendLock<T>(senderId: string, clientId: string | null, fn: (db: Queryable) => Promise<T>): Promise<T> {
+    if (clientId === null) return fn({ query });
+    const db = await pool.connect();
+    const key = `thread-send:${senderId}:${clientId}`;
+    let broken: Error | undefined;
     try {
-        await publishAndNotify(inserted, thread, person, senderName, email);
-    } catch (err) {
-        // Not delivered, so not stored: a resend with this clientId must
-        // publish afresh, not find this row and report it sent.
-        await query(`DELETE FROM messages WHERE id = $1`, [inserted.id]).catch(() => { /* the throw below reports it */ });
-        throw err;
+        await db.query(`SELECT pg_advisory_lock(hashtextextended($1, 0))`, [key]);
+        return await fn(db as unknown as Queryable);
+    } finally {
+        try {
+            await db.query(`SELECT pg_advisory_unlock(hashtextextended($1, 0))`, [key]);
+        } catch (err) {
+            // Discarding the connection ends its session, and the lock with it.
+            broken = err instanceof Error ? err : new Error(String(err));
+        }
+        db.release(broken);
     }
-    return { ok: true, row: inserted, created: true };
 }
 
 /** Live delivery (the bus event the live channel forwards) and the bell. Throws if the publish fails. */

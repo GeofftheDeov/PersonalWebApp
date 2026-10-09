@@ -300,6 +300,61 @@ async function main() {
     const hiccups = (await history(player, strahdKey, "?limit=200")).json?.messages?.filter((m: any) => m.body === "t101 bus hiccup");
     check("...so the thread holds it exactly once", hiccups?.length === 1, `got ${hiccups?.length}`);
 
+    // A resend that arrives while the first send is still publishing must
+    // wait for its outcome (integration fix, spec #58): it used to find the
+    // row, answer 200, and then the first send deleted it when its publish
+    // failed, so a message showed as sent that nobody got and nobody stored.
+    const stalled = async (clientId: string, body: string, outcome: "fail" | "succeed") => {
+      let release!: () => void;
+      const gate = new Promise<void>((r) => { release = r; });
+      let stall = true;
+      (bus as any).publish = async (...args: Parameters<typeof bus.publish>) => {
+        if (stall) {
+          stall = false;
+          await gate;
+          if (outcome === "fail") throw new Error("t101 bus down mid-send");
+        }
+        return realPublish(...args);
+      };
+      console.error = () => {};
+      const first = send(player, strahdKey, { body, clientId });
+      // The first send has stored its row and is now publishing.
+      for (let i = 0; i < 200; i++) {
+        const { rows } = await pool.query(`SELECT 1 FROM messages WHERE sender_id = $1 AND client_id = $2`, [player.id, clientId]);
+        if (rows.length) break;
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      let resendSettled = false;
+      const resend = send(player, strahdKey, { body, clientId }).finally(() => { resendSettled = true; });
+      await new Promise((r) => setTimeout(r, 300));
+      const waited = !resendSettled;
+      release();
+      const [a, b] = await Promise.all([first, resend]);
+      console.error = quietErrors;
+      (bus as any).publish = realPublish;
+      const stored = (await history(player, strahdKey, "?limit=200")).json?.messages?.filter((m: any) => m.body === body) ?? [];
+      return { a, b, waited, stored };
+    };
+
+    const midFail = await stalled(`t101-${RUN}-c`, "t101 resent mid-publish", "fail");
+    check("a resend while the first send is still publishing waits for it", midFail.waited);
+    check("...the first send's publish fails: it reports 500", midFail.a.status === 500, `got ${midFail.a.status}`);
+    check("...and the resend stores and publishes it afresh (201), not a 200 for a row about to vanish",
+      midFail.b.status === 201 && (await published("gamenight.message", midFail.b.json?.message?.id)).length === 1,
+      `got ${midFail.b.status} ${midFail.b.text}`);
+    check("...so the message the resend reports is the one stored, exactly once",
+      midFail.stored.length === 1 && midFail.stored[0].id === midFail.b.json?.message?.id,
+      `got ${JSON.stringify(midFail.stored)}`);
+
+    const midOk = await stalled(`t101-${RUN}-d`, "t101 resent mid-publish, fine", "succeed");
+    check("a resend while the first send is still publishing (and will succeed) waits for it", midOk.waited);
+    check("...then gets the stored message (200) once the first send is out (201)",
+      midOk.a.status === 201 && midOk.b.status === 200 && midOk.b.json?.message?.id === midOk.a.json?.message?.id,
+      `got ${midOk.a.status}/${midOk.b.status}`);
+    check("...published once and stored once",
+      (await published("gamenight.message", midOk.a.json?.message?.id)).length === 1 && midOk.stored.length === 1,
+      `stored ${midOk.stored.length}`);
+
     const badClientId = await send(player, strahdKey, { body: "t101 x", clientId: "a b" });
     check("a malformed clientId is refused (400)", badClientId.status === 400, `got ${badClientId.status}`);
 

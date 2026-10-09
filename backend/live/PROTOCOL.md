@@ -4,7 +4,7 @@ One WebSocket per signed-in person. It carries live events for every thread that
 
 - Server: `backend/live/liveChannel.ts`
 - Web client: `frontend/src/lib/realtime/liveClient.ts`, wrapped by the `useLiveThread` hook (threads), `useTyping` (typing) and `useThreads` (the thread list)
-- Tests: `backend/scripts/test-live-channel.ts` (campaigns, auth, heartbeat, client), `backend/scripts/test-live-dms.ts` (DMs), `backend/scripts/test-live-typing.ts` (typing), `backend/scripts/test-live-list.ts` (`thread.updated`, `thread.read`), `backend/scripts/test-live-access.ts` (access changes, token expiry)
+- Tests: `backend/scripts/test-live-channel.ts` (campaigns, auth, heartbeat, client), `backend/scripts/test-live-dms.ts` (DMs), `backend/scripts/test-live-typing.ts` (typing), `backend/scripts/test-live-list.ts` (`thread.updated`, `thread.read`), `backend/scripts/test-live-two-tasks.ts` (every frame across two backend processes), `backend/scripts/test-live-redis-recovery.ts` (Redis outages), `backend/scripts/test-live-access.ts` (access changes, token expiry)
 
 ## Connecting
 
@@ -125,6 +125,14 @@ Clients show "Theo is writing…" and take it down `expiresInMs` (5 seconds) aft
 The server sends `ping` every 25 seconds. A socket that has sent nothing since the previous ping is terminated without a close frame, so the client sees 1006. Any frame counts as an answer, but clients should send `pong`.
 
 Clients should also give up on a socket that has received nothing for about 60 seconds, since browsers can take minutes to notice a dead connection. The ALB idle timeout must stay above the ping interval (#106 sets it above 60 seconds).
+
+## More than one backend task
+
+Every frame works across backend tasks: each task subscribes to the event bus's broadcast path (Redis Pub/Sub), so a message, read or typing frame from a socket on one task reaches sockets on every task. In memory (no `REDIS_URL`) there is only ever one process.
+
+The channel takes upgrades only once those subscriptions are in place. If Redis is unreachable when a task boots, the task keeps retrying (backoff up to 30 s) and `/api/live` refuses upgrades until it succeeds; clients just keep reconnecting. If Redis drops later, the subscriptions come back by themselves when it does. Events published while they were down are not delivered (there is no replay), and open sockets are not told.
+
+Each task logs `[live] socket open: person <id>, <n> threads, task <host>/<pid>` when a socket is ready, and `[live] socket closed: person <id>, code <code>, after <s>s, task <host>/<pid>` when it closes.
 
 ## Close codes
 

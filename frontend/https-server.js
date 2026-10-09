@@ -55,6 +55,16 @@ console.log("-> Creating HTTP servers...");
 const httpServer = createHttpServer(requestHandler);
 const secondaryServer = createHttpServer(requestHandler);
 
+// The ALB keeps idle connections to this server open for its idle timeout
+// (120 s on dev and prod, raised for the live channel's WebSockets, #106).
+// Node's default 5 s keep-alive would close them first, and a request the ALB
+// sends down a connection just as Node closes it comes back as a 502. So keep
+// idle connections longer than the ALB does: raise these with its timeout.
+for (const server of [httpServer, secondaryServer]) {
+    server.keepAliveTimeout = 125_000;
+    server.headersTimeout = 126_000;
+}
+
 httpServer.listen(port, hostname, () => {
     console.log(`> Server Ready on http://${hostname}:${port}`);
 });

@@ -60,6 +60,11 @@ export function useLiveThread(thread: string | null, handlers: LiveThreadHandler
     const latest = useRef(handlers);
     latest.current = handlers;
     const status = useLiveStatus();
+    // The server's thread set changes on each `ready`, including one re-sent
+    // on the open socket when access changes (#105), which doesn't change
+    // `status`: re-render on it so the thread's own status is read fresh.
+    const [, setThreadsSeen] = useState(0);
+    useEffect(() => getLiveClient().onThreads(() => setThreadsSeen(n => n + 1)), []);
 
     useEffect(() => {
         if (!thread) return;
@@ -69,7 +74,5 @@ export function useLiveThread(thread: string | null, handlers: LiveThreadHandler
         });
     }, [thread]);
 
-    // The server's thread set is replaced on each `ready`, which also flips
-    // `status` to open and re-renders this, so reading it fresh here is enough.
     return thread && status === 'open' ? getLiveClient().threadStatus(thread) : status;
 }

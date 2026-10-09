@@ -26,6 +26,7 @@ import pool from "../db/index.js";
 import { signJwt } from "../utils/jwt.js";
 import { attachLiveChannel, LIVE_PATH, PROTOCOL_VERSION } from "../live/liveChannel.js";
 import { campaignThreadKey, dmThreadKey } from "../services/threads.js";
+import { publishFriendshipChanged } from "../services/accessEvents.js";
 
 /** The frontend's realtime client, loaded by path at run time (see test-live-channel.ts). */
 type LiveClientLike = {
@@ -236,12 +237,10 @@ async function main() {
 
     console.log("\nA friend added while the socket is open\n");
 
-    // The server works out a socket's threads at connect (#105 will follow
-    // changes live). Until then, opening a thread the open socket wasn't
-    // subscribed to makes the client reconnect once, so a DM with a brand-new
-    // friend is live without a reload, as it was with its own SSE stream.
+    // The server follows friendship events on the open socket (#105; the
+    // friend routes publish them, test-live-access.ts covers those), so a DM
+    // with a brand-new friend turns live without a reconnect or a reload.
     const dave = await account("dave");
-    await befriend(alice, dave);
     const newThread = dmThreadKey(alice.id, dave.id);
     const reconnects: number[] = [];
     const beforeNew = upgrades;
@@ -249,21 +248,23 @@ async function main() {
       onMessage: (m, t) => seen.push(`${t} ${m.body}`),
       onReconnect: () => reconnects.push(Date.now()),
     });
-    check("opening the new friend's DM brings it live", await until(() => lc.threadStatus(newThread) === "open"),
+    await befriend(alice, dave);
+    await publishFriendshipChanged(alice.id, dave.id, "added");
+    check("the new friend's DM turns live", await until(() => lc.threadStatus(newThread) === "open"),
       lc.threadStatus(newThread));
-    check("...with one reconnect", upgrades - beforeNew === 1 && reconnects.length === 1,
-      `${upgrades - beforeNew} upgrades, ${reconnects.length} reconnects`);
+    check("...without a reconnect, and it catches up once", upgrades === beforeNew && reconnects.length === 1,
+      `${upgrades - beforeNew} upgrades, ${reconnects.length} catch-ups`);
     await post(`/api/messages/dm/${alice.id}`, dave, { body: `new friend ${RUN}` });
     check("the new friend's DM arrives live", await until(() => seen.includes(`${newThread} new friend ${RUN}`)),
       JSON.stringify(seen));
-    check("threads open before the reconnect stay live after it", lc.threadStatus(thread) === "open"
+    check("the threads that were already open stay live", lc.threadStatus(thread) === "open"
       && lc.threadStatus(campaignThreadKey(table)) === "open");
 
     const beforeStranger = upgrades;
     const offStranger = lc.subscribe(dmThreadKey(alice.id, stranger.id), {});
     await sleep(600);
-    check("a thread the person still can't see stays unavailable after at most one reconnect",
-      lc.threadStatus(dmThreadKey(alice.id, stranger.id)) === "unavailable" && upgrades - beforeStranger <= 1,
+    check("a thread the person can't see stays unavailable, without a reconnect",
+      lc.threadStatus(dmThreadKey(alice.id, stranger.id)) === "unavailable" && upgrades === beforeStranger,
       `${lc.threadStatus(dmThreadKey(alice.id, stranger.id))}, ${upgrades - beforeStranger} upgrades`);
     offStranger();
     offNew();

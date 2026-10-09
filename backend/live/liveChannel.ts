@@ -21,7 +21,10 @@ import { unreadCounts } from "../services/readState.js";
  *     the frontend's rewrite);
  *   - authenticates with the JWT from the first frame (or, less preferred, the
  *     `token` query parameter), through utils/jwt.ts like every other route;
- *   - asks Threads which threads the person can see, once, at connect;
+ *   - asks Threads which threads the person can see, at connect and again
+ *     whenever a membership or friendship event names them (#105), and
+ *     re-sends `ready` when a socket's set changes;
+ *   - closes a socket with 4001 when its token expires (#105);
  *   - listens on broadcast bus subscriptions (campaign messages and friend
  *     DMs), so every backend task sees every message event, and forwards each
  *     one only to sockets subscribed to its thread;
@@ -115,10 +118,18 @@ export type ThreadListFrame =
 
 interface Connection {
     ws: WebSocket;
+    /** Set once the token checks out; the socket is only usable once `ready` is true too. */
     personId: string | null;
+    /** True once this socket has been sent its first `ready`. */
+    ready: boolean;
     threads: Set<ThreadKey>;
     alive: boolean;
+    /** Closes the socket when its token expires (#105). */
+    expiry?: ReturnType<typeof setTimeout>;
 }
+
+/** setTimeout's ceiling (about 24.8 days); longer waits re-arm. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
 
 type AnyServer = HttpServer | HttpsServer;
 
@@ -148,13 +159,13 @@ export async function attachLiveChannel(
         }
     }
 
-    /** Sends a frame to every authenticated socket of one person. */
+    /** Sends a frame to every ready socket of one person. */
     function deliverToPerson(personId: string, frame: ServerFrame) {
         const sockets = byPerson.get(personId);
         if (!sockets?.size) return;
         const data = JSON.stringify(frame);
         for (const conn of sockets) {
-            if (conn.ws.readyState === WebSocket.OPEN) conn.ws.send(data);
+            if (conn.ready && conn.ws.readyState === WebSocket.OPEN) conn.ws.send(data);
         }
     }
 
@@ -225,7 +236,8 @@ export async function attachLiveChannel(
         const now = Date.now();
         if (now - (state.lastAt.get(thread) ?? -Infinity) < TYPING_MIN_INTERVAL_MS) return;
         state.lastAt.set(thread, now);
-        // Subscriptions are fixed at connect; access may have ended since (a campaign left).
+        // Subscriptions follow access events (#105), but an event can lag the
+        // change (or be lost on Redis Pub/Sub), so check the access itself.
         if (!(await canAccessThread({ id: personId }, thread))) return;
         const lookup = state.name ??= findPersonById(personId, "name firstName lastName handle email")
             .then((person) => personDisplayName(person?.doc));
@@ -304,34 +316,173 @@ export async function attachLiveChannel(
         }
     }
 
-    function subscribe(conn: Connection, threads: ThreadKey[]) {
-        for (const key of threads) {
-            conn.threads.add(key);
-            if (!byThread.has(key)) byThread.set(key, new Set());
-            byThread.get(key)!.add(conn);
-        }
+    function subscribe(conn: Connection, key: ThreadKey) {
+        conn.threads.add(key);
+        if (!byThread.has(key)) byThread.set(key, new Set());
+        byThread.get(key)!.add(conn);
+    }
+
+    function unsubscribe(conn: Connection, key: ThreadKey) {
+        conn.threads.delete(key);
+        const set = byThread.get(key);
+        set?.delete(conn);
+        if (set && set.size === 0) byThread.delete(key);
     }
 
     function forget(conn: Connection) {
         connections.delete(conn);
+        clearTimeout(conn.expiry);
         if (conn.personId) {
             const mine = byPerson.get(conn.personId);
             mine?.delete(conn);
             if (mine && mine.size === 0) byPerson.delete(conn.personId);
         }
-        for (const key of conn.threads) {
-            const set = byThread.get(key);
-            set?.delete(conn);
-            if (set && set.size === 0) byThread.delete(key);
-        }
-        conn.threads.clear();
+        for (const key of [...conn.threads]) unsubscribe(conn, key);
     }
+
+    /** Tells a socket the threads it is subscribed to now. */
+    function announce(conn: Connection) {
+        conn.ready = true;
+        send(conn.ws, { type: "ready", v: PROTOCOL_VERSION, threads: [...conn.threads] });
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* Access follows membership and friendship (#105)                   */
+    /* ---------------------------------------------------------------- */
+    // A socket's threads are worked out from Threads (visibleThreadKeys) when
+    // it connects, and again for the people an access event names: someone
+    // joined or left a campaign, a campaign was deleted, two people became or
+    // stopped being friends. Each socket whose set changed gets a fresh
+    // `ready` listing it, on the same connection.
+    //
+    // Losing access is applied the moment the event arrives, from the event
+    // alone, so nothing published after it (a message, typing) reaches the
+    // person who left. Gaining access waits for the recompute, so a thread is
+    // only ever added once the database says so.
+
+    /**
+     * People whose threads are being recomputed: `again` when another event
+     * or connect came in meanwhile, `event` once an access event asked.
+     */
+    const refreshing = new Map<string, { again: boolean; event: boolean; done: Promise<void> }>();
+
+    /**
+     * Recomputes one person's threads and applies them to every socket of
+     * theirs on this process. Runs one at a time per person: an event that
+     * arrives during a recompute makes it run again, and a result read before
+     * that event is thrown away rather than applied. Never rejects. If the
+     * threads can't be worked out, sockets still waiting for their first
+     * `ready` close with 1011 (the client retries); after an access event,
+     * so do the person's other sockets, which would otherwise miss the
+     * change until they reconnect. A connect alone leaves those alone.
+     */
+    function refreshPerson(personId: string, { event = false } = {}): Promise<void> {
+        const running = refreshing.get(personId);
+        if (running) {
+            running.again = true;
+            running.event ||= event;
+            return running.done;
+        }
+        const state = { again: true, event, done: Promise.resolve() };
+        refreshing.set(personId, state);
+        state.done = (async () => {
+            try {
+                while (state.again) {
+                    state.again = false;
+                    let threads: ThreadKey[];
+                    try {
+                        threads = await visibleThreadKeys({ id: personId });
+                    } catch (err: any) {
+                        console.error("[live] could not work out threads:", err?.message);
+                        for (const conn of byPerson.get(personId) ?? []) {
+                            if (!conn.ready || state.event) conn.ws.close(1011, "server error");
+                        }
+                        return;
+                    }
+                    if (!state.again) applyThreads(personId, threads);
+                }
+            } finally {
+                refreshing.delete(personId);
+            }
+        })();
+        return state.done;
+    }
+
+    function applyThreads(personId: string, threads: ThreadKey[]) {
+        const next = new Set(threads);
+        for (const conn of byPerson.get(personId) ?? []) {
+            if (conn.ws.readyState !== WebSocket.OPEN) continue;
+            let changed = false;
+            for (const key of [...conn.threads]) if (!next.has(key)) { unsubscribe(conn, key); changed = true; }
+            for (const key of next) if (!conn.threads.has(key)) { subscribe(conn, key); changed = true; }
+            if (changed || !conn.ready) announce(conn);
+        }
+    }
+
+    /** Takes a thread off every socket of one person straight away. */
+    function revoke(personId: string, thread: ThreadKey) {
+        for (const conn of byPerson.get(personId) ?? []) {
+            if (!conn.threads.has(thread)) continue;
+            unsubscribe(conn, thread);
+            if (conn.ready) announce(conn);
+        }
+    }
+
+    function refreshAll(people: Iterable<string>) {
+        for (const personId of new Set(people)) {
+            if (byPerson.has(personId)) void refreshPerson(personId, { event: true });
+        }
+    }
+
+    // No `firstSighting`: these are idempotent (a duplicate costs one more
+    // recompute), and their ids would crowd message ids out of the seen set.
+    unsubscribes.push(
+        await bus.subscribeBroadcast("campaign.changed", ({ campaignId, action, personId }) => {
+            const thread = campaignThreadKey(String(campaignId));
+            if (action === "deleted" || (action === "member-removed" && !personId)) {
+                const people = [...(byThread.get(thread) ?? [])].map((conn) => conn.personId!);
+                for (const id of people) revoke(id, thread);
+                refreshAll(people);
+            } else if (action === "member-removed") {
+                revoke(String(personId), thread);
+                refreshAll([String(personId)]);
+            } else if ((action === "member-added" || action === "created") && personId) {
+                refreshAll([String(personId)]);
+            }
+            // "updated": a campaign's details, not who is in it.
+        }),
+        await bus.subscribeBroadcast("friendship.changed", ({ personIds, action }) => {
+            const [a, b] = (personIds ?? []).map(String);
+            if (!a || !b || a === b) return;
+            if (action === "removed") {
+                const thread = dmThreadKey(a, b);
+                revoke(a, thread);
+                revoke(b, thread);
+            }
+            refreshAll([a, b]);
+        }),
+    );
+
+    /** Closes the socket with 4001 once its token's `exp` passes, so a socket can't outlive its token. */
+    function closeAtExpiry(conn: Connection, exp: unknown) {
+        if (typeof exp !== "number") return;
+        const check = () => {
+            const left = exp * 1000 - Date.now();
+            if (left <= 0) return conn.ws.close(CLOSE_UNAUTHORIZED, "token expired");
+            conn.expiry = setTimeout(check, Math.min(left, MAX_TIMER_MS));
+            conn.expiry.unref?.();
+        };
+        check();
+    }
+    /* ---------------- end access ---------------- */
 
     async function authenticate(conn: Connection, token: unknown) {
         let personId: string | null = null;
+        let exp: unknown;
         try {
             if (typeof token !== "string" || !token) throw new Error("no token");
             const decoded = verifyJwt(token);
+            exp = decoded.exp;
             personId = await resolveAccountId(String(decoded.id));
         } catch {
             personId = null;
@@ -339,31 +490,28 @@ export async function attachLiveChannel(
         if (conn.ws.readyState !== WebSocket.OPEN) return;
         if (!personId) return conn.ws.close(CLOSE_UNAUTHORIZED, "unauthorized");
 
-        let threads: ThreadKey[];
-        try {
-            threads = await visibleThreadKeys({ id: personId });
-        } catch (err: any) {
-            console.error("[live] could not work out threads:", err.message);
-            return conn.ws.close(1011, "server error");
-        }
-        if (conn.ws.readyState !== WebSocket.OPEN) return;
+        // Registered before its threads are read, so an access event that
+        // arrives meanwhile reaches this socket too (by making the read run
+        // again). Nothing is sent to it before its first `ready`.
         conn.personId = personId;
         if (!byPerson.has(personId)) byPerson.set(personId, new Set());
         byPerson.get(personId)!.add(conn);
-        subscribe(conn, threads);
-        send(conn.ws, { type: "ready", v: PROTOCOL_VERSION, threads });
-        console.log(`[live] socket open: person ${personId}, ${threads.length} threads, task ${TASK}`);
+        closeAtExpiry(conn, exp);
+        await refreshPerson(personId);
+        if (conn.ready) {
+            console.log(`[live] socket open: person ${personId}, ${conn.threads.size} threads, task ${TASK}`);
+        }
     }
 
     wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
-        const conn: Connection = { ws, personId: null, threads: new Set(), alive: true };
+        const conn: Connection = { ws, personId: null, ready: false, threads: new Set(), alive: true };
         connections.add(conn);
         let authStarted = false;
 
         // Covers the whole handshake: no auth frame in time is "unauthorized";
         // an auth that stalls (a slow database) is a server error, so the client retries.
         const authTimer = setTimeout(() => {
-            if (conn.personId || ws.readyState !== WebSocket.OPEN) return;
+            if (conn.ready || ws.readyState !== WebSocket.OPEN) return;
             if (authStarted) ws.close(1011, "auth timed out");
             else ws.close(CLOSE_UNAUTHORIZED, "auth timeout");
         }, authTimeoutMs);

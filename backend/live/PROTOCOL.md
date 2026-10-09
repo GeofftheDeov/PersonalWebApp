@@ -4,7 +4,7 @@ One WebSocket per signed-in person. It carries live events for every thread that
 
 - Server: `backend/live/liveChannel.ts`
 - Web client: `frontend/src/lib/realtime/liveClient.ts`, wrapped by the `useLiveThread` hook (threads), `useTyping` (typing) and `useThreads` (the thread list)
-- Tests: `backend/scripts/test-live-channel.ts` (campaigns, auth, heartbeat, client), `backend/scripts/test-live-dms.ts` (DMs), `backend/scripts/test-live-typing.ts` (typing), `backend/scripts/test-live-list.ts` (`thread.updated`, `thread.read`), `backend/scripts/test-live-two-tasks.ts` (every frame across two backend processes), `backend/scripts/test-live-redis-recovery.ts` (Redis outages)
+- Tests: `backend/scripts/test-live-channel.ts` (campaigns, auth, heartbeat, client), `backend/scripts/test-live-dms.ts` (DMs), `backend/scripts/test-live-typing.ts` (typing), `backend/scripts/test-live-list.ts` (`thread.updated`, `thread.read`), `backend/scripts/test-live-two-tasks.ts` (every frame across two backend processes), `backend/scripts/test-live-redis-recovery.ts` (Redis outages), `backend/scripts/test-live-access.ts` (access changes, token expiry)
 
 ## Connecting
 
@@ -27,6 +27,7 @@ The client's first frame carries its JWT:
 - `v` is the protocol version the client speaks. A version the server doesn't speak closes the socket with **4002**.
 - A token in the query string (`/api/live?token=<jwt>`) also works, but use the first frame where possible: URLs end up in logs.
 - A missing, malformed, expired or wrong-secret token, or one whose subject isn't an account, closes the socket with **4001**. So does a first frame that isn't an auth frame, and a connection that sends nothing for 10 seconds.
+- A socket doesn't outlive its token: when the token's `exp` passes, the server closes the socket with **4001** (#105). Reconnect with a fresh token.
 - The 10 seconds cover the whole handshake. If the server is still checking a token when they run out (a slow database), it closes with **1011** instead, and the client should retry.
 
 When auth succeeds, the server answers:
@@ -35,7 +36,15 @@ When auth succeeds, the server answers:
 { "type": "ready", "v": 1, "threads": ["campaign:<id>", "dm:<a>:<b>"] }
 ```
 
-`threads` lists the thread keys this socket will receive events for: every campaign the person belongs to, whatever its status, plus one DM thread per friend. The server works this out once, when the socket connects. Admins get no extra campaigns. A thread missing from `threads` gets no live events on this socket, so clients should show it as not live (the web client's `threadStatus` reports `unavailable`). Until #105 recomputes subscriptions on membership and friendship events, joining a campaign or adding a friend only takes effect on the next connect, and so does leaving one. To cover the gap, the web client reconnects once when something subscribes to a thread the open socket's `ready` left out (a DM with a friend added a minute ago); a thread still missing after that stays `unavailable` until it is subscribed again.
+`threads` lists the thread keys this socket will receive events for: every campaign the person belongs to, whatever its status, plus one DM thread per friend. Admins get no extra campaigns. A thread missing from `threads` gets no live events on this socket, so clients should show it as not live (the web client's `threadStatus` reports `unavailable`).
+
+### Access changes on an open socket (#105)
+
+The set isn't fixed at connect. When the person joins or leaves a campaign (accepting an invite, joining by link, being added or removed by the GM, leaving), a campaign of theirs is deleted, or they become or stop being friends with someone, the server sends **another `ready`** on the same socket, with the whole new `threads` list. Nothing else changes: same connection, no reconnect, `v` as before.
+
+- Losing access takes effect as soon as the server hears of the change: nothing published after it (a message, typing, `thread.updated`) reaches that socket for that thread, even before the new `ready` arrives. After unfriending, sending a DM to the former friend is refused with 403.
+- Gaining access takes effect when the new `ready` arrives. Events from before it aren't replayed, so refetch a thread that just became available, and the thread list. (The web client calls `onReconnect` for exactly those: the newly available threads and the person-level subscribers. `LiveClient.onThreads` reports every new set.)
+- Clients tell the two kinds of `ready` apart by whether one already arrived on this connection.
 
 Thread keys are `campaign:<campaign id>` and `dm:<id>:<id>`, with the two account ids sorted.
 
@@ -43,7 +52,7 @@ Thread keys are `campaign:<campaign id>` and `dm:<id>:<id>`, with the two accoun
 
 | type | fields | meaning |
 |---|---|---|
-| `ready` | `v`, `threads` | Auth succeeded. Events start flowing. |
+| `ready` | `v`, `threads` | Auth succeeded. Events start flowing. Sent again on the same socket when the person's threads change (see Access changes). |
 | `message.created` | `thread`, `message` | A message was posted to a thread you can see. |
 | `typing` | `thread`, `personId`, `name`, `expiresInMs` | Someone else is writing in a thread you can see (see Typing). |
 | `thread.updated` | `thread`, `lastActivityAt`, `unreadCount` | A thread's last activity and your unread count in it changed (a new message). |
@@ -133,14 +142,14 @@ Each task logs `[live] socket open: person <id>, <n> threads, task <host>/<pid>`
 | 1001 | Server shutting down (deploy). | Reconnect. |
 | 1006 | Connection lost, or dropped for missing pings. | Reconnect. |
 | 1011 | Server error while setting up the socket. | Reconnect. |
-| 4001 | Unauthorized: bad, expired or missing token. | Stop. Get a fresh token (sign in again) before retrying. |
+| 4001 | Unauthorized: bad, expired or missing token, or the token expired while the socket was open. | Stop. Get a fresh token (sign in again) before retrying. |
 | 4002 | Unsupported protocol version. | Stop. The client is too old or too new. |
 
 ## Reconnecting
 
 Reconnect with exponential backoff and full jitter. The web client waits a random time between 0 and `min(30 s, 0.5 s × 2^attempt)`, and resets the attempt count on `ready`.
 
-**The server doesn't replay missed events.** After a reconnect, refetch what's on screen: the open thread's latest page and the thread list. The web client calls every subscriber's `onReconnect` (thread subscribers and person-level ones, `LiveClient.subscribePerson`) when a later `ready` arrives.
+**The server doesn't replay missed events.** After a reconnect, refetch what's on screen: the open thread's latest page and the thread list. The web client calls every subscriber's `onReconnect` (thread subscribers and person-level ones, `LiveClient.subscribePerson`) when the first `ready` on a later connection arrives.
 
 ## Versioning
 

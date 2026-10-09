@@ -12,6 +12,9 @@ import { renderPage } from '../utils/adminUi.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { resolveAccountId } from '../utils/accountRefs.js';
 import { toCsv } from '../utils/csv.js';
+import { publishFriendshipChanged, publishMembershipChanged } from '../services/accessEvents.js';
+import { getMemberCampaignIds } from '../utils/gameNightPlannerUtils.js';
+import { isUuid } from '../db/model.js';
 import { workshopClientJs } from '../utils/workshopClient.js';
 import { listViews, createView, updateView, deleteView, ListViewError } from '../services/listViews.js';
 import Account from "../models/Account.js";
@@ -899,6 +902,40 @@ router.get('/:collection/new', async (req, res) => {
     }));
 });
 
+/**
+ * Tables whose rows decide who sees which Letters thread (#105). The table
+ * browser writes them directly, so it publishes the same access events the
+ * app's own routes do; it is also the only place a campaign is deleted.
+ * CSV import is left out: nobody imports memberships or friends lists.
+ */
+const ACCESS_COLLECTIONS = new Set(['campaigns', 'campaign_members', 'accounts']);
+
+const idOf = (ref: any): string | null => (ref ? String(ref?._id ?? ref) : null);
+
+async function publishAccessChanges(collection: string, before: any, after: any) {
+    if (!ACCESS_COLLECTIONS.has(collection)) return;
+    if (collection === 'campaigns') {
+        if (before && !after) await publishMembershipChanged(idOf(before._id)!, 'deleted');
+        return;
+    }
+    if (collection === 'campaign_members') {
+        const was = { campaign: idOf(before?.campaign), person: idOf(before?.person) };
+        const now = { campaign: idOf(after?.campaign), person: idOf(after?.person) };
+        if (was.campaign === now.campaign && was.person === now.person) return;
+        if (was.campaign && was.person) await publishMembershipChanged(was.campaign, 'member-removed', was.person);
+        if (now.campaign && now.person) await publishMembershipChanged(now.campaign, 'member-added', now.person);
+        return;
+    }
+    // accounts: an edited friends list. Only this side changes here, so each
+    // event names the pair and the live channel works out what is true now.
+    const me = idOf(before?._id ?? after?._id);
+    if (!me) return;
+    const was = new Set<string>((before?.friends ?? []).map(String));
+    const now = new Set<string>((after?.friends ?? []).map(String));
+    for (const id of now) if (!was.has(id)) await publishFriendshipChanged(me, id, 'added');
+    for (const id of was) if (!now.has(id)) await publishFriendshipChanged(me, id, 'removed');
+}
+
 // CREATE ACTION
 router.post('/:collection/create', async (req, res) => {
     const { collection } = req.params;
@@ -913,7 +950,8 @@ router.post('/:collection/create', async (req, res) => {
             doc.password = await bcrypt.hash(doc.password, salt);
         }
 
-        await modelFor(collection).create(doc);
+        const saved = await modelFor(collection).create(doc);
+        await publishAccessChanges(collection, null, saved?.toObject?.() ?? null);
         res.redirect(`/db/${collection}?token=${token}`);
     } catch (err: any) {
         res.status(400).send(`Invalid JSON or Create Error: ${err.message}`);
@@ -977,7 +1015,10 @@ router.post('/:collection/update/:id', async (req, res) => {
             updateDoc.password = await bcrypt.hash(updateDoc.password, salt);
         }
 
-        await modelFor(collection).findByIdAndUpdate(id, { $set: updateDoc });
+        const before = ACCESS_COLLECTIONS.has(collection)
+            ? (await modelFor(collection).findById(id))?.toObject() : null;
+        const after = await modelFor(collection).findByIdAndUpdate(id, { $set: updateDoc }, { new: true });
+        await publishAccessChanges(collection, before, after?.toObject?.() ?? null);
         res.redirect(`/db/${collection}?token=${token}`);
     } catch (err: any) {
         res.status(400).send(`Invalid JSON or Update Error: ${err.message}`);
@@ -988,7 +1029,11 @@ router.post('/:collection/update/:id', async (req, res) => {
 router.post('/:collection/delete/:id', async (req, res) => {
     const { collection, id } = req.params;
     try {
-        await modelFor(collection).findByIdAndDelete(id);
+        // Deleting an account cascades to its memberships: note them first.
+        const campaignsOf = collection === 'accounts' && isUuid(id) ? await getMemberCampaignIds({ id }) : [];
+        const removed = await modelFor(collection).findByIdAndDelete(id);
+        await publishAccessChanges(collection, removed?.toObject?.() ?? null, null);
+        if (removed) for (const campaignId of campaignsOf) await publishMembershipChanged(campaignId, 'member-removed', id);
         res.sendStatus(200);
     } catch (err) {
         res.status(500).send('Delete failed');

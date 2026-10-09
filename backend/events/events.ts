@@ -20,10 +20,26 @@ export interface EventMap {
         action: "created" | "updated" | "deleted";
     };
 
-    /** Campaign membership or details changed. */
+    /**
+     * Campaign membership or details changed. Membership changes go through
+     * services/accessEvents.ts (#105); the live channel recomputes the threads
+     * of the people they affect.
+     */
     "campaign.changed": {
         campaignId: string;
-        action: "created" | "updated" | "member-added" | "member-removed";
+        action: "created" | "updated" | "member-added" | "member-removed" | "deleted";
+        /** Who joined or left (member-added, member-removed), or who created it (created). */
+        personId?: string;
+    };
+
+    /**
+     * Two people became friends, or stopped being friends (#105). Published
+     * through services/accessEvents.ts; the live channel recomputes both
+     * people's threads, so their DM thread starts or stops being live.
+     */
+    "friendship.changed": {
+        personIds: [string, string];
+        action: "added" | "removed";
     };
 
     /** A chat message was posted in a campaign's Game Night channel. */

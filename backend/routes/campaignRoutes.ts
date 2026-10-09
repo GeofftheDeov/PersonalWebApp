@@ -7,6 +7,7 @@ import Account from "../models/Account.js";
 import { auth } from "../middleware/auth.js";
 import { getAuthorizedCampaignIds } from "../utils/gameNightPlannerUtils.js";
 import { personDisplayName } from "../utils/personUtils.js";
+import { publishMembershipChanged } from "../services/accessEvents.js";
 
 /**
  * Phase 3 (#35, plan §3.4). Auto-enrolment used to branch on req.user.type to
@@ -55,6 +56,7 @@ router.post("/", auth, async (req: any, res) => {
         // Auto-enroll creator as Game Master
         const memberFields = await memberFieldsFor(req.user, campaign._id, "Game Master");
         await new CampaignMember(memberFields).save();
+        await publishMembershipChanged(String(campaign._id), "created", req.user.id);
 
         res.status(201).json({
             message: "Campaign created successfully!",
@@ -151,6 +153,7 @@ router.post("/:id/join", auth, async (req: any, res) => {
 
         const memberFields = await memberFieldsFor(req.user, req.params.id, "Player");
         const member = await new CampaignMember(memberFields).save();
+        await publishMembershipChanged(req.params.id, "member-added", req.user.id);
         res.status(201).json({ message: "Joined campaign successfully!", member });
     } catch (error: any) {
         console.error("Error joining campaign:", error);

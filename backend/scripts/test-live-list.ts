@@ -202,6 +202,7 @@ async function main() {
     const gmLaptop = open(gm);
     const gmPhone = open(gm);
     const playerSocket = open(player);
+    const playerPhone = open(player);
     const bardSocket = open(bard);
     const outsiderSocket = open(outsider);
     await Promise.all(opened.map((c) => c.ready()));
@@ -216,10 +217,12 @@ async function main() {
     check("...and the message's time as the thread's last activity",
       updatesFor(gmLaptop, thread)[0]?.lastActivityAt === new Date(first.createdAt).toISOString(),
       `${updatesFor(gmLaptop, thread)[0]?.lastActivityAt} vs ${first.createdAt}`);
-    check("the sender's own socket gets thread.updated too", await until(() => updatesFor(playerSocket, thread).length === 1),
-      JSON.stringify(playerSocket.frames));
-    check("...without the sender's unread count going up", updatesFor(playerSocket, thread)[0]?.unreadCount === 0,
-      JSON.stringify(updatesFor(playerSocket, thread)));
+    check("the sender's own sockets (both devices) get thread.updated too",
+      await until(() => [playerSocket, playerPhone].every((c) => updatesFor(c, thread).length === 1)),
+      `${JSON.stringify(playerSocket.frames)} | ${JSON.stringify(playerPhone.frames)}`);
+    check("...without the sender's unread count going up",
+      [playerSocket, playerPhone].every((c) => updatesFor(c, thread)[0]?.unreadCount === 0),
+      [playerSocket, playerPhone].map((c) => JSON.stringify(updatesFor(c, thread))).join(" | "));
     check("the frame carries no message text",
       !JSON.stringify(updatesFor(gmLaptop, thread)).includes(`first ${RUN}`), JSON.stringify(updatesFor(gmLaptop, thread)));
 

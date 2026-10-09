@@ -13,6 +13,9 @@
  * - Dispatches frames about the person rather than one thread
  *   (`thread.updated`, `thread.read`) to person-level subscribers
  *   (`subscribePerson`), which the thread list uses (#102).
+ * - Follows a `ready` the server re-sends when the person's access changes
+ *   (#105): `threadStatus` and `onThreads` listeners see the new set, and a
+ *   thread that just became available, and the thread list, refetch.
  * - There is no server-side replay. After a reconnect every subscriber's
  *   `onReconnect` runs so the open thread can refetch its latest page and the
  *   thread list can refetch itself.
@@ -122,11 +125,12 @@ export class LiveClient {
     private people = new Set<PersonHandlers>();
     /** The thread keys the server's last `ready` subscribed this socket to. */
     private serverThreads = new Set<string>();
-    /** Threads that already cost one reconnect while subscribed (see `subscribe`); not retried until re-subscribed. */
-    private refreshedFor = new Set<string>();
     private statusListeners = new Set<(status: LiveStatus) => void>();
+    private threadsListeners = new Set<(threads: string[]) => void>();
     private attempt = 0;
     private everReady = false;
+    /** Whether the current socket has had its first `ready`; later ones on it are access changes (#105). */
+    private socketReady = false;
     private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     private staleTimer: ReturnType<typeof setTimeout> | null = null;
     private idleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -148,31 +152,34 @@ export class LiveClient {
     /**
      * Listen to `message.created` for one thread. Connects if needed.
      *
-     * The server works out a socket's threads once, at connect, so a thread
-     * that became visible since (a friend just added, a campaign just joined)
-     * is missing from the open socket. Subscribing to such a thread reconnects
-     * once to pick it up; if it is still missing after that, it really is
-     * unavailable, and stays so without further retries until it is
-     * subscribed afresh. (#105 will have the server follow these changes live.)
+     * A thread the server didn't subscribe the socket to reports
+     * `unavailable` (see `threadStatus`). The server follows membership and
+     * friendship changes on the open socket (#105): when the thread becomes
+     * visible (a friend just added, a campaign just joined), a fresh `ready`
+     * lists it, it turns `open`, and its `onReconnect` runs so it can fetch
+     * what it missed. No reconnect is needed.
      */
     subscribe(thread: string, handlers: ThreadHandlers): () => void {
         if (!this.threads.has(thread)) this.threads.set(thread, new Set());
         this.threads.get(thread)!.add(handlers);
         this.cancelIdleClose();
         if (this.status === "idle" || this.status === "unauthorized") this.connect();
-        else if (this.status === "open" && !this.serverThreads.has(thread) && !this.refreshedFor.has(thread)) {
-            this.refreshedFor.add(thread);
-            this.reopen();
-        }
         return () => {
             const set = this.threads.get(thread);
             set?.delete(handlers);
-            if (set && set.size === 0) {
-                this.threads.delete(thread);
-                this.refreshedFor.delete(thread);
-            }
+            if (set && set.size === 0) this.threads.delete(thread);
             if (!this.hasSubscribers()) this.scheduleIdleClose();
         };
+    }
+
+    /**
+     * Listen for changes to the set of threads the open socket is subscribed
+     * to: each `ready`, the first on a connection and any the server re-sends
+     * when access changes (#105). Use it to re-read `threadStatus`.
+     */
+    onThreads(listener: (threads: string[]) => void): () => void {
+        this.threadsListeners.add(listener);
+        return () => this.threadsListeners.delete(listener);
     }
 
     /**
@@ -195,22 +202,10 @@ export class LiveClient {
         return this.threads.size > 0 || this.people.size > 0;
     }
 
-    /** Replace the open socket with a new one straight away, so the server works out its threads again. */
-    private reopen() {
-        const socket = this.socket;
-        if (!socket) return;
-        this.socket = null;
-        this.clearStale();
-        socket.onclose = null;
-        socket.onmessage = null; // frames still in flight on the old socket would duplicate the new one's
-        try { socket.close(1000, "refreshing threads"); } catch { /* already gone */ }
-        this.connect();
-    }
-
     /**
-     * Whether live events for this thread are flowing. The server works out a
-     * socket's threads when it connects, so a thread it left out (one joined
-     * since, or a campaign an admin views without being a member) reports
+     * Whether live events for this thread are flowing. A thread the server's
+     * latest `ready` left out (a DM with someone who isn't a friend, a
+     * campaign an admin views without being a member, one just left) reports
      * `unavailable` rather than `open`.
      */
     threadStatus(thread: string): ThreadStatus {
@@ -248,6 +243,7 @@ export class LiveClient {
         const url = typeof this.opts.url === "function" ? this.opts.url() : this.opts.url;
         const socket: SocketLike = new Ctor(url);
         this.socket = socket;
+        this.socketReady = false;
         this.watchOnline();
 
         socket.onopen = () => {
@@ -294,11 +290,27 @@ export class LiveClient {
     private onFrame(socket: SocketLike, frame: any) {
         switch (frame?.type) {
             case "ready": {
+                const previous = this.serverThreads;
+                const next = new Set<string>(Array.isArray(frame.threads) ? frame.threads.map(String) : []);
+                this.serverThreads = next;
+                if (this.socketReady) {
+                    // Re-sent on the same socket: access changed (#105). A thread
+                    // that just became available missed what came before, and
+                    // the thread list gained or lost a thread: both refetch.
+                    for (const l of [...this.threadsListeners]) safely(() => l([...next]));
+                    for (const [thread, set] of [...this.threads]) {
+                        if (previous.has(thread) || !next.has(thread)) continue;
+                        for (const h of [...set]) safely(() => h.onReconnect?.());
+                    }
+                    for (const h of [...this.people]) safely(() => h.onReconnect?.());
+                    return;
+                }
                 const reconnected = this.everReady;
-                this.serverThreads = new Set(Array.isArray(frame.threads) ? frame.threads.map(String) : []);
+                this.socketReady = true;
                 this.everReady = true;
                 this.attempt = 0;
                 this.setStatus("open");
+                for (const l of [...this.threadsListeners]) safely(() => l([...next]));
                 if (reconnected) {
                     for (const set of [...this.threads.values()]) {
                         for (const h of [...set]) safely(() => h.onReconnect?.());

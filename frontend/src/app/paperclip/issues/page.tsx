@@ -246,8 +246,9 @@ export default function IssueDeskPage() {
   const POLL_TIMEOUT_MS = 10 * 60 * 1_000;
   // How long to wait for an assigned agent's wakeup run to appear.
   const PICKUP_TIMEOUT_MS = 30_000;
-  // Verified Paperclip heartbeat-run statuses; the last four are terminal.
-  const TERMINAL = new Set(['succeeded', 'failed', 'cancelled', 'timed_out']);
+  // Paperclip's terminal heartbeat-run statuses (HEARTBEAT_RUN_TERMINAL_STATUSES,
+  // paperclipai 2026.1005.0 — `interrupted` is new since 2026.707.0).
+  const TERMINAL = new Set(['succeeded', 'interrupted', 'failed', 'cancelled', 'timed_out']);
 
   // Cancels whatever is currently being watched and hands back a fresh
   // controller plus a `finish` that closes the transcript exactly once.

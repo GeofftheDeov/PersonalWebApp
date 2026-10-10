@@ -221,9 +221,10 @@ router.get('/costs', async (req: any, res: Response) => {
 // normal Authorization header. (EventSource can't send headers, so the old SSE
 // route always got a 401 from the auth middleware — it was never reachable.)
 // Upstream paths verified against the deployed instance (paperclipai
-// 2026.707.0): runs live under /api/heartbeat-runs/{runId}; run.status is one
-// of queued | scheduled_retry | running | succeeded | failed | cancelled |
-// timed_out. Events return a BARE ARRAY of rows with a numeric monotonic
+// 2026.707.0) and re-checked against the 2026.1005.0 server source: runs live
+// under /api/heartbeat-runs/{runId}; run.status is one of queued |
+// scheduled_retry | running | succeeded | interrupted | failed | cancelled |
+// timed_out (everything from succeeded on is terminal). Events return a BARE ARRAY of rows with a numeric monotonic
 // `seq`; incremental polling uses ?afterSeq=<seq>&limit=<n>.
 
 // GET /api/paperclip/runs/:runId

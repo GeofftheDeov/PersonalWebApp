@@ -15,7 +15,8 @@
 # `node` user (uid 1000). The EFS access point (fsap-02a0045caa8f59650) maps
 # the volume root to 1000:1000 to match.
 
-FROM node:22-bookworm-slim
+# paperclipai >= 2026.1005.0 requires Node >= 24.11.
+FROM node:24-bookworm-slim
 
 # git: required for Paperclip project workspaces / worktrees.
 # curl: container health check.
@@ -25,7 +26,7 @@ RUN apt-get update \
 
 # Pin the CLI version; bump intentionally. Installing at build time also
 # fetches @embedded-postgres/linux-x64 binaries so nothing downloads at boot.
-ARG PAPERCLIP_VERSION=2026.707.0
+ARG PAPERCLIP_VERSION=2026.1005.0
 RUN npm install -g paperclipai@${PAPERCLIP_VERSION} @anthropic-ai/claude-code \
     && npm cache clean --force \
     # embedded-postgres creates library symlinks inside its own package dir at

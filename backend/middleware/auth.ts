@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
+import { verifyJwt } from '../utils/jwt.js';
 import Account from '../models/Account.js';
 import { resolveAccountId } from '../utils/accountRefs.js';
 
@@ -35,7 +35,7 @@ export const auth = async (req: AuthRequest, res: Response, next: NextFunction) 
     const token = authHeader.split(' ')[1];
 
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || "your-secret-key-change-this") as any;
+        const decoded = verifyJwt(token);
         const id = await resolveAccountId(String(decoded.id));
         if (!id) {
             console.log(`[AUTH] 401: token subject ${decoded.id} resolves to no account`);

@@ -445,7 +445,16 @@ CREATE TABLE campaigns (
   discord_guild_id   text,
   discord_channel_id text,
   sf_id              text,
-  created_at         timestamptz NOT NULL DEFAULT now()
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  -- Session planning (#57, migrations/2026-10-01-session-planning.sql).
+  -- The owner controls the banner and the GM title. Separate from Game Master,
+  -- and unchanged when the torch passes; NULL means admin-managed.
+  owner_id           uuid REFERENCES accounts(id) ON DELETE SET NULL,
+  gm_title           text NOT NULL DEFAULT 'Dungeon Master'
+                       CHECK (char_length(btrim(gm_title)) BETWEEN 1 AND 40),
+  quorum             integer CHECK (quorum >= 1),    -- NULL = the whole party
+  table_link         text CHECK (char_length(table_link) <= 500),
+  banner_key         text
 );
 
 CREATE TABLE campaign_members (
@@ -519,11 +528,30 @@ CREATE TABLE characters (
 );
 CREATE INDEX idx_characters_player ON characters (player_id);
 
+-- A saved place for a campaign (#57). Declared ahead of game_sessions, which
+-- references it.
+CREATE TABLE venues (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  campaign_id  uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  name         text NOT NULL CHECK (char_length(btrim(name)) BETWEEN 1 AND 120),
+  -- Returned only to party members, and only while the venue is on a shortlist
+  -- or confirmed for a session.
+  address      text CHECK (char_length(address) <= 300),
+  kind         text NOT NULL DEFAULT 'other' CHECK (kind IN ('home','store','other')),
+  host_id      uuid REFERENCES accounts(id) ON DELETE SET NULL,
+  created_by   uuid REFERENCES accounts(id) ON DELETE SET NULL,
+  last_used_at timestamptz,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_venues_campaign ON venues (campaign_id, last_used_at DESC NULLS LAST);
+
 CREATE TABLE game_sessions (
   id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   title                text NOT NULL,
   campaign_id          uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
-  date                 timestamptz NOT NULL DEFAULT now(),
+  -- NULL only while the night is being planned (or the session was cancelled
+  -- first); see game_sessions_date_required.
+  date                 timestamptz DEFAULT now(),
   end_date             timestamptz,
   location             text,
   is_online            boolean NOT NULL DEFAULT false,
@@ -536,7 +564,24 @@ CREATE TABLE game_sessions (
   sf_id                text,
   -- { sentAt, responses: [{ playerId, name, ready, respondedAt }] }
   ready_check          jsonb,
-  created_at           timestamptz NOT NULL DEFAULT now()
+  created_at           timestamptz NOT NULL DEFAULT now(),
+  -- Session planning (#57). A session with a date fixed up front is simply
+  -- 'scheduled'; 'planning' ones walk night -> venue -> food (in person) or
+  -- night alone (online).
+  status               text NOT NULL DEFAULT 'scheduled'
+                         CHECK (status IN ('planning','scheduled','cancelled','completed')),
+  -- Kickoff is the transition that creates the session, not a stage.
+  planning_stage       text CHECK (planning_stage IN ('night','venue','food')),
+  food_mode            text CHECK (food_mode IN ('potluck','provided')),
+  food_owner_id        uuid REFERENCES accounts(id) ON DELETE SET NULL,
+  host_id              uuid REFERENCES accounts(id) ON DELETE SET NULL,
+  venue_id             uuid REFERENCES venues(id) ON DELETE SET NULL,
+  -- One-session torch pass. A permanent pass swaps campaign_members.status.
+  gm_override_id       uuid REFERENCES accounts(id) ON DELETE SET NULL,
+  CONSTRAINT game_sessions_stage_matches_status
+    CHECK ((status = 'planning') = (planning_stage IS NOT NULL)),
+  CONSTRAINT game_sessions_date_required
+    CHECK (date IS NOT NULL OR status IN ('planning','cancelled'))
 );
 CREATE INDEX idx_game_sessions_campaign ON game_sessions (campaign_id);
 
@@ -562,6 +607,180 @@ CREATE TABLE encounters (
   dungeon_id  uuid REFERENCES dungeons(id) ON DELETE SET NULL,
   sf_id       text,
   created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+-- ============================================================
+-- Session planning (#57, migrations/2026-10-01-session-planning.sql)
+--
+-- Regular availability feeds the night vote; venues feed the venue vote;
+-- quests are the to-dos planning hands out. venues is declared with the
+-- tabletop tables above because game_sessions references it.
+-- ============================================================
+
+-- A weekly window in the person's own time zone. end_time earlier than
+-- start_time means it crosses midnight ("Fri 9 pm - 1 am" is 5, 21:00, 01:00).
+-- Weekday follows JS getDay() and Postgres EXTRACT(dow): 0 = Sunday.
+CREATE TABLE availability_windows (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  person_id   uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  weekday     smallint NOT NULL CHECK (weekday BETWEEN 0 AND 6),
+  start_time  time NOT NULL CHECK (start_time < '24:00'),
+  end_time    time NOT NULL CHECK (end_time < '24:00'),
+  time_zone   text NOT NULL CHECK (char_length(time_zone) BETWEEN 1 AND 64),  -- IANA
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT availability_windows_nonempty CHECK (start_time <> end_time)
+);
+CREATE INDEX idx_availability_windows_person ON availability_windows (person_id);
+
+-- "Out Oct 17" (unavailable) or "free this Tuesday only" (available).
+CREATE TABLE availability_exceptions (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  person_id   uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  starts_at   timestamptz NOT NULL,
+  ends_at     timestamptz NOT NULL,
+  kind        text NOT NULL CHECK (kind IN ('unavailable','available')),
+  note        text CHECK (char_length(note) <= 200),
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT availability_exceptions_range CHECK (ends_at > starts_at)
+);
+CREATE INDEX idx_availability_exceptions_person ON availability_exceptions (person_id, starts_at);
+
+-- Busy time from an external calendar. No title column, on purpose: the party
+-- sees free / busy and nothing more.
+CREATE TABLE busy_blocks (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  person_id   uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  source      text NOT NULL CHECK (source IN ('google','discord')),
+  starts_at   timestamptz NOT NULL,
+  ends_at     timestamptz NOT NULL,
+  external_id text,   -- Discord scheduled-event id; Google free/busy has none
+  fetched_at  timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT busy_blocks_range CHECK (ends_at > starts_at)
+);
+CREATE INDEX idx_busy_blocks_person ON busy_blocks (person_id, starts_at);
+
+-- The outside calendars a person lets count as busy (#84): a row means ON.
+-- synced_from / synced_to is the stretch the last good sync covered; that
+-- source's busy_blocks are exactly what it said about that stretch.
+-- last_error is shown to the owner only.
+CREATE TABLE busy_sources (
+  person_id       uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  source          text NOT NULL CHECK (source IN ('google','discord')),
+  enabled_at      timestamptz NOT NULL DEFAULT now(),
+  synced_at       timestamptz,
+  synced_from     timestamptz,
+  synced_to       timestamptz,
+  last_attempt_at timestamptz,
+  last_error      text CHECK (char_length(last_error) <= 500),
+  PRIMARY KEY (person_id, source),
+  CONSTRAINT busy_sources_synced_shape CHECK (
+    (synced_at IS NULL) = (synced_from IS NULL) AND
+    (synced_at IS NULL) = (synced_to IS NULL) AND
+    (synced_to IS NULL OR synced_to > synced_from))
+);
+
+-- The night vote and the venue vote. eligible_ids and quorum are snapshotted
+-- when the poll opens. result: 'winner', 'tie' (closed, the GM picks) or
+-- 'no_quorum' (the round failed; the GM re-shortlists).
+CREATE TABLE polls (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id        uuid NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,
+  kind              text NOT NULL CHECK (kind IN ('night','venue')),
+  round             integer NOT NULL DEFAULT 1 CHECK (round >= 1),
+  status            text NOT NULL DEFAULT 'open' CHECK (status IN ('open','closed')),
+  eligible_ids      uuid[] NOT NULL DEFAULT '{}',
+  quorum            integer CHECK (quorum >= 1),
+  result            text CHECK (result IN ('winner','tie','no_quorum')),
+  closed_reason     text CHECK (closed_reason IN ('all_voted','gm_advanced','gm_reshortlisted','cancelled')),
+  winning_option_id uuid,   -- FK added below, once poll_options exists
+  opened_at         timestamptz NOT NULL DEFAULT now(),
+  closed_at         timestamptz,
+  CONSTRAINT polls_round_unique UNIQUE (session_id, kind, round),
+  CONSTRAINT polls_closed_shape CHECK (
+    (status = 'open') = (closed_reason IS NULL) AND
+    (status = 'open') = (closed_at IS NULL) AND
+    (result IS NULL OR status = 'closed') AND
+    ((result IS NOT DISTINCT FROM 'winner') = (winning_option_id IS NOT NULL)))
+);
+CREATE UNIQUE INDEX ux_polls_one_open ON polls (session_id) WHERE status = 'open';
+
+CREATE TABLE poll_options (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  poll_id      uuid NOT NULL REFERENCES polls(id) ON DELETE CASCADE,
+  starts_at    timestamptz,                      -- night option
+  ends_at      timestamptz,
+  venue_id     uuid REFERENCES venues(id),       -- venue option
+  suggested_by uuid REFERENCES accounts(id) ON DELETE SET NULL,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT poll_options_id_poll_key UNIQUE (id, poll_id),
+  CONSTRAINT poll_options_shape CHECK (
+    (venue_id IS NULL AND starts_at IS NOT NULL AND ends_at > starts_at) OR
+    (venue_id IS NOT NULL AND starts_at IS NULL AND ends_at IS NULL))
+);
+CREATE INDEX idx_poll_options_poll ON poll_options (poll_id);
+CREATE UNIQUE INDEX ux_poll_options_venue ON poll_options (poll_id, venue_id)
+  WHERE venue_id IS NOT NULL;
+CREATE UNIQUE INDEX ux_poll_options_night ON poll_options (poll_id, starts_at, ends_at)
+  WHERE venue_id IS NULL;
+
+ALTER TABLE polls ADD CONSTRAINT polls_winning_option_fkey
+  FOREIGN KEY (winning_option_id) REFERENCES poll_options(id);
+
+-- A person has voted (even if they approved nothing) ...
+CREATE TABLE poll_ballots (
+  poll_id    uuid NOT NULL REFERENCES polls(id) ON DELETE CASCADE,
+  person_id  uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  cast_at    timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (poll_id, person_id)
+);
+
+-- ... and this is what they approved (night) or chose (venue).
+CREATE TABLE poll_votes (
+  poll_id    uuid NOT NULL,
+  option_id  uuid NOT NULL,
+  person_id  uuid NOT NULL,
+  PRIMARY KEY (option_id, person_id),
+  CONSTRAINT poll_votes_option_fkey FOREIGN KEY (option_id, poll_id)
+    REFERENCES poll_options (id, poll_id) ON DELETE CASCADE,
+  CONSTRAINT poll_votes_ballot_fkey FOREIGN KEY (poll_id, person_id)
+    REFERENCES poll_ballots (poll_id, person_id) ON DELETE CASCADE
+);
+CREATE INDEX idx_poll_votes_poll ON poll_votes (poll_id, person_id);
+
+-- Quests. assignee_id NULL is an unclaimed potluck slot; the quest module
+-- requires an assignee for every other kind.
+CREATE TABLE session_tasks (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id       uuid NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,
+  assignee_id      uuid REFERENCES accounts(id) ON DELETE SET NULL,
+  kind             text NOT NULL CHECK (kind IN ('host_prep','food','custom')),
+  title            text NOT NULL CHECK (char_length(btrim(title)) BETWEEN 1 AND 120),
+  notes            text CHECK (char_length(notes) <= 1000),
+  due_at           timestamptz,    -- follows the session's start
+  status           text NOT NULL DEFAULT 'open' CHECK (status IN ('open','done','cancelled')),
+  reminder_offsets integer[] NOT NULL DEFAULT '{}'   -- minutes before due_at
+                     CHECK (cardinality(reminder_offsets) <= 5
+                            AND 0 <= ALL (reminder_offsets)
+                            AND 20160 >= ALL (reminder_offsets)),
+  created_by       uuid REFERENCES accounts(id) ON DELETE SET NULL,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  completed_at     timestamptz,
+  -- The session start due_at was last set against (#91), so due times follow
+  -- the night idempotently. NULL: set before the session had a night.
+  due_anchor       timestamptz
+);
+CREATE INDEX idx_session_tasks_session  ON session_tasks (session_id);
+CREATE INDEX idx_session_tasks_assignee ON session_tasks (assignee_id, status);
+CREATE INDEX idx_session_tasks_due      ON session_tasks (due_at) WHERE status = 'open';
+
+-- Sent reminders. Keyed on the due time they were sent for, so each offset
+-- fires once per due time and moving the night re-arms it.
+CREATE TABLE session_task_reminders (
+  task_id        uuid NOT NULL REFERENCES session_tasks(id) ON DELETE CASCADE,
+  offset_minutes integer NOT NULL,
+  due_at         timestamptz NOT NULL,
+  sent_at        timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (task_id, offset_minutes, due_at)
 );
 
 -- ============================================================
@@ -622,10 +841,13 @@ CREATE TABLE messages (
   sender_email text NOT NULL,
   body         text NOT NULL CHECK (char_length(body) <= 4000),
   created_at   timestamptz NOT NULL DEFAULT now(),
+  -- The sender's own id for this message, so a resend is stored once (#101).
+  client_id    text CHECK (client_id IS NULL OR char_length(client_id) <= 64),
   CHECK (campaign_id IS NOT NULL OR dm_key IS NOT NULL)
 );
 CREATE INDEX idx_messages_campaign_created ON messages (campaign_id, created_at DESC);
 CREATE INDEX idx_messages_dm_created       ON messages (dm_key, created_at DESC);
+CREATE UNIQUE INDEX idx_messages_sender_client ON messages (sender_id, client_id) WHERE client_id IS NOT NULL;
 
 CREATE TABLE notifications (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -644,6 +866,20 @@ CREATE TABLE notifications (
 );
 CREATE INDEX idx_notifications_bell   ON notifications (user_id, read, created_at DESC);
 CREATE INDEX idx_notifications_dedupe ON notifications (user_id, type, source_key, read);
+
+-- Letters read state (#100, spec #58): how far each person has read each
+-- thread. thread_key is `campaign:<campaign id>` or `dm:<dm_key>`
+-- (services/threads.ts). Unread = messages after last_read_at sent by someone
+-- else. Only your own position is tracked; nobody else ever sees it.
+CREATE TABLE thread_reads (
+  id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  person_id            uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  thread_key           text NOT NULL,
+  last_read_at         timestamptz NOT NULL,
+  last_read_message_id uuid REFERENCES messages(id) ON DELETE SET NULL,
+  updated_at           timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT thread_reads_person_thread UNIQUE (person_id, thread_key)
+);
 
 -- ============================================================
 -- Integrations / trading

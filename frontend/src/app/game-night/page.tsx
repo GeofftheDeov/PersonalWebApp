@@ -4,7 +4,11 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sword, Book, Map, Plus, Save, Shield, X, ChevronRight, Skull, Star, Wifi } from 'lucide-react';
 import Footer from '@/components/Footer';
+import QuestLog from '@/components/QuestLog';
 import Link from 'next/link';
+import { sessionWhen } from '@/lib/sessions';
+import { DEFAULT_GM_TITLE } from '@/lib/campaigns';
+import CampaignBanner from '@/components/CampaignBanner';
 
 interface Campaign {
     _id: string;
@@ -15,6 +19,7 @@ interface Campaign {
     endDate: string;
     discordGuildId?: string;
     discordChannelId?: string;
+    bannerUrl?: string | null;
 }
 
 interface Session {
@@ -63,9 +68,9 @@ export default function GameNightPage() {
     const [showCreateSession, setShowCreateSession] = useState(false);
     const [showCreateCharacter, setShowCreateCharacter] = useState(false);
 
-    const [campaignForm, setCampaignForm] = useState({
-        title: '', description: '', status: 'Not Started', startDate: '', endDate: ''
-    });
+    const EMPTY_CAMPAIGN = { title: '', description: '', status: 'Not Started', startDate: '', endDate: '', gmTitle: '' };
+    const [campaignForm, setCampaignForm] = useState(EMPTY_CAMPAIGN);
+    const [campaignError, setCampaignError] = useState<string | null>(null);
     const EMPTY_SESSION = {
         title: '', campaignId: '', date: '', endDate: '', location: '', isOnline: false, agenda: '', summary: '',
         createDiscordEvent: false, createGoogleEvent: false,
@@ -115,8 +120,12 @@ export default function GameNightPage() {
         });
         if (res.ok) {
             setShowCreateCampaign(false);
-            setCampaignForm({ title: '', description: '', status: 'Not Started', startDate: '', endDate: '' });
+            setCampaignForm(EMPTY_CAMPAIGN);
+            setCampaignError(null);
             fetchAll();
+        } else {
+            const err = await res.json().catch(() => ({}));
+            setCampaignError(err.error || 'Failed to create campaign');
         }
     };
 
@@ -250,10 +259,12 @@ export default function GameNightPage() {
                             {campaigns.length} Campaign{campaigns.length !== 1 ? 's' : ''} &middot; {sessions.length} Session{sessions.length !== 1 ? 's' : ''} &middot; {characters.length} Character{characters.length !== 1 ? 's' : ''}
                         </p>
                     </div>
-                    {tab === 'campaigns' && createButton(() => setShowCreateCampaign(true), 'NEW CAMPAIGN', 'create-campaign-btn')}
+                    {tab === 'campaigns' && createButton(() => { setCampaignError(null); setShowCreateCampaign(true); }, 'NEW CAMPAIGN', 'create-campaign-btn')}
                     {tab === 'sessions' && createButton(() => { setSessionForm(EMPTY_SESSION); setSessionError(null); setShowCreateSession(true); }, 'NEW SESSION', 'create-session-btn')}
                     {tab === 'characters' && createButton(() => setShowCreateCharacter(true), 'NEW CHARACTER', 'create-character-btn')}
                 </header>
+
+                <QuestLog />
 
                 {/* Tabs */}
                 <div className="flex gap-1 sm:gap-2 mb-8 border-b-4 border-black">
@@ -286,6 +297,7 @@ export default function GameNightPage() {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 {campaigns.map(c => (
                                     <Link key={c._id} href={`/game-night/campaigns/${c._id}`} className="relative p-6 border-4 border-black bg-white dark:bg-slate-800 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] hover:-translate-y-1 transition-transform group block">
+                                        <CampaignBanner url={c.bannerUrl} seed={c._id} title={c.title} className="-mx-6 -mt-6 mb-4 border-b-4 border-black" />
                                         <div className="flex justify-between items-start gap-2 mb-3">
                                             <h3 className="font-permanent text-xl text-black dark:text-white uppercase leading-tight group-hover:text-teal-600 transition-colors break-words min-w-0">{c.title}</h3>
                                             <span className={`px-2 py-1 text-xs font-permanent uppercase border-2 border-black whitespace-nowrap shrink-0 ${statusColor(c.status)}`}>
@@ -336,7 +348,7 @@ export default function GameNightPage() {
                                     <div className="flex-grow">
                                         <h3 className="font-permanent text-lg text-black dark:text-white uppercase group-hover:text-teal-600 transition-colors">{s.title}</h3>
                                         <div className="flex gap-3 mt-1 flex-wrap">
-                                            <span className="text-xs font-permanent text-teal-600 dark:text-yellow-400 uppercase">{new Date(s.date).toLocaleDateString()}</span>
+                                            <span className="text-xs font-permanent text-teal-600 dark:text-yellow-400 uppercase">{sessionWhen(s)}</span>
                                             {s.campaign && <span className="text-xs font-permanent text-zinc-500 dark:text-zinc-400 uppercase">{s.campaign.title}</span>}
                                         </div>
                                         {s.summary && <p className="mt-2 text-sm font-permanent text-zinc-500 dark:text-zinc-400 uppercase">{s.summary}</p>}
@@ -418,6 +430,12 @@ export default function GameNightPage() {
                                     <option value="Completed">Completed</option>
                                 </select>
                             </div>
+                            <div>
+                                <label className={LABEL_CLS}>Game Master title</label>
+                                <input maxLength={40} className={INPUT_CLS} placeholder={DEFAULT_GM_TITLE.toUpperCase()} value={campaignForm.gmTitle} onChange={e => setCampaignForm({ ...campaignForm, gmTitle: e.target.value })} />
+                                <p className="text-[10px] text-zinc-500 mt-1 font-permanent uppercase">What your group calls whoever runs the game (Game Master, Host, Organizer). Leave blank for {DEFAULT_GM_TITLE}. You can change it later.</p>
+                            </div>
+                            {campaignError && <p role="alert" className="font-permanent text-xs text-red-400 uppercase">{campaignError}</p>}
                         </div>
                         <div className="flex gap-3 mt-8">
                             <button type="submit" className={BTN_SUBMIT}><Save className="w-5 h-5" /> CREATE CAMPAIGN</button>

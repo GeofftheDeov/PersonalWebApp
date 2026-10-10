@@ -1,14 +1,13 @@
 import dotenv from "dotenv";
+import { assertJwtSecretConfigured } from "./utils/jwt.js";
 dotenv.config();
 
-const INSECURE_JWT_DEFAULT = "your-secret-key-change-this";
-const jwtSecret = process.env.JWT_SECRET;
-if (!jwtSecret || jwtSecret === INSECURE_JWT_DEFAULT) {
-    if (process.env.NODE_ENV === "production") {
-        throw new Error("FATAL: JWT_SECRET must be set to a strong secret in production");
-    } else {
-        console.warn("[SECURITY] WARNING: JWT_SECRET is missing or using the insecure default. Set a strong secret before deploying to production.");
-    }
+// No JWT secret, no backend — in every environment, not only production (#95).
+try {
+    assertJwtSecretConfigured();
+} catch (err: any) {
+    console.error(`FATAL: ${err.message}`);
+    process.exit(1);
 }
 
 const vaultKey = process.env.VAULT_ENCRYPTION_KEY;
@@ -38,13 +37,20 @@ import campaignMemberRoutes from "./routes/campaignMemberRoutes.js";
 import friendRoutes from "./routes/friendRoutes.js";
 import cloudClawRoutes from "./routes/cloudClawRoutes.js";
 import paperclipRoutes from "./routes/paperclipRoutes.js";
+import questRoutes from "./routes/questRoutes.js";
 import apiKeyRoutes from "./routes/apiKeyRoutes.js";
 import googleCalendarRoutes from "./routes/googleCalendarRoutes.js";
 import messageRoutes from "./routes/messageRoutes.js";
+import threadRoutes from "./routes/threadRoutes.js";
 import notificationRoutes from "./routes/notificationRoutes.js";
 import inviteRoutes from "./routes/inviteRoutes.js";
+import availabilityRoutes from "./routes/availabilityRoutes.js";
+import planningRoutes from "./routes/planningRoutes.js";
+import { startPlanningAnnouncements } from "./planning/announcements.js";
 import { snapshotAlpacaNow } from "./routes/adminRoutes.js";
 import { startEventBus, stopEventBus } from "./events/index.js";
+import { LIVE_PATH, type LiveChannel } from "./live/liveChannel.js";
+import { startLiveChannel } from "./live/startLiveChannel.js";
 import { startReadyCheckLoop } from "./utils/readyCheck.js";
 import { startWorkers } from "./jobs/workers.js";
 import { startVaultSyncLoop } from "./services/vaultSync.js";
@@ -124,12 +130,20 @@ app.use("/api/campaign-members", campaignMemberRoutes);
 app.use("/api/friends", friendRoutes);
 app.use("/api/cloud-claw", cloudClawRoutes);
 app.use("/api/paperclip", paperclipRoutes);
+app.use("/api/quests", questRoutes); // session quests (#90)
 app.use("/api/api-keys", apiKeyRoutes);
 app.use("/api/google-calendar", googleCalendarRoutes);
 app.use("/api/messages", messageRoutes);
+app.use("/api/threads", threadRoutes); // Letters thread list + read state (#100)
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/campaign-invites", inviteRoutes);
 app.use("/api/runner", runnerRoutes); // PC skill runner (agentic OS); RUNNER_TOKEN auth
+app.use("/api/availability", availabilityRoutes);
+app.use("/api/planning", planningRoutes);
+
+// Bell notifications + Table Talk posts for planning stage changes (#88).
+// Subscribes before the bus starts, which is when Redis picks its streams.
+startPlanningAnnouncements();
 
 // Event bus (Redis Streams when REDIS_URL is set; in-memory otherwise).
 // Started after routes are imported so module-level subscriptions are registered.
@@ -146,22 +160,36 @@ registerRepeatableJobs().catch((err) =>
     console.error("[BACKEND] Failed to register repeatable jobs:", err)
 );
 
+// The live channel (#98) shares the HTTP(S) servers: WebSocket upgrades on
+// LIVE_PATH. It subscribes to the bus itself (broadcast), before or after start.
+let liveChannel: LiveChannel | null = null;
+
 process.on("SIGTERM", () => {
-    Promise.all([stopEventBus(), stopWorkers(), closeBullConnection()])
+    Promise.all([liveChannel?.close(), stopEventBus(), stopWorkers(), closeBullConnection()])
         .finally(() => process.exit(0));
 });
 
+const servers: (http.Server | https.Server)[] = [];
 
 if (hasCerts) {
     const httpsServer = https.createServer(credentials, app);
+    servers.push(httpsServer);
     httpsServer.listen(httpsPort, () => {
         console.log(`HTTPS server listening on https://localhost:${httpsPort}`);
     });
 }
 
 const httpServer = http.createServer(app);
+servers.push(httpServer);
 httpServer.listen(httpPort, hostname, () => {
     console.log(`[BACKEND] HTTP server listening on http://${hostname}:${httpPort}`);
+});
+
+// Retries until its bus subscriptions succeed (Redis down at boot, #106).
+const live = startLiveChannel(servers);
+liveChannel = live;
+live.ready.then((channel) => {
+    if (channel) console.log(`[BACKEND] Live channel accepting WebSocket upgrades on ${LIVE_PATH}.`);
 });
 
 // Alpaca snapshots: capture account + positions every 5 minutes so the dashboard

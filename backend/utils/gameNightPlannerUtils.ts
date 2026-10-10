@@ -27,11 +27,20 @@ async function isAdmin(user: any): Promise<boolean> {
  */
 export async function getAuthorizedCampaignIds(user: any) {
     if (await isAdmin(user)) return null;
+    return getMemberCampaignIds(user);
+}
 
+/**
+ * Campaign ids this person is a member of, admin or not. Letters threads
+ * (services/threads.ts) are membership-only, so an admin's live channel doesn't
+ * carry every campaign on the site.
+ */
+export async function getMemberCampaignIds(user: any): Promise<string[]> {
+    if (!user?.id) return [];
     // Membership was a four-way OR across { email, lead, contact, account },
     // including an unindexed email match. One person column, one indexed lookup.
     const memberships = await CampaignMember.find({ person: user.id }).select("campaign");
-    return memberships.map((m: any) => m.campaign);
+    return memberships.map((m: any) => String(m.campaign));
 }
 
 /**
@@ -49,4 +58,17 @@ export async function isCampaignGameMaster(user: any, campaignId: string): Promi
     }).select("_id");
 
     return Boolean(gm);
+}
+
+/**
+ * True when the user has Game Master control of this one session: the
+ * campaign's Game Master, an admin, or the session's one-session stand-in
+ * (#89, a torch pass sets `gmOverride`).
+ */
+export async function isSessionGameMaster(user: any, session: { campaign?: unknown; gmOverride?: unknown }): Promise<boolean> {
+    const campaignId = String(session.campaign ?? "");
+    if (await isCampaignGameMaster(user, campaignId)) return true;
+    if (!campaignId || !session.gmOverride || String(session.gmOverride) !== String(user?.id)) return false;
+    // A stand-in counts only while they're still in the party.
+    return Boolean(await CampaignMember.findOne({ campaign: campaignId, person: user.id }).select("_id"));
 }

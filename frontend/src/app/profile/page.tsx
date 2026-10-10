@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Footer from '@/components/Footer';
 import CalendarView from '@/components/CalendarView';
+import AvailabilityEditor from '@/components/AvailabilityEditor';
 
 export default function ProfilePage() {
     const router = useRouter();
@@ -19,7 +20,7 @@ export default function ProfilePage() {
     const [games, setGames] = useState<string[]>([]);
     const [gameInput, setGameInput] = useState('');
     const [savingGames, setSavingGames] = useState(false);
-    const [activeTab, setActiveTab] = useState<'info' | 'calendar' | 'games' | 'vault'>('info');
+    const [activeTab, setActiveTab] = useState<'info' | 'availability' | 'calendar' | 'games' | 'vault'>('info');
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const EMPTY_KEY_FORM = { provider: '', label: '', keyId: '', secret: '' };
@@ -37,7 +38,7 @@ export default function ProfilePage() {
             .catch(() => setApiKeys([]));
     };
 
-    const [gcal, setGcal] = useState<{ connected: boolean; configured: boolean } | null>(null);
+    const [gcal, setGcal] = useState<{ connected: boolean; configured: boolean; needsReconsent?: boolean } | null>(null);
     const [gcalNotice, setGcalNotice] = useState<string | null>(null);
 
     const loadGcalStatus = (token: string) => {
@@ -95,8 +96,11 @@ export default function ProfilePage() {
         loadApiKeys(token);
         loadGcalStatus(token);
 
-        // Feedback from the Google OAuth redirect (?gcal=connected|denied|error|noRefreshToken)
-        const gcalParam = new URLSearchParams(window.location.search).get('gcal');
+        // Feedback from the Google OAuth redirect (?gcal=connected|denied|error|noRefreshToken),
+        // and the tab it was started from (?tab=availability: connecting Google as a busy source).
+        const search = new URLSearchParams(window.location.search);
+        const gcalParam = search.get('gcal');
+        if (search.get('tab') === 'availability') setActiveTab('availability');
         if (gcalParam) {
             const messages: Record<string, string> = {
                 connected: 'Google Calendar connected!',
@@ -306,13 +310,13 @@ export default function ProfilePage() {
 
                 {/* Profile tabs */}
                 <div className="flex flex-wrap gap-2 mb-10 border-b-4 border-black pb-4">
-                    {(['info', 'calendar', 'games', 'vault'] as const).map(tab => (
+                    {(['info', 'availability', 'calendar', 'games', 'vault'] as const).map(tab => (
                         <button
                             key={tab}
                             onClick={() => setActiveTab(tab)}
                             className={`px-6 py-3 border-4 border-black font-permanent uppercase text-base tracking-wide transition-colors ${activeTab === tab ? 'bg-black dark:bg-white text-white dark:text-black' : 'bg-white dark:bg-zinc-800 text-black dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-700 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]'}`}
                         >
-                            {tab === 'info' ? 'INFO' : tab === 'calendar' ? 'CALENDAR' : tab === 'games' ? 'GAMES' : 'VAULT'}
+                            {tab === 'calendar' ? 'ALMANAC' : tab.toUpperCase()}
                         </button>
                     ))}
                 </div>
@@ -593,6 +597,12 @@ export default function ProfilePage() {
                                         ? 'Connected — session events can be added to your calendar automatically.'
                                         : 'Connect to add session events to your calendar automatically.'}
                                 </p>
+                                {gcal?.needsReconsent && (
+                                    <p className="font-permanent text-xs text-yellow-700 dark:text-yellow-400 uppercase mt-1">
+                                        To let your busy time count when your party plans a night, reconnect once from the{' '}
+                                        <button type="button" onClick={() => setActiveTab('availability')} className="underline">Availability tab</button>.
+                                    </p>
+                                )}
                             </div>
                             {gcal?.connected ? (
                                 <button
@@ -748,6 +758,8 @@ export default function ProfilePage() {
                         </div>
                     )}
                 </div>)}
+
+                {activeTab === 'availability' && <AvailabilityEditor googleNotice={gcalNotice} />}
 
                 {activeTab === 'calendar' && <CalendarView />}
 

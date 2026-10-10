@@ -1,7 +1,7 @@
 import express from "express";
 const router = express.Router();
 import SfAccount from "../models/SfAccount.js";
-import jwt from "jsonwebtoken";
+import { verifyJwt } from "../utils/jwt.js";
 import { recordPull } from "../jobs/personSync.js";
 
 /**
@@ -27,10 +27,9 @@ const authenticateJWT = (req: express.Request, res: express.Response, next: expr
     }
 
     const token = authHeader.substring(7); // Remove 'Bearer ' prefix
-    const jwtSecret = process.env.JWT_SECRET || "your-secret-key-change-this";
 
     try {
-        jwt.verify(token, jwtSecret);
+        verifyJwt(token);
         next();
     } catch (error) {
         return res.status(403).json({ error: "Forbidden: Invalid token" });

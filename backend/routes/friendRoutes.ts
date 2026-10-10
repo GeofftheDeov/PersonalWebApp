@@ -4,6 +4,7 @@ import FriendRequest from "../models/FriendRequest.js";
 import { auth } from "../middleware/auth.js";
 import { startSession } from "../db/model.js";
 import { notify, resolveNotifications } from "../utils/notify.js";
+import { publishFriendshipChanged } from "../services/accessEvents.js";
 import Account from "../models/Account.js";
 import { findPersonById, findPersonByHandle, personDisplayName, toPublicPerson } from "../utils/personUtils.js";
 
@@ -145,6 +146,8 @@ router.put("/request/:id", auth, async (req: any, res) => {
         await session.commitTransaction();
         session.endSession();
 
+        if (action === "accept") await publishFriendshipChanged(String(request.from), String(request.to), "added");
+
         // Clear the recipient's bell entry; notify the sender based on action.
         resolveNotifications(userId, `fr:${request._id}`).catch(() => { /* logged inside */ });
 
@@ -206,6 +209,7 @@ router.delete("/:id", auth, async (req: any, res) => {
         await session.commitTransaction();
         session.endSession();
 
+        await publishFriendshipChanged(String(userId), String(friendId), "removed");
         res.json({ message: "Friend removed successfully" });
     } catch (error) {
         await session.abortTransaction();

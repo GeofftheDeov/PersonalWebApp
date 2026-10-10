@@ -1,5 +1,9 @@
 import Session from "../models/Session.js";
 import Campaign from "../models/Campaign.js";
+import Message from "../models/Message.js";
+import { bus } from "../events/index.js";
+import { notify } from "../utils/notify.js";
+import { findCampaignPeopleIds } from "./personUtils.js";
 import CampaignMember from "../models/CampaignMember.js";
 import { notify } from "../utils/notify.js";
 import { postTableTalk } from "./tableTalk.js";
@@ -63,11 +67,9 @@ async function sendReadyCheck(session: any) {
     session.readyCheck = { sentAt: new Date(), responses: session.readyCheck?.responses ?? [] };
     await session.save();
 
-    // 1. Bell notifications for every member, whatever collection they live in.
-    const members = await CampaignMember.find({ campaign: campaignId }).select("email");
-    const emails = [...new Set(members.map((m: any) => m.email).filter((e: any): e is string => Boolean(e)))];
-    const people = await findPeopleByEmail(emails as string[]);
-    await Promise.all(people.map(p => notify(p.doc._id, {
+    // 1. Bell notifications for every member with an account.
+    const peopleIds = await findCampaignPeopleIds(campaignId);
+    await Promise.all(peopleIds.map(id => notify(id, {
         type: "system",
         title: `Ready check: "${session.title}" starts at ${startTime}`,
         body: `${title} — ready up for tonight's session!`,
@@ -80,5 +82,5 @@ async function sendReadyCheck(session: any) {
     const body = `**READY CHECK!** "${session.title}" starts at ${startTime}. Head to the [session page](${sessionLink}) and ready up!`;
     await postTableTalk(campaignId, body);
 
-    console.log(`[ready-check] sent for session "${session.title}" (${session._id}) — ${people.length} member(s) notified.`);
+    console.log(`[ready-check] sent for session "${session.title}" (${session._id}) — ${peopleIds.length} member(s) notified.`);
 }

@@ -8,7 +8,7 @@ import Campaign from "../models/Campaign.js";
 import { getAuthorizedCampaignIds } from "../utils/gameNightPlannerUtils.js";
 import { findPersonById, toPublicPerson } from "../utils/personUtils.js";
 import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
+import { signJwt } from "../utils/jwt.js";
 import crypto from "crypto";
 import multer from "multer";
 import path from "path";
@@ -16,6 +16,7 @@ import fs from "fs";
 import { sendResetPasswordEmail, sendVerificationEmail } from "../services/emailService.js";
 import { auth } from "../middleware/auth.js";
 import { isDevEnv } from "../utils/env.js";
+import { hashToken } from "../utils/tokenHash.js";
 import { OAuth2Client } from "google-auth-library";
 
 /**
@@ -52,8 +53,6 @@ const upload = multer({
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-this";
-
 /**
  * The token carries only who you are. It deliberately does NOT carry what you
  * may do: `app_role` is read from the database at the moment it is needed, so
@@ -63,7 +62,7 @@ const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-this";
  * something will eventually start reading again by mistake.
  */
 const signToken = (person: any) =>
-    jwt.sign({ id: person._id, email: person.email }, JWT_SECRET, { expiresIn: "1h" });
+    signJwt({ id: person._id, email: person.email }, { expiresIn: "1h" });
 
 /** The user object the client stores. Capability comes from explicit columns. */
 const publicUser = (person: any) => ({
@@ -120,7 +119,7 @@ router.post("/register", async (req, res) => {
       email,
       password,
       isVerified: isDev,
-      emailVerificationToken: token,
+      emailVerificationToken: token && hashToken(token),
       sfObject: "Lead",
     });
 
@@ -142,18 +141,18 @@ router.post("/register", async (req, res) => {
 
 router.post("/verify-email", async (req, res) => {
     const { token } = req.body;
-    if (!token) return res.status(400).json({ error: "Token is required" });
+    // A string only: the model layer reads an object filter value as operators,
+    // so {"$ne": null} would match whoever has a token outstanding.
+    if (typeof token !== "string" || !token) return res.status(400).json({ error: "Token is required" });
 
     try {
-        const user = await Account.findOne({ emailVerificationToken: token });
+        const user = await Account.findOne({ emailVerificationToken: hashToken(token) });
         if (!user) return res.status(400).json({ error: "Invalid or expired token" });
 
+        // The model layer has no $unset; null clears the column.
         await Account.updateOne(
             { _id: user._id },
-            {
-                $set: { isVerified: true },
-                $unset: { emailVerificationToken: "" }
-            }
+            { $set: { isVerified: true, emailVerificationToken: null } }
         );
 
         res.json({ message: "Email verified successfully" });
@@ -454,11 +453,12 @@ router.post("/forgot-password", async (req, res) => {
 
         const token = crypto.randomBytes(20).toString("hex");
 
+        // Only the hash is stored; the raw token goes out in the email below.
         await Account.updateOne(
             { _id: user._id },
             {
                 $set: {
-                    resetPasswordToken: token,
+                    resetPasswordToken: hashToken(token),
                     resetPasswordExpires: new Date(Date.now() + 3600000) // 1 hour
                 }
             }
@@ -477,9 +477,12 @@ router.post("/forgot-password", async (req, res) => {
 
 router.post("/reset-password", async (req, res) => {
     const { token, newPassword } = req.body;
+    // A string only: the model layer reads an object filter value as operators,
+    // so {"$ne": null} would match whoever has a reset in flight.
+    if (typeof token !== "string" || !token) return res.status(400).json({ error: "Invalid or expired token" });
     try {
         const doc: any = await Account.findOne({
-            resetPasswordToken: token,
+            resetPasswordToken: hashToken(token),
             resetPasswordExpires: { $gt: new Date() },
         });
 

@@ -11,6 +11,7 @@
  * lands; a section that passes before its slice is written is a bug in the
  * test, not good news (see the Phase 2 fixture lesson in phase3-fixture.ts).
  */
+import "./use-test-jwt-secret.js";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -983,11 +984,9 @@ async function main() {
             });
 
             // ── admin page ───────────────────────────────────────────────────
-            const jwt = (await import("jsonwebtoken")).default;
-            const adminToken = jwt.sign({ id: IDS.acctA, email: "geoffrey.murray.1995@gmail.com" },
-                process.env.JWT_SECRET || "your-secret-key-change-this", { expiresIn: "5m" });
-            const leadToken = jwt.sign({ id: IDS.acctB, email: "gdrumz@momurrays.com" },
-                process.env.JWT_SECRET || "your-secret-key-change-this", { expiresIn: "5m" });
+            const { signJwt } = await import("../utils/jwt.js");
+            const adminToken = signJwt({ id: IDS.acctA, email: "geoffrey.murray.1995@gmail.com" }, { expiresIn: "5m" });
+            const leadToken = signJwt({ id: IDS.acctB, email: "gdrumz@momurrays.com" }, { expiresIn: "5m" });
 
             await check("the Person Sync page is admin-only", async () => {
                 const admin = await fetch(`${base}/admin/person-sync?token=${adminToken}`);

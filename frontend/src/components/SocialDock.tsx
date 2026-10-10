@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import { Users, UserPlus, MessageCircle, X, Search, Check, Trash2, ExternalLink, ArrowLeft, Map, MessageSquare, User as UserIcon } from 'lucide-react';
 import ChatThread, { ChatChannel } from './ChatThread';
+import { useThreads, threadKeyFor, ThreadFilter, ThreadSummary } from '../lib/useThreads';
 
 interface Friend {
   _id: string;
@@ -26,24 +27,35 @@ interface Request {
   status: string;
 }
 
-interface CampaignSummary {
-  _id: string;
-  title: string;
-  status: string;
-}
-
 interface ActiveChat {
   channel: ChatChannel;
   title: string;
 }
 
+/** Last activity, compact: NOW, 5M, 3H, 2D, then a date. */
+const fmtActivity = (iso: string | null) => {
+  if (!iso) return '';
+  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60_000);
+  if (mins < 1) return 'NOW';
+  if (mins < 60) return `${mins}M`;
+  if (mins < 24 * 60) return `${Math.floor(mins / 60)}H`;
+  if (mins < 7 * 24 * 60) return `${Math.floor(mins / (24 * 60))}D`;
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }).toUpperCase();
+};
+
+const chatFor = (t: ThreadSummary): ActiveChat => ({
+  channel: { kind: t.kind, id: t.targetId },
+  title: t.kind === 'dm' ? `@${t.title}` : t.title,
+});
+
 export default function SocialDock() {
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'chats' | 'friends' | 'requests' | 'add'>('chats');
   const [friends, setFriends] = useState<Friend[]>([]);
-  const [campaigns, setCampaigns] = useState<CampaignSummary[]>([]);
   const [incomingRequests, setIncomingRequests] = useState<Request[]>([]);
   const [activeChat, setActiveChat] = useState<ActiveChat | null>(null);
+  const [chatFilter, setChatFilter] = useState<ThreadFilter>('all');
+  const { threads, totalUnread, markRead, refresh: refreshThreads } = useThreads({ filter: chatFilter });
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResult, setSearchResult] = useState<Friend | null>(null);
   const [searchError, setSearchError] = useState('');
@@ -54,24 +66,27 @@ export default function SocialDock() {
 
   const panelRef = useRef<HTMLDivElement>(null);
 
+  // No polling (#102). Chats follow the live channel through useThreads.
+  // Friends and requests load once for the badge, then again whenever the
+  // dock opens, along with the thread list as a cheap catch-up.
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      fetchSocialData();
-      const interval = setInterval(fetchSocialData, 30000); // Poll every 30s
-      return () => clearInterval(interval);
-    }
+    if (localStorage.getItem('token')) fetchSocialData();
   }, []);
+
+  useEffect(() => {
+    if (!isOpen || !localStorage.getItem('token')) return;
+    fetchSocialData();
+    refreshThreads();
+  }, [isOpen, refreshThreads]);
 
   const fetchSocialData = async () => {
     const token = localStorage.getItem('token');
     if (!token) return;
 
     try {
-      const [friendsRes, requestsRes, campaignsRes] = await Promise.all([
+      const [friendsRes, requestsRes] = await Promise.all([
         fetch('/api/friends/list', { headers: { 'Authorization': `Bearer ${token}` } }),
         fetch('/api/friends/requests', { headers: { 'Authorization': `Bearer ${token}` } }),
-        fetch('/api/campaigns', { headers: { 'Authorization': `Bearer ${token}` } })
       ]);
 
       if (friendsRes.ok) {
@@ -83,10 +98,6 @@ export default function SocialDock() {
         const requestsData = await requestsRes.json();
         setIncomingRequests(requestsData.incoming);
         setNotificationCount(requestsData.incoming.length);
-      }
-
-      if (campaignsRes.ok) {
-        setCampaigns(await campaignsRes.json());
       }
     } catch (err) {
       console.error("Failed to fetch social data", err);
@@ -216,9 +227,9 @@ export default function SocialDock() {
       >
         <Users size={20} className="group-hover:rotate-12 transition-transform" />
         <span className="hidden md:inline font-permanent">SOCIAL</span>
-        {notificationCount > 0 && (
-          <span className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 border-2 border-white text-[10px] font-black animate-pulse">
-            {notificationCount}
+        {notificationCount + totalUnread > 0 && (
+          <span className="absolute -top-2 -right-2 flex h-5 min-w-5 px-1 items-center justify-center rounded-full bg-red-600 border-2 border-white text-[10px] font-black animate-pulse">
+            {notificationCount + totalUnread > 99 ? '99+' : notificationCount + totalUnread}
           </span>
         )}
       </button>
@@ -268,6 +279,7 @@ export default function SocialDock() {
                     }`}
                   >
                     {tab}
+                    {tab === 'chats' && totalUnread > 0 && ` (${totalUnread})`}
                     {tab === 'requests' && notificationCount > 0 && ` (${notificationCount})`}
                   </button>
                 ))}
@@ -282,7 +294,7 @@ export default function SocialDock() {
                     <>
                       <div className="flex items-center gap-3 mb-3 shrink-0">
                         <button
-                          onClick={() => setActiveChat(null)}
+                          onClick={() => { setActiveChat(null); refreshThreads(); }}
                           className="p-2 bg-black border-2 border-white text-white hover:bg-yellow-400 hover:text-black hover:border-black transition-colors"
                           aria-label="Back to chat list"
                         >
@@ -299,69 +311,69 @@ export default function SocialDock() {
                         <ChatThread
                           channel={activeChat.channel}
                           placeholder={activeChat.channel.kind === 'campaign' ? 'MESSAGE THE PARTY…' : `MESSAGE ${activeChat.title.toUpperCase()}…`}
+                          onLatestMessage={(messageId) => {
+                            const key = threadKeyFor(activeChat.channel.kind, activeChat.channel.id);
+                            if (key) markRead(key, messageId);
+                          }}
                         />
                       </div>
                     </>
                   ) : (
-                    <div className="space-y-6">
-                      <div>
-                        <p className="text-xs font-black text-zinc-400 uppercase tracking-widest mb-3 flex items-center gap-2">
-                          <Map size={14} /> Campaigns
-                        </p>
-                        {campaigns.length === 0 ? (
-                          <div className="text-center py-6 text-zinc-500 border-4 border-dashed border-zinc-700 font-bold uppercase text-xs">
-                            No campaigns yet.
-                          </div>
-                        ) : (
-                          <div className="space-y-2">
-                            {campaigns.map((c) => (
-                              <button
-                                key={c._id}
-                                onClick={() => openChat({ channel: { kind: 'campaign', id: c._id }, title: c.title })}
-                                className="w-full flex items-center gap-3 p-3 bg-zinc-800 border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-1 hover:translate-y-1 hover:shadow-none transition-all text-left"
-                              >
-                                <div className="p-1.5 bg-teal-500 border-2 border-black shrink-0">
-                                  <Map size={14} className="text-white" />
-                                </div>
-                                <div className="min-w-0 flex-grow">
-                                  <p className="font-black text-sm text-white truncate uppercase">{c.title}</p>
-                                  <p className="text-[10px] text-zinc-500 font-bold uppercase">{c.status}</p>
-                                </div>
-                                <MessageSquare size={16} className="text-zinc-600 shrink-0" />
-                              </button>
-                            ))}
-                          </div>
-                        )}
+                    <div className="space-y-4">
+                      <div className="flex gap-2">
+                        {(['all', 'campaigns', 'friends'] as const).map((f) => (
+                          <button
+                            key={f}
+                            onClick={() => setChatFilter(f)}
+                            className={`px-3 py-1 border-2 border-black font-black text-[10px] uppercase tracking-widest transition-colors ${
+                              chatFilter === f ? 'bg-teal-500 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-white'
+                            }`}
+                          >
+                            {f}
+                          </button>
+                        ))}
                       </div>
-                      <div>
-                        <p className="text-xs font-black text-zinc-400 uppercase tracking-widest mb-3 flex items-center gap-2">
-                          <MessageCircle size={14} /> Direct Messages
-                        </p>
-                        {friends.length === 0 ? (
-                          <div className="text-center py-6 text-zinc-500 border-4 border-dashed border-zinc-700 font-bold uppercase text-xs">
-                            Add friends to start chatting.
-                          </div>
-                        ) : (
-                          <div className="space-y-2">
-                            {friends.map((f) => (
-                              <button
-                                key={f._id}
-                                onClick={() => openChat({ channel: { kind: 'dm', id: f._id }, title: `@${friendLabel(f)}` })}
-                                className="w-full flex items-center gap-3 p-3 bg-zinc-800 border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-1 hover:translate-y-1 hover:shadow-none transition-all text-left"
-                              >
-                                <div className="p-1.5 bg-yellow-400 border-2 border-black shrink-0">
-                                  <Users size={14} className="text-black" />
-                                </div>
-                                <div className="min-w-0 flex-grow">
-                                  <p className="font-black text-sm text-white truncate">@{friendLabel(f).toUpperCase()}</p>
-                                  <p className="text-[10px] text-zinc-500 font-bold">#{f.userNumber}</p>
-                                </div>
-                                <MessageSquare size={16} className="text-zinc-600 shrink-0" />
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                      {threads.length === 0 ? (
+                        <div className="text-center py-6 text-zinc-500 border-4 border-dashed border-zinc-700 font-bold uppercase text-xs">
+                          {chatFilter === 'campaigns' ? 'No active campaigns.' : 'No conversations yet.'}
+                          {chatFilter !== 'campaigns' && <><br />Message a friend from the Friends tab.</>}
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {threads.map((t) => (
+                            <button
+                              key={t.threadKey}
+                              onClick={() => openChat(chatFor(t))}
+                              className="w-full flex items-center gap-3 p-3 bg-zinc-800 border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-1 hover:translate-y-1 hover:shadow-none transition-all text-left"
+                            >
+                              <div className={`p-1.5 border-2 border-black shrink-0 ${t.kind === 'campaign' ? 'bg-teal-500' : 'bg-yellow-400'}`}>
+                                {t.kind === 'campaign'
+                                  ? <Map size={14} className="text-white" />
+                                  : <Users size={14} className="text-black" />}
+                              </div>
+                              <div className="min-w-0 flex-grow">
+                                <p className={`font-black text-sm truncate uppercase ${t.unreadCount > 0 ? 'text-white' : 'text-zinc-300'}`}>
+                                  {t.kind === 'dm' ? `@${t.title}` : t.title}
+                                </p>
+                                <p className="text-[10px] text-zinc-500 font-bold uppercase">{t.subtitle}</p>
+                              </div>
+                              <div className="flex flex-col items-end gap-1 shrink-0">
+                                <span className="text-[10px] text-zinc-500 font-bold">{fmtActivity(t.lastActivityAt)}</span>
+                                {t.unreadCount > 0 ? (
+                                  <span
+                                    className="min-w-5 h-5 px-1 flex items-center justify-center rounded-full bg-red-600 border-2 border-black text-[10px] font-black text-white"
+                                    aria-label={`${t.unreadCount} unread`}
+                                  >
+                                    {t.unreadCount > 99 ? '99+' : t.unreadCount}
+                                  </span>
+                                ) : (
+                                  <MessageSquare size={16} className="text-zinc-600" />
+                                )}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )
                 )}
@@ -492,7 +504,7 @@ export default function SocialDock() {
                           {isLoading ? "..." : <Search size={20} />}
                         </button>
                       </div>
-                      {searchError && <p className="text-red-500 text-xs font-black uppercase">{searchError}</p>}
+                      {searchError && <p className="text-red-500 text-xs font-black uppercase">{searchError}</p>}
                     </form>
 
                     {searchResult && (

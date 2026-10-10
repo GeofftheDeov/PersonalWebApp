@@ -26,7 +26,9 @@ A full-stack personal web application featuring a Next.js frontend and an Expres
 
 1. Navigate to `backend/`
 2. Install dependencies: `npm install`
-3. Create a `.env` file (see `.env.example`)
+3. Create a `.env` file (see `.env.example`). Set `JWT_SECRET` to a random string, e.g. the output of
+   `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. The backend refuses to
+   start without one, in dev as well as production, and there is no default.
 4. Start the server: `npm run dev`
 
 ### Frontend Setup

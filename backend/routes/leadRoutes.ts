@@ -8,6 +8,7 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { sendVerificationEmail } from "../services/emailService.js";
 import { isDevEnv } from "../utils/env.js";
+import { hashToken } from "../utils/tokenHash.js";
 
 /**
  * Registration lives here, not in userRoutes (#35 and plan §3.2 both file it
@@ -49,7 +50,7 @@ router.post("/", async (req, res) => {
             email,
             password,
             isVerified: isDev || !email, // Auto-verify if no email (phone verification skipped for now)
-            emailVerificationToken: email ? token : undefined,
+            emailVerificationToken: email && token ? hashToken(token) : undefined,
             company,
             phone,
             leadStatus: "New",

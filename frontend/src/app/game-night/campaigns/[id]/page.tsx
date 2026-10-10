@@ -5,6 +5,7 @@ import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Map, ArrowLeft, Calendar, Book, Users, Shield, ChevronRight, Crown, Save, X, Pencil, UserPlus, Check, Copy, Link2, Plus, Wifi, Flame, ImagePlus } from 'lucide-react';
 import CampaignChat from '@/components/CampaignChat';
+import { memberName, type MemberPerson } from '@/lib/memberName';
 import CampaignBanner from '@/components/CampaignBanner';
 import BannerEditor from '@/components/BannerEditor';
 import NoticeBoard from '@/components/NoticeBoard';
@@ -30,9 +31,7 @@ interface Member {
     lastName?: string;
     status?: string;
     playerId?: string | null;
-    contact?: { name?: string };
-    lead?: { firstName?: string; lastName?: string };
-    account?: { name?: string };
+    person?: MemberPerson | null;
 }
 
 const INPUT_CLS = "w-full p-3 border-4 border-black bg-white text-black font-permanent text-base uppercase focus:border-yellow-400 outline-none";
@@ -42,14 +41,6 @@ const statusColor = (status: string) => {
     if (status === 'In Progress') return 'bg-teal-500 text-white';
     if (status === 'Completed') return 'bg-zinc-600 text-white';
     return 'bg-yellow-400 text-black';
-};
-
-const memberName = (m: Member) => {
-    if (m.firstName || m.lastName) return `${m.firstName || ''} ${m.lastName || ''}`.trim();
-    if (m.contact?.name) return m.contact.name;
-    if (m.lead?.firstName || m.lead?.lastName) return `${m.lead.firstName || ''} ${m.lead.lastName || ''}`.trim();
-    if (m.account?.name) return m.account.name;
-    return m.email || 'Unknown Player';
 };
 
 const toDateInput = (d?: string) => d ? new Date(d).toISOString().split('T')[0] : '';

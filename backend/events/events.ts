@@ -4,6 +4,7 @@
  * Conventions (see Obsidian vault: concepts/redis-streams-event-bus):
  *  - Names are past-tense and dot-namespaced: `<domain>.<happened>`
  *  - The domain (text before the first dot) maps to a Redis stream: `events:<domain>`
+ *    (`<namespace>:events:<domain>` when EVENT_BUS_NAMESPACE is set; see NAMESPACES.md)
  *  - Payloads must be JSON-serializable
  */
 export interface EventMap {
@@ -19,10 +20,35 @@ export interface EventMap {
         action: "created" | "updated" | "deleted";
     };
 
-    /** Campaign membership or details changed. */
+    /**
+     * Campaign membership or details changed. Membership changes go through
+     * services/accessEvents.ts (#105); the live channel recomputes the threads
+     * of the people they affect.
+     */
     "campaign.changed": {
         campaignId: string;
-        action: "created" | "updated" | "member-added" | "member-removed";
+        action: "created" | "updated" | "member-added" | "member-removed" | "deleted";
+        /** Who joined or left (member-added, member-removed), or who created it (created). */
+        personId?: string;
+    };
+
+    /**
+     * Two people became friends, or stopped being friends (#105). Published
+     * through services/accessEvents.ts; the live channel recomputes both
+     * people's threads, so their DM thread starts or stops being live.
+     */
+    "friendship.changed": {
+        personIds: [string, string];
+        action: "added" | "removed";
+    };
+
+    /**
+     * An account was deleted (spec #58). Published through
+     * services/accessEvents.ts; the live channel closes that person's open
+     * sockets with 4001, since their token now names nobody.
+     */
+    "account.deleted": {
+        personId: string;
     };
 
     /**
@@ -63,6 +89,32 @@ export interface EventMap {
     };
 
     /**
+     * Someone is typing in a thread (#103). Ephemeral only: published with
+     * `publishEphemeral`, never `publish`, so it is never XADDed to a stream
+     * or stored. The live channel fans it out to the thread's other members.
+     */
+    "letters.typing": {
+        threadKey: string; // "campaign:<id>" or "dm:<a>:<b>"
+        personId: string;
+        name: string; // display name, never an email address
+        expiresInMs: number;
+    };
+
+    /**
+     * A person's read position in a thread moved forward (#102). Published
+     * with `publishEphemeral`: it only feeds the live channel's `thread.read`
+     * frame to that person's other devices; the position itself is stored in
+     * thread_reads, and no once-per-service consumer needs it.
+     */
+    "thread.read": {
+        personId: string;
+        threadKey: string;
+        lastReadAt: string; // ISO timestamp
+        lastReadMessageId: string | null;
+        /** Messages left unread after this position (newer ones someone else sent). */
+        unreadCount: number;
+    };
+    /*
      * Someone's regular availability changed (#57), so any overlap that
      * includes them is stale. Carries no times: listeners re-read the overlap,
      * which applies its own access rules.

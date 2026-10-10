@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Book, ArrowLeft, Calendar, MapPin, FileText, Map, Save, X, Pencil, Wifi, Swords, Check, Clock } from 'lucide-react';
+import { memberName } from '@/lib/memberName';
 import SessionQuests from '@/components/SessionQuests';
 import SessionTorch from '@/components/SessionTorch';
 import { gmTitleOf } from '@/lib/campaigns';

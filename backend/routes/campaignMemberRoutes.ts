@@ -3,6 +3,7 @@ const router = express.Router();
 import CampaignMember from "../models/CampaignMember.js";
 import { auth } from "../middleware/auth.js";
 import { getAuthorizedCampaignIds, isCampaignGameMaster } from "../utils/gameNightPlannerUtils.js";
+import { publishMembershipChanged } from "../services/accessEvents.js";
 import { gmTitleOf } from "../planning/campaignSettings.js";
 
 /**
@@ -19,9 +20,18 @@ import { gmTitleOf } from "../planning/campaignSettings.js";
  * no person rather than a silent partial write — hence the explicit 400.
  */
 
+/**
+ * What one member may see of another's account. `person` refs accounts, and
+ * populated whole it serialized every column — password hash, verification
+ * token, and the reset token, which is stored in plaintext and redeemed by
+ * equality — to every member of the campaign. Same fields as
+ * GET /api/campaigns/:id/members (#108).
+ */
+const PERSON_PUBLIC = { path: "person", select: "handle name firstName lastName" };
+
 /** The membership, plus the campaign it belongs to — or null if you can't see it. */
 async function readableMember(req: any, id: string) {
-    const member = await CampaignMember.findById(id).populate("campaign").populate("person");
+    const member = await CampaignMember.findById(id).populate("campaign").populate(PERSON_PUBLIC);
     if (!member) return { member: null, allowed: false };
     const campaignIds = await getAuthorizedCampaignIds(req.user);
     const campaignId = String((member.campaign as any)?._id ?? member.campaign);
@@ -37,7 +47,7 @@ router.get("/", auth, async (req: any, res) => {
         const filter = campaignIds === null ? {} : { campaign: { $in: campaignIds } };
         const members = await CampaignMember.find(filter)
             .populate("campaign")
-            .populate("person")
+            .populate(PERSON_PUBLIC)
             .sort({ createdAt: -1 });
         res.json(members);
     } catch (error: any) {
@@ -85,6 +95,7 @@ router.post("/", auth, async (req: any, res) => {
         });
 
         await member.save();
+        await publishMembershipChanged(String(campaign), "member-added", String(person));
         res.status(201).json({ message: "Campaign member created successfully!", member });
     } catch (error: any) {
         console.error("Error creating campaign member:", error);
@@ -124,12 +135,14 @@ router.delete("/:id", auth, async (req: any, res) => {
         if (!member) return res.status(404).json({ error: "Campaign member not found" });
 
         // A player may remove themselves; otherwise this is a GM action.
-        const isSelf = String((member.person as any)?._id ?? member.person) === String(req.user.id);
+        const personId = (member.person as any)?._id ?? member.person;
+        const isSelf = String(personId) === String(req.user.id);
         if (!isSelf && !(await isCampaignGameMaster(req.user, campaignId!))) {
             return res.status(403).json({ error: `Only the ${await gmTitleOf(campaignId)} can remove members` });
         }
 
         await CampaignMember.findByIdAndDelete(req.params.id);
+        if (personId) await publishMembershipChanged(campaignId!, "member-removed", String(personId));
         res.json({ message: "Campaign member deleted successfully" });
     } catch (error: any) {
         console.error("Error deleting campaign member:", error);

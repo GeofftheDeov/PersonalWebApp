@@ -31,6 +31,8 @@ import { unreadCounts } from "../services/readState.js";
  *   - listens on broadcast bus subscriptions (campaign messages and friend
  *     DMs), so every backend task sees every message event, and forwards each
  *     one only to sockets subscribed to its thread;
+ *   - tells a campaign's sockets when its Notice Board changed (#57), from
+ *     the planning, quest and campaign events, so they refetch it;
  *   - pings every 25 seconds and drops a socket that has sent nothing since
  *     the previous ping.
  *
@@ -105,7 +107,18 @@ export type ServerFrame =
     | { type: "message.created"; thread: ThreadKey; message: LiveMessage }
     | ThreadListFrame
     | { type: "ping" }
-    | TypingFrame;
+    | TypingFrame
+    | NoticeBoardFrame;
+
+/**
+ * A campaign's Notice Board changed (#57): a planning step, a vote, a quest,
+ * the torch, the party. Carries no content: clients refetch the board, which
+ * applies its own access rules.
+ */
+export interface NoticeBoardFrame {
+    type: "noticeboard.changed";
+    thread: ThreadKey;
+}
 
 /** Someone else is typing in a thread you can see (#103). */
 export interface TypingFrame {
@@ -272,6 +285,32 @@ export async function attachLiveChannel(
         });
     }
     /* ---------------- end typing ---------------- */
+
+    /* ---------------- the Notice Board (#57) ---------------- */
+    // Planning and quest events carry ids, not content, so the frame does
+    // too: the campaign's sockets refetch the board. One action can publish
+    // several events (a last vote closes the poll and moves the stage), so
+    // clients coalesce the frames. No `firstSighting`: a duplicate costs one
+    // more refetch, and these ids would crowd message ids out of the seen set.
+
+    function boardChanged(campaignId: unknown) {
+        if (!campaignId) return;
+        const thread = campaignThreadKey(String(campaignId));
+        deliver(thread, { type: "noticeboard.changed", thread });
+    }
+
+    unsubscribes.push(
+        await bus.subscribeBroadcast("planning.stage_changed", (p) => boardChanged(p.campaignId)),
+        await bus.subscribeBroadcast("planning.night_moved", (p) => boardChanged(p.campaignId)),
+        await bus.subscribeBroadcast("planning.poll_opened", (p) => boardChanged(p.campaignId)),
+        await bus.subscribeBroadcast("planning.venue_suggested", (p) => boardChanged(p.campaignId)),
+        await bus.subscribeBroadcast("planning.vote_cast", (p) => boardChanged(p.campaignId)),
+        await bus.subscribeBroadcast("planning.poll_closed", (p) => boardChanged(p.campaignId)),
+        await bus.subscribeBroadcast("quest.assigned", (p) => boardChanged(p.campaignId)),
+        await bus.subscribeBroadcast("quest.completed", (p) => boardChanged(p.campaignId)),
+        await bus.subscribeBroadcast("campaign.torch_passed", (p) => boardChanged(p.campaignId)),
+    );
+    /* ---------------- end the Notice Board ---------------- */
 
     /* ---------------------------------------------------------------- */
     /* The thread list (#102): thread.updated and thread.read            */
@@ -467,6 +506,9 @@ export async function attachLiveChannel(
                 refreshAll([String(personId)]);
             }
             // "updated": a campaign's details, not who is in it.
+            // The board shows the party and the GM title: whoever still
+            // holds the thread refetches it (after any revoke above).
+            if (action !== "deleted") boardChanged(campaignId);
         }),
         await bus.subscribeBroadcast("friendship.changed", ({ personIds, action }) => {
             const [a, b] = (personIds ?? []).map(String);

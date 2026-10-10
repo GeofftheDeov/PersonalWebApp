@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { ClipboardList, Plus, X, Wifi, FastForward, RotateCcw, Ban, Check, Crown, CalendarClock, MapPin, Home, Store, Utensils } from 'lucide-react';
 import OverlapPicker, { timeRange, type PickedTime } from './OverlapPicker';
 import SessionTorch, { type StandIn } from './SessionTorch';
+import { getLiveClient } from '@/lib/realtime/useLiveThread';
+import { campaignThreadKey } from '@/lib/realtime/threadKeys';
 
 /**
  * The Notice Board (#57): the campaign's planning card. The Game Master
@@ -14,7 +16,8 @@ import SessionTorch, { type StandIn } from './SessionTorch';
  * (#92): it starts with the campaign's recent venues, anyone can suggest
  * one, and each player picks one. Then the food (#93): a potluck, where the
  * Game Master seeds slots and the party claims them (unclaimed ones stand
- * out), or food provided by one person. Backed by /api/planning.
+ * out), or food provided by one person. Backed by /api/planning, and live:
+ * useNoticeBoard refetches whenever anyone in the party acts.
  */
 
 /** A venue as the party sees it. The address is only sent while it's shortlisted or confirmed. */
@@ -468,7 +471,11 @@ function PlanningCard({ state, reload }: { state: PlanningState; reload: () => P
     const failed = night?.status === 'closed' && night.result === 'no_quorum';
     const needsShortlist = !open && !tie;
 
-    const mine = useCallback(() => new Set((night?.options ?? []).filter(o => o.approvals.includes(viewer.id)).map(o => o.id)), [night, viewer.id]);
+    // Keyed on the round and your saved votes, not the poll object: the board
+    // refetches whenever anyone acts (live, #57), and someone else's vote
+    // mustn't wipe the nights you've ticked but not yet saved.
+    const mineKey = `${night?.id ?? ''}|${(night?.options ?? []).filter(o => o.approvals.includes(viewer.id)).map(o => o.id).join()}`;
+    const mine = useCallback(() => new Set(mineKey.split('|')[1].split(',').filter(Boolean)), [mineKey]);
     const [choice, setChoice] = useState<Set<string>>(mine);
     useEffect(() => setChoice(mine()), [mine]);
     const [busy, setBusy] = useState(false);
@@ -728,7 +735,7 @@ function UpcomingRow({ campaignId, session: u, reload }: { campaignId: string; s
     };
 
     return (
-        <li className="p-3 border-2 border-black bg-white dark:bg-slate-800">
+        <li className="p-4 border-4 border-black bg-white dark:bg-slate-800 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
             <div className="flex flex-wrap items-center justify-between gap-2">
                 <Link href={`/game-night/sessions/${u.id}`} className="min-w-0 hover:underline">
                     <span className="block font-permanent text-sm text-black dark:text-white uppercase break-words">{u.title}</span>
@@ -761,32 +768,105 @@ function UpcomingRow({ campaignId, session: u, reload }: { campaignId: string; s
     );
 }
 
-export default function NoticeBoard({ campaignId, onSessionsChanged }: { campaignId: string; onSessionsChanged?: () => void }) {
+/** How long to wait for more `noticeboard.changed` frames before refetching: one action can send several. */
+const LIVE_REFETCH_MS = 250;
+
+/**
+ * The board's data, shared by the Notice Board and Coming up. Loads when
+ * `campaignId` is set (pass null to wait), again when `refreshKey` changes,
+ * and live (#57): when any member acts -- votes, moves a step on, claims a
+ * slot, passes the torch -- the live channel sends `noticeboard.changed` on
+ * the campaign's thread and this refetches. It refetches after a reconnect
+ * too, since nothing is replayed.
+ *
+ * `onSessionsChanged` runs when the campaign's session list may have changed:
+ * a session joined or left the board, or (live) anything at all happened.
+ */
+export function useNoticeBoard(campaignId: string | null, { onSessionsChanged, refreshKey }: { onSessionsChanged?: () => void; refreshKey?: string } = {}) {
     const [board, setBoard] = useState<Board | null>(null);
     const [error, setError] = useState<string | null>(null);
-    const [kickoff, setKickoff] = useState<{ title: string; agenda: string; isOnline: boolean; foodMode: FoodMode | ''; foodOwnerId: string } | null>(null);
-    const [starting, setStarting] = useState(false);
-    const [kickoffError, setKickoffError] = useState<string | null>(null);
     const plannedIds = useRef<string | null>(null);
+    const sessionsChanged = useRef(onSessionsChanged);
+    sessionsChanged.current = onSessionsChanged;
+    /** Bumped per request, so a slow response never overwrites a newer one. */
+    const latest = useRef(0);
 
     const reload = useCallback(async () => {
+        if (!campaignId) return;
+        const seq = ++latest.current;
         try {
             const res = await fetch(`/api/planning/campaigns/${campaignId}`, { headers: authHeaders() });
             const body = await res.json().catch(() => ({}));
+            if (seq !== latest.current) return;
             if (!res.ok) { setError(body.error || 'Could not load the Notice Board.'); return; }
             // A session joining or leaving the board (kicked off, scheduled,
             // cancelled) changes the campaign's session list too.
             const ids = body.planning.map((p: PlanningState) => p.session.id).join();
-            if (plannedIds.current !== null && plannedIds.current !== ids) onSessionsChanged?.();
+            if (plannedIds.current !== null && plannedIds.current !== ids) sessionsChanged.current?.();
             plannedIds.current = ids;
             setBoard(body);
             setError(null);
         } catch {
-            setError('Could not load the Notice Board.');
+            if (seq === latest.current) setError('Could not load the Notice Board.');
         }
-    }, [campaignId, onSessionsChanged]);
+    }, [campaignId]);
 
-    useEffect(() => { reload(); }, [reload]);
+    useEffect(() => { reload(); }, [reload, refreshKey]);
+
+    useEffect(() => {
+        if (!campaignId) return;
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        const soon = () => {
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(() => {
+                timer = null;
+                reload();
+                sessionsChanged.current?.(); // a night moved, a session scheduled
+            }, LIVE_REFETCH_MS);
+        };
+        const unsubscribe = getLiveClient().subscribe(campaignThreadKey(campaignId), { onNoticeBoard: soon, onReconnect: soon });
+        return () => {
+            unsubscribe();
+            if (timer) clearTimeout(timer);
+        };
+    }, [campaignId, reload]);
+
+    return { board, error, reload };
+}
+
+export type NoticeBoardData = ReturnType<typeof useNoticeBoard>;
+
+/** Scheduled sessions still to come (#57): the campaign page shows them beside its past sessions. */
+export function ComingUp({ campaignId, data: { board, error, reload } }: { campaignId: string; data: NoticeBoardData }) {
+    return (
+        <section aria-labelledby="coming-up-h">
+            <h2 id="coming-up-h" className="mb-4 text-2xl font-permanent text-black dark:text-white uppercase flex items-center gap-2">
+                <CalendarClock className="w-5 h-5 text-teal-500" /> Coming up
+                {board && <span className="ml-1 text-sm text-zinc-400">({board.upcoming?.length ?? 0})</span>}
+            </h2>
+            {!board ? (
+                error
+                    ? <p className="font-permanent text-xs text-red-600 uppercase">{error}</p>
+                    : <p className="font-permanent text-sm text-teal-600 uppercase animate-pulse">Checking the calendar...</p>
+            ) : board.upcoming?.length ? (
+                <ul className="space-y-3">
+                    {board.upcoming.map(u => <UpcomingRow key={u.id} campaignId={campaignId} session={u} reload={reload} />)}
+                </ul>
+            ) : (
+                <div className="py-10 border-4 border-dashed border-zinc-300 dark:border-zinc-700 text-center">
+                    <CalendarClock className="w-10 h-10 text-zinc-300 dark:text-zinc-600 mx-auto mb-2" />
+                    <p className="font-permanent text-sm text-zinc-400 uppercase">Nothing scheduled yet.</p>
+                </div>
+            )}
+        </section>
+    );
+}
+
+/** The planning cards. Its data comes from useNoticeBoard, which the page shares with Coming up. */
+export default function NoticeBoard({ campaignId, data: { board, error, reload } }: { campaignId: string; data: NoticeBoardData }) {
+    const [kickoff, setKickoff] = useState<{ title: string; agenda: string; isOnline: boolean; foodMode: FoodMode | ''; foodOwnerId: string } | null>(null);
+    const [starting, setStarting] = useState(false);
+    const [kickoffError, setKickoffError] = useState<string | null>(null);
 
     const start = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -888,17 +968,6 @@ export default function NoticeBoard({ campaignId, onSessionsChanged }: { campaig
             ) : (
                 <div className="space-y-5">
                     {board.planning.map(state => <PlanningCard key={state.session.id} state={state} reload={reload} />)}
-                </div>
-            )}
-
-            {board.upcoming?.length > 0 && (
-                <div className="mt-6">
-                    <h3 className="mb-2 font-permanent text-sm text-black dark:text-white uppercase flex items-center gap-2">
-                        <CalendarClock className="w-4 h-4 text-teal-600" /> Coming up
-                    </h3>
-                    <ul className="space-y-2">
-                        {board.upcoming.map(u => <UpcomingRow key={u.id} campaignId={campaignId} session={u} reload={reload} />)}
-                    </ul>
                 </div>
             )}
         </section>

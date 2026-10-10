@@ -8,7 +8,7 @@ import Campaign from "../models/Campaign.js";
 import { getAuthorizedCampaignIds } from "../utils/gameNightPlannerUtils.js";
 import { findPersonById, toPublicPerson } from "../utils/personUtils.js";
 import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
+import { signJwt } from "../utils/jwt.js";
 import crypto from "crypto";
 import multer from "multer";
 import path from "path";
@@ -53,8 +53,6 @@ const upload = multer({
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-this";
-
 /**
  * The token carries only who you are. It deliberately does NOT carry what you
  * may do: `app_role` is read from the database at the moment it is needed, so
@@ -64,7 +62,7 @@ const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-this";
  * something will eventually start reading again by mistake.
  */
 const signToken = (person: any) =>
-    jwt.sign({ id: person._id, email: person.email }, JWT_SECRET, { expiresIn: "1h" });
+    signJwt({ id: person._id, email: person.email }, { expiresIn: "1h" });
 
 /** The user object the client stores. Capability comes from explicit columns. */
 const publicUser = (person: any) => ({

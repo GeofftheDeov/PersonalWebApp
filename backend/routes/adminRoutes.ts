@@ -1,5 +1,5 @@
 import express from 'express';
-import jwt from 'jsonwebtoken';
+import { verifyJwt } from '../utils/jwt.js';
 import fs from 'fs';
 import path from 'path';
 import { execFile } from 'child_process';
@@ -43,7 +43,7 @@ const verifyToken = async (req: any, res: express.Response, next: express.NextFu
     }
 
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || "your-secret-key-change-this") as any;
+        const decoded = verifyJwt(token);
         // A token minted before the cutover may name a source row that lost its
         // merge and is no longer any accounts.id.
         const id = await resolveAccountId(String(decoded.id));

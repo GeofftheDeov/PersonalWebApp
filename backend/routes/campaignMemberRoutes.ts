@@ -3,6 +3,7 @@ const router = express.Router();
 import CampaignMember from "../models/CampaignMember.js";
 import { auth } from "../middleware/auth.js";
 import { getAuthorizedCampaignIds, isCampaignGameMaster } from "../utils/gameNightPlannerUtils.js";
+import { publishMembershipChanged } from "../services/accessEvents.js";
 import { gmTitleOf } from "../planning/campaignSettings.js";
 
 /**
@@ -94,6 +95,7 @@ router.post("/", auth, async (req: any, res) => {
         });
 
         await member.save();
+        await publishMembershipChanged(String(campaign), "member-added", String(person));
         res.status(201).json({ message: "Campaign member created successfully!", member });
     } catch (error: any) {
         console.error("Error creating campaign member:", error);
@@ -133,12 +135,14 @@ router.delete("/:id", auth, async (req: any, res) => {
         if (!member) return res.status(404).json({ error: "Campaign member not found" });
 
         // A player may remove themselves; otherwise this is a GM action.
-        const isSelf = String((member.person as any)?._id ?? member.person) === String(req.user.id);
+        const personId = (member.person as any)?._id ?? member.person;
+        const isSelf = String(personId) === String(req.user.id);
         if (!isSelf && !(await isCampaignGameMaster(req.user, campaignId!))) {
             return res.status(403).json({ error: `Only the ${await gmTitleOf(campaignId)} can remove members` });
         }
 
         await CampaignMember.findByIdAndDelete(req.params.id);
+        if (personId) await publishMembershipChanged(campaignId!, "member-removed", String(personId));
         res.json({ message: "Campaign member deleted successfully" });
     } catch (error: any) {
         console.error("Error deleting campaign member:", error);

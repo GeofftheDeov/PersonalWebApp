@@ -17,18 +17,17 @@
  * against anything but localhost):
  *   DATABASE_URL=postgresql://postgres@127.0.0.1:5433/pwatest npx tsx scripts/test-campaign-member-leak.ts
  */
+import "./use-test-jwt-secret.js";
 import express from "express";
 import type { AddressInfo } from "net";
-import jwt from "jsonwebtoken";
 import pool from "../db/index.js";
 import campaignMemberRoutes from "../routes/campaignMemberRoutes.js";
+import { signJwt } from "../utils/jwt.js";
 
 if (!/(\/\/|@)(127\.0\.0\.1|localhost)[:/]/.test(process.env.DATABASE_URL ?? "")) {
   console.error("\n  Refusing to run: DATABASE_URL must be a local throwaway database.\n");
   process.exit(2);
 }
-
-const SECRET = process.env.JWT_SECRET || "your-secret-key-change-this";
 
 let pass = 0, fail = 0;
 function check(name: string, ok: boolean, detail = "") {
@@ -92,7 +91,7 @@ async function main() {
   await new Promise((r) => server.once("listening", r));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
-  const tokenFor = (p: { id: string; email: string }) => jwt.sign({ id: p.id, email: p.email }, SECRET);
+  const tokenFor = (p: { id: string; email: string }) => signJwt({ id: p.id, email: p.email });
   const call = async (method: string, path: string, who: { id: string; email: string }, body?: unknown) => {
     const res = await fetch(`${base}${path}`, {
       method,

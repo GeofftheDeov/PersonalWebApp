@@ -1,5 +1,5 @@
 import express, { Response } from 'express';
-import jwt from 'jsonwebtoken';
+import { signJwt, verifyJwt } from '../utils/jwt.js';
 import { OAuth2Client } from 'google-auth-library';
 import { auth } from '../middleware/auth.js';
 import ApiKeyVault from '../models/ApiKeyVault.js';
@@ -44,11 +44,9 @@ const oauthClient = () => {
 router.get('/auth-url', auth, (req: any, res: Response) => {
     try {
         const back = RETURN_TABS.has(String(req.query.return)) ? String(req.query.return) : undefined;
-        const state = jwt.sign(
-            { id: req.user.id, purpose: 'gcal-connect', back },
-            process.env.JWT_SECRET || 'your-secret-key-change-this',
-            { expiresIn: '10m' },
-        );
+              const state = signJwt({ id: req.user.id, purpose: 'gcal-connect', back }, { expiresIn: '10m' });
+
+
         const url = oauthClient().generateAuthUrl({
             access_type: 'offline',
             prompt: 'consent', // force refresh-token issuance on reconnect
@@ -71,7 +69,7 @@ router.get('/callback', async (req: any, res: Response) => {
         const { code, state, error } = req.query as { code?: string; state?: string; error?: string };
         if (!state) return res.redirect(`${frontend}/profile?gcal=error`);
 
-        const decoded = jwt.verify(state, process.env.JWT_SECRET || 'your-secret-key-change-this') as any;
+        const decoded = verifyJwt(state);
         if (decoded.purpose !== 'gcal-connect') throw new Error('Bad state');
         if (RETURN_TABS.has(decoded.back)) tab = `&tab=${decoded.back}`;
         if (error) return res.redirect(`${frontend}/profile?gcal=denied${tab}`);

@@ -241,7 +241,7 @@ export default function IssueDeskPage() {
   // ── Run transcript polling
   // Polls /api/paperclip/runs/:id/events with a cursor every 2s until the run
   // reaches a terminal status (or 10 min). Plain fetch means the normal
-  // Authorization header works — EventSource couldn't send one.
+  // Authorization header works, which a browser SSE stream couldn't send.
   const POLL_MS = 2_000;
   const POLL_TIMEOUT_MS = 10 * 60 * 1_000;
   // How long to wait for an assigned agent's wakeup run to appear.

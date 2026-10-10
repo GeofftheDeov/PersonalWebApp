@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Redis } from "ioredis";
 import type { EventMap, EventName, EventEnvelope } from "./events.js";
 import type { EventBus, EventHandler } from "./EventBus.js";
@@ -15,21 +16,57 @@ interface RedisStreamBusOptions {
     source?: string;
     /** Unique consumer name within the group. Defaults to hostname+pid. */
     consumer?: string;
+    /**
+     * Environment namespace (e.g. "prod", "dev") for buses that share one
+     * Redis. Every stream key, the consumer group and every Pub/Sub channel
+     * get a `<namespace>:` prefix, so two namespaces never see each other's
+     * events. Unset or blank keeps the un-namespaced names.
+     */
+    namespace?: string;
 }
 
-/** Domain = text before the first dot → stream `events:<domain>`. */
-function streamFor(event: string): string {
-    return `events:${event.split(".")[0]}`;
+/**
+ * The names a bus in `namespace` uses on Redis. An unset or blank namespace
+ * keeps the un-namespaced names: streams `events:<domain>`, channels
+ * `events:live:<name>`, the group as given. Otherwise each gets `<namespace>:`
+ * in front.
+ */
+export function busNames(namespace?: string) {
+    const ns = namespace?.trim() ?? "";
+    if (ns && !/^[A-Za-z0-9_-]+$/.test(ns)) {
+        throw new Error(`Event bus namespace may only use letters, digits, '-' and '_' (got "${ns}")`);
+    }
+    const prefix = ns ? `${ns}:` : "";
+    return {
+        /** Domain = text before the first dot → stream `[<ns>:]events:<domain>`. */
+        stream: (event: string) => `${prefix}events:${event.split(".")[0]}`,
+        /**
+         * Pub/Sub channel carrying an event name's broadcast fan-out. Channels
+         * are not keys and ignore the logical database number, so this prefix
+         * is the only thing keeping namespaces apart on Pub/Sub.
+         */
+        channel: (event: string) => `${prefix}events:live:${event}`,
+        group: (group: string) => `${prefix}${group}`,
+    };
 }
 
 /**
  * Production EventBus on Redis Streams.
  *
+ * - namespace: with one set, every name below carries a `<namespace>:` prefix
+ *   (see busNames); prod and dev share a Redis and must not share events
  * - publish: XADD to `events:<domain>` with MAXLEN ~ trimming
  * - subscribe: consumer-group reads (XREADGROUP), XACK on handler success
  * - recovery: failed/stuck entries are reclaimed with XAUTOCLAIM after 60s idle
+ * - broadcast: publish also PUBLISHes the envelope on `events:live:<name>`;
+ *   every process with a broadcast subscription SUBSCRIBEs to that channel.
+ *   publishEphemeral only PUBLISHes, so it never reaches a stream.
+ * - broadcast outage: when the Pub/Sub connection comes back after a drop,
+ *   onBroadcastResumed listeners hear of it once the channels are subscribed
+ *   again (what was PUBLISHed meanwhile is lost)
  *
- * Delivery is at-least-once: handlers must be idempotent.
+ * Delivery is at-least-once for `subscribe` (handlers must be idempotent) and
+ * at-most-once for `subscribeBroadcast` (Pub/Sub keeps no history).
  */
 export class RedisStreamBus implements EventBus {
     private pub: Redis;
@@ -37,13 +74,25 @@ export class RedisStreamBus implements EventBus {
     private group: string;
     private source: string;
     private consumer: string;
+    private streamFor: (event: string) => string;
+    private channelFor: (event: string) => string;
     private handlers = new Map<EventName, Set<EventHandler<any>>>();
     private readers: Redis[] = [];
     private running = false;
+    /** Pub/Sub connection, opened by the first broadcast subscription. */
+    private sub: Redis | null = null;
+    private broadcasts = new Map<EventName, Set<EventHandler<any>>>();
+    /** Per channel, the SUBSCRIBE in flight or done; awaited by later subscribers. */
+    private channels = new Map<string, Promise<unknown>>();
+    /** Told when the Pub/Sub connection is back after a drop (see onBroadcastResumed). */
+    private resumedListeners = new Set<() => void>();
 
     constructor(opts: RedisStreamBusOptions) {
+        const names = busNames(opts.namespace);
         this.url = opts.url;
-        this.group = opts.group;
+        this.group = names.group(opts.group);
+        this.streamFor = names.stream;
+        this.channelFor = names.channel;
         this.source = opts.source ?? opts.group;
         this.consumer = opts.consumer ?? `${process.env.HOSTNAME ?? "host"}-${process.pid}`;
         this.pub = new Redis(this.url, { lazyConnect: true, maxRetriesPerRequest: 3 });
@@ -58,15 +107,66 @@ export class RedisStreamBus implements EventBus {
             payload: JSON.stringify(payload),
         };
         const id = await this.pub.xadd(
-            streamFor(event),
+            this.streamFor(event),
             "MAXLEN", "~", MAXLEN,
             "*",
             "name", envelope.name,
             "ts", envelope.ts,
             "source", envelope.source,
             "payload", envelope.payload
-        );
-        return id as string;
+        ) as string;
+        // The event is durable once XADD returns. A failed fan-out only costs
+        // live delivery, so it must not tell the caller to publish again.
+        await this.pub
+            .publish(this.channelFor(event), JSON.stringify({ id, ...envelope }))
+            .catch((err) => console.error(`[events] broadcast of ${event} (${id}) failed:`, err.message));
+        return id;
+    }
+
+    async publishEphemeral<K extends EventName>(event: K, payload: EventMap[K]): Promise<string> {
+        const id = randomUUID();
+        await this.pub.publish(this.channelFor(event), JSON.stringify({
+            id,
+            name: event,
+            ts: new Date().toISOString(),
+            source: this.source,
+            payload: JSON.stringify(payload),
+        }));
+        return id;
+    }
+
+    async subscribeBroadcast<K extends EventName>(event: K, handler: EventHandler<K>): Promise<() => void> {
+        if (!this.broadcasts.has(event)) this.broadcasts.set(event, new Set());
+        const handlers = this.broadcasts.get(event)!;
+        // A wrapper per registration, so the same function subscribed twice
+        // needs two unsubscribes, not one.
+        const entry: EventHandler<K> = (payload, meta) => handler(payload, meta);
+        handlers.add(entry);
+
+        const channel = this.channelFor(event);
+        if (!this.channels.has(channel)) this.channels.set(channel, this.subscriber().subscribe(channel));
+        try {
+            await this.channels.get(channel);
+        } catch (err) {
+            handlers.delete(entry);
+            this.channels.delete(channel);
+            throw err;
+        }
+
+        return () => {
+            handlers.delete(entry);
+            if (handlers.size > 0 || this.broadcasts.get(event) !== handlers) return;
+            this.broadcasts.delete(event);
+            this.channels.delete(channel);
+            // Commands run in order on one connection, so a SUBSCRIBE issued
+            // after this (by a new subscription) still wins.
+            this.sub?.unsubscribe(channel).catch(() => {/* closed */});
+        };
+    }
+
+    onBroadcastResumed(listener: () => void): () => void {
+        this.resumedListeners.add(listener);
+        return () => this.resumedListeners.delete(listener);
     }
 
     subscribe<K extends EventName>(event: K, handler: EventHandler<K>): () => void {
@@ -80,7 +180,7 @@ export class RedisStreamBus implements EventBus {
         this.running = true;
         await this.pub.connect().catch(() => {/* ioredis auto-retries */});
 
-        const streams = [...new Set([...this.handlers.keys()].map(streamFor))];
+        const streams = [...new Set([...this.handlers.keys()].map(this.streamFor))];
         for (const stream of streams) {
             try {
                 await this.pub.xgroup("CREATE", stream, this.group, "$", "MKSTREAM");
@@ -100,8 +200,68 @@ export class RedisStreamBus implements EventBus {
         await Promise.allSettled([
             this.pub.quit(),
             ...this.readers.map((r) => r.quit()),
+            ...(this.sub ? [this.sub.quit()] : []),
         ]);
         this.readers = [];
+        this.sub = null;
+        this.broadcasts.clear();
+        this.channels.clear();
+    }
+
+    private subscriber(): Redis {
+        if (this.sub) return this.sub;
+        // A connection in subscriber mode can run no other commands, so
+        // broadcast gets its own. ioredis re-subscribes after a reconnect.
+        const sub = this.pub.duplicate();
+        sub.on("error", (err) => console.error("[events] redis (sub) error:", err.message));
+        sub.on("message", (_channel: string, message: string) => this.fanOut(message));
+        // The first `ready` is the first connect; any later one is a reconnect
+        // after a drop, and whatever was PUBLISHed in between is gone.
+        let connectedBefore = false;
+        sub.on("ready", () => {
+            if (!connectedBefore) { connectedBefore = true; return; }
+            if (this.sub !== sub) return;
+            this.resumed(sub);
+        });
+        this.sub = sub;
+        return sub;
+    }
+
+    /**
+     * After a reconnect, ioredis re-subscribes every channel by itself; this
+     * subscribes them again and waits for the reply (commands answer in
+     * order, so ioredis's own re-subscribe is through by then), and only
+     * then tells the onBroadcastResumed listeners, so anything they make
+     * clients refetch is read after the subscriptions are back. A failed
+     * SUBSCRIBE means the connection dropped again; the next `ready` retries.
+     */
+    private resumed(sub: Redis): void {
+        const channels = [...this.channels.keys()];
+        console.warn(`[events] broadcast subscriber reconnected; events published while it was down were not delivered`);
+        (channels.length ? sub.subscribe(...channels) : Promise.resolve())
+            .then(() => {
+                if (this.sub !== sub) return;
+                for (const listener of [...this.resumedListeners]) {
+                    try { listener(); } catch (err) { console.error("[events] onBroadcastResumed listener failed:", err); }
+                }
+            })
+            .catch((err) => console.error("[events] re-subscribing after a reconnect failed:", err.message));
+    }
+
+    private fanOut(message: string): void {
+        let envelope: EventEnvelope;
+        try {
+            const raw = JSON.parse(message);
+            envelope = { id: raw.id, name: raw.name, ts: raw.ts, source: raw.source, payload: JSON.parse(raw.payload ?? "{}") };
+        } catch (err: any) {
+            console.error("[events] unreadable broadcast message:", err.message);
+            return;
+        }
+        for (const handler of this.broadcasts.get(envelope.name) ?? []) {
+            Promise.resolve()
+                .then(() => handler(envelope.payload, envelope))
+                .catch((err) => console.error(`[events] broadcast handler for '${envelope.name}' failed:`, err));
+        }
     }
 
     private async readLoop(reader: Redis, stream: string): Promise<void> {

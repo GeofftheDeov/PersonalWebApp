@@ -7,6 +7,7 @@ import Account from "../models/Account.js";
 import { auth } from "../middleware/auth.js";
 import { getAuthorizedCampaignIds } from "../utils/gameNightPlannerUtils.js";
 import { personDisplayName } from "../utils/personUtils.js";
+import { publishMembershipChanged } from "../services/accessEvents.js";
 import { SettingsError, cleanGmTitle, updateCampaignSettings } from "../planning/campaignSettings.js";
 import { clearBanner, requestBannerUpload, setBanner, withBannerUrl } from "../planning/campaignBanner.js";
 import { bus } from "../events/index.js";
@@ -65,7 +66,7 @@ router.post("/", auth, async (req: any, res) => {
         // Auto-enroll creator as Game Master
         const memberFields = await memberFieldsFor(req.user, campaign._id, "Game Master");
         await new CampaignMember(memberFields).save();
-        bus.publish("campaign.changed", { campaignId: String(campaign._id), action: "created" }).catch(() => { /* non-fatal */ });
+        await publishMembershipChanged(String(campaign._id), "created", req.user.id);
 
         res.status(201).json({
             message: "Campaign created successfully!",
@@ -207,6 +208,7 @@ router.post("/:id/join", auth, async (req: any, res) => {
 
         const memberFields = await memberFieldsFor(req.user, req.params.id, "Player");
         const member = await new CampaignMember(memberFields).save();
+        await publishMembershipChanged(req.params.id, "member-added", req.user.id);
         res.status(201).json({ message: "Joined campaign successfully!", member });
     } catch (error: any) {
         console.error("Error joining campaign:", error);

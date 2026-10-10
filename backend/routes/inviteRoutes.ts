@@ -6,6 +6,7 @@ import CampaignMember from "../models/CampaignMember.js";
 import { auth } from "../middleware/auth.js";
 import { getAuthorizedCampaignIds } from "../utils/gameNightPlannerUtils.js";
 import { notify, resolveNotifications } from "../utils/notify.js";
+import { publishMembershipChanged } from "../services/accessEvents.js";
 import { findPersonById, personDisplayName, toPublicPerson } from "../utils/personUtils.js";
 
 /**
@@ -158,6 +159,7 @@ router.put("/:id/respond", auth, async (req: any, res) => {
             invite.status = "declined";
         }
         await invite.save();
+        if (invite.status === "accepted") await publishMembershipChanged(campaignId, "member-added", req.user.id);
 
         // Clear the invitee's bell entry and tell the inviter what happened.
         await resolveNotifications(req.user.id, `invite:${invite._id}`);

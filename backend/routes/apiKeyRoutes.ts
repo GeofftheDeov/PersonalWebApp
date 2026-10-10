@@ -2,6 +2,8 @@ import express, { Response } from 'express';
 import { auth } from '../middleware/auth.js';
 import ApiKeyVault from '../models/ApiKeyVault.js';
 import { encrypt, decrypt } from '../utils/encryption.js';
+import { GOOGLE_PROVIDER } from '../utils/googleCalendarGrant.js';
+import { disableBusySource } from '../planning/busySources.js';
 
 const router = express.Router();
 
@@ -60,6 +62,9 @@ router.delete('/:provider', auth, async (req: any, res: Response) => {
   try {
     const userId = String(req.user.id);
     await ApiKeyVault.findOneAndDelete({ userId, provider: req.params.provider });
+    // Removing the Google connection here is the same as disconnecting it:
+    // Google stops being a busy source and its busy blocks go (#84).
+    if (req.params.provider === GOOGLE_PROVIDER) await disableBusySource(userId, 'google');
     res.json({ ok: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

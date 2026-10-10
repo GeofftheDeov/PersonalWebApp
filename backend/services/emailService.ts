@@ -60,6 +60,29 @@ export const sendResetPasswordEmail = async (email: string, token: string) => {
     }
 };
 
+export interface OutgoingEmail {
+    to: string;
+    subject: string;
+    text: string;
+    html: string;
+}
+
+/**
+ * A plain notification email (e.g. quest reminders, #91) through the same
+ * transport as the account emails. Like those, it skips the send when
+ * EMAIL_PASS isn't set. Throws when the transport fails; callers that treat
+ * email as best-effort catch it.
+ */
+export const sendEmail = async (msg: OutgoingEmail) => {
+    if (!process.env.EMAIL_PASS) {
+        console.warn(`[Email Service] EMAIL_PASS not set. Skipping "${msg.subject}".`);
+        return { response: 'Mock email sent' };
+    }
+    const info = await transporter.sendMail({ from: process.env.EMAIL_USER, ...msg });
+    console.log(`[Email Service] Email sent: ${info.response}`);
+    return info;
+};
+
 export const sendVerificationEmail = async (email: string, token: string) => {
     const verifyUrl = `${process.env.FRONTEND_URL}/verify-email?token=${token}`;
 

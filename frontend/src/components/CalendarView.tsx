@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { CheckSquare, Calendar, ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react';
+import { CheckSquare, Calendar, ChevronLeft, ChevronRight, AlertCircle, Dices, Check } from 'lucide-react';
+import { questApi, type AlmanacSession } from '@/lib/quests';
 
 interface Task {
     _id: string;
@@ -18,7 +19,13 @@ interface CalendarEvent {
     startDate: string;
 }
 
-type DayItem = { type: 'task'; data: Task } | { type: 'event'; data: CalendarEvent };
+// A game session (#90) carries the viewer's quests on it, so they show next to the session.
+type DayItem = { type: 'task'; data: Task } | { type: 'event'; data: CalendarEvent } | { type: 'session'; data: AlmanacSession };
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const itemDate = (item: DayItem) => new Date(
+    item.type === 'task' ? item.data.dueDate : item.type === 'event' ? item.data.startDate : item.data.date);
+const openQuests = (s: AlmanacSession) => s.quests.filter(q => q.status === 'open').length;
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -46,6 +53,28 @@ export default function CalendarView() {
     });
     const [selectedDay, setSelectedDay] = useState<Date | null>(null);
     const [view, setView] = useState<'month' | 'list'>('month');
+    // Game sessions by id, filled per visible month plus the next 90 days for "upcoming".
+    const [sessions, setSessions] = useState<Record<string, AlmanacSession>>({});
+
+    const loadSessions = async (start: Date, end: Date) => {
+        if (!localStorage.getItem('token')) return;
+        try {
+            const { sessions: found } = await questApi<{ sessions: AlmanacSession[] }>(
+                `/almanac?start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`);
+            setSessions(prev => ({ ...prev, ...Object.fromEntries(found.map(s => [s.id, s])) }));
+        } catch (err) {
+            console.error('Almanac sessions fetch failed:', err);
+        }
+    };
+
+    useEffect(() => {
+        const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+        loadSessions(start, new Date(+start + 90 * DAY_MS));
+    }, [today]);
+
+    useEffect(() => {
+        loadSessions(current, new Date(current.getFullYear(), current.getMonth() + 1, 1));
+    }, [current]);
 
     useEffect(() => {
         const token = localStorage.getItem('token');
@@ -74,46 +103,73 @@ export default function CalendarView() {
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const prevMonthDays = new Date(year, month, 0).getDate();
 
-    const getItemsForDay = (day: number): DayItem[] => {
-        const dateStr = new Date(year, month, day).toDateString();
-        const items: DayItem[] = [];
-        tasks.forEach(t => {
-            if (t.dueDate && new Date(t.dueDate).toDateString() === dateStr)
-                items.push({ type: 'task', data: t });
-        });
-        events.forEach(e => {
-            if (e.startDate && new Date(e.startDate).toDateString() === dateStr)
-                items.push({ type: 'event', data: e });
-        });
-        return items;
+    const sessionList = Object.values(sessions).sort((a, b) => +new Date(a.date) - +new Date(b.date));
+
+    // Sessions come first on a day, so their quests read next to them.
+    const allItems: DayItem[] = [
+        ...sessionList.map(s => ({ type: 'session' as const, data: s })),
+        ...tasks.filter(t => t.dueDate).map(t => ({ type: 'task' as const, data: t })),
+        ...events.filter(e => e.startDate).map(e => ({ type: 'event' as const, data: e })),
+    ];
+
+    const itemsOn = (date: Date): DayItem[] => {
+        const dateStr = date.toDateString();
+        return allItems.filter(item => itemDate(item).toDateString() === dateStr);
     };
+    const getItemsForDay = (day: number) => itemsOn(new Date(year, month, day));
+    const selectedItems: DayItem[] = selectedDay ? itemsOn(selectedDay) : [];
 
-    const selectedItems: DayItem[] = selectedDay ? (() => {
-        const dateStr = selectedDay.toDateString();
-        const items: DayItem[] = [];
-        tasks.forEach(t => {
-            if (t.dueDate && new Date(t.dueDate).toDateString() === dateStr)
-                items.push({ type: 'task', data: t });
-        });
-        events.forEach(e => {
-            if (e.startDate && new Date(e.startDate).toDateString() === dateStr)
-                items.push({ type: 'event', data: e });
-        });
-        return items;
-    })() : [];
-
-    const upcoming: DayItem[] = [
-        ...tasks.filter(t => t.dueDate && new Date(t.dueDate) >= today).map(t => ({ type: 'task' as const, data: t })),
-        ...events.filter(e => e.startDate && new Date(e.startDate) >= today).map(e => ({ type: 'event' as const, data: e })),
-    ].sort((a, b) => {
-        const da = a.type === 'task' ? new Date(a.data.dueDate) : new Date((a.data as CalendarEvent).startDate);
-        const db = b.type === 'task' ? new Date(b.data.dueDate) : new Date((b.data as CalendarEvent).startDate);
-        return da.getTime() - db.getTime();
-    });
+    const upcoming: DayItem[] = allItems
+        .filter(item => itemDate(item) >= today)
+        .sort((a, b) => itemDate(a).getTime() - itemDate(b).getTime());
 
     const overdue = tasks.filter(t => t.dueDate && new Date(t.dueDate) < today && t.status !== 'Completed');
 
+    const SessionChip = ({ session, compact }: { session: AlmanacSession; compact: boolean }) => {
+        const href = `/game-night/sessions/${session.id}`;
+        const open = openQuests(session);
+        if (compact) {
+            return (
+                <Link href={href} className="block truncate text-[10px] font-permanent uppercase px-1 py-0.5 border border-black bg-black text-white hover:bg-zinc-700 mt-0.5 transition-colors">
+                    {session.title}{open > 0 && <span className="text-yellow-400"> · {open} quest{open !== 1 ? 's' : ''}</span>}
+                </Link>
+            );
+        }
+        const when = new Date(session.date);
+        return (
+            <div className="border-2 border-black bg-white dark:bg-slate-800 hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all">
+                <Link href={href} className="flex items-center gap-3 p-3 group">
+                    <div className="w-8 h-8 shrink-0 flex items-center justify-center border-2 border-black bg-black">
+                        <Dices className="w-4 h-4 text-yellow-400" />
+                    </div>
+                    <div className="flex-grow min-w-0">
+                        <p className="font-permanent text-sm text-black dark:text-white uppercase truncate group-hover:text-teal-600 transition-colors">{session.title}</p>
+                        <p className="text-xs font-permanent text-zinc-400 uppercase truncate">
+                            {session.campaign.title} &middot; {when.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, {when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                        </p>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-zinc-300 dark:text-zinc-600 shrink-0" />
+                </Link>
+                {session.quests.length > 0 && (
+                    <ul className="px-3 pb-3 -mt-1 space-y-1" aria-label={`Your quests for ${session.title}`}>
+                        {session.quests.map(q => (
+                            <li key={q.id}>
+                                <Link href={`${href}#quests`} className="flex items-center gap-2 text-[11px] font-permanent uppercase text-zinc-600 dark:text-zinc-300 hover:text-teal-600">
+                                    <span className={`w-3.5 h-3.5 shrink-0 grid place-items-center border border-black ${q.status === 'done' ? 'bg-teal-500 text-white' : 'bg-white'}`}>
+                                        {q.status === 'done' && <Check className="w-3 h-3" />}
+                                    </span>
+                                    <span className={`truncate ${q.status === 'done' ? 'line-through text-zinc-400' : ''}`}>{q.title}</span>
+                                </Link>
+                            </li>
+                        ))}
+                    </ul>
+                )}
+            </div>
+        );
+    };
+
     const ItemChip = ({ item, compact = false }: { item: DayItem; compact?: boolean }) => {
+        if (item.type === 'session') return <SessionChip session={item.data} compact={compact} />;
         const isTask = item.type === 'task';
         const href = isTask ? `/calendar/tasks/${item.data._id}` : `/calendar/events/${item.data._id}`;
         const label = item.data.title;
@@ -160,10 +216,11 @@ export default function CalendarView() {
             <header className="mb-8 border-b-8 border-black pb-6">
                 <h2 className="text-4xl sm:text-5xl md:text-7xl font-permanent text-black dark:text-black leading-none tracking-tight uppercase break-words">
                     <span className="drop-shadow-[6px_6px_0px_rgba(250,204,21,1)]">YOUR</span>
-                    <span className="text-yellow-400 ml-2 sm:ml-4 drop-shadow-[6px_6px_0px_rgba(0,0,0,1)]">CALENDAR</span>
+                    <span className="text-yellow-400 ml-2 sm:ml-4 drop-shadow-[6px_6px_0px_rgba(0,0,0,1)]">ALMANAC</span>
                 </h2>
                 <p className="font-permanent text-zinc-500 uppercase text-sm mt-3">
                     {tasks.length} Task{tasks.length !== 1 ? 's' : ''} &middot; {events.length} Event{events.length !== 1 ? 's' : ''}
+                    {sessionList.length > 0 && <> &middot; {sessionList.length} Game Night{sessionList.length !== 1 ? 's' : ''}</>}
                     {overdue.length > 0 && <span className="ml-3 text-red-500">· {overdue.length} OVERDUE</span>}
                 </p>
             </header>
@@ -286,6 +343,18 @@ export default function CalendarView() {
 
             {view === 'list' && (
                 <div className="space-y-8">
+                    <div>
+                        <h3 className="text-xl font-permanent text-black dark:text-white uppercase mb-3 flex items-center gap-2">
+                            <Dices className="w-5 h-5" /> Game Nights ({sessionList.length})
+                        </h3>
+                        <div className="space-y-2">
+                            {sessionList.length === 0 ? (
+                                <p className="font-permanent text-zinc-400 uppercase text-sm">No game nights in view.</p>
+                            ) : (
+                                sessionList.map(s => <SessionChip key={s.id} session={s} compact={false} />)
+                            )}
+                        </div>
+                    </div>
                     <div>
                         <h3 className="text-xl font-permanent text-teal-600 uppercase mb-3 flex items-center gap-2">
                             <CheckSquare className="w-5 h-5" /> Tasks ({tasks.length})

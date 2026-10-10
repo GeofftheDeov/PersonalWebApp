@@ -6,6 +6,7 @@ export const QUEUE_NAMES = {
     NOTION_WRITEBACK: "notion-writeback",
     SF_POLL: "salesforce-poll",
     PERSON_SYNC: "person-sync",
+    QUEST_REMINDERS: "quest-reminders",
 } as const;
 
 export const DEFAULT_JOB_OPTS = {
@@ -23,6 +24,30 @@ let _sfQueue: Queue | null = null;
 let _notionWritebackQueue: Queue | null = null;
 let _sfPollQueue: Queue | null = null;
 let _personSyncQueue: Queue | null = null;
+let _questReminderQueue: Queue | null = null;
+
+/**
+ * Quest reminders (#91): once a minute, send the reminders that have come due
+ * (planning/questReminders.ts). attempts: 1 -- the next minute's run is the
+ * retry, and each reminder is claimed in the database before it's sent, so a
+ * rerun never repeats one.
+ *
+ * The same job also closes the food step of every in-person session that has
+ * reached its start (#93, planner.ts closeDueFoodSteps), which is idempotent.
+ * Without Redis (local dev) nothing closes the food step by itself; the ready
+ * check still covers those sessions (utils/readyCheck.ts).
+ */
+const QUEST_REMINDERS_EVERY_MS = 60 * 1000;
+const QUEST_REMINDER_JOB_OPTS = { attempts: 1, removeOnComplete: { count: 20 }, removeOnFail: { count: 50 } };
+
+export function getQuestReminderQueue(): Queue | null {
+    const opts = getBullConnectionOptions();
+    if (!opts) return null;
+    if (!_questReminderQueue) {
+        _questReminderQueue = new Queue(QUEUE_NAMES.QUEST_REMINDERS, { connection: opts });
+    }
+    return _questReminderQueue;
+}
 
 /**
  * Person sync (#35, plan §2.8): nightly drain of person_outbox to Salesforce,
@@ -149,6 +174,16 @@ export async function registerRepeatableJobs(): Promise<void> {
         );
         console.log("[bullmq] Registered nightly person-sync job (03:00 America/Chicago)");
     }
+
+    const questQ = getQuestReminderQueue();
+    if (questQ) {
+        await questQ.upsertJobScheduler(
+            "quest-reminders",
+            { every: QUEST_REMINDERS_EVERY_MS },
+            { name: "quest-reminders", data: {}, opts: QUEST_REMINDER_JOB_OPTS }
+        );
+        console.log("[bullmq] Registered repeatable quest-reminders job (every 60s)");
+    }
 }
 
 export async function closeBullConnection(): Promise<void> {
@@ -158,9 +193,12 @@ export async function closeBullConnection(): Promise<void> {
         _notionWritebackQueue?.close(),
         _sfPollQueue?.close(),
         _personSyncQueue?.close(),
+        _questReminderQueue?.close(),
     ]);
     _notionQueue = null;
     _sfQueue = null;
     _notionWritebackQueue = null;
     _sfPollQueue = null;
+    _personSyncQueue = null;
+    _questReminderQueue = null;
 }

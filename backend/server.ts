@@ -38,11 +38,15 @@ import campaignMemberRoutes from "./routes/campaignMemberRoutes.js";
 import friendRoutes from "./routes/friendRoutes.js";
 import cloudClawRoutes from "./routes/cloudClawRoutes.js";
 import paperclipRoutes from "./routes/paperclipRoutes.js";
+import questRoutes from "./routes/questRoutes.js";
 import apiKeyRoutes from "./routes/apiKeyRoutes.js";
 import googleCalendarRoutes from "./routes/googleCalendarRoutes.js";
 import messageRoutes from "./routes/messageRoutes.js";
 import notificationRoutes from "./routes/notificationRoutes.js";
 import inviteRoutes from "./routes/inviteRoutes.js";
+import availabilityRoutes from "./routes/availabilityRoutes.js";
+import planningRoutes from "./routes/planningRoutes.js";
+import { startPlanningAnnouncements } from "./planning/announcements.js";
 import { snapshotAlpacaNow } from "./routes/adminRoutes.js";
 import { startEventBus, stopEventBus } from "./events/index.js";
 import { startReadyCheckLoop } from "./utils/readyCheck.js";
@@ -124,12 +128,19 @@ app.use("/api/campaign-members", campaignMemberRoutes);
 app.use("/api/friends", friendRoutes);
 app.use("/api/cloud-claw", cloudClawRoutes);
 app.use("/api/paperclip", paperclipRoutes);
+app.use("/api/quests", questRoutes); // session quests (#90)
 app.use("/api/api-keys", apiKeyRoutes);
 app.use("/api/google-calendar", googleCalendarRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/campaign-invites", inviteRoutes);
 app.use("/api/runner", runnerRoutes); // PC skill runner (agentic OS); RUNNER_TOKEN auth
+app.use("/api/availability", availabilityRoutes);
+app.use("/api/planning", planningRoutes);
+
+// Bell notifications + Table Talk posts for planning stage changes (#88).
+// Subscribes before the bus starts, which is when Redis picks its streams.
+startPlanningAnnouncements();
 
 // Event bus (Redis Streams when REDIS_URL is set; in-memory otherwise).
 // Started after routes are imported so module-level subscriptions are registered.

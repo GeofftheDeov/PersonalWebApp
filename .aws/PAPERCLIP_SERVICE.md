@@ -17,6 +17,10 @@ switches off embedded Postgres, `paperclipai run` = doctor + start, and
 - `paperclip/Dockerfile` + `paperclip/entrypoint.sh` — headless image, runs as
   `node` (uid 1000) because embedded Postgres refuses root; authenticated mode
   bound to 0.0.0.0; instance data on `/paperclip-data`.
+- Claude Code CLI for `claude_local` agents, pinned via the
+  `CLAUDE_CODE_VERSION` build arg (tracks npm's `stable` dist-tag). Its state
+  lives at `CLAUDE_CONFIG_DIR=/paperclip-data/claude` on EFS, so sessions and
+  settings survive task replacement.
 - EFS access point `fsap-02a0045caa8f59650` → `/paperclip-data` owned 1000:1000
   (already created; wired into the task definition).
 - Task definition draft: `.aws/paperclip-dev-task-definition.json`.

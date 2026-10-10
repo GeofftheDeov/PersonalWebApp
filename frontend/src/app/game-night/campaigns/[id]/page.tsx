@@ -8,7 +8,7 @@ import CampaignChat from '@/components/CampaignChat';
 import { memberName, type MemberPerson } from '@/lib/memberName';
 import CampaignBanner from '@/components/CampaignBanner';
 import BannerEditor from '@/components/BannerEditor';
-import NoticeBoard from '@/components/NoticeBoard';
+import NoticeBoard, { ComingUp, useNoticeBoard } from '@/components/NoticeBoard';
 import { sessionWhen } from '@/lib/sessions';
 import { DEFAULT_GM_TITLE, gmTitleOf, roleLabel } from '@/lib/campaigns';
 import { canAdmin, fetchCapabilities } from '@/lib/capabilities';
@@ -147,6 +147,12 @@ export default function CampaignDetailPage() {
         setIsGM(computeIsGM(memberRows));
     }, [id]);
 
+    // The Notice Board's data (#57), shared with Coming up and live. Re-read
+    // on a GM rename or a torch pass, which change who can plan.
+    const gmIds = members.filter(m => m.status === 'Game Master').map(m => m._id).join();
+    const boardKey = campaign ? `${gmTitleOf(campaign)}|${gmIds}` : '';
+    const board = useNoticeBoard(campaign ? id : null, { onSessionsChanged: reloadSessions, refreshKey: boardKey });
+
     const handlePassTorch = async (e: React.FormEvent) => {
         e.preventDefault();
         const target = members.find(m => m.playerId === torchTo);
@@ -238,6 +244,7 @@ export default function CampaignDetailPage() {
                 const created = await res.json();
                 setSessionWarnings(created.warnings || []);
                 setSessions(prev => [created, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+                board.reload(); // a session still to come belongs under Coming up
                 setShowSessionModal(false);
                 setSessionForm(EMPTY_SESSION);
             } else {
@@ -299,7 +306,12 @@ export default function CampaignDetailPage() {
     const gmMembers = members.filter(m => m.status === 'Game Master' && m.playerId);
     const viewerId = JSON.parse(localStorage.getItem('user') || 'null')?.id;
     const torchNeedsFrom = gmMembers.length > 1 && !gmMembers.some(m => m.playerId === viewerId);
-    const gmIds = members.filter(m => m.status === 'Game Master').map(m => m._id).join();
+    // Scheduled sessions still to come show under Coming up, and ones being
+    // planned on the Notice Board, so this list is the campaign's past.
+    const upcomingIds = new Set((board.board?.upcoming ?? []).map(u => u.id));
+    const now = Date.now();
+    const pastSessions = sessions.filter(s => s.status !== 'planning' && !upcomingIds.has(s._id)
+        && !(s.status === 'scheduled' && s.date && new Date(s.date).getTime() > now));
     const standInName = (personId: string) => {
         const m = members.find(x => x.playerId === personId);
         return m ? memberName(m) : 'someone';
@@ -307,7 +319,7 @@ export default function CampaignDetailPage() {
 
     return (
         <div className="min-h-[calc(100vh-76px)] flex flex-col">
-            <div className="flex-grow w-full max-w-4xl mx-auto p-4 sm:p-6 md:p-12">
+            <div className="flex-grow w-full max-w-6xl mx-auto p-4 sm:p-6 md:p-8">
 
                 <div className="mb-8">
                     <Link href="/game-night" className="inline-flex items-center gap-2 px-4 py-2 bg-yellow-400 text-black border-4 border-black font-permanent text-sm shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:bg-white transition-colors uppercase w-fit">
@@ -529,8 +541,8 @@ export default function CampaignDetailPage() {
 
                 {/* The Notice Board: session planning (#57) */}
                 <div id="notice-board" className="mb-10 scroll-mt-24">
-                    {/* Keyed on the GM title and the GMs, so a rename or a torch pass re-reads the board. */}
-                    <NoticeBoard key={`${gmTitleOf(campaign)}|${gmIds}`} campaignId={id} onSessionsChanged={reloadSessions} />
+                    {/* Keyed on the GM title and the GMs, so a rename or a torch pass starts its forms afresh. */}
+                    <NoticeBoard key={boardKey} campaignId={id} data={board} />
                 </div>
 
                 {/* Table Talk + Players */}
@@ -590,11 +602,13 @@ export default function CampaignDetailPage() {
                     </div>
                 </div>
 
-                {/* Sessions */}
+                {/* Sessions: what's coming up beside what's been played */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-6 items-start">
+                <ComingUp campaignId={id} data={board} />
                 <div>
                     <div className="flex items-center justify-between mb-4">
                         <h2 className="text-2xl font-permanent text-black dark:text-white uppercase flex items-center gap-2">
-                            <Book className="w-5 h-5 text-teal-500" /> Sessions <span className="ml-1 text-sm text-zinc-400">({sessions.length})</span>
+                            <Book className="w-5 h-5 text-teal-500" /> Previous sessions <span className="ml-1 text-sm text-zinc-400">({pastSessions.length})</span>
                         </h2>
                         {isGM && (
                             <button
@@ -617,14 +631,14 @@ export default function CampaignDetailPage() {
                             </div>
                         </div>
                     )}
-                    {sessions.length === 0 ? (
+                    {pastSessions.length === 0 ? (
                         <div className="py-10 border-4 border-dashed border-zinc-300 dark:border-zinc-700 text-center">
                             <Book className="w-10 h-10 text-zinc-300 dark:text-zinc-600 mx-auto mb-2" />
                             <p className="font-permanent text-sm text-zinc-400 uppercase">No sessions logged yet.</p>
                         </div>
                     ) : (
                         <div className="space-y-3">
-                            {sessions.map(s => (
+                            {pastSessions.map(s => (
                                 <Link key={s._id} href={`/game-night/sessions/${s._id}`} className="flex gap-4 p-4 border-4 border-black bg-white dark:bg-slate-800 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:-translate-y-0.5 transition-transform items-start group block">
                                     <div className="p-2 bg-teal-500 border-2 border-black shrink-0"><Book className="w-4 h-4 text-white" /></div>
                                     <div className="flex-grow min-w-0">
@@ -650,6 +664,7 @@ export default function CampaignDetailPage() {
                             ))}
                         </div>
                     )}
+                </div>
                 </div>
             </div>
 

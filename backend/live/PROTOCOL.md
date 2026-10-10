@@ -4,7 +4,7 @@ One WebSocket per signed-in person. It carries live events for every thread that
 
 - Server: `backend/live/liveChannel.ts`
 - Web client: `frontend/src/lib/realtime/liveClient.ts`, wrapped by the `useLiveThread` hook (threads), `useTyping` (typing) and `useThreads` (the thread list)
-- Tests: `backend/scripts/test-live-channel.ts` (campaigns, auth, heartbeat, client), `backend/scripts/test-live-dms.ts` (DMs), `backend/scripts/test-live-typing.ts` (typing), `backend/scripts/test-live-list.ts` (`thread.updated`, `thread.read`), `backend/scripts/test-live-two-tasks.ts` (every frame across two backend processes), `backend/scripts/test-live-redis-recovery.ts` (Redis outages), `backend/scripts/test-live-access.ts` (access changes, token expiry), `backend/scripts/test-live-combined.ts` (how the tickets' frames combine: access changes with the thread list and typing, resends with unread counts, namespaces, per-stream dedupe)
+- Tests: `backend/scripts/test-live-channel.ts` (campaigns, auth, heartbeat, client), `backend/scripts/test-live-dms.ts` (DMs), `backend/scripts/test-live-typing.ts` (typing), `backend/scripts/test-live-list.ts` (`thread.updated`, `thread.read`), `backend/scripts/test-live-two-tasks.ts` (every frame across two backend processes), `backend/scripts/test-live-redis-recovery.ts` (Redis outages), `backend/scripts/test-live-access.ts` (access changes, token expiry), `backend/scripts/test-live-combined.ts` (how the tickets' frames combine: access changes with the thread list and typing, resends with unread counts, namespaces, per-stream dedupe), `backend/scripts/test-live-noticeboard.ts` (`noticeboard.changed`)
 
 ## Connecting
 
@@ -57,6 +57,7 @@ Thread keys are `campaign:<campaign id>` and `dm:<id>:<id>`, with the two accoun
 | `typing` | `thread`, `personId`, `name`, `expiresInMs` | Someone else is writing in a thread you can see (see Typing). |
 | `thread.updated` | `thread`, `lastActivityAt`, `unreadCount` | A thread's last activity and your unread count in it changed (a new message). |
 | `thread.read` | `thread`, `lastReadAt`, `lastReadMessageId`, `unreadCount` | You read a thread, on this or another device. |
+| `noticeboard.changed` | `thread` | A campaign's Notice Board changed (see The Notice Board). |
 | `ping` | none | Heartbeat. Answer with `pong`. |
 
 `message` is:
@@ -83,6 +84,14 @@ These keep a thread list (unread markers, newest-first order) current without po
 - **`thread.read`** goes to every socket of the person who read, and to nobody else, when a mark-read (`POST /api/threads/:threadKey/read`) moves their read position forward. A mark-read that doesn't move it (a device that is behind) sends nothing. `lastReadAt` is the read message's `createdAt`; `unreadCount` is what's left unread after the position. Your read position is never sent to other people.
 - If a `thread.read` and a `thread.updated` for the same thread cross, a client can trust the read when `lastReadAt` is at or after the update's `lastActivityAt` (the web client does: the count stays 0).
 - Both are live-only, like everything here. After a reconnect, refetch the list (`GET /api/threads`).
+
+### The Notice Board: `noticeboard.changed` (#57)
+
+```json
+{ "type": "noticeboard.changed", "thread": "campaign:<id>" }
+```
+
+Sent to every socket subscribed to a campaign's thread, the actor's own included, when something on that campaign's Notice Board changes: a session kicked off, shortlisted, voted on, moved to its next step, scheduled or cancelled; a venue suggested; a quest assigned, claimed or done; the torch passed; the campaign's details or party changed. It carries nothing else: refetch the board (`GET /api/planning/campaigns/:campaignId`), which applies its own access rules. One action can send several (a last vote closes the poll and moves the step on), so clients wait a moment and refetch once. Live-only like everything here: refetch after a reconnect. The web client's `useNoticeBoard` hook (`frontend/src/components/NoticeBoard.tsx`) does both.
 
 Clients must ignore frame types they don't know. Later versions of the server will add frames (spec #58) without changing `v`.
 

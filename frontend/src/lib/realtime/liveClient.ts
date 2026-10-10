@@ -10,6 +10,7 @@
  *   or protocol-version refusal: retrying with the same token can't help.
  * - Dispatches `message.created` to the handlers subscribed to its thread.
  * - Sends `typing` (`sendTyping`) and dispatches others' `typing` to `onTyping` (#103).
+ * - Dispatches `noticeboard.changed` to its campaign thread's `onNoticeBoard` (#57).
  * - Dispatches frames about the person rather than one thread
  *   (`thread.updated`, `thread.read`) to person-level subscribers
  *   (`subscribePerson`), which the thread list uses (#102).
@@ -54,6 +55,8 @@ export interface ThreadHandlers {
     onReconnect?: () => void;
     /** A `typing` frame for this thread (#103). typing.ts turns these into an indicator. */
     onTyping?: (typing: LiveTyping, thread: string) => void;
+    /** A campaign thread's Notice Board changed (#57): refetch it. */
+    onNoticeBoard?: (thread: string) => void;
 }
 
 /** `thread.updated`: a thread's last activity, and this person's unread count in it, changed. */
@@ -350,6 +353,12 @@ export class LiveClient {
                     expiresInMs: Number(frame.expiresInMs),
                 };
                 for (const h of [...handlers]) safely(() => h.onTyping?.(typing, frame.thread));
+                return;
+            }
+            case "noticeboard.changed": { // #57
+                const handlers = this.threads.get(frame.thread);
+                if (!handlers) return;
+                for (const h of [...handlers]) safely(() => h.onNoticeBoard?.(frame.thread));
                 return;
             }
             // The thread list's frames (#102): about the person, so they go to person-level subscribers.

@@ -1,13 +1,8 @@
 import Session from "../models/Session.js";
 import Campaign from "../models/Campaign.js";
-import Message from "../models/Message.js";
-import { bus } from "../events/index.js";
-import { notify } from "../utils/notify.js";
-import { findCampaignPeopleIds } from "./personUtils.js";
-import CampaignMember from "../models/CampaignMember.js";
 import { notify } from "../utils/notify.js";
 import { postTableTalk } from "./tableTalk.js";
-import { findPeopleByEmail } from "./personUtils.js";
+import { findCampaignPeopleIds } from "./personUtils.js";
 
 const CHECK_EVERY_MS = 60 * 1000;          // scan once a minute
 const READY_WINDOW_MS = 30 * 60 * 1000;    // fire 30 minutes before start

@@ -27,12 +27,18 @@ RUN apt-get update \
 # Pin the CLI version; bump intentionally. Installing at build time also
 # fetches @embedded-postgres/linux-x64 binaries so nothing downloads at boot.
 ARG PAPERCLIP_VERSION=2026.1005.0
-RUN npm install -g paperclipai@${PAPERCLIP_VERSION} @anthropic-ai/claude-code \
+RUN npm install -g paperclipai@${PAPERCLIP_VERSION} \
     && npm cache clean --force \
     # embedded-postgres creates library symlinks inside its own package dir at
     # first run; the container runs as `node`, so that subtree must be writable
     # (otherwise: "EACCES: permission denied, symlink 'libcrypto.so.1.1'...").
     && chown -R node:node /usr/local/lib/node_modules/paperclipai/node_modules/@embedded-postgres
+
+# Claude Code CLI for Paperclip's `claude_local` adapter. Pinned separately so
+# it can be bumped without touching Paperclip; track the npm `stable` dist-tag.
+ARG CLAUDE_CODE_VERSION=2.1.287
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
+    && npm cache clean --force
 
 COPY entrypoint.sh /usr/local/bin/paperclip-entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/paperclip-entrypoint.sh \
@@ -46,6 +52,9 @@ ENV PAPERCLIP_HOME=/paperclip-data \
     PAPERCLIP_NO_BROWSER=1 \
     PAPERCLIP_OPEN_ON_LISTEN=false \
     PAPERCLIP_TELEMETRY_DISABLED=1 \
+    # Claude Code state (sessions, settings, credentials) on EFS so claude_local
+    # runs can resume sessions across task replacement.
+    CLAUDE_CONFIG_DIR=/paperclip-data/claude \
     # Reachable from other tasks: authenticated mode + explicit 0.0.0.0 bind.
     # (local_trusted mode force-binds loopback and would be unreachable.)
     PAPERCLIP_DEPLOYMENT_MODE=authenticated \

@@ -4,6 +4,7 @@ import CampaignMember from "../models/CampaignMember.js";
 import { auth } from "../middleware/auth.js";
 import { getAuthorizedCampaignIds, isCampaignGameMaster } from "../utils/gameNightPlannerUtils.js";
 import { publishMembershipChanged } from "../services/accessEvents.js";
+import { gmTitleOf } from "../planning/campaignSettings.js";
 
 /**
  * Campaign membership admin (#35, plan §3.6).
@@ -76,7 +77,7 @@ router.post("/", auth, async (req: any, res) => {
         if (!person) return res.status(400).json({ error: "A person reference is required" });
 
         if (!(await isCampaignGameMaster(req.user, String(campaign)))) {
-            return res.status(403).json({ error: "Only the Game Master can add members" });
+            return res.status(403).json({ error: `Only the ${await gmTitleOf(campaign)} can add members` });
         }
 
         const existing = await CampaignMember.findOne({ campaign, person });
@@ -107,7 +108,7 @@ router.put("/:id", auth, async (req: any, res) => {
         const { member, campaignId } = await readableMember(req, req.params.id);
         if (!member) return res.status(404).json({ error: "Campaign member not found" });
         if (!(await isCampaignGameMaster(req.user, campaignId!))) {
-            return res.status(403).json({ error: "Only the Game Master can edit members" });
+            return res.status(403).json({ error: `Only the ${await gmTitleOf(campaignId)} can edit members` });
         }
 
         // Moving a membership to a different person or campaign is not an edit.
@@ -137,7 +138,7 @@ router.delete("/:id", auth, async (req: any, res) => {
         const personId = (member.person as any)?._id ?? member.person;
         const isSelf = String(personId) === String(req.user.id);
         if (!isSelf && !(await isCampaignGameMaster(req.user, campaignId!))) {
-            return res.status(403).json({ error: "Only the Game Master can remove members" });
+            return res.status(403).json({ error: `Only the ${await gmTitleOf(campaignId)} can remove members` });
         }
 
         await CampaignMember.findByIdAndDelete(req.params.id);

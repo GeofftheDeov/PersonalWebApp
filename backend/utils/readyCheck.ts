@@ -4,12 +4,13 @@ import Message from "../models/Message.js";
 import { bus } from "../events/index.js";
 import { notify } from "../utils/notify.js";
 import { findCampaignPeopleIds } from "./personUtils.js";
+import CampaignMember from "../models/CampaignMember.js";
+import { notify } from "../utils/notify.js";
+import { postTableTalk } from "./tableTalk.js";
+import { findPeopleByEmail } from "./personUtils.js";
 
 const CHECK_EVERY_MS = 60 * 1000;          // scan once a minute
 const READY_WINDOW_MS = 30 * 60 * 1000;    // fire 30 minutes before start
-
-/** Synthetic sender for automated Table Talk posts. */
-const BOT_SENDER = { id: "system", name: "GAME NIGHT", email: "system@personal-web-app.local" };
 
 /**
  * Ready-up loop: once a minute, find sessions starting within the next
@@ -25,14 +26,25 @@ export function startReadyCheckLoop() {
     console.log("[BACKEND] Ready-check loop scheduled (every 60s, T-30min window).");
 }
 
-export async function runReadyCheckSweep() {
-    const now = new Date();
-    const windowEnd = new Date(now.getTime() + READY_WINDOW_MS);
-
-    const due = await Session.find({
-        date: { $gt: now, $lte: windowEnd },
+/**
+ * Sessions due a ready check at `now`: starting within the next 30 minutes,
+ * not yet sent, and happening -- scheduled (#57), or in the food step (#93).
+ * A session still on its night or venue isn't settled, and a cancelled one
+ * isn't happening. The food step closes by itself only at the session's
+ * start, so without the second arm a session whose food was still open at
+ * T-30 would miss its ready check; by the food step its night and venue are
+ * settled, so it gets one like any scheduled session.
+ */
+export function readyCheckDueFilter(now: Date) {
+    return {
+        $or: [{ status: "scheduled" }, { status: "planning", planningStage: "food" }],
+        date: { $gt: now, $lte: new Date(now.getTime() + READY_WINDOW_MS) },
         "readyCheck.sentAt": { $exists: false },
-    }).populate("campaign", "title");
+    };
+}
+
+export async function runReadyCheckSweep() {
+    const due = await Session.find(readyCheckDueFilter(new Date())).populate("campaign", "title");
 
     for (const session of due) {
         try {
@@ -68,18 +80,7 @@ async function sendReadyCheck(session: any) {
 
     // 2. Automated Table Talk message so the party sees it in chat too.
     const body = `**READY CHECK!** "${session.title}" starts at ${startTime}. Head to the [session page](${sessionLink}) and ready up!`;
-    const message = await Message.create({
-        campaign: campaignId,
-        sender: BOT_SENDER,
-        body,
-    });
-    await bus.publish("gamenight.message", {
-        messageId: String(message._id),
-        campaignId,
-        sender: BOT_SENDER,
-        body: message.body,
-        createdAt: message.createdAt.toISOString(),
-    });
+    await postTableTalk(campaignId, body);
 
     console.log(`[ready-check] sent for session "${session.title}" (${session._id}) — ${peopleIds.length} member(s) notified.`);
 }

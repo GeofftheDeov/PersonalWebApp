@@ -59,3 +59,16 @@ export async function isCampaignGameMaster(user: any, campaignId: string): Promi
 
     return Boolean(gm);
 }
+
+/**
+ * True when the user has Game Master control of this one session: the
+ * campaign's Game Master, an admin, or the session's one-session stand-in
+ * (#89, a torch pass sets `gmOverride`).
+ */
+export async function isSessionGameMaster(user: any, session: { campaign?: unknown; gmOverride?: unknown }): Promise<boolean> {
+    const campaignId = String(session.campaign ?? "");
+    if (await isCampaignGameMaster(user, campaignId)) return true;
+    if (!campaignId || !session.gmOverride || String(session.gmOverride) !== String(user?.id)) return false;
+    // A stand-in counts only while they're still in the party.
+    return Boolean(await CampaignMember.findOne({ campaign: campaignId, person: user.id }).select("_id"));
+}

@@ -5,6 +5,9 @@ import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Book, ArrowLeft, Calendar, MapPin, FileText, Map, Save, X, Pencil, Wifi, Swords, Check, Clock } from 'lucide-react';
 import { memberName } from '@/lib/memberName';
+import SessionQuests from '@/components/SessionQuests';
+import SessionTorch from '@/components/SessionTorch';
+import { gmTitleOf } from '@/lib/campaigns';
 
 const INPUT_CLS = "w-full p-3 border-4 border-black bg-white text-black font-permanent text-base uppercase focus:border-yellow-400 outline-none";
 const LABEL_CLS = "block text-teal-400 font-permanent uppercase text-xs mb-1";
@@ -26,7 +29,9 @@ export default function SessionDetailPage() {
     const [editing, setEditing] = useState(false);
     const [saving, setSaving] = useState(false);
     const [form, setForm] = useState<any>({});
-    const [isGM, setIsGM] = useState(false);
+    // The campaign's Game Master (or an admin), vs. anyone with GM control of
+    // this session, which includes a one-session stand-in (#89).
+    const [isCampaignGM, setIsCampaignGM] = useState(false);
     const [members, setMembers] = useState<any[]>([]);
     const [readySaving, setReadySaving] = useState(false);
 
@@ -50,7 +55,7 @@ export default function SessionDetailPage() {
                                 const memberRows = await mRes.json();
                                 setMembers(memberRows);
                                 const me = JSON.parse(localStorage.getItem('user') || 'null');
-                                setIsGM(Boolean(me && (me.role === 'admin' || memberRows.some((m: any) =>
+                                setIsCampaignGM(Boolean(me && (me.role === 'admin' || memberRows.some((m: any) =>
                                     m.status === 'Game Master' &&
                                     ((m.email && me.email && m.email.toLowerCase() === me.email.toLowerCase()) || (m.playerId && m.playerId === me.id))
                                 ))));
@@ -62,6 +67,11 @@ export default function SessionDetailPage() {
             .catch(() => router.push('/game-night'))
             .finally(() => setLoading(false));
     }, [id, router]);
+
+    const refreshSession = async () => {
+        const res = await fetch(`/api/tabletop/sessions/${id}`, { headers: { Authorization: `Bearer ${token()}` } });
+        if (res.ok) setSession(await res.json());
+    };
 
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -106,6 +116,16 @@ export default function SessionDetailPage() {
     );
     const me = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('user') || 'null') : null;
     const myResponse = readyCheck?.responses?.find((r: any) => r.playerId === me?.id);
+    const memberName = (m: any) => {
+        if (m.firstName || m.lastName) return `${m.firstName || ''} ${m.lastName || ''}`.trim();
+        return m.email?.split('@')[0] || 'Unknown Player';
+    };
+    const isGM = isCampaignGM || Boolean(me?.id && session.gmOverride === me.id);
+    const party = members.filter((m: any) => m.playerId).map((m: any) => ({ id: m.playerId as string, name: memberName(m) }));
+    const standIn = session.gmOverride
+        ? { id: session.gmOverride as string, name: party.find(p => p.id === session.gmOverride)?.name ?? 'someone' }
+        : null;
+    const canPassTorch = isCampaignGM && (session.status === 'planning' || session.status === 'scheduled');
     const responseFor = (m: any) => readyCheck?.responses?.find((r: any) => m.playerId && r.playerId === m.playerId);
     const readyCount = readyCheck?.responses?.filter((r: any) => r.ready).length ?? 0;
 
@@ -141,6 +161,15 @@ export default function SessionDetailPage() {
                         </button>
                     )}
                 </div>
+
+                {/* One-session torch pass (#89) */}
+                {(standIn || canPassTorch) && (
+                    <div className="mb-8 p-4 border-4 border-black bg-slate-900 shadow-[6px_6px_0px_0px_rgba(249,115,22,1)]">
+                        <SessionTorch sessionId={id} gmTitle={gmTitleOf(session.campaign)} party={party} tone="dark"
+                            gameMasterIds={members.filter((m: any) => m.status === 'Game Master' && m.playerId).map((m: any) => m.playerId)}
+                            standIn={standIn} viewerId={me?.id ?? null} canPass={canPassTorch} onChanged={refreshSession} />
+                    </div>
+                )}
 
                 {/* Ready Check */}
                 {showReadyCheck && (
@@ -230,6 +259,19 @@ export default function SessionDetailPage() {
                 {/* View */}
                 {!editing && (
                     <div className="p-6 border-4 border-black bg-white dark:bg-slate-800 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] space-y-6">
+                        {session.status === 'planning' && (
+                            <div className="p-3 border-2 border-black bg-yellow-400 text-black">
+                                <p className="font-permanent text-sm uppercase">Still being planned — no night yet.</p>
+                                {session.campaign?._id && (
+                                    <Link href={`/game-night/campaigns/${session.campaign._id}#notice-board`} className="font-permanent text-xs uppercase underline">
+                                        Vote on the Notice Board
+                                    </Link>
+                                )}
+                            </div>
+                        )}
+                        {session.status === 'cancelled' && (
+                            <p className="p-3 border-2 border-black bg-zinc-800 text-white font-permanent text-sm uppercase">This session was cancelled.</p>
+                        )}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             {sessionDate && (
                                 <div className="flex items-start gap-2">
@@ -257,6 +299,13 @@ export default function SessionDetailPage() {
                                                 <Wifi className="w-3 h-3" /> ONLINE
                                             </span>
                                         )}
+                                        {/* The campaign's table link (#57): where an online session happens. */}
+                                        {session.isOnline && session.campaign?.tableLink && (
+                                            <a href={session.campaign.tableLink} target="_blank" rel="noopener noreferrer"
+                                                className="block mt-2 font-permanent text-xs text-teal-600 dark:text-yellow-400 underline break-all">
+                                                Join the table: {session.campaign.tableLink}
+                                            </a>
+                                        )}
                                     </div>
                                 </div>
                             )}
@@ -277,6 +326,7 @@ export default function SessionDetailPage() {
                                 </div>
                             </div>
                         )}
+                        <SessionQuests sessionId={id} />
                         {(session.googleCalendarLink || session.discordEventId) && (
                             <div>
                                 <p className="font-permanent text-xs text-zinc-400 uppercase mb-2">External Events</p>

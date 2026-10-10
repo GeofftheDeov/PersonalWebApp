@@ -8,11 +8,14 @@ import PlayerSession from "../models/PlayerSession.js";
 import Task from "../models/Task.js";
 import Event from "../models/Event.js";
 import Campaign from "../models/Campaign.js";
+import { gmTitleOf } from "../planning/campaignSettings.js";
 import { auth } from "../middleware/auth.js";
-import { getAuthorizedCampaignIds, isCampaignGameMaster } from "../utils/gameNightPlannerUtils.js";
+import { getAuthorizedCampaignIds, isCampaignGameMaster, isSessionGameMaster } from "../utils/gameNightPlannerUtils.js";
 import { findPersonById, personDisplayName } from "../utils/personUtils.js";
 import { getDecryptedKeys } from "./apiKeyRoutes.js";
-import { createDiscordScheduledEvent, buildGoogleCalendarLink, createGoogleCalendarEvent } from "../utils/integrations.js";
+import { buildGoogleCalendarLink, integrations } from "../utils/integrations.js";
+import pool from "../db/index.js";
+import { followSessionStarts } from "../planning/questReminders.js";
 
 // --- Sessions ---
 router.get("/sessions", auth, async (req: any, res) => {
@@ -37,7 +40,7 @@ router.post("/sessions", auth, async (req: any, res) => {
 
         // Sessions are GM-only: only the campaign's Game Master may create them.
         if (!(await isCampaignGameMaster(req.user, targetCampaign))) {
-            return res.status(403).json({ error: "Only the Game Master can create sessions for this campaign" });
+            return res.status(403).json({ error: `Only the ${await gmTitleOf(targetCampaign)} can create sessions for this campaign` });
         }
 
         const {
@@ -87,7 +90,7 @@ router.post("/sessions", auth, async (req: any, res) => {
                 if (!keys) {
                     warnings.push("Discord event skipped: no 'discord' bot token in your API Key Vault.");
                 } else {
-                    const ev = await createDiscordScheduledEvent({
+                    const ev = await integrations().discord.createScheduledEvent({
                         botToken: keys.secret,
                         guildId: campaignDoc.discordGuildId as string,
                         channelId: campaignDoc.discordChannelId || undefined,
@@ -120,7 +123,7 @@ router.post("/sessions", auth, async (req: any, res) => {
             try {
                 const keys = await getDecryptedKeys(String(req.user.id), "google_calendar");
                 if (keys) {
-                    const ev = await createGoogleCalendarEvent(keys.secret, eventInput);
+                    const ev = await integrations().google.createCalendarEvent(keys.secret, eventInput);
                     session.googleEventId = ev.id;
                 } else {
                     warnings.push("Google Calendar not connected — shareable link created, but no event was added to your calendar.");
@@ -155,12 +158,12 @@ router.get("/sessions/:id", auth, async (req: any, res) => {
 
 router.put("/sessions/:id", auth, async (req: any, res) => {
     try {
-        const existing = await Session.findById(req.params.id).select("campaign");
+        const existing = await Session.findById(req.params.id).select("campaign gmOverride");
         if (!existing) return res.status(404).json({ error: "Session not found" });
 
-        // Sessions are GM-only: only the campaign's Game Master may edit them.
-        if (!(await isCampaignGameMaster(req.user, String(existing.campaign)))) {
-            return res.status(403).json({ error: "Only the Game Master can edit sessions for this campaign" });
+        // Sessions are GM-only: the campaign's Game Master, or this session's stand-in (#89).
+        if (!(await isSessionGameMaster(req.user, existing))) {
+            return res.status(403).json({ error: `Only the ${await gmTitleOf(existing.campaign)} can edit sessions for this campaign` });
         }
 
         const { title, date, endDate, location, isOnline, agenda, summary, vodUrl } = req.body;
@@ -170,6 +173,11 @@ router.put("/sessions/:id", auth, async (req: any, res) => {
             { new: true }
         ).populate("campaign");
         if (!session) return res.status(404).json({ error: "Session not found" });
+        // Its quests' due times follow a new start (#91). The reminder job catches up anyway.
+        if (date !== undefined) {
+            await followSessionStarts(pool, String(session._id)).catch((err) =>
+                console.error("[tabletop] moving quest due times failed:", err.message));
+        }
         res.json(session);
     } catch (error: any) {
         res.status(500).json({ error: "Failed to update session", details: error.message });
@@ -223,7 +231,7 @@ router.post("/prepare-session", auth, async (req: any, res) => {
 
         // GM-only, same as direct session creation (this endpoint was previously unauthenticated).
         if (!(await isCampaignGameMaster(req.user, campaignId?.toString()))) {
-            return res.status(403).json({ error: "Only the Game Master can create sessions for this campaign" });
+            return res.status(403).json({ error: `Only the ${await gmTitleOf(campaignId)} can create sessions for this campaign` });
         }
 
 

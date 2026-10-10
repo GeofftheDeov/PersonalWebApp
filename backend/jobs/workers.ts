@@ -3,6 +3,9 @@ import Task from "../models/Task.js";
 import { pullNotionTasks, pushTaskToNotion } from "../services/notionSync.js";
 import { pushTaskToSalesforce, pullTasksFromSalesforce } from "../services/salesforceService.js";
 import { runPersonSync } from "./personSync.js";
+import pool from "../db/index.js";
+import { runQuestReminders } from "../planning/questReminders.js";
+import { closeDueFoodSteps } from "../planning/planner.js";
 import {
     getBullConnectionOptions,
     QUEUE_NAMES,
@@ -15,6 +18,7 @@ let _sfWritebackWorker: Worker | null = null;
 let _notionWritebackWorker: Worker | null = null;
 let _sfPollWorker: Worker | null = null;
 let _personSyncWorker: Worker | null = null;
+let _questReminderWorker: Worker | null = null;
 
 /**
  * Pull all Notion tasks and upsert into MongoDB.
@@ -255,8 +259,34 @@ export function startWorkers(): () => Promise<void> {
         console.error(`[bullmq] person-sync failed: ${err.message}`)
     );
 
+    // The every-minute planning job: quest reminders (#91), and closing the food
+    // step of in-person sessions that have reached their start (#93). The real
+    // clock here; tests call runQuestReminders and closeDueFoodSteps with their
+    // own. The two are independent, so one failing doesn't stop the other; the
+    // job still fails (and logs) if either did.
+    _questReminderWorker = new Worker(QUEUE_NAMES.QUEST_REMINDERS, async () => {
+        const now = new Date();
+        let closed = 0;
+        let sweepError: unknown = null;
+        try {
+            closed = (await closeDueFoodSteps(pool, now)).closed.length;
+        } catch (err) {
+            sweepError = err;
+        }
+        if (closed) console.log(`[bullmq] quest-reminders: closed the food step of ${closed} session(s)`);
+        const r = await runQuestReminders(pool, now);
+        if (r.sent.length || r.followed.length) {
+            console.log(`[bullmq] quest-reminders: sent ${r.sent.length}, moved ${r.followed.length} due time(s)`);
+        }
+        if (sweepError) throw sweepError;
+        return { sent: r.sent.length, followed: r.followed.length, closedFoodSteps: closed };
+    }, { connection: opts, concurrency: 1 });
+    _questReminderWorker.on("failed", (job, err) =>
+        console.error(`[bullmq] quest-reminders failed: ${err.message}`)
+    );
+
     console.log(
-        "[bullmq] Workers started: notion-sync (c=1), sf-writeback (c=3), notion-writeback (c=2), sf-poll (c=1), person-sync (c=1)"
+        "[bullmq] Workers started: notion-sync (c=1), sf-writeback (c=3), notion-writeback (c=2), sf-poll (c=1), person-sync (c=1), quest-reminders (c=1)"
     );
 
     return async () => {
@@ -266,12 +296,14 @@ export function startWorkers(): () => Promise<void> {
             _notionWritebackWorker?.close(),
             _sfPollWorker?.close(),
             _personSyncWorker?.close(),
+            _questReminderWorker?.close(),
         ]);
         _notionSyncWorker = null;
         _sfWritebackWorker = null;
         _notionWritebackWorker = null;
         _sfPollWorker = null;
         _personSyncWorker = null;
+        _questReminderWorker = null;
         console.log("[bullmq] Workers shut down");
     };
 }

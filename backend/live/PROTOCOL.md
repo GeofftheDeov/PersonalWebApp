@@ -64,8 +64,18 @@ Thread keys are `campaign:<campaign id>` and `dm:<id>:<id>`, with the two accoun
 
 ```json
 { "id": "<uuid>", "sender": { "id": "<account id or \"system\">", "name": "..." },
-  "body": "markdown", "createdAt": "<ISO>", "eventId": "<uuid, optional>" }
+  "body": "markdown", "createdAt": "<ISO>", "eventId": "<uuid, optional>",
+  "attachments": [ /* optional, see below */ ] }
 ```
+
+`attachments` (#104) only appears when the message has some. A message with attachments may have an empty `body`. Each attachment is:
+
+```json
+{ "key": "message-attachments/...", "name": "map.png", "size": 123456, "contentType": "image/png",
+  "width": 1600, "height": 1200, "url": "<presigned GET>", "expiresAt": "<ISO>" }
+```
+
+`width` and `height` only appear for images whose size the uploader's browser reported. `url` is a presigned S3 GET that stops working at `expiresAt` (an hour), minted for this frame. It's `null` if the server couldn't make one. History (`GET /api/threads/:threadKey/messages`) returns the same shape with fresh URLs, so refetch for a new one. Uploads go through `POST /api/threads/:threadKey/attachments` (see `backend/routes/threadRoutes.ts`).
 
 Campaign threads and DM threads carry the same frame. A DM reaches only its pair: every socket of each of the two people, the sender's own included, so a message sent from a phone also shows on the sender's laptop. `eventId` only appears on campaign messages. Automated posts, such as the ready check, arrive the same way, with `sender.id` set to `"system"`. Sender email addresses are never sent.
 

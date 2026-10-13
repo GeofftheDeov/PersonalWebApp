@@ -6,12 +6,22 @@ export interface AdminPageOptions {
     extraStyles?: string;
     /**
      * Lay the page out at the device's width (a viewport meta), so its phone
-     * breakpoints apply on a phone. Off by default: without it a phone renders
-     * the page at ~980px and zooms out, which is what the other admin pages
-     * (and the nav, until spec #135's W5 nav fix) are still built for.
+     * breakpoints apply on a phone, and below 800px let the nav links scroll
+     * sideways inside the one 60px row (spec #135 W5's rule). Off by default:
+     * without it a phone renders the page at ~980px and zooms out, which is
+     * what the other admin pages are still built for until W5 opts them in.
      */
     deviceWidth?: boolean;
 }
+
+const DEVICE_WIDTH_STYLES = `
+    @media (max-width: 800px) {
+        .top-nav { padding: 0 1rem; gap: 1rem; }
+        .nav-brand { flex-shrink: 0; font-size: 1.1rem; }
+        .nav-brand .suffix { display: none; }
+        .nav-links { overflow-x: auto; gap: 1.25rem; min-width: 0; scrollbar-width: none; }
+        .nav-link { white-space: nowrap; font-size: 0.8rem; }
+    }`;
 
 export const renderPage = ({ token, title, activePage, content, extraStyles = '', deviceWidth = false }: AdminPageOptions): string => {
     return `
@@ -123,6 +133,8 @@ export const renderPage = ({ token, title, activePage, content, extraStyles = ''
                         height: 2px;
                         background: #f97316;
                     }
+
+                    ${deviceWidth ? DEVICE_WIDTH_STYLES : ''}
 
                     /* Insert Extra Styles */
                     ${extraStyles}

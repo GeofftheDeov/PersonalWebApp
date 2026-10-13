@@ -29,7 +29,8 @@ export const signedMoney = (v: number) => sign(v, 2) + usd.format(Math.abs(v));
 export const signedPct = (v: number | null, digits = 2) =>
     v === null || !Number.isFinite(v) ? "—" : `${sign(v, digits)}${Math.abs(v).toFixed(digits)}%`;
 
-const centralDay = (d: Date) => d.toLocaleDateString("en-CA", { timeZone: TIME_ZONE });
+/** The Central calendar day, YYYY-MM-DD. */
+export const centralDay = (d: Date) => d.toLocaleDateString("en-CA", { timeZone: TIME_ZONE });
 
 /** "9:41 AM CT" today (Central), "Oct 11, 9:41 AM CT" on another day. */
 export function centralTime(d: Date, now: Date): string {

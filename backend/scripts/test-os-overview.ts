@@ -204,6 +204,22 @@ async function main() {
         check("the stale tile is flagged in the HTML", tileTag(staleHtml.body, "alpaca")?.stale === "true"
             && /STALE/.test(staleHtml.body), tileTag(staleHtml.body, "alpaca"));
 
+        // Yesterday's snapshot is yesterday's P&L, not "today".
+        clock = new Date("2026-10-13T15:00:00Z");
+        const oldHtml = await get(H.base, "/admin/os", adminToken);
+        check("a snapshot from an earlier Central day labels its P&L with that day, not 'today'",
+            oldHtml.body.includes("on Oct 12") && !/<span class="muted">today<\/span>/.test(oldHtml.body));
+
+        // numeric accepts NaN; a NaN snapshot is unavailable, never "$NaN".
+        const nanTs = new Date(latest.getTime() + 2 * MIN);
+        await pool.query(`INSERT INTO alpaca_snapshots (ts, equity, last_equity, day_pl) VALUES ($1, 'NaN', 100000, 'NaN')`, [nanTs]);
+        clock = new Date(latest.getTime() + 5 * MIN);
+        const nan = (await get(H.base, "/admin/os/api/overview", adminToken)).json?.tiles?.alpaca;
+        const nanHtml = await get(H.base, "/admin/os", adminToken);
+        check("a snapshot with NaN equity makes the tile unavailable, not '$NaN'",
+            nan?.status === "unavailable" && /no usable equity/.test(nan.reason) && !/NaN/.test(nanHtml.body), nan);
+        await pool.query(`DELETE FROM alpaca_snapshots WHERE ts = $1`, [nanTs]);
+
         // ── degradation ─────────────────────────────────────────────────────
         clock = new Date(latest.getTime() + 5 * MIN);
 

@@ -31,7 +31,8 @@ export function createOsRouter({ now = () => new Date(), tiles = TILES, db = poo
         const at = now();
         try {
             const token = String(req.query.token ?? "");
-            res.send(renderOverviewPage({ token, now: at, overview: await overview(at), sources: tiles }));
+            // The page carries the admin token in every link: keep it out of caches.
+            res.set("Cache-Control", "no-store").send(renderOverviewPage({ token, now: at, overview: await overview(at), sources: tiles }));
         } catch (err: any) {
             console.error("[os] overview page failed:", err?.message ?? err);
             res.status(500).send("overview failed");

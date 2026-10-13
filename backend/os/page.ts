@@ -51,6 +51,8 @@ export function renderOverviewPage({ token, now, overview, sources, refreshMs = 
         link: (path) => `${path}${path.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`,
     };
     const tiles = sources.map((s) => renderTile(s, overview.tiles[s.id], view)).join("");
+    // Never let a bad interval turn the reload timer into a busy loop.
+    const every = Number.isFinite(refreshMs) && refreshMs >= 5000 ? Math.round(refreshMs) : OVERVIEW_REFRESH_MS;
 
     const content = `
         <div class="os-layout">
@@ -65,7 +67,7 @@ export function renderOverviewPage({ token, now, overview, sources, refreshMs = 
         <script>
         // Reload while the page is visible; catch up as soon as a hidden tab comes back.
         (function () {
-            var every = ${Number(refreshMs)}, loaded = Date.now();
+            var every = ${every}, loaded = Date.now();
             function tick() { if (document.visibilityState === 'visible' && Date.now() - loaded >= every) location.reload(); }
             setInterval(tick, Math.min(every, 5000));
             document.addEventListener('visibilitychange', tick);
@@ -76,8 +78,8 @@ export function renderOverviewPage({ token, now, overview, sources, refreshMs = 
         /* The shared admin shell centres a 100vh flex body, which pushes anything
            taller than the viewport off the top: pin the page below the nav and
            scroll inside it. */
-        .os-layout { width: 100%; height: calc(100vh - 60px); overflow-y: auto; box-sizing: border-box;
-            padding: 1.5rem; position: relative; z-index: 95; }
+        .os-layout { width: 100%; height: calc(100vh - 60px); height: calc(100dvh - 60px); overflow-y: auto;
+            box-sizing: border-box; padding: 1.5rem; position: relative; z-index: 95; }
         .os-inner { max-width: 1100px; margin: 0 auto; }
         .os-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 1rem; gap: 1rem; }
         .os-title { color: #0d9488; font-weight: bold; letter-spacing: 3px; }
@@ -85,14 +87,6 @@ export function renderOverviewPage({ token, now, overview, sources, refreshMs = 
         @media (max-width: 800px) {
             .os-layout { padding: 1rem; }
             .os-tiles { grid-template-columns: 1fr; }
-            /* This page lays out at device width, so keep the shared nav usable:
-               its links scroll sideways inside the one 60px row (spec #135 W5's
-               rule, applied here until W5 brings it to every page). */
-            .top-nav { padding: 0 1rem; gap: 1rem; }
-            .nav-brand { flex-shrink: 0; font-size: 1.1rem; }
-            .nav-brand .suffix { display: none; }
-            .nav-links { overflow-x: auto; gap: 1.25rem; min-width: 0; scrollbar-width: none; }
-            .nav-link { white-space: nowrap; font-size: 0.8rem; }
         }
         .tile { border: 1px solid #333; background: #1e1e1e; padding: 1rem 1.25rem; min-width: 0; box-sizing: border-box; }
         .tile-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }

@@ -21,7 +21,8 @@ export type Unavailable = { status: "unavailable"; reason: string };
 export type Ok<T extends object> = { status: "ok" } & T;
 export type Tile<T extends object = object> = Ok<T> | Unavailable;
 
-export const ok = <T extends object>(data: T): Ok<T> => ({ status: "ok", ...data });
+// status last, so a data field named `status` can't overwrite the state.
+export const ok = <T extends object>(data: T): Ok<T> => ({ ...data, status: "ok" });
 export const unavailable = (reason: string): Unavailable => ({ status: "unavailable", reason });
 
 /** What a tile may read the database through (a pool or one client). */
@@ -69,8 +70,8 @@ export function describeError(err: any): string {
     // 42P01 undefined_table, 42703 undefined_column: a migration hasn't been applied.
     if (err?.code === "42P01") return `table missing (${msg.match(/relation "([^"]+)"/)?.[1] ?? msg})`;
     if (err?.code === "42703") return `column missing (${msg.match(/column "?([^" ]+)"? does not exist/)?.[1] ?? msg})`;
-    // 57014 query_canceled: a statement timeout (#140's per-tile budget).
-    if (err?.code === "57014") return "timed out";
+    // 57014 query_canceled: a statement timeout (#140's per-tile budget), or a manual/shutdown cancel.
+    if (err?.code === "57014") return /statement timeout/i.test(msg) ? "timed out" : "query cancelled";
     return msg.length > MAX_REASON ? msg.slice(0, MAX_REASON - 1) + "…" : msg;
 }
 

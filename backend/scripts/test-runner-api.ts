@@ -285,7 +285,7 @@ async function main() {
             check(`${s.id}: a second press while it's queued returns the same run (200, not created)`,
                 again.status === 200 && again.json?.created === false && Number(again.json?.run?.id) === id, again);
 
-            const claim = await claimAs(["morning-brief", s.id]);
+            const claim = await claimAs([s.id]);
             check(`${s.id}: a runner that lists it claims it`,
                 claim.status === 200 && Number(claim.json?.run?.id) === id && claim.json?.run?.skill === s.id, claim);
             const r = await row(id);
@@ -371,14 +371,21 @@ async function main() {
                 const got = outputOf("weekly-review", day);
                 check(`weekly-review on ${day} writes outputs/reviews/${week}.md`, got === `outputs/reviews/${week}.md`, got);
             }
+            for (const bad of ["2026-02-30", "2026-10-12T04:00:00Z", "2026-W42", ""]) {
+                let threw = false;
+                try { outputOf("weekly-review", bad); } catch { threw = true; }
+                check(`weekly-review's output refuses ${JSON.stringify(bad)} rather than guessing a week`, threw);
+            }
         }
 
         // ── the record-a-finished-run endpoint (#138) accepts the new skills ───
         {
-            const probe = await asRunner("/runs", {});
+            // A body any version of the endpoint must refuse; its runner is ours, so cleanup finds a stray row.
+            const probe = await asRunner("/runs", { skill: "t159-not-a-skill", trigger: "manual", ok: true, runner: runner159 });
             if (probe.status === 404) {
                 console.log("  SKIP  POST /api/runner/runs isn't on this branch yet (#138): recording the new skills is unchecked");
             } else {
+                check("POST /runs refuses a skill that isn't runnable (400)", probe.status === 400, probe);
                 for (const s of NEW_SKILLS) {
                     const res = await asRunner("/runs", {
                         skill: s.id, trigger: "manual", ok: true, runner: runner159, outputPath: s.output,

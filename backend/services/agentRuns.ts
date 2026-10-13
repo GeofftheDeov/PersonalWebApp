@@ -13,9 +13,11 @@ import { query } from '../db/index.js';
  * 2024-12-30 is 2025-W01.
  */
 export function isoWeek(day: string): string {
-    const [y, m, d] = day.split('-').map(Number);
-    const date = new Date(Date.UTC(y, m - 1, d));
-    if (isNaN(date.getTime())) throw new RangeError(`not a YYYY-MM-DD day: ${day}`);
+    const date = new Date(`${day}T00:00:00Z`);
+    // The round trip rejects timestamps and impossible days like 2026-02-30.
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== day) {
+        throw new RangeError(`not a YYYY-MM-DD day: ${day}`);
+    }
     // The Thursday of this day's week (weeks run Monday to Sunday) is always in the week's year.
     date.setUTCDate(date.getUTCDate() + 3 - ((date.getUTCDay() + 6) % 7));
     const year = date.getUTCFullYear();

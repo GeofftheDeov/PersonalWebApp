@@ -1,4 +1,4 @@
-import { ok, type TileSource } from "../overview.js";
+import { describeError, ok, unavailable, type TileSource } from "../overview.js";
 import { esc, money, TIME_ZONE } from "../format.js";
 import { summariseUsage, type UsageSummary } from "../../services/agentRuns.js";
 
@@ -39,14 +39,20 @@ export const usageTile: TileSource<UsageTileData> = {
     href: "/admin/briefs",
 
     async build({ now, db }) {
-        return ok(await summariseUsage(db, { now, days: USAGE_WINDOW_DAYS, maxPoints: USAGE_MAX_POINTS }));
+        const summary = await summariseUsage(db, { now, days: USAGE_WINDOW_DAYS, maxPoints: USAGE_MAX_POINTS });
+        // numeric accepts NaN (and NaN passes CHECK >= 0); completeRun never stores one, but a
+        // hand-written row could, and a NaN total would read "$NaN" here and null in the JSON.
+        if (summary.costUsd !== null && !Number.isFinite(summary.costUsd)) {
+            return unavailable("a run in the window has a cost that isn't a number");
+        }
+        return ok(summary);
     },
 
     explain(err: any) {
         // 42703 undefined_column on a usage column: #137's migration hasn't been applied here.
-        const column = String(err?.message ?? "").match(/column "?(?:\w+\.)?(\w+)"? does not exist/)?.[1];
-        if (err?.code === "42703" && column && USAGE_COLUMNS.includes(column)) {
-            return `usage column missing (${column}): apply ${USAGE_MIGRATION}`;
+        const msg = String(err?.message ?? "");
+        if (err?.code === "42703" && USAGE_COLUMNS.some((c) => new RegExp(`\\b${c}\\b`).test(msg))) {
+            return `${describeError(err)}: apply ${USAGE_MIGRATION}`;
         }
         return undefined;
     },

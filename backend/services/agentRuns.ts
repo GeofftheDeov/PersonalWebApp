@@ -231,12 +231,15 @@ export interface UsageSummary {
 /**
  * Summarise run usage over the `days` Central calendar days ending with `now`'s
  * day (today included). Runs count by when they finished; queued and running
- * runs have no usage yet and aren't counted.
+ * runs have no usage yet and aren't counted. This only reads: a dead `running`
+ * run counts once listRuns or claimNext expires it, on the day it was expired.
  *
  * A run "has usage" when it reported a cost, the headline number. A run
  * without one (an older runner, an unreadable result, an expired run) is
  * counted in runsWithoutUsage and left out of every total and point, so missing
- * data never looks free. Token totals sum what the runs with usage reported.
+ * data never looks free. Token totals sum what the runs with usage reported; a
+ * run whose cost was dropped as malformed but whose tokens were kept counts as
+ * without usage, and its tokens aren't added.
  *
  * Reads through `db`, so an overview tile runs it on its own budgeted
  * connection. Throws on a missing table or column (an unapplied migration);
@@ -280,7 +283,7 @@ export async function summariseUsage(
         inputTokens: t.input_tokens,
         outputTokens: t.output_tokens,
         points: points.reverse().map((r): UsagePoint => ({
-            id: Number(r.id),
+            id: r.id,
             finishedAt: new Date(r.finished_at).toISOString(),
             skill: r.skill,
             trigger: r.trigger,

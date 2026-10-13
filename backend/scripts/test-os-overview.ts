@@ -60,6 +60,10 @@ function tileTag(html: string, id: string) {
     return { status: attr("status"), stale: attr("stale") };
 }
 
+/** One tile's whole <section> (tiles don't nest sections), so a text check can't match another tile. */
+const tileHtml = (html: string, id: string) =>
+    html.match(new RegExp(`<section[^>]*data-tile="${id}"[^>]*>[\\s\\S]*?</section>`))?.[0] ?? "";
+
 async function main() {
     // The clock the harness router reads; each case sets it.
     let clock = new Date();
@@ -159,8 +163,8 @@ async function main() {
                 && /ALPACA_API_KEY/.test(e.reason) && !("equity" in e), e);
         const emptyHtml = await get(H.base, "/admin/os", adminToken);
         check("the empty tile's HTML says 'no snapshots yet' and shows no $0.00",
-            tileTag(emptyHtml.body, "alpaca")?.status === "unavailable" && /no snapshots yet/i.test(emptyHtml.body)
-                && !/\$0\.00/.test(emptyHtml.body), tileTag(emptyHtml.body, "alpaca"));
+            tileTag(emptyHtml.body, "alpaca")?.status === "unavailable" && /no snapshots yet/i.test(tileHtml(emptyHtml.body, "alpaca"))
+                && !/\$0\.00/.test(tileHtml(emptyHtml.body, "alpaca")), tileTag(emptyHtml.body, "alpaca"));
 
         // ── Alpaca tile: latest snapshot wins, P&L % ─────────────────────────
         const snap = (ts: Date, equity: number, lastEquity: number) => pool.query(
@@ -220,7 +224,7 @@ async function main() {
         const nan = (await get(H.base, "/admin/os/api/overview", adminToken)).json?.tiles?.alpaca;
         const nanHtml = await get(H.base, "/admin/os", adminToken);
         check("a snapshot with NaN equity makes the tile unavailable, not '$NaN'",
-            nan?.status === "unavailable" && /no usable equity/.test(nan.reason) && !/NaN/.test(nanHtml.body), nan);
+            nan?.status === "unavailable" && /no usable equity/.test(nan.reason) && !/NaN/.test(tileHtml(nanHtml.body, "alpaca")), nan);
         await pool.query(`DELETE FROM alpaca_snapshots WHERE ts = $1`, [nanTs]);
 
         // ── Usage tile (#144) ───────────────────────────────────────────────
@@ -274,11 +278,11 @@ async function main() {
                 && u.points[1].trigger === "scheduled" && u.points[1].inputTokens === 20_000
                 && u.points[2].trigger === "manual" && u.points[2].ok === true, u?.points);
 
-        const usageHtml = await get(H.base, "/admin/os", adminToken);
-        const ut = tileTag(usageHtml.body, "usage");
+        const usagePage = await get(H.base, "/admin/os", adminToken);
+        const ut = tileTag(usagePage.body, "usage"), usageHtml = tileHtml(usagePage.body, "usage");
         check("the ok usage tile is labelled API-equivalent, counts the run without usage, and links to /admin/briefs",
-            ut?.status === "ok" && usageHtml.body.includes("API-equivalent") && usageHtml.body.includes("$1.75")
-                && /1 run without usage/.test(usageHtml.body) && /href="\/admin\/briefs\?token=/.test(usageHtml.body), ut);
+            ut?.status === "ok" && usageHtml.includes("API-equivalent") && usageHtml.includes("$1.75")
+                && /1 run without usage/.test(usageHtml) && /href="\/admin\/briefs\?token=/.test(usageHtml), ut);
 
         // The newest 30 runs with usage become points; the totals still cover them all.
         const burst = Array.from({ length: 31 }, (_, i) => new Date(new Date("2026-03-08T12:00:00Z").getTime() + i * MIN));
@@ -297,10 +301,11 @@ async function main() {
         check("an empty window is reported as empty (no cost, no tokens), not $0",
             emptyWeek?.status === "ok" && emptyWeek.runs === 0 && emptyWeek.runsWithUsage === 0
                 && emptyWeek.costUsd === null && emptyWeek.inputTokens === null && emptyWeek.points?.length === 0, emptyWeek);
-        const emptyWeekHtml = await get(H.base, "/admin/os", adminToken);
+        const emptyWeekPage = await get(H.base, "/admin/os", adminToken);
+        const emptyWeekHtml = tileHtml(emptyWeekPage.body, "usage");
         check("the empty tile says 'no runs with usage in the last 7 days', not $0.00",
-            tileTag(emptyWeekHtml.body, "usage")?.status === "ok"
-                && emptyWeekHtml.body.includes("no runs with usage in the last 7 days") && !/\$0\.00/.test(emptyWeekHtml.body));
+            tileTag(emptyWeekPage.body, "usage")?.status === "ok"
+                && emptyWeekHtml.includes("no runs with usage in the last 7 days") && !/\$0\.00/.test(emptyWeekHtml));
 
         // A window whose only runs reported nothing is still empty of usage, not $0.
         await run(new Date("2026-02-20T15:00:00Z"), {}, { status: "failed" });
@@ -309,10 +314,19 @@ async function main() {
         check("runs without any usage are counted, and the totals stay empty rather than zero",
             noUsage?.runs === 2 && noUsage.runsWithoutUsage === 2 && noUsage.runsWithUsage === 0
                 && noUsage.costUsd === null && noUsage.outputTokens === null, noUsage);
-        const noUsageHtml = await get(H.base, "/admin/os", adminToken);
+        const noUsageHtml = tileHtml((await get(H.base, "/admin/os", adminToken)).body, "usage");
         check("...and the tile says so, with the count of runs without usage",
-            noUsageHtml.body.includes("no runs with usage in the last 7 days") && /2 runs without usage/.test(noUsageHtml.body)
-                && !/\$0\.00/.test(noUsageHtml.body));
+            noUsageHtml.includes("no runs with usage in the last 7 days") && /2 runs without usage/.test(noUsageHtml)
+                && !/\$0\.00/.test(noUsageHtml));
+
+        // numeric accepts NaN, and CHECK (cost_usd >= 0) lets it through: never "$NaN".
+        await pool.query(`INSERT INTO agent_runs (skill, status, finished_at, runner, cost_usd)
+                          VALUES ('morning-brief', 'succeeded', $1, $2, 'NaN')`, [new Date("2026-02-21T16:00:00Z"), usageRunner]);
+        const nanUsage = await usageAt(new Date("2026-02-21T18:00:00Z"));
+        const nanUsageHtml = tileHtml((await get(H.base, "/admin/os", adminToken)).body, "usage");
+        check("a NaN cost makes the usage tile unavailable, not '$NaN'",
+            nanUsage?.status === "unavailable" && /isn't a number/.test(nanUsage.reason) && !/NaN/.test(nanUsageHtml), nanUsage);
+        await pool.query(`DELETE FROM agent_runs WHERE runner = $1 AND cost_usd = 'NaN'`, [usageRunner]);
 
         // The usage migration not applied: the tile names it; the other tiles carry on.
         await pool.query(`ALTER TABLE agent_runs RENAME COLUMN cost_usd TO cost_usd_t144_renamed`);
@@ -326,7 +340,7 @@ async function main() {
         const unmigratedHtml = await get(H.base, "/admin/os", adminToken);
         check("the unmigrated usage tile is unavailable in the HTML, naming the migration",
             unmigratedHtml.status === 200 && tileTag(unmigratedHtml.body, "usage")?.status === "unavailable"
-                && unmigratedHtml.body.includes("2026-10-12-agent-run-usage.sql"));
+                && tileHtml(unmigratedHtml.body, "usage").includes("2026-10-12-agent-run-usage.sql"));
         await pool.query(`ALTER TABLE agent_runs RENAME COLUMN cost_usd_t144_renamed TO cost_usd`);
         usageRenamed = false;
 

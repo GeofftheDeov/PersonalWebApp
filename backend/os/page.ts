@@ -85,6 +85,14 @@ export function renderOverviewPage({ token, now, overview, sources, refreshMs = 
         @media (max-width: 800px) {
             .os-layout { padding: 1rem; }
             .os-tiles { grid-template-columns: 1fr; }
+            /* This page lays out at device width, so keep the shared nav usable:
+               its links scroll sideways inside the one 60px row (spec #135 W5's
+               rule, applied here until W5 brings it to every page). */
+            .top-nav { padding: 0 1rem; gap: 1rem; }
+            .nav-brand { flex-shrink: 0; font-size: 1.1rem; }
+            .nav-brand .suffix { display: none; }
+            .nav-links { overflow-x: auto; gap: 1.25rem; min-width: 0; scrollbar-width: none; }
+            .nav-link { white-space: nowrap; font-size: 0.8rem; }
         }
         .tile { border: 1px solid #333; background: #1e1e1e; padding: 1rem 1.25rem; min-width: 0; box-sizing: border-box; }
         .tile-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
@@ -106,5 +114,5 @@ export function renderOverviewPage({ token, now, overview, sources, refreshMs = 
             padding: 0.05rem 0.4rem; margin-right: 0.3rem; font-weight: bold; }
     `;
 
-    return renderPage({ token, title: "Agentic OS", activePage: "os", content, extraStyles });
+    return renderPage({ token, title: "Agentic OS", activePage: "os", content, extraStyles, deviceWidth: true });
 }

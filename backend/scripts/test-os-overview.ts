@@ -244,8 +244,10 @@ async function main() {
         // ── the page ────────────────────────────────────────────────────────
         check("the page refreshes itself every 2 minutes while visible, with no CDN scripts",
             /visibilityState/.test(osPage.body) && /120000/.test(osPage.body) && !/<script[^>]+src=/.test(osPage.body));
-        check("the layout pins calc(100vh - 60px) and stacks to one column below 800px",
-            /calc\(100vh - 60px\)/.test(osPage.body) && /@media \(max-width: 800px\)/.test(osPage.body));
+        // A phone only reaches the 800px breakpoint if the page lays out at device width.
+        check("the layout pins calc(100vh - 60px), lays out at device width and stacks to one column below 800px",
+            /calc\(100vh - 60px\)/.test(osPage.body) && /@media \(max-width: 800px\)/.test(osPage.body)
+                && /<meta name="viewport" content="width=device-width/.test(osPage.body));
     } finally {
         if (renamed) await pool.query(`ALTER TABLE alpaca_snapshots_t139_renamed RENAME TO alpaca_snapshots`).catch(() => {});
         await pool.query(`DELETE FROM alpaca_snapshots`).catch(() => {});

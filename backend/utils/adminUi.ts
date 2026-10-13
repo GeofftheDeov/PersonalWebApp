@@ -4,13 +4,21 @@ export interface AdminPageOptions {
     activePage: 'admin' | 'os' | 'db' | 'frontend' | 'cloud-claw' | 'obsidian' | 'briefs' | 'alpaca' | 'paperclip' | 'profile' | 'person-sync';
     content: string;
     extraStyles?: string;
+    /**
+     * Lay the page out at the device's width (a viewport meta), so its phone
+     * breakpoints apply on a phone. Off by default: without it a phone renders
+     * the page at ~980px and zooms out, which is what the other admin pages
+     * (and the nav, until spec #135's W5 nav fix) are still built for.
+     */
+    deviceWidth?: boolean;
 }
 
-export const renderPage = ({ token, title, activePage, content, extraStyles = '' }: AdminPageOptions): string => {
+export const renderPage = ({ token, title, activePage, content, extraStyles = '', deviceWidth = false }: AdminPageOptions): string => {
     return `
         <html>
             <head>
                 <title>${title}</title>
+                ${deviceWidth ? '<meta name="viewport" content="width=device-width, initial-scale=1">' : ''}
                 <style>
                     * {
                         user-select: none !important;

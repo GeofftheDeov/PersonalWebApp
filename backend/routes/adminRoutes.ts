@@ -18,6 +18,7 @@ import { requireAdmin } from '../middleware/auth.js';
 import { runPersonSync, personSyncStatus, retryFailedOutboxRow } from '../jobs/personSync.js';
 import { resolveAccountId } from '../utils/accountRefs.js';
 import briefsRoutes from './briefsRoutes.js';
+import osRoutes from './osRoutes.js';
 
 const router = express.Router();
 
@@ -56,10 +57,16 @@ const verifyToken = async (req: any, res: express.Response, next: express.NextFu
     }
 };
 
-router.use(verifyToken, requireAdmin(true));
+/** The admin gate every route below sits behind; exported for test harnesses that mount a router factory. */
+export const adminGate = [verifyToken, requireAdmin(true)] as const;
+
+router.use(...adminGate);
 
 // Morning briefs from the vault (outputs/briefs/); inherits the admin gate above.
 router.use('/briefs', briefsRoutes);
+
+// The agentic OS home screen (spec #135); inherits the admin gate above.
+router.use('/os', osRoutes);
 
 // ── Person sync (#35, plan §2.7–2.8) ──────────────────────────────────────────
 //
@@ -198,6 +205,9 @@ router.get('/', (req, res) => {
         <div class="admin-panel">
             <h1>Admin Command</h1>
             <div class="nav-grid">
+                <a href="/admin/os?token=${token}" class="nav-btn">
+                    Agentic OS
+                </a>
                 <a href="/db?token=${token}" class="nav-btn">
                     Manage Database
                 </a>

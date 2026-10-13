@@ -61,6 +61,10 @@ const ASK_BOX = `
                     <div id="ask-reply" class="ask-reply" aria-live="polite" hidden>
                         <div class="ask-say"></div>
                         <div class="ask-display muted"></div>
+                        <div id="ask-confirm" class="ask-confirm" hidden>
+                            <button id="ask-confirm-yes" type="button">CONFIRM</button>
+                            <button id="ask-confirm-no" type="button">CANCEL</button>
+                        </div>
                     </div>
                 </form>`;
 
@@ -73,10 +77,24 @@ const ASK_BOX = `
  *                         being spoken; #150 swaps in voice choice and stop.
  *   OS.cancelSpeech()     stops speech in progress and drops a navigation still
  *                         waiting on its "Opening …" (a new ask does this too).
- *   OS.onReply(fn)        fn(reply) after each reply is shown, before it's spoken
- *                         (#148 renders confirmations, #153 starts polling).
- *   OS.busy()             true while there's unsent text, an ask in flight, speech
- *                         or a pending navigation; the reload holds off.
+ *   OS.onReply(fn)        fn(reply) after each reply is shown, before it's spoken.
+ *   OS.busy()             true while there's unsent text, an ask or confirm in
+ *                         flight, speech, a pending navigation or a pending
+ *                         proposal; the reload holds off.
+ *
+ * Run proposals (#148). A `confirm_run` reply shows Confirm and Cancel until
+ * it's answered, a new ask replaces it, or it expires (at its expiresAt; the
+ * server has the last word with a 410):
+ *
+ *   OS.proposal()         the pending confirmation { id, skill, label, expiresAt },
+ *                         or null. #151's voice "yes"/"no" checks this first.
+ *   OS.confirm()          POST /admin/os/ask/confirm for the pending proposal;
+ *                         shows and speaks the outcome. Resolves to the response
+ *                         body { run, created, say }, or null.
+ *   OS.dismiss()          Cancel: client-side only, the proposal just expires.
+ *                         Returns false when nothing was pending.
+ *   OS.onConfirm(fn)      fn(run, body) after a confirm queues (or finds) the run,
+ *                         before the outcome is spoken (#153 polls the run).
  *
  * The JSON API sits behind the HTML gate: an expired token comes back as a
  * redirect to login and a non-admin as an HTML 403, never a JSON error.
@@ -93,7 +111,11 @@ function askScript(token: string): string {
             var form = document.getElementById('ask-form'), input = document.getElementById('ask-text');
             var send = document.getElementById('ask-send'), out = document.getElementById('ask-reply');
             var sayEl = out.querySelector('.ask-say'), displayEl = out.querySelector('.ask-display');
-            var pending = false, hooks = [];
+            var pending = false, hooks = [], confirmHooks = [];
+            var confirmBox = document.getElementById('ask-confirm');
+            var yesBtn = document.getElementById('ask-confirm-yes'), noBtn = document.getElementById('ask-confirm-no');
+            // The run proposal waiting for Confirm or Cancel, and its expiry timer.
+            var proposal = null, proposalTimer = null;
             // The navigation waiting for its "Opening …" to finish; a new ask or a stop drops it.
             var leaving = null;
 
@@ -128,8 +150,26 @@ function askScript(token: string): string {
                 } catch (e) { finish(); }
             }
 
+            // Shows (c) or clears (null) the pending proposal's Confirm and Cancel.
+            function setProposal(c) {
+                if (proposalTimer) { clearTimeout(proposalTimer); proposalTimer = null; }
+                proposal = c || null;
+                confirmBox.hidden = !proposal;
+                yesBtn.disabled = noBtn.disabled = false;
+                if (!proposal) return;
+                var ms = Date.parse(proposal.expiresAt) - Date.now();
+                // A skewed client clock: fall back to the full two minutes; the server still says 410.
+                if (!(ms > 0 && ms <= 120000)) ms = 120000;
+                proposalTimer = setTimeout(function () {
+                    if (proposal !== c) return;
+                    setProposal(null);
+                    show(sayEl.textContent, 'Expired. Ask again to run it.', 'expired');
+                }, ms);
+            }
+
             function handle(reply) {
                 show(reply.say, reply.display, reply.kind);
+                setProposal(reply.kind === 'confirm_run' && reply.confirmation ? reply.confirmation : null);
                 hooks.forEach(function (fn) { try { fn(reply); } catch (e) { console.error(e); } });
                 if (reply.kind === 'navigate' && PAGES.indexOf(reply.url) >= 0) {
                     var trip = leaving = { url: reply.url };
@@ -143,36 +183,87 @@ function askScript(token: string): string {
 
             function fail(message) { show(message, '', 'error'); speak(message); }
 
-            function ask(text, source) {
-                // 500 characters as the server counts them (code points; never half an emoji).
-                text = Array.from(String(text || '').trim()).slice(0, 500).join('');
-                if (!text || pending) return Promise.resolve(null);
-                cancelSpeech();
-                pending = true; send.disabled = true;
-                show('…', '', 'pending');
-                return fetch(withToken('/admin/os/ask'), {
+            // POSTs JSON behind the admin gate. Resolves to { status, ok, body }, or to
+            // null once a failure (expired session, not an admin, no JSON, no server) is shown.
+            function postJson(path, payload) {
+                return fetch(withToken(path), {
                     method: 'POST', redirect: 'manual', credentials: 'same-origin',
                     headers: { 'content-type': 'application/json' },
-                    body: JSON.stringify({ text: text, source: source === 'voice' ? 'voice' : 'typed' }),
+                    body: JSON.stringify(payload),
                 }).then(function (res) {
                     if (res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400)) {
                         fail('Your session has expired. Sign in again.'); return null;
                     }
                     if (res.status === 403) { fail('This account is not an administrator.'); return null; }
                     var json = (res.headers.get('content-type') || '').indexOf('application/json') >= 0;
-                    if (!json) { fail('The ask failed (status ' + res.status + ').'); return null; }
-                    return res.json().then(function (body) {
-                        if (!res.ok) { fail(body && body.error ? 'Sorry: ' + body.error + '.' : 'The ask failed.'); return null; }
-                        handle(body);
-                        return body;
-                    });
+                    if (!json) { fail('The request failed (status ' + res.status + ').'); return null; }
+                    return res.json().then(function (body) { return { status: res.status, ok: res.ok, body: body }; });
                 }).catch(function () {
                     fail("Couldn't reach the server."); return null;
+                });
+            }
+
+            function ask(text, source) {
+                // 500 characters as the server counts them (code points; never half an emoji).
+                text = Array.from(String(text || '').trim()).slice(0, 500).join('');
+                if (!text || pending) return Promise.resolve(null);
+                cancelSpeech();
+                // A new ask abandons a pending proposal; it just expires on the server.
+                setProposal(null);
+                pending = true; send.disabled = true;
+                show('…', '', 'pending');
+                return postJson('/admin/os/ask', { text: text, source: source === 'voice' ? 'voice' : 'typed' }).then(function (r) {
+                    if (!r) return null;
+                    if (!r.ok) { fail(r.body && r.body.error ? 'Sorry: ' + r.body.error + '.' : 'The ask failed.'); return null; }
+                    handle(r.body);
+                    return r.body;
                 }).then(function (reply) {
                     pending = false; send.disabled = false;
                     return reply;
                 });
             }
+
+            // Confirm: queue the pending proposal's run.
+            function confirm() {
+                var p = proposal;
+                if (!p || pending) return Promise.resolve(null);
+                cancelSpeech();
+                pending = true; send.disabled = true; yesBtn.disabled = noBtn.disabled = true;
+                show('…', '', 'pending');
+                return postJson('/admin/os/ask/confirm', { id: p.id }).then(function (r) {
+                    if (!r) return null;
+                    // 404, 409 and 410 are final; anything else (a 500) leaves the proposal to try again.
+                    var final = r.ok || r.status === 404 || r.status === 409 || r.status === 410;
+                    if (final && proposal === p) setProposal(null);
+                    if (!r.ok) {
+                        fail(r.status === 410 ? 'That has expired. Ask again to run it.'
+                            : r.status === 409 ? 'That run was already confirmed.'
+                            : r.status === 404 ? 'Nothing to confirm.'
+                            : "Sorry, the run couldn't be queued. Try again.");
+                        return null;
+                    }
+                    show(r.body.say, '', 'confirmed');
+                    confirmHooks.forEach(function (fn) { try { fn(r.body.run, r.body); } catch (e) { console.error(e); } });
+                    speak(r.body.say);
+                    return r.body;
+                }).then(function (body) {
+                    pending = false; send.disabled = false;
+                    if (proposal === p) yesBtn.disabled = noBtn.disabled = false;
+                    return body;
+                });
+            }
+
+            // Cancel: client-side only; the proposal expires on the server.
+            function dismiss() {
+                if (!proposal || pending) return false;
+                setProposal(null);
+                show('Cancelled.', '', 'cancelled');
+                speak('Cancelled.');
+                return true;
+            }
+
+            yesBtn.addEventListener('click', function () { confirm(); });
+            noBtn.addEventListener('click', function () { dismiss(); });
 
             form.addEventListener('submit', function (e) {
                 e.preventDefault();
@@ -182,10 +273,15 @@ function askScript(token: string): string {
             window.OS = {
                 ask: ask, speak: speak, cancelSpeech: cancelSpeech,
                 onReply: function (fn) { hooks.push(fn); },
+                confirm: confirm, dismiss: dismiss,
+                proposal: function () {
+                    return proposal ? { id: proposal.id, skill: proposal.skill, label: proposal.label, expiresAt: proposal.expiresAt } : null;
+                },
+                onConfirm: function (fn) { confirmHooks.push(fn); },
                 busy: function () {
                     var speaking = false;
                     try { speaking = !!(window.speechSynthesis && window.speechSynthesis.speaking); } catch (e) { /* none */ }
-                    return pending || speaking || !!leaving || input.value.trim() !== '';
+                    return pending || speaking || !!leaving || !!proposal || input.value.trim() !== '';
                 },
             };
         })();`;
@@ -257,6 +353,13 @@ export function renderOverviewPage({ token, now, overview, sources, refreshMs = 
         .ask-say { color: #fff; font-size: 0.95rem; line-height: 1.4; overflow-wrap: anywhere; }
         .ask-display:empty { display: none; }
         .ask-display { margin-top: 0.3rem; }
+        .ask-reply[data-kind="confirm_run"] { border-left-color: #f97316; }
+        .ask-confirm { display: flex; gap: 0.5rem; margin-top: 0.6rem; flex-wrap: wrap; }
+        .ask-confirm[hidden] { display: none; }
+        .ask-confirm button { font: inherit; font-weight: bold; letter-spacing: 1px; padding: 0 1.1rem; min-height: 44px; }
+        #ask-confirm-yes { background: #0d9488; color: #000; border: 0; }
+        #ask-confirm-no { background: transparent; color: #ddd; border: 1px solid #555; }
+        .ask-confirm button:disabled { opacity: 0.5; }
         .tile { border: 1px solid #333; background: #1e1e1e; padding: 1rem 1.25rem; min-width: 0; box-sizing: border-box; }
         .tile-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
         .tile-title { color: #0d9488; font-size: 0.75rem; letter-spacing: 2px; font-weight: bold; text-transform: uppercase; text-decoration: none; }

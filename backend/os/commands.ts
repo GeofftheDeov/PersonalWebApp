@@ -1,4 +1,6 @@
-import type { Command } from "./ask.js";
+import { normaliseAsk, type Command } from "./ask.js";
+import { proposalSay } from "./proposals.js";
+import { SKILLS, type SkillId } from "../services/agentRuns.js";
 
 /**
  * Tier 1 of the ask router (spec #135 W3): the command table, kept as data.
@@ -50,7 +52,43 @@ const navigation: Command[] = ADMIN_PAGES.map((page) => ({
     handler: () => ({ kind: "navigate", say: `Opening ${page.label}.`, url: page.path }),
 }));
 
+/**
+ * "run <label>" for every runnable skill, the labels lowercased ("run my
+ * morning brief", "please run the weekly review"), plus the extra names in
+ * RUN_ALIASES. Each always proposes the run (tier 3); nothing is queued until
+ * the admin confirms.
+ */
+const RUN_ALIASES: Partial<Record<SkillId, string[]>> = { "morning-brief": ["brief"] };
+
+const runs: Command[] = SKILLS.map((skill) => {
+    const names = [normaliseAsk(skill.label), ...(RUN_ALIASES[skill.id] ?? [])];
+    return {
+        pattern: new RegExp(`^${POLITE}run (?:the |my )?(?:${names.map(escapeRe).join("|")})(?: now)?(?: please)?$`),
+        intent: `run.${skill.id}`,
+        handler: () => ({ kind: "confirm_run", say: proposalSay(skill.id), skill: skill.id }),
+    };
+});
+
+/**
+ * "Yes" or "no" that reaches the router: the page answers these itself while a
+ * proposal is pending (#151), so here there's nothing pending.
+ */
+const nothingPending: Command[] = [
+    {
+        pattern: /^(?:yes|yeah|yep|yup|confirm|confirmed|do it|go ahead|go for it)(?: please)?$/,
+        intent: "confirm.nothing_pending",
+        handler: () => ({ kind: "answer", say: "Nothing to confirm." }),
+    },
+    {
+        pattern: /^(?:no|nope|cancel|never mind|nevermind)$/,
+        intent: "cancel.nothing_pending",
+        handler: () => ({ kind: "answer", say: "Nothing to cancel." }),
+    },
+];
+
 /** The tier-1 command table, in match order. */
 export const COMMANDS: readonly Command[] = [
+    ...nothingPending,
+    ...runs,
     ...navigation,
 ];

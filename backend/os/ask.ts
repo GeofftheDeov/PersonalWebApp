@@ -46,8 +46,12 @@ export interface AskReply {
     confirmation?: AskConfirmation;
 }
 
-/** What a command's handler returns; the router sets the tier (and, from #148, the confirmation). */
-export type CommandReply = Omit<AskReply, "tier" | "confirmation">;
+/**
+ * What a command's handler returns; the router sets the tier. A `confirm_run`
+ * reply names the runnable `skill` to propose, and the router turns it into a
+ * proposal with its confirmation (os/proposals.ts).
+ */
+export type CommandReply = Omit<AskReply, "tier" | "confirmation"> & { skill?: string };
 
 /** Everything a command's handler gets. Handlers read the clock from here, never `new Date()`. */
 export interface AskContext {

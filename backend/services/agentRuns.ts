@@ -7,9 +7,40 @@ import { query } from '../db/index.js';
  * /api/runner (routes/runnerRoutes.ts). Nothing here executes a skill.
  */
 
-/** What may be enqueued. The runner keeps its own list of what it will run. */
+/**
+ * The ISO 8601 week of a calendar day, as `YYYY-Www`. The year is the week's
+ * own, which differs from the day's near New Year: 2027-01-01 is 2026-W53 and
+ * 2024-12-30 is 2025-W01.
+ */
+export function isoWeek(day: string): string {
+    const date = new Date(`${day}T00:00:00Z`);
+    // The round trip rejects timestamps and impossible days like 2026-02-30.
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== day) {
+        throw new RangeError(`not a YYYY-MM-DD day: ${day}`);
+    }
+    // The Thursday of this day's week (weeks run Monday to Sunday) is always in the week's year.
+    date.setUTCDate(date.getUTCDate() + 3 - ((date.getUTCDay() + 6) % 7));
+    const year = date.getUTCFullYear();
+    const week = Math.floor((date.getTime() - Date.UTC(year, 0, 1)) / (7 * 86_400_000)) + 1;
+    return `${year}-W${String(week).padStart(2, '0')}`;
+}
+
+/**
+ * What may be enqueued: the runnable skills. The runner keeps its own list of
+ * what it will run, and claims only those; a queued run of a skill no runner
+ * lists waits (and holds off a second press of that skill) until one does.
+ *
+ * `label` is the RUN button's text (upper-cased) and the "run <label>" voice
+ * phrase. `output` is where the vault skill writes, given the run's calendar
+ * day (YYYY-MM-DD); the wrapper declares the same path. All are on demand only:
+ * none carries a schedule.
+ */
 export const SKILLS = [
     { id: 'morning-brief', label: 'Morning brief', output: (d: string) => `outputs/briefs/${d}.md` },
+    // Refreshes the trading wiki from the Notion debriefs; one page, rewritten in place.
+    { id: 'ingest-debrief', label: 'Ingest debrief', output: (_d: string) => 'projects/alpaca-trading-bot/market-state.md' },
+    { id: 'lint-wiki', label: 'Lint wiki', output: (d: string) => `outputs/lint/${d}.md` },
+    { id: 'weekly-review', label: 'Weekly review', output: (d: string) => `outputs/reviews/${isoWeek(d)}.md` },
 ] as const;
 export type SkillId = typeof SKILLS[number]['id'];
 export const isSkill = (s: unknown): s is SkillId => SKILLS.some(k => k.id === s);

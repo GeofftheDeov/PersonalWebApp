@@ -52,16 +52,16 @@ async function listen(app: express.Express) {
 }
 
 /** A model that records what it was asked and answers from a queue (#154 fills `next`). */
-const fakeModel = {
-    calls: [] as ModelRequest[],
-    next: [] as ModelReply[],
-    async route(req: ModelRequest): Promise<ModelReply> {
-        this.calls.push(req);
-        const reply = this.next.shift();
+const fakeModel: OsModel & { calls: ModelRequest[]; next: ModelReply[] } = {
+    calls: [],
+    next: [],
+    async route(req) {
+        fakeModel.calls.push(req);
+        const reply = fakeModel.next.shift();
         if (!reply) throw new Error("fake model: no canned reply");
         return reply;
     },
-} satisfies OsModel & Record<string, unknown>;
+};
 
 /** The admin pages navigation may reach (an independent list: the nav's admin links). */
 const ALLOWED = new Set(["/admin/os", "/admin", "/db", "/admin/cloud-claw", "/admin/obsidian", "/admin/briefs",

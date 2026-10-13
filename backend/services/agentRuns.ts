@@ -1,6 +1,7 @@
 import { query } from '../db/index.js';
 import type { Queryable } from '../os/overview.js';
 import { TIME_ZONE } from '../os/format.js';
+import type { SkillSchedule } from '../os/schedule.js';
 
 /**
  * The skill-run queue (db/migrations/2026-09-26-agent-runs.sql).
@@ -34,18 +35,33 @@ export function isoWeek(day: string): string {
  *
  * `label` is the RUN button's text (upper-cased) and the "run <label>" voice
  * phrase. `output` is where the vault skill writes, given the run's calendar
- * day (YYYY-MM-DD); the wrapper declares the same path. All are on demand only:
- * none carries a schedule.
+ * day (YYYY-MM-DD); the wrapper declares the same path. `schedule`, when
+ * present, is when the PC's Task Scheduler also starts it (os/schedule.ts);
+ * the rest are on demand only. Read it through skillSchedule().
  */
+export interface Skill {
+    id: string;
+    label: string;
+    output: (day: string) => string;
+    schedule?: SkillSchedule;
+}
 export const SKILLS = [
-    { id: 'morning-brief', label: 'Morning brief', output: (d: string) => `outputs/briefs/${d}.md` },
+    {
+        id: 'morning-brief', label: 'Morning brief', output: (d: string) => `outputs/briefs/${d}.md`,
+        // Mirrors the vault's Task Scheduler registration (scripts/register_morning_brief.ps1:
+        // weekdays at 06:45 PC time, StartWhenAvailable), which the server can't see. Change both together.
+        schedule: { days: [1, 2, 3, 4, 5], at: '06:45', timeZone: TIME_ZONE },
+    },
     // Refreshes the trading wiki from the Notion debriefs; one page, rewritten in place.
     { id: 'ingest-debrief', label: 'Ingest debrief', output: (_d: string) => 'projects/alpaca-trading-bot/market-state.md' },
     { id: 'lint-wiki', label: 'Lint wiki', output: (d: string) => `outputs/lint/${d}.md` },
     { id: 'weekly-review', label: 'Weekly review', output: (d: string) => `outputs/reviews/${isoWeek(d)}.md` },
-] as const;
+] as const satisfies readonly Skill[];
 export type SkillId = typeof SKILLS[number]['id'];
 export const isSkill = (s: unknown): s is SkillId => SKILLS.some(k => k.id === s);
+/** A skill's Task Scheduler schedule, or null when it's on demand only. */
+export const skillSchedule = (id: SkillId): SkillSchedule | null =>
+    (SKILLS as readonly Skill[]).find(k => k.id === id)?.schedule ?? null;
 
 /** A run still `running` after this long is presumed dead (PC slept, runner killed). */
 const STALE_AFTER = '45 minutes';

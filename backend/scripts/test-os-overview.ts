@@ -403,7 +403,7 @@ async function main() {
         check("the tile shows the latest brief's date, its partial status and the unavailable sections, and links to /admin/briefs",
             tileTag(satPage.body, "brief")?.status === "ok" && satHtml.includes("Oct 9") && /partial/.test(satHtml)
                 && satHtml.includes("trading.account") && satHtml.includes("email")
-                && /href="\/admin\/briefs\?token=/.test(satHtml) && /Mon, Oct 12, 6:45 AM CT/.test(satHtml), satHtml);
+                && /href="\/admin\/briefs\?token=/.test(satHtml) && /Mon 6:45 AM/.test(satHtml) && /Mon, Oct 12 · runs weekdays at 6:45 AM CT/.test(satHtml), satHtml);
         const sun = await briefAt(new Date("2026-10-11T18:00:00Z"));
         check("Sunday with no brief is not flagged either", sun?.missingToday === false, sun);
 

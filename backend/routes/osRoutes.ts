@@ -45,13 +45,12 @@ const NOT_UNDERSTOOD: AskReply = {
 };
 const FAILED: AskReply = { tier: 1, kind: "unavailable", say: "Sorry, something went wrong answering that." };
 
-const MAX_ERROR = 500;
-
 export function createOsRouter({
     now = () => new Date(), tiles = TILES, db = pool, commands = COMMANDS, model = null,
 }: OsRouterDeps = {}) {
     const router = express.Router();
-    void model; // tier 2 (#154) calls it when no command matches
+    // Taken now so tests already pin "tier 1 never calls the model"; tier 2 (#154) uses it.
+    void model;
 
     const overview = (at: Date) => buildOverview(tiles, { now: at, db });
 
@@ -76,13 +75,15 @@ export function createOsRouter({
         }
     });
 
-    router.post("/ask", express.json({ limit: "16kb" }), async (req: any, res) => {
+    // The body is parsed by the app's express.json() (server.ts), as for every admin route.
+    router.post("/ask", async (req: any, res) => {
         const started = performance.now();
         const at = now();
         const { text: rawText, source } = req.body ?? {};
         if (typeof rawText !== "string" || !rawText.trim()) return res.status(400).json({ error: "text is required" });
         const text = rawText.trim();
-        if (text.length > MAX_ASK_CHARS) return res.status(400).json({ error: `text is over ${MAX_ASK_CHARS} characters` });
+        // Characters as Postgres counts them (code points), not UTF-16 units.
+        if ([...text].length > MAX_ASK_CHARS) return res.status(400).json({ error: `text is over ${MAX_ASK_CHARS} characters` });
         if (!ASK_SOURCES.includes(source)) return res.status(400).json({ error: "source must be 'voice' or 'typed'" });
         const accountId: string = req.adminUser.id;
 
@@ -104,7 +105,7 @@ export function createOsRouter({
                 reply = { ...r, tier: r.kind === "confirm_run" ? 3 : 1 };
             } catch (err) {
                 console.error(`[os] ask command ${intent} failed:`, (err as any)?.message ?? err);
-                error = describeError(err).slice(0, MAX_ERROR);
+                error = describeError(err);
                 reply = FAILED;
             }
         }

@@ -81,9 +81,9 @@ export interface Command {
  * punctuation mark a space, whitespace collapsed.
  */
 export function normaliseAsk(text: string): string {
-    return text.toLowerCase()
+    return text.normalize("NFC").toLowerCase()
         .replace(/['‘’`]/g, "")
-        .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+        .replace(/[^\p{L}\p{M}\p{N}\s]+/gu, " ")
         .replace(/\s+/g, " ")
         .trim();
 }

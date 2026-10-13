@@ -143,8 +143,10 @@ async function main() {
             ["  PLEASE, open ALPACA!!  ", "/admin/alpaca"],
             ["can you pull up the trading page", "/admin/alpaca"],
         ];
+        const navigatedTo: unknown[] = [];
         for (const [text, url] of navCases) {
             const r = await ask(text, text.startsWith("go") ? "voice" : "typed");
+            navigatedTo.push(r.json?.url);
             check(`"${text}" navigates to ${url} at tier 1, with something to say`,
                 r.status === 200 && r.json?.tier === 1 && r.json.kind === "navigate" && r.json.url === url
                     && typeof r.json.say === "string" && r.json.say.length > 0 && !("confirmation" in r.json),
@@ -179,7 +181,7 @@ async function main() {
         check("an unmatched ask is logged as not_understood with no intent", none?.kind === "not_understood"
             && none.intent === null, none);
         check("every navigate response's url is an allowlisted admin page",
-            rows.filter((r) => r.kind === "navigate").length === navCases.length);
+            navigatedTo.every((u) => typeof u === "string" && ALLOWED.has(u)), navigatedTo);
 
         // ── validation: not an ask, so no row ───────────────────────────────
         const before = (await asks()).length;
@@ -198,7 +200,12 @@ async function main() {
         }
         const exactly500 = await ask(`open alpaca ${"x".repeat(488)}`);
         check("500 characters is accepted", exactly500.status === 200, exactly500.status);
-        check("rejected asks wrote no row (the 500-character one did)", (await asks()).length === before + 1);
+        // 500 characters, but 988 UTF-16 units: counted as characters, as os_asks counts them.
+        const emoji500 = await ask(`open alpaca ${"\u{1F600}".repeat(488)}`);
+        check("500 characters of emoji is accepted too", emoji500.status === 200, emoji500);
+        const emoji501 = await ask(`open alpaca ${"\u{1F600}".repeat(489)}`);
+        check("501 characters of emoji is a 400", emoji501.status === 400, emoji501.status);
+        check("rejected asks wrote no row (the two 500-character ones did)", (await asks()).length === before + 2);
 
         // ── the command table: first match wins; a failing handler degrades ─
         const first = await ask("open alpaca", "typed", F.base);

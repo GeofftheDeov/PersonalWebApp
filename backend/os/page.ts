@@ -1,5 +1,6 @@
 import { renderPage } from "../utils/adminUi.js";
 import { centralTime, esc } from "./format.js";
+import { ADMIN_PAGES } from "./commands.js";
 import { describeError, type Overview, type Tile, type TileSource, type ViewContext } from "./overview.js";
 
 /** The page reloads itself this often while it's visible. */
@@ -70,10 +71,12 @@ const ASK_BOX = `
  *                         The mic (#149) calls OS.ask(transcript, 'voice').
  *   OS.speak(text, done?) speaks with speechSynthesis, cancelling anything still
  *                         being spoken; #150 swaps in voice choice and stop.
- *   OS.cancelSpeech()     stops speech in progress (a new ask does this too).
+ *   OS.cancelSpeech()     stops speech in progress and drops a navigation still
+ *                         waiting on its "Opening …" (a new ask does this too).
  *   OS.onReply(fn)        fn(reply) after each reply is shown, before it's spoken
  *                         (#148 renders confirmations, #153 starts polling).
- *   OS.busy()             true while typing, waiting or speaking; the reload holds off.
+ *   OS.busy()             true while there's unsent text, an ask in flight, speech
+ *                         or a pending navigation; the reload holds off.
  *
  * The JSON API sits behind the HTML gate: an expired token comes back as a
  * redirect to login and a non-admin as an HTML 403, never a JSON error.
@@ -81,15 +84,18 @@ const ASK_BOX = `
 function askScript(token: string): string {
     // JSON in a <script>: escape "<" so the token can't close the tag.
     const tokenJson = JSON.stringify(token).replace(/</g, "\\u003c");
+    const pagesJson = JSON.stringify(ADMIN_PAGES.map((p) => p.path)).replace(/</g, "\\u003c");
     return `
         (function () {
             var token = ${tokenJson};
+            // Navigation only ever goes to an allowlisted admin page (os/commands.ts ADMIN_PAGES).
+            var PAGES = ${pagesJson};
             var form = document.getElementById('ask-form'), input = document.getElementById('ask-text');
             var send = document.getElementById('ask-send'), out = document.getElementById('ask-reply');
             var sayEl = out.querySelector('.ask-say'), displayEl = out.querySelector('.ask-display');
             var pending = false, hooks = [];
-            // Navigation only ever goes to an admin page on this site.
-            var ADMIN_PATH = /^\\/(admin|db)(\\/[a-z0-9-]*)*$/;
+            // The navigation waiting for its "Opening …" to finish; a new ask or a stop drops it.
+            var leaving = null;
 
             function withToken(path) { return path + (path.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(token); }
 
@@ -100,17 +106,21 @@ function askScript(token: string): string {
                 displayEl.textContent = display || '';
             }
 
-            function cancelSpeech() {
+            function stopVoice() {
                 try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) { /* no speech */ }
             }
 
-            // done() runs when speech ends, fails, or after a few seconds, whichever comes first.
+            // Stop: silence, and drop a navigation still waiting on its "Opening …".
+            function cancelSpeech() { leaving = null; stopVoice(); }
+
+            // Speaks text, cutting off anything still being spoken. done() runs once:
+            // when speech ends or fails, after a few seconds, or at once without speech.
             function speak(text, done) {
                 var finished = false;
                 function finish() { if (!finished) { finished = true; if (done) done(); } }
                 try {
                     if (!window.speechSynthesis || !window.SpeechSynthesisUtterance || !text) return finish();
-                    cancelSpeech();
+                    stopVoice();
                     var u = new SpeechSynthesisUtterance(text);
                     u.onend = finish; u.onerror = finish;
                     window.speechSynthesis.speak(u);
@@ -121,8 +131,11 @@ function askScript(token: string): string {
             function handle(reply) {
                 show(reply.say, reply.display, reply.kind);
                 hooks.forEach(function (fn) { try { fn(reply); } catch (e) { console.error(e); } });
-                if (reply.kind === 'navigate' && typeof reply.url === 'string' && ADMIN_PATH.test(reply.url)) {
-                    speak(reply.say, function () { location.href = withToken(reply.url); });
+                if (reply.kind === 'navigate' && PAGES.indexOf(reply.url) >= 0) {
+                    var trip = leaving = { url: reply.url };
+                    speak(reply.say, function () {
+                        if (leaving === trip) location.href = withToken(trip.url);
+                    });
                 } else {
                     speak(reply.say);
                 }
@@ -131,7 +144,8 @@ function askScript(token: string): string {
             function fail(message) { show(message, '', 'error'); speak(message); }
 
             function ask(text, source) {
-                text = String(text || '').trim().slice(0, 500);
+                // 500 characters as the server counts them (code points; never half an emoji).
+                text = Array.from(String(text || '').trim()).slice(0, 500).join('');
                 if (!text || pending) return Promise.resolve(null);
                 cancelSpeech();
                 pending = true; send.disabled = true;
@@ -171,7 +185,7 @@ function askScript(token: string): string {
                 busy: function () {
                     var speaking = false;
                     try { speaking = !!(window.speechSynthesis && window.speechSynthesis.speaking); } catch (e) { /* none */ }
-                    return pending || speaking || document.activeElement === input || input.value.trim() !== '';
+                    return pending || speaking || !!leaving || input.value.trim() !== '';
                 },
             };
         })();`;

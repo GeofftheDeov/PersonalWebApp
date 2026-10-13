@@ -952,6 +952,7 @@ CREATE TRIGGER trg_admin_list_views_updated BEFORE UPDATE ON admin_list_views
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- ---------- agentic OS: skill-run queue (migrations/2026-09-26-agent-runs.sql) ----------
+-- Usage and trigger: migrations/2026-10-12-agent-run-usage.sql. NULL usage means unknown.
 
 CREATE TABLE agent_runs (
   id            bigserial PRIMARY KEY,
@@ -964,7 +965,13 @@ CREATE TABLE agent_runs (
   finished_at   timestamptz,
   runner        text,
   summary       text,
-  output_path   text
+  output_path   text,
+  cost_usd      numeric CHECK (cost_usd >= 0),
+  input_tokens  bigint  CHECK (input_tokens >= 0),
+  output_tokens bigint  CHECK (output_tokens >= 0),
+  duration_ms   integer CHECK (duration_ms >= 0),
+  trigger       text NOT NULL DEFAULT 'button'
+                  CHECK (trigger IN ('button','scheduled','manual'))
 );
 CREATE INDEX idx_agent_runs_queued ON agent_runs (requested_at) WHERE status = 'queued';
 CREATE INDEX idx_agent_runs_recent ON agent_runs (requested_at DESC);

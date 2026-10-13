@@ -50,6 +50,9 @@ router.post('/runs/:id/complete', async (req, res) => {
             ok: req.body?.ok === true,
             summary: typeof req.body?.summary === 'string' ? req.body.summary : undefined,
             outputPath: typeof req.body?.outputPath === 'string' ? req.body.outputPath : undefined,
+            // Optional { costUsd, inputTokens, outputTokens, durationMs } (#137). Bad
+            // fields are stored as null, never a 4xx: the vault's runner lags the server.
+            usage: req.body?.usage,
         });
         if (!run) return res.status(409).json({ error: 'run is not running (unknown, already completed, or expired)' });
         // The output travels through the vault; Obsidian Git may not have pushed

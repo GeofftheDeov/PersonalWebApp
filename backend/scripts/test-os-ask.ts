@@ -20,12 +20,20 @@
  *
  *   DATABASE_URL=postgresql://postgres@127.0.0.1:5546/t146_test npx tsx scripts/test-os-ask.ts
  *
- * Extending it: tier-1 answers (#147) and run proposals (#148) add cases to
- * the "tier 1" section and seed what they read. Tier-2 cases queue canned
- * replies (fakeModel.next, built with `decided()`) and assert on
- * fakeModel.calls: #155 (vault context) checks what the prompt holds, #156
- * (budget) seeds tier-2 spend, and #157 replaces the "until #157" cases. Don't
- * stop this script with `pkill -f`: it matches the shell's own command line
+ * Run proposals (#148) have their own "tier 3" sections: `confirm(id, who?,
+ * base?)` posts to /admin/os/ask/confirm, `askRow(id)` reads one os_asks row,
+ * `createdRuns()` the runs these personas queued, and `clock` is moved to
+ * test expiry. The duplicate check is global per skill, so the queue must
+ * start empty (checked as a precondition; the runs are deleted at the end).
+ * `harness(commands?, deps?)` takes any other router dep, e.g. a failing
+ * `enqueue` (the Q harness).
+ *
+ * Extending it: tier-1 answers (#147) add cases to the "tier 1" section and
+ * seed what they read. Tier-2 cases queue canned replies (fakeModel.next,
+ * built with `decided()`) and assert on fakeModel.calls: #155 (vault context)
+ * checks what the prompt holds, #156 (budget) seeds tier-2 spend, and #157
+ * replaces the "until #157" cases; its run_skill should produce a proposal
+ * the tier-3 checks accept. Don't stop this script with `pkill -f`: it matches the shell's own command line
  * and kills the shell.
  */
 import "./use-test-jwt-secret.js";
@@ -34,7 +42,7 @@ import type { AddressInfo } from "net";
 import crypto from "crypto";
 import pool from "../db/index.js";
 import adminRoutes, { adminGate } from "../routes/adminRoutes.js";
-import { createOsRouter } from "../routes/osRoutes.js";
+import { createOsRouter, type OsRouterDeps } from "../routes/osRoutes.js";
 import type { Command } from "../os/ask.js";
 import type { ModelDecision, ModelReply, ModelRequest, ModelUsage, OsModel } from "../os/model.js";
 import { signJwt } from "../utils/jwt.js";
@@ -89,11 +97,12 @@ async function main() {
     prod.use(express.json());
     prod.use("/admin", adminRoutes);
 
-    const harness = (commands?: readonly Command[], model: OsModel | null = fakeModel) => {
+    /** The router factory behind the real gate; `deps` overrides anything else (e.g. #148's `enqueue`). */
+    const harness = (commands?: readonly Command[], deps: OsRouterDeps = {}) => {
         const app = express();
         app.use(express.json());
         app.use("/admin/os", ...adminGate,
-            createOsRouter({ now: () => clock, model, ...(commands ? { commands } : {}) }));
+            createOsRouter({ now: () => clock, model: fakeModel, ...(commands ? { commands } : {}), ...deps }));
         return listen(app);
     };
 
@@ -104,9 +113,12 @@ async function main() {
         { pattern: /^explode$/, intent: "test.explode", handler: () => { throw new Error("handler exploded"); } },
     ];
 
-    const P = await listen(prod), H = await harness(), F = await harness(firstWins);
+    // A queue that's down: confirming must not use up the proposal.
+    const queueDown = harness(undefined, { enqueue: async () => { throw new Error("queue down"); } });
+
+    const P = await listen(prod), H = await harness(), F = await harness(firstWins), Q = await queueDown;
     // No ANTHROPIC_API_KEY: the router gets no model client.
-    const N = await harness(undefined, null);
+    const N = await harness(undefined, { model: null });
 
     const post = async (base: string, path: string, body: unknown, token?: string) => {
         const res = await fetch(`${base}${path}${token ? `?token=${encodeURIComponent(token)}` : ""}`, {
@@ -129,11 +141,13 @@ async function main() {
 
     try {
         // ── personas ────────────────────────────────────────────────────────
+        let personas = 0;
         const persona = async (role: "admin" | "user") => {
+            const n = ++personas;
             const { rows: [row] } = await pool.query(
                 `INSERT INTO accounts (id, name, email, password, app_role, app_role_source, is_verified)
                  VALUES (gen_random_uuid(), $1, $2, 'x', $3, 'manual', true) RETURNING id, email`,
-                [`t146 ${role} ${tag}`, `t146-${role}-${tag}@example.test`, role]);
+                [`t146 ${role} ${n} ${tag}`, `t146-${role}-${n}-${tag}@example.test`, role]);
             created.push(row.id);
             return { id: row.id as string, token: signJwt({ id: row.id, type: "User", email: row.email }) };
         };
@@ -174,7 +188,7 @@ async function main() {
 
         // ── no match: tier 2, and still nowhere off the allowlist ───────────
         const unmatched = ["what's the weather", "open google.com", "go to evil.example.com/admin",
-            "open /etc/passwd", "open", "navigate to https://example.com", "yes"];
+            "open /etc/passwd", "open", "navigate to https://example.com", "run", "run the weather", "run alpaca"];
         for (const text of unmatched) {
             fakeModel.next.push(decided({ action: "cannot_answer", say: "I can't help with that from here." }));
             const r = await ask(text);
@@ -251,6 +265,11 @@ async function main() {
         const noLog = await ask("open alpaca");
         check("with the ask log missing (migration not applied), navigation still answers",
             noLog.status === 200 && noLog.json?.kind === "navigate" && noLog.json.url === "/admin/alpaca", noLog);
+        // A proposal IS its row: with nowhere to keep it, there's nothing to confirm, so the ask fails.
+        const noProposal = await ask("run the brief");
+        check("with the ask log missing, a run ask fails as `unavailable` with no confirmation to tap",
+            noProposal.status === 200 && noProposal.json?.kind === "unavailable" && noProposal.json.tier === 1
+                && !("confirmation" in noProposal.json) && typeof noProposal.json.say === "string", noProposal.json);
         await pool.query(`ALTER TABLE os_asks_t146_renamed RENAME TO os_asks`);
         renamed = false;
 
@@ -278,6 +297,143 @@ async function main() {
                 && /id="ask-reply"[^>]*aria-live="polite"/.test(page.body), page.status);
         check("the page posts asks to /admin/os/ask and speaks replies with speechSynthesis, with no CDN scripts",
             /\/admin\/os\/ask/.test(page.body) && /speechSynthesis/.test(page.body) && !/<script[^>]+src=/.test(page.body));
+
+        // ── tier 3: run proposals (#148) ────────────────────────────────────
+        const callsBeforeTier3 = fakeModel.calls.length;
+        // The duplicate check is global per skill, so the queue must start empty.
+        const live = (await pool.query(`SELECT skill FROM agent_runs WHERE status IN ('queued','running')`)).rows;
+        check("(precondition) no run is queued or running", live.length === 0, live);
+        const createdRuns = async () => (await pool.query(
+            `SELECT * FROM agent_runs WHERE requested_by = ANY($1::text[]) ORDER BY id`, [created])).rows;
+        const askRow = async (id: unknown) => (await pool.query(`SELECT * FROM os_asks WHERE id = $1`, [id])).rows[0];
+        const confirm = (id: unknown, who: { token: string } = admin, base = H.base) =>
+            post(base, "/admin/os/ask/confirm", { id }, who.token);
+        const TTL_MS = 2 * 60_000;
+
+        const runCases: [string, string, string, string][] = [
+            ["run my morning brief", "morning-brief", "Morning brief", "Run the morning brief?"],
+            ["Run the brief", "morning-brief", "Morning brief", "Run the morning brief?"],
+            ["run morning brief", "morning-brief", "Morning brief", "Run the morning brief?"],
+            ["Run ingest debrief.", "ingest-debrief", "Ingest debrief", "Run the ingest debrief?"],
+            ["run the lint wiki", "lint-wiki", "Lint wiki", "Run the lint wiki?"],
+            ["please run the weekly review", "weekly-review", "Weekly review", "Run the weekly review?"],
+            ["Can you run my weekly review?", "weekly-review", "Weekly review", "Run the weekly review?"],
+        ];
+        clock = new Date("2026-10-12T15:00:00Z");
+        const proposals: Record<string, any> = {};
+        for (const [text, skill, label, say] of runCases) {
+            const r = await ask(text, "voice");
+            const c = r.json?.confirmation;
+            const row = c ? await askRow(c.id) : null;
+            proposals[text] = c;
+            check(`"${text}" proposes ${skill} at tier 3 and asks "${say}"`,
+                r.status === 200 && r.json?.tier === 3 && r.json.kind === "confirm_run" && r.json.say === say
+                    && !("url" in r.json) && Number.isInteger(c?.id) && c.skill === skill && c.label === label
+                    && new Date(c.expiresAt).getTime() === clock.getTime() + TTL_MS, r.json);
+            check(`... and its os_asks row is the proposal (${skill}, 2-minute expiry, unconfirmed)`,
+                row?.account_id === admin.id && row.tier === 3 && row.kind === "confirm_run" && row.skill === skill
+                    && row.intent === `run.${skill}` && row.source === "voice" && row.text === text
+                    && new Date(row.expires_at).getTime() === clock.getTime() + TTL_MS
+                    && row.confirmed_at === null && row.run_id === null && row.error === null, row);
+        }
+        check("proposing queues nothing", (await createdRuns()).length === 0, await createdRuns());
+
+        // ── tier 3: confirmation ────────────────────────────────────────────
+        // Confirm at 1:59 of the 2 minutes: still good.
+        clock = new Date(clock.getTime() + TTL_MS - 1000);
+        const brief = proposals["Run the brief"];
+        const queued = await confirm(brief.id);
+        const briefRow = await askRow(brief.id);
+        check("confirming queues the run and returns it (201, created)",
+            queued.status === 201 && queued.json?.created === true && queued.json.run?.skill === "morning-brief"
+                && queued.json.run.status === "queued" && typeof queued.json.say === "string", queued.json);
+        check("... records confirmed_at (the injected clock) and run_id on the proposal",
+            briefRow?.run_id === queued.json?.run?.id && new Date(briefRow.confirmed_at).getTime() === clock.getTime(), briefRow);
+        const again = await confirm(brief.id);
+        check("a second confirm of the same proposal gets 409", again.status === 409 && typeof again.json?.error === "string", again);
+        check("... and the run was queued exactly once",
+            (await createdRuns()).filter((r) => r.skill === "morning-brief").length === 1, await createdRuns());
+
+        // Same skill, still queued: the RUN button's duplicate check hands back the queued run.
+        const other = proposals["run my morning brief"];
+        const dup = await confirm(other.id);
+        check("confirming a skill that's already queued returns the existing run (200, not created)",
+            dup.status === 200 && dup.json?.created === false && dup.json.run?.id === queued.json?.run?.id, dup.json);
+        check("... and links that run to the proposal", (await askRow(other.id))?.run_id === queued.json?.run?.id);
+        check("... and still only one morning-brief run exists",
+            (await createdRuns()).filter((r) => r.skill === "morning-brief").length === 1);
+
+        // The RUN button and a confirm share the queue: a run queued by the button is the one a confirm returns.
+        const button = await post(P.base, "/admin/briefs/runs", { skill: "lint-wiki" }, admin.token);
+        const lint = await confirm(proposals["run the lint wiki"].id);
+        check("a run queued by the RUN button is the one a confirm returns",
+            button.status === 201 && lint.status === 200 && lint.json?.created === false
+                && lint.json.run?.id === button.json?.run?.id, { button: button.json, lint: lint.json });
+
+        // Another admin can't confirm (or see) this admin's proposal.
+        const otherAdmin = await persona("admin");
+        const ingest = proposals["Run ingest debrief."];
+        const foreign = await confirm(ingest.id, otherAdmin);
+        check("another admin's proposal id gets 404", foreign.status === 404 && typeof foreign.json?.error === "string", foreign);
+        check("... and doesn't use it up", (await askRow(ingest.id))?.confirmed_at === null);
+
+        // The queue is down: 500, and the proposal is still there to confirm.
+        const down = await confirm(ingest.id, admin, Q.base);
+        check("when the enqueue fails, confirm is a 500 and the proposal stays unconfirmed",
+            down.status === 500 && (await askRow(ingest.id))?.confirmed_at === null, { status: down.status, json: down.json });
+        const ingestOk = await confirm(ingest.id);
+        check("... so a retry confirms it", ingestOk.status === 201 && ingestOk.json?.run?.skill === "ingest-debrief", ingestOk.json);
+
+        // Exactly two minutes on: expired.
+        clock = new Date(new Date("2026-10-12T15:00:00Z").getTime() + TTL_MS);
+        const weekly = proposals["please run the weekly review"];
+        const expired = await confirm(weekly.id);
+        check("an expired proposal gets 410", expired.status === 410 && typeof expired.json?.error === "string", expired);
+        check("... queues nothing and stays unconfirmed",
+            !(await createdRuns()).some((r) => r.skill === "weekly-review") && (await askRow(weekly.id))?.confirmed_at === null);
+        check("a confirmed proposal confirmed again after expiry is still 409", (await confirm(brief.id)).status === 409);
+
+        // Ids that aren't this admin's proposals.
+        const navRow = (await asks()).find((r) => r.kind === "navigate");
+        for (const [name, id, status] of [
+            ["an unknown id", 999_999_999, 404], ["a navigation ask's id", navRow?.id, 404],
+            ["a missing id", undefined, 400], ["a non-numeric id", "abc", 400], ["a fractional id", 1.5, 400],
+            ["a negative id", -1, 400],
+        ] as const) {
+            const r = await confirm(id);
+            check(`confirming ${name} is a ${status} with a JSON error`, r.status === status && typeof r.json?.error === "string",
+                { status: r.status, body: r.body.slice(0, 120) });
+        }
+
+        // Gate on the confirm endpoint.
+        // Proposed through the shipped router, on the real clock, so it is still live when confirmed there.
+        const fresh = (await ask("run the lint wiki", "typed", P.base)).json?.confirmation;
+        for (const [label, base] of [["prod wiring", P.base], ["harness", H.base]] as const) {
+            const anon = await post(base, "/admin/os/ask/confirm", { id: fresh?.id });
+            const nonAdmin = await confirm(fresh?.id, user, base);
+            check(`${label}: confirm with no token is redirected to login`, anon.status === 302, anon.status);
+            check(`${label}: confirm as a non-admin gets the gate's 403`, nonAdmin.status === 403 && nonAdmin.json === null, nonAdmin.status);
+        }
+        check("... and neither used up the proposal", (await askRow(fresh?.id))?.confirmed_at === null);
+        const shippedConfirm = await confirm(fresh?.id, admin, P.base);
+        check("the shipped admin router serves POST /admin/os/ask/confirm",
+            shippedConfirm.status === 200 && shippedConfirm.json?.run?.skill === "lint-wiki", shippedConfirm.json);
+
+        // "Yes" with nothing pending in the page reaches the router.
+        for (const text of ["yes", "Yes!", "confirm", "do it"]) {
+            const r = await ask(text, "voice");
+            check(`"${text}" answers "Nothing to confirm" at tier 1`,
+                r.status === 200 && r.json?.tier === 1 && r.json.kind === "answer" && /^Nothing to confirm\.?$/.test(r.json.say)
+                    && !("confirmation" in r.json), r.json);
+        }
+
+        // The page: Confirm and Cancel for a pending proposal.
+        const withConfirm = await get(H.base, "/admin/os", admin.token);
+        check("the page has Confirm and Cancel buttons and posts confirmations to /admin/os/ask/confirm",
+            /<button[^>]*id="ask-confirm-yes"/.test(withConfirm.body) && /<button[^>]*id="ask-confirm-no"/.test(withConfirm.body)
+                && /\/admin\/os\/ask\/confirm/.test(withConfirm.body));
+
+        check("no tier-3 ask called the model", fakeModel.calls.length === callsBeforeTier3, fakeModel.calls.length);
 
         // ── tier 2: an answer ───────────────────────────────────────────────
         const lastRow = async () => (await asks()).at(-1);
@@ -385,9 +541,11 @@ async function main() {
         check("every canned model reply was used", fakeModel.next.length === 0, fakeModel.next.length);
     } finally {
         if (renamed) await pool.query(`ALTER TABLE os_asks_t146_renamed RENAME TO os_asks`).catch(() => {});
+        // Runs these admins queued (requested_by has no FK), then the accounts;
         // os_asks rows go with their account (ON DELETE CASCADE).
+        await pool.query(`DELETE FROM agent_runs WHERE requested_by = ANY($1::text[])`, [created]).catch(() => {});
         for (const id of created) await pool.query(`DELETE FROM accounts WHERE id = $1`, [id]);
-        P.server.close(); H.server.close(); F.server.close(); N.server.close();
+        P.server.close(); H.server.close(); F.server.close(); Q.server.close(); N.server.close();
     }
 
     console.log(`\n  ${pass} passed, ${fail} failed\n`);

@@ -40,12 +40,12 @@ const COULD_NOT_ANSWER: AskReply = { tier: 2, kind: "unavailable", say: "Sorry, 
 const NO_MODEL: AskReply = {
     tier: 2, kind: "unavailable",
     say: "Sorry, I can only do the built-in commands right now.",
-    display: "Open questions need the model, which isn't configured. Try “open alpaca” or “show the briefs”.",
+    display: "Open questions need the model, which isn't configured. Try “open alpaca”, “show the briefs” or “run the brief”.",
 };
 const NOT_YET: AskReply = {
     tier: 2, kind: "not_understood",
     say: "Sorry, I can't do that from an open question yet.",
-    display: "Try “open alpaca”, “show the briefs” or “go to the vault”.",
+    display: "Try “open alpaca”, “show the briefs” or “run the brief”.",
 };
 
 const pageList = ADMIN_PAGES.map((p) => `- ${p.id}: ${p.label}`).join("\n");

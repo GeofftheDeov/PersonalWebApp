@@ -12,6 +12,9 @@ import { COMMANDS, isAllowedPage } from "../os/commands.js";
 import type { OsModel } from "../os/model.js";
 import { modelFromEnv } from "../os/haiku.js";
 import { askModel, type Tier2Log } from "../os/tier2.js";
+import { logAsk } from "../os/askLog.js";
+import { confirmProposal, createProposal, type Enqueue } from "../os/proposals.js";
+import { enqueueRun, isSkill, type SkillId } from "../services/agentRuns.js";
 
 /**
  * /admin/os — the agentic OS home screen (spec #135, W2) and its ask router (W3).
@@ -19,10 +22,13 @@ import { askModel, type Tier2Log } from "../os/tier2.js";
  *   GET  /admin/os                the overview page (HTML), with the ask box
  *   GET  /admin/os/api/overview   the same overview as JSON: { generatedAt, tiles: { [id]: Tile } }
  *   POST /admin/os/ask            { text, source: 'voice' | 'typed' } -> AskReply (os/ask.ts)
+ *   POST /admin/os/ask/confirm    { id } -> { run, created, say }: queues a tier-3 proposal's run
+ *                                 (os/proposals.ts); 404 unknown or another account's, 409
+ *                                 already confirmed, 410 expired
  *
  * Mounted inside adminRoutes after verifyToken + requireAdmin, so every route
  * here is admin-only. Built from a factory so tests inject the clock, the tile
- * list, the command table and the model client.
+ * list, the command table, the model client and the run queue.
  */
 export interface OsRouterDeps {
     /** The clock every tile and command reads. */
@@ -39,12 +45,15 @@ export interface OsRouterDeps {
      * tier 2 is unavailable while tier 1 keeps working.
      */
     model?: OsModel | null | (() => OsModel | null);
+    /** Queues a confirmed proposal's run: the RUN button's enqueue, duplicate check included. */
+    enqueue?: Enqueue;
 }
 
 const FAILED: AskReply = { tier: 1, kind: "unavailable", say: "Sorry, something went wrong answering that." };
+const NOT_PROPOSED: AskReply = { tier: 1, kind: "unavailable", say: "Sorry, I couldn't set up that run. Nothing was queued." };
 
 export function createOsRouter({
-    now = () => new Date(), tiles = TILES, db = pool, commands = COMMANDS, model = modelFromEnv,
+    now = () => new Date(), tiles = TILES, db = pool, commands = COMMANDS, model = modelFromEnv, enqueue = enqueueRun,
 }: OsRouterDeps = {}) {
     const router = express.Router();
 
@@ -87,7 +96,10 @@ export function createOsRouter({
         let reply: AskReply;
         let intent: string | null = null;
         let error: string | null = null;
+        /** Tier 2's model call: model id, tokens and cost, logged with the ask. */
         let call: Tier2Log["call"] = null;
+        /** A skill to propose (tier 3): the reply becomes a proposal once its row is written. */
+        let propose: SkillId | null = null;
 
         const hit = matchCommand(commands, normalised);
         if (hit) {
@@ -99,7 +111,12 @@ export function createOsRouter({
                     overview: () => (built ??= overview(at)),
                 });
                 if (r.kind === "navigate" && !isAllowedPage(r.url)) throw new Error(`navigation outside the allowlist: ${String(r.url).slice(0, 80)}`);
-                reply = { ...r, tier: r.kind === "confirm_run" ? 3 : 1 };
+                if (r.kind === "confirm_run") {
+                    if (!isSkill(r.skill)) throw new Error(`proposal of a skill that isn't runnable: ${String(r.skill).slice(0, 80)}`);
+                    propose = r.skill;
+                }
+                const { skill: _skill, ...shown } = r;
+                reply = { ...shown, tier: 1 };
             } catch (err) {
                 console.error(`[os] ask command ${intent} failed:`, (err as any)?.message ?? err);
                 error = describeError(err);
@@ -116,47 +133,44 @@ export function createOsRouter({
             ({ intent, error, call } = t2.log);
         }
 
-        await logAsk(db, {
-            accountId, askedAt: at, text, source, tier: reply.tier, kind: reply.kind, intent, error, call,
-            latencyMs: Math.round(performance.now() - started),
-        });
+        const entry = { accountId, askedAt: at, text, source: source as AskSource, intent, error, ...call };
+        if (propose) {
+            // The row IS the proposal: without it there's nothing to confirm, so the ask fails.
+            try {
+                reply = await createProposal(db, { ...entry, latencyMs: Math.round(performance.now() - started) }, propose);
+                return res.set("Cache-Control", "no-store").json(reply);
+            } catch (err) {
+                console.error(`[os] could not record a proposal of ${propose}:`, (err as any)?.message ?? err);
+                entry.error = describeError(err);
+                reply = NOT_PROPOSED;
+            }
+        }
+        await logAsk(db, { ...entry, tier: reply.tier, kind: reply.kind, latencyMs: Math.round(performance.now() - started) });
         res.set("Cache-Control", "no-store").json(reply);
     });
 
+    router.post("/ask/confirm", async (req: any, res) => {
+        res.set("Cache-Control", "no-store");
+        const id = req.body?.id;
+        if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: "id must be a proposal id" });
+        try {
+            const outcome = await confirmProposal(db, { id, accountId: req.adminUser.id, now: now(), enqueue });
+            switch (outcome.status) {
+                case "confirmed":
+                    return res.status(outcome.created ? 201 : 200)
+                        .json({ run: outcome.run, created: outcome.created, say: outcome.say });
+                case "not_found": return res.status(404).json({ error: "no such proposal" });
+                case "already_confirmed": return res.status(409).json({ error: "that proposal was already confirmed" });
+                case "expired": return res.status(410).json({ error: "that proposal has expired" });
+                case "not_runnable": return res.status(410).json({ error: "that skill is no longer runnable" });
+            }
+        } catch (err: any) {
+            console.error(`[os] confirming proposal ${id} failed:`, err?.message ?? err);
+            res.status(500).json({ error: "could not queue the run" });
+        }
+    });
+
     return router;
-}
-
-interface AskLogRow {
-    accountId: string;
-    askedAt: Date;
-    text: string;
-    source: AskSource;
-    tier: AskReply["tier"];
-    kind: AskReply["kind"];
-    intent: string | null;
-    error: string | null;
-    /** Tier 2's model call: model id, input and output tokens, cost. */
-    call: Tier2Log["call"];
-    latencyMs: number;
-}
-
-/**
- * One os_asks row per ask. Best effort for tiers 1 and 2: a failed write
- * (say, the migration isn't applied yet) is logged and the admin still gets
- * the answer. A tier-3 proposal (#148) IS its row, so #148 must insert it
- * before replying and fail the ask if it can't.
- */
-async function logAsk(db: Queryable, row: AskLogRow): Promise<void> {
-    try {
-        await db.query(
-            `INSERT INTO os_asks (account_id, asked_at, text, source, tier, kind, intent, error, latency_ms,
-                                  model, input_tokens, output_tokens, cost_usd)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-            [row.accountId, row.askedAt, row.text, row.source, row.tier, row.kind, row.intent, row.error, row.latencyMs,
-                row.call?.model ?? null, row.call?.inputTokens ?? null, row.call?.outputTokens ?? null, row.call?.costUsd ?? null]);
-    } catch (err: any) {
-        console.error("[os] could not log an ask:", err?.message ?? err);
-    }
 }
 
 export default createOsRouter();

@@ -1,4 +1,6 @@
 import { query } from '../db/index.js';
+import type { Queryable } from '../os/overview.js';
+import { TIME_ZONE } from '../os/format.js';
 
 /**
  * The skill-run queue (db/migrations/2026-09-26-agent-runs.sql).
@@ -191,4 +193,105 @@ export async function completeRun(
         [id, result.ok ? 'succeeded' : 'failed', result.summary?.slice(0, 500) ?? null, result.outputPath?.slice(0, 300) ?? null,
             usage.costUsd, usage.inputTokens, usage.outputTokens, usage.durationMs]);
     return rows[0] ?? null;
+}
+
+/** One finished run that reported usage: a point on the usage tile's sparkline (#145). */
+export interface UsagePoint {
+    id: number;
+    finishedAt: string;            // ISO
+    skill: string;
+    trigger: RunTrigger;
+    ok: boolean;
+    costUsd: number;               // a point always has a cost; see summariseUsage
+    inputTokens: number | null;
+    outputTokens: number | null;
+    durationMs: number | null;
+}
+
+/** Usage over a window of Central calendar days. */
+export interface UsageSummary {
+    /** The window, [from, to), ISO: the Central midnight `days - 1` days before `now`'s day, to the Central midnight after it. */
+    from: string;
+    to: string;
+    days: number;
+    /** Finished runs (succeeded or failed) in the window. */
+    runs: number;
+    /** Runs that reported a cost; only these are in the totals and the points. */
+    runsWithUsage: number;
+    /** Runs that didn't: counted here, never added to the totals as zero. */
+    runsWithoutUsage: number;
+    /** Sums over the runs with usage; null when there are none (empty is not $0). */
+    costUsd: number | null;
+    inputTokens: number | null;
+    outputTokens: number | null;
+    /** The newest `maxPoints` runs with usage, oldest first. */
+    points: UsagePoint[];
+}
+
+/**
+ * Summarise run usage over the `days` Central calendar days ending with `now`'s
+ * day (today included). Runs count by when they finished; queued and running
+ * runs have no usage yet and aren't counted. This only reads: a dead `running`
+ * run counts once listRuns or claimNext expires it, on the day it was expired.
+ *
+ * A run "has usage" when it reported a cost, the headline number. A run
+ * without one (an older runner, an unreadable result, an expired run) is
+ * counted in runsWithoutUsage and left out of every total and point, so missing
+ * data never looks free. Token totals sum what the runs with usage reported; a
+ * run whose cost was dropped as malformed but whose tokens were kept counts as
+ * without usage, and its tokens aren't added.
+ *
+ * Reads through `db`, so an overview tile runs it on its own budgeted
+ * connection. Throws on a missing table or column (an unapplied migration);
+ * the caller decides what that means.
+ */
+export async function summariseUsage(
+    db: Queryable,
+    { now, days, maxPoints }: { now: Date; days: number; maxPoints: number },
+): Promise<UsageSummary> {
+    // Central midnights computed in Postgres, which knows the DST rules: the
+    // window's two ends can carry different UTC offsets.
+    const { rows: [t] } = await db.query(
+        `WITH w AS (
+           SELECT (date_trunc('day', $1::timestamptz AT TIME ZONE $3) - make_interval(days => $2 - 1)) AT TIME ZONE $3 AS from_ts,
+                  (date_trunc('day', $1::timestamptz AT TIME ZONE $3) + interval '1 day') AT TIME ZONE $3 AS to_ts
+         )
+         SELECT w.from_ts, w.to_ts,
+                count(r.id)::int                                           AS runs,
+                count(r.id) FILTER (WHERE r.cost_usd IS NOT NULL)::int     AS runs_with_usage,
+                sum(r.cost_usd)                                            AS cost_usd,
+                sum(r.input_tokens)  FILTER (WHERE r.cost_usd IS NOT NULL) AS input_tokens,
+                sum(r.output_tokens) FILTER (WHERE r.cost_usd IS NOT NULL) AS output_tokens
+           FROM w LEFT JOIN agent_runs r ON r.finished_at >= w.from_ts AND r.finished_at < w.to_ts
+          GROUP BY w.from_ts, w.to_ts`,
+        [now, days, TIME_ZONE]);
+    const { rows: points } = await db.query(
+        `SELECT id, finished_at, skill, trigger, status, cost_usd, input_tokens, output_tokens, duration_ms
+           FROM agent_runs
+          WHERE finished_at >= $1 AND finished_at < $2 AND cost_usd IS NOT NULL
+          ORDER BY finished_at DESC, id DESC
+          LIMIT $3`,
+        [t.from_ts, t.to_ts, maxPoints]);
+    return {
+        from: new Date(t.from_ts).toISOString(),
+        to: new Date(t.to_ts).toISOString(),
+        days,
+        runs: t.runs,
+        runsWithUsage: t.runs_with_usage,
+        runsWithoutUsage: t.runs - t.runs_with_usage,
+        costUsd: t.cost_usd,
+        inputTokens: t.input_tokens,
+        outputTokens: t.output_tokens,
+        points: points.reverse().map((r): UsagePoint => ({
+            id: r.id,
+            finishedAt: new Date(r.finished_at).toISOString(),
+            skill: r.skill,
+            trigger: r.trigger,
+            ok: r.status === 'succeeded',
+            costUsd: r.cost_usd,
+            inputTokens: r.input_tokens,
+            outputTokens: r.output_tokens,
+            durationMs: r.duration_ms,
+        })),
+    };
 }

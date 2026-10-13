@@ -60,6 +60,10 @@ function tileTag(html: string, id: string) {
     return { status: attr("status"), stale: attr("stale") };
 }
 
+/** One tile's whole <section> (tiles don't nest sections), so a text check can't match another tile. */
+const tileHtml = (html: string, id: string) =>
+    html.match(new RegExp(`<section[^>]*data-tile="${id}"[^>]*>[\\s\\S]*?</section>`))?.[0] ?? "";
+
 async function main() {
     // The clock the harness router reads; each case sets it.
     let clock = new Date();
@@ -105,7 +109,7 @@ async function main() {
 
     const tag = crypto.randomBytes(4).toString("hex");
     const created: string[] = [];
-    let renamed = false;
+    let renamed = false, usageRenamed = false;
 
     try {
         // ── personas ────────────────────────────────────────────────────────
@@ -137,6 +141,9 @@ async function main() {
             osPage.status === 200 && /active/.test(osPage.body.match(osLink)?.[1] ?? ""),
             `status ${osPage.status}`);
         check("/admin/os has an Alpaca tile", tileTag(osPage.body, "alpaca") !== null);
+        check("/admin/os has a Claude usage tile, ahead of the Alpaca tile",
+            tileTag(osPage.body, "usage") !== null
+                && osPage.body.indexOf(`data-tile="usage"`) < osPage.body.indexOf(`data-tile="alpaca"`));
 
         // ── gate ────────────────────────────────────────────────────────────
         for (const path of ["/admin/os", "/admin/os/api/overview"]) {
@@ -156,8 +163,8 @@ async function main() {
                 && /ALPACA_API_KEY/.test(e.reason) && !("equity" in e), e);
         const emptyHtml = await get(H.base, "/admin/os", adminToken);
         check("the empty tile's HTML says 'no snapshots yet' and shows no $0.00",
-            tileTag(emptyHtml.body, "alpaca")?.status === "unavailable" && /no snapshots yet/i.test(emptyHtml.body)
-                && !/\$0\.00/.test(emptyHtml.body), tileTag(emptyHtml.body, "alpaca"));
+            tileTag(emptyHtml.body, "alpaca")?.status === "unavailable" && /no snapshots yet/i.test(tileHtml(emptyHtml.body, "alpaca"))
+                && !/\$0\.00/.test(tileHtml(emptyHtml.body, "alpaca")), tileTag(emptyHtml.body, "alpaca"));
 
         // ── Alpaca tile: latest snapshot wins, P&L % ─────────────────────────
         const snap = (ts: Date, equity: number, lastEquity: number) => pool.query(
@@ -217,8 +224,125 @@ async function main() {
         const nan = (await get(H.base, "/admin/os/api/overview", adminToken)).json?.tiles?.alpaca;
         const nanHtml = await get(H.base, "/admin/os", adminToken);
         check("a snapshot with NaN equity makes the tile unavailable, not '$NaN'",
-            nan?.status === "unavailable" && /no usable equity/.test(nan.reason) && !/NaN/.test(nanHtml.body), nan);
+            nan?.status === "unavailable" && /no usable equity/.test(nan.reason) && !/NaN/.test(tileHtml(nanHtml.body, "alpaca")), nan);
         await pool.query(`DELETE FROM alpaca_snapshots WHERE ts = $1`, [nanTs]);
+
+        // ── Usage tile (#144) ───────────────────────────────────────────────
+        // Seeded in March 2026, far from the real clock, so nothing another case
+        // (or a live runner) writes lands in these windows. The clock sits on
+        // Tue Mar 10, two days after DST began: the window is 7 Central days
+        // including today, Wed Mar 4 00:00 CST (06:00Z) to Wed Mar 11 00:00 CDT
+        // (05:00Z), and its start and end carry different UTC offsets.
+        const usageRunner = `t144-${tag}`;
+        const run = (finishedAt: Date | null, usage: { cost?: number; input?: number; output?: number; ms?: number } = {},
+            opts: { skill?: string; trigger?: string; status?: string } = {}) => pool.query(
+            `INSERT INTO agent_runs (skill, status, requested_at, claimed_at, finished_at, runner,
+                                     cost_usd, input_tokens, output_tokens, duration_ms, trigger)
+             VALUES ($1, $2, $3, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            [opts.skill ?? "morning-brief", opts.status ?? (finishedAt ? "succeeded" : "running"),
+                new Date((finishedAt ?? clock).getTime() - 5 * MIN), finishedAt, usageRunner,
+                usage.cost ?? null, usage.input ?? null, usage.output ?? null, usage.ms ?? null, opts.trigger ?? "button"]);
+        const usageAt = async (at: Date) => {
+            clock = at;
+            return (await get(H.base, "/admin/os/api/overview", adminToken)).json?.tiles?.usage;
+        };
+        const usageNow = new Date("2026-03-10T18:00:00Z");
+        const windowStart = new Date("2026-03-04T06:00:00Z");
+        const windowEnd = new Date("2026-03-11T05:00:00Z");
+        const SEC = 1000;
+
+        // Inside: the first instant of the window, mid-window (a scheduled run), and today.
+        await run(windowStart, { cost: 0.5, input: 1_000, output: 100, ms: 60_000 });
+        await run(new Date("2026-03-07T12:00:00Z"), { cost: 1.25, input: 20_000, output: 3_000, ms: 90_000 },
+            { skill: "weekly-review", trigger: "scheduled" });
+        await run(new Date("2026-03-10T11:45:00Z"), { cost: 0.0025, input: 50, output: 5, ms: 1_000 },
+            { trigger: "manual" });
+        // Inside, but without usage: a failed run the runner sent nothing for.
+        await run(new Date("2026-03-09T12:00:00Z"), {}, { status: "failed" });
+        // Just outside: a second before the window opens, and the first instant of tomorrow.
+        await run(new Date(windowStart.getTime() - SEC), { cost: 9, input: 900_000, output: 90_000 });
+        await run(windowEnd, { cost: 7, input: 700_000, output: 70_000 });
+        // Still running: nothing finished, nothing to count.
+        await run(null, {}, { status: "running" });
+
+        const u = await usageAt(usageNow);
+        check("the usage tile is ok and covers 7 Central days including today, across the DST change",
+            u?.status === "ok" && u.from === windowStart.toISOString() && u.to === windowEnd.toISOString(), u);
+        check("the totals cover only the window: runs just outside it are excluded",
+            u?.costUsd === 1.7525 && u.inputTokens === 21_050 && u.outputTokens === 3_105, u);
+        check("runs without usage are counted separately, not added as zero",
+            u?.runs === 4 && u.runsWithUsage === 3 && u.runsWithoutUsage === 1, u);
+        check("the per-run points are the runs with usage, oldest first, with skill, trigger and outcome",
+            u?.points?.length === 3 && u.points.every((p: any) => p.costUsd !== null)
+                && u.points[0].finishedAt === windowStart.toISOString() && u.points[1].skill === "weekly-review"
+                && u.points[1].trigger === "scheduled" && u.points[1].inputTokens === 20_000
+                && u.points[2].trigger === "manual" && u.points[2].ok === true, u?.points);
+
+        const usagePage = await get(H.base, "/admin/os", adminToken);
+        const ut = tileTag(usagePage.body, "usage"), usageHtml = tileHtml(usagePage.body, "usage");
+        check("the ok usage tile is labelled API-equivalent, counts the run without usage, and links to /admin/briefs",
+            ut?.status === "ok" && usageHtml.includes("API-equivalent") && usageHtml.includes("$1.75")
+                && /1 run without usage/.test(usageHtml) && /href="\/admin\/briefs\?token=/.test(usageHtml), ut);
+
+        // The newest 30 runs with usage become points; the totals still cover them all.
+        const burst = Array.from({ length: 31 }, (_, i) => new Date(new Date("2026-03-08T12:00:00Z").getTime() + i * MIN));
+        for (const at of burst) await run(at, { cost: 0.01, input: 10, output: 1 });
+        const many = await usageAt(usageNow);
+        check("at most 30 points, the newest; the totals still count every run",
+            many?.points?.length === 30 && many.runsWithUsage === 34
+                && many.points.every((p: any, i: number) => i === 0 || p.finishedAt >= many.points[i - 1].finishedAt)
+                && many.points.at(-1).trigger === "manual"
+                && !many.points.some((p: any) => p.finishedAt === burst[0].toISOString()),
+            { n: many?.points?.length, runsWithUsage: many?.runsWithUsage });
+        await pool.query(`DELETE FROM agent_runs WHERE runner = $1 AND finished_at = ANY($2)`, [usageRunner, burst]);
+
+        // An empty window: a week with no runs at all.
+        const emptyWeek = await usageAt(new Date("2026-02-10T18:00:00Z"));
+        check("an empty window is reported as empty (no cost, no tokens), not $0",
+            emptyWeek?.status === "ok" && emptyWeek.runs === 0 && emptyWeek.runsWithUsage === 0
+                && emptyWeek.costUsd === null && emptyWeek.inputTokens === null && emptyWeek.points?.length === 0, emptyWeek);
+        const emptyWeekPage = await get(H.base, "/admin/os", adminToken);
+        const emptyWeekHtml = tileHtml(emptyWeekPage.body, "usage");
+        check("the empty tile says 'no runs with usage in the last 7 days', not $0.00",
+            tileTag(emptyWeekPage.body, "usage")?.status === "ok"
+                && emptyWeekHtml.includes("no runs with usage in the last 7 days") && !/\$0\.00/.test(emptyWeekHtml));
+
+        // A window whose only runs reported nothing is still empty of usage, not $0.
+        await run(new Date("2026-02-20T15:00:00Z"), {}, { status: "failed" });
+        await run(new Date("2026-02-21T15:00:00Z"));
+        const noUsage = await usageAt(new Date("2026-02-21T18:00:00Z"));
+        check("runs without any usage are counted, and the totals stay empty rather than zero",
+            noUsage?.runs === 2 && noUsage.runsWithoutUsage === 2 && noUsage.runsWithUsage === 0
+                && noUsage.costUsd === null && noUsage.outputTokens === null, noUsage);
+        const noUsageHtml = tileHtml((await get(H.base, "/admin/os", adminToken)).body, "usage");
+        check("...and the tile says so, with the count of runs without usage",
+            noUsageHtml.includes("no runs with usage in the last 7 days") && /2 runs without usage/.test(noUsageHtml)
+                && !/\$0\.00/.test(noUsageHtml));
+
+        // numeric accepts NaN, and CHECK (cost_usd >= 0) lets it through: never "$NaN".
+        await pool.query(`INSERT INTO agent_runs (skill, status, finished_at, runner, cost_usd)
+                          VALUES ('morning-brief', 'succeeded', $1, $2, 'NaN')`, [new Date("2026-02-21T16:00:00Z"), usageRunner]);
+        const nanUsage = await usageAt(new Date("2026-02-21T18:00:00Z"));
+        const nanUsageHtml = tileHtml((await get(H.base, "/admin/os", adminToken)).body, "usage");
+        check("a NaN cost makes the usage tile unavailable, not '$NaN'",
+            nanUsage?.status === "unavailable" && /isn't a number/.test(nanUsage.reason) && !/NaN/.test(nanUsageHtml), nanUsage);
+        await pool.query(`DELETE FROM agent_runs WHERE runner = $1 AND cost_usd = 'NaN'`, [usageRunner]);
+
+        // The usage migration not applied: the tile names it; the other tiles carry on.
+        await pool.query(`ALTER TABLE agent_runs RENAME COLUMN cost_usd TO cost_usd_t144_renamed`);
+        usageRenamed = true;
+        clock = usageNow;
+        const unmigrated = await get(H.base, "/admin/os/api/overview", adminToken);
+        const um = unmigrated.json?.tiles ?? {};
+        check("a renamed usage column makes the usage tile unavailable and names the migration; the JSON is still 200",
+            unmigrated.status === 200 && um.usage?.status === "unavailable" && /cost_usd/.test(um.usage.reason)
+                && um.usage.reason.includes("2026-10-12-agent-run-usage.sql") && um.alpaca?.status === "ok", um);
+        const unmigratedHtml = await get(H.base, "/admin/os", adminToken);
+        check("the unmigrated usage tile is unavailable in the HTML, naming the migration",
+            unmigratedHtml.status === 200 && tileTag(unmigratedHtml.body, "usage")?.status === "unavailable"
+                && tileHtml(unmigratedHtml.body, "usage").includes("2026-10-12-agent-run-usage.sql"));
+        await pool.query(`ALTER TABLE agent_runs RENAME COLUMN cost_usd_t144_renamed TO cost_usd`);
+        usageRenamed = false;
 
         // ── degradation ─────────────────────────────────────────────────────
         clock = new Date(latest.getTime() + 5 * MIN);
@@ -229,7 +353,8 @@ async function main() {
         const bt = broken.json?.tiles ?? {};
         check("a renamed table makes only the Alpaca tile unavailable, naming the table, and the JSON is still 200",
             broken.status === 200 && bt.alpaca?.status === "unavailable" && /alpaca_snapshots/.test(bt.alpaca.reason)
-                && bt.canary?.status === "ok" && bt.canary.accounts >= 2, { status: broken.status, bt });
+                && bt.canary?.status === "ok" && bt.canary.accounts >= 2 && bt.usage?.status === "ok",
+            { status: broken.status, bt });
         check("a tile that throws is unavailable with the reason", bt.thrower?.status === "unavailable"
             && /source exploded/.test(bt.thrower.reason), bt.thrower);
         const brokenHtml = await get(D.base, "/admin/os", adminToken);
@@ -266,7 +391,9 @@ async function main() {
                 && /<meta name="viewport" content="width=device-width/.test(osPage.body));
     } finally {
         if (renamed) await pool.query(`ALTER TABLE alpaca_snapshots_t139_renamed RENAME TO alpaca_snapshots`).catch(() => {});
+        if (usageRenamed) await pool.query(`ALTER TABLE agent_runs RENAME COLUMN cost_usd_t144_renamed TO cost_usd`).catch(() => {});
         await pool.query(`DELETE FROM alpaca_snapshots`).catch(() => {});
+        await pool.query(`DELETE FROM agent_runs WHERE runner = $1`, [`t144-${tag}`]).catch(() => {});
         for (const id of created) await pool.query(`DELETE FROM accounts WHERE id = $1`, [id]);
         P.server.close(); H.server.close(); D.server.close();
     }

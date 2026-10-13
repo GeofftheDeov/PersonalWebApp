@@ -1,4 +1,4 @@
-# S3 uploads (campaign banners, #81)
+# S3 uploads (campaign banners #81, Letters attachments #104)
 
 The backend reaches S3 only through `integrations().uploads` (`backend/utils/integrations.ts`).
 It needs a private bucket per environment, a CORS rule so the browser can `PUT` to it, and
@@ -58,13 +58,17 @@ aws iam put-role-policy --role-name ecsTaskRole --policy-name pwa-uploads --poli
     "Action": ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"],
     "Resource": [
       "arn:aws:s3:::pwa-uploads-dev/campaign-banners/*",
-      "arn:aws:s3:::pwa-uploads-prod/campaign-banners/*"
+      "arn:aws:s3:::pwa-uploads-prod/campaign-banners/*",
+      "arn:aws:s3:::pwa-uploads-dev/message-attachments/*",
+      "arn:aws:s3:::pwa-uploads-prod/message-attachments/*"
     ]
   }]
 }'
 ```
 
-Add the matching prefix to `Resource` when Letters attachments or profile pictures start using it.
+`message-attachments/*` is for Letters attachments (#104). If the policy was already put
+without it, run the command again: `put-role-policy` replaces the whole document. Add the
+matching prefix to `Resource` when profile pictures start using the bucket.
 
 The app signs URLs with the task role's temporary credentials, so a presigned URL stops
 working when those credentials rotate, even if its own expiry is later. Uploads get 5 minutes
@@ -86,6 +90,11 @@ URL on each page load, so browsers re-download banners. With it:
 Banner keys contain a random UUID and never change, so they cache forever. Anyone holding a
 CloudFront URL can view that banner, but the URL is only handed to people who can see the campaign.
 
+Attachments never use CloudFront. Their reads are always presigned GETs (`readUrl` with
+`private: true`) that expire after an hour, so a link copied out of a thread stops working. If a
+distribution is ever scoped to the bucket, keep it off `message-attachments/*` (or don't care: the
+app never hands out a CloudFront URL for one).
+
 ## 5. Environment variables
 
 Both task definitions already list these as empty, so uploads stay off until you fill them in:
@@ -104,6 +113,12 @@ As a campaign owner on dev, click **Add banner** on the campaign page, pick an
 image, save. The banner should show on the campaign page, the Game Night cards and the
 dashboard. In the bucket: `campaign-banners/<campaignId>/<uuid>.webp`. Replacing the banner
 deletes the old object; removing it deletes the current one.
+
+For attachments, as a campaign member on dev, use the paperclip in Table Talk to attach a map image
+and a PDF, then send. The image should preview in the log for everyone in the party (live, without
+reloading), and the PDF should show as a link that opens under its own name. In the bucket:
+`message-attachments/campaign/<campaignId>/<uuid>.<ext>` (DMs: `message-attachments/dm/<a>/<b>/…`).
+The same CORS rule covers both.
 
 A browser console error mentioning CORS on the `PUT` means step 2 is missing or the origin
 isn't listed. A 403 `SignatureDoesNotMatch` usually means the request's Content-Type or size

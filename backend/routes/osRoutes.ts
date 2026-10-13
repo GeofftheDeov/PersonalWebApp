@@ -10,6 +10,8 @@ import {
 } from "../os/ask.js";
 import { COMMANDS, isAllowedPage } from "../os/commands.js";
 import type { OsModel } from "../os/model.js";
+import { modelFromEnv } from "../os/haiku.js";
+import { askModel, type Tier2Log } from "../os/tier2.js";
 
 /**
  * /admin/os — the agentic OS home screen (spec #135, W2) and its ask router (W3).
@@ -31,26 +33,20 @@ export interface OsRouterDeps {
     /** Tier 1's command table, in match order. */
     commands?: readonly Command[];
     /**
-     * Tier 2's model client (#154). null (the default until #154 wires the
-     * Haiku client) means no tier 2: an ask no command matches is
-     * `not_understood`. Tier 1 never calls it.
+     * Tier 2's model client (os/tier2.ts), called only when no command
+     * matches. A function is resolved on each ask: the default, modelFromEnv,
+     * gives the Haiku client, or null without ANTHROPIC_API_KEY. null means
+     * tier 2 is unavailable while tier 1 keeps working.
      */
-    model?: OsModel | null;
+    model?: OsModel | null | (() => OsModel | null);
 }
 
-const NOT_UNDERSTOOD: AskReply = {
-    tier: 1, kind: "not_understood",
-    say: "Sorry, I didn't understand that.",
-    display: "Try “open alpaca”, “show the briefs” or “go to the vault”.",
-};
 const FAILED: AskReply = { tier: 1, kind: "unavailable", say: "Sorry, something went wrong answering that." };
 
 export function createOsRouter({
-    now = () => new Date(), tiles = TILES, db = pool, commands = COMMANDS, model = null,
+    now = () => new Date(), tiles = TILES, db = pool, commands = COMMANDS, model = modelFromEnv,
 }: OsRouterDeps = {}) {
     const router = express.Router();
-    // Taken now so tests already pin "tier 1 never calls the model"; tier 2 (#154) uses it.
-    void model;
 
     const overview = (at: Date) => buildOverview(tiles, { now: at, db });
 
@@ -88,9 +84,10 @@ export function createOsRouter({
         const accountId: string = req.adminUser.id;
 
         const normalised = normaliseAsk(text);
-        let reply: AskReply = NOT_UNDERSTOOD;
+        let reply: AskReply;
         let intent: string | null = null;
         let error: string | null = null;
+        let call: Tier2Log["call"] = null;
 
         const hit = matchCommand(commands, normalised);
         if (hit) {
@@ -108,11 +105,19 @@ export function createOsRouter({
                 error = describeError(err);
                 reply = FAILED;
             }
+        } else {
+            // No match: tier 2 (#154), the model. askModel never throws.
+            let built: Promise<Overview> | null = null;
+            const t2 = await askModel({
+                model: typeof model === "function" ? model() : model,
+                now: at, text, overview: () => (built ??= overview(at)),
+            });
+            reply = t2.reply;
+            ({ intent, error, call } = t2.log);
         }
-        // No match: tier 2 (#154) goes here, through `model`. Until then, not understood.
 
         await logAsk(db, {
-            accountId, askedAt: at, text, source, tier: reply.tier, kind: reply.kind, intent, error,
+            accountId, askedAt: at, text, source, tier: reply.tier, kind: reply.kind, intent, error, call,
             latencyMs: Math.round(performance.now() - started),
         });
         res.set("Cache-Control", "no-store").json(reply);
@@ -130,6 +135,8 @@ interface AskLogRow {
     kind: AskReply["kind"];
     intent: string | null;
     error: string | null;
+    /** Tier 2's model call: model id, input and output tokens, cost. */
+    call: Tier2Log["call"];
     latencyMs: number;
 }
 
@@ -142,9 +149,11 @@ interface AskLogRow {
 async function logAsk(db: Queryable, row: AskLogRow): Promise<void> {
     try {
         await db.query(
-            `INSERT INTO os_asks (account_id, asked_at, text, source, tier, kind, intent, error, latency_ms)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-            [row.accountId, row.askedAt, row.text, row.source, row.tier, row.kind, row.intent, row.error, row.latencyMs]);
+            `INSERT INTO os_asks (account_id, asked_at, text, source, tier, kind, intent, error, latency_ms,
+                                  model, input_tokens, output_tokens, cost_usd)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+            [row.accountId, row.askedAt, row.text, row.source, row.tier, row.kind, row.intent, row.error, row.latencyMs,
+                row.call?.model ?? null, row.call?.inputTokens ?? null, row.call?.outputTokens ?? null, row.call?.costUsd ?? null]);
     } catch (err: any) {
         console.error("[os] could not log an ask:", err?.message ?? err);
     }

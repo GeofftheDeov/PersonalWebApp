@@ -8,17 +8,23 @@
  *     does, so the gate and the mount are checked as shipped.
  *   - "harness": the router factory, createOsRouter({ now, model, commands? }),
  *     behind the real admin gate (adminGate), with an injected clock and a
- *     fake model that records every call. Tier 1 never calls the model, so
- *     the fake must end the run uncalled.
+ *     fake model that records every call and answers from a queue of canned
+ *     replies (or errors). Tier 1 never calls the model; tier 2 (#154) calls
+ *     it only when no command matches.
  *
  * Everything is asserted through HTTP responses and os_asks rows. Admin JWTs
- * are minted directly.
+ * are minted directly. ANTHROPIC_API_KEY is removed from the environment
+ * first, so the prod wiring's tier 2 takes the "no key" path and nothing here
+ * ever calls the real API. The real Haiku client is tested on its own against
+ * a local fake API: scripts/test-os-haiku.ts.
  *
  *   DATABASE_URL=postgresql://postgres@127.0.0.1:5546/t146_test npx tsx scripts/test-os-ask.ts
  *
  * Extending it: tier-1 answers (#147) and run proposals (#148) add cases to
- * the "tier 1" section and seed what they read; tier 2 (#154) gives the fake
- * model canned replies (fakeModel.next) and asserts on fakeModel.calls. Don't
+ * the "tier 1" section and seed what they read. Tier-2 cases queue canned
+ * replies (fakeModel.next, built with `decided()`) and assert on
+ * fakeModel.calls: #155 (vault context) checks what the prompt holds, #156
+ * (budget) seeds tier-2 spend, and #157 replaces the "until #157" cases. Don't
  * stop this script with `pkill -f`: it matches the shell's own command line
  * and kills the shell.
  */
@@ -30,8 +36,11 @@ import pool from "../db/index.js";
 import adminRoutes, { adminGate } from "../routes/adminRoutes.js";
 import { createOsRouter } from "../routes/osRoutes.js";
 import type { Command } from "../os/ask.js";
-import type { ModelReply, ModelRequest, OsModel } from "../os/model.js";
+import type { ModelDecision, ModelReply, ModelRequest, ModelUsage, OsModel } from "../os/model.js";
 import { signJwt } from "../utils/jwt.js";
+
+// Never a real model call: the prod wiring reads the key per ask, so without it tier 2 is unavailable.
+delete process.env.ANTHROPIC_API_KEY;
 
 if (!/(\/\/|@)(127\.0\.0\.1|localhost)[:/]/.test(process.env.DATABASE_URL ?? "")) {
     console.error("\n  Refusing to run: DATABASE_URL must be a local throwaway database.\n");
@@ -51,17 +60,23 @@ async function listen(app: express.Express) {
     return { server, base: `http://127.0.0.1:${(server.address() as AddressInfo).port}` };
 }
 
-/** A model that records what it was asked and answers from a queue (#154 fills `next`). */
-const fakeModel: OsModel & { calls: ModelRequest[]; next: ModelReply[] } = {
+/** A model that records what it was asked and answers from a queue: a reply, or an error to throw. */
+const fakeModel: OsModel & { calls: ModelRequest[]; next: (ModelReply | Error)[] } = {
     calls: [],
     next: [],
     async route(req) {
         fakeModel.calls.push(req);
         const reply = fakeModel.next.shift();
         if (!reply) throw new Error("fake model: no canned reply");
+        if (reply instanceof Error) throw reply;
         return reply;
     },
 };
+
+const USAGE: ModelUsage = { inputTokens: 1200, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 80 };
+/** A canned model reply: a decision (null: it didn't parse), a stop reason and usage. */
+const decided = (decision: ModelDecision | null, stopReason: string | null = "end_turn",
+    usage: ModelUsage | null = USAGE): ModelReply => ({ model: "claude-haiku-5-5", decision, stopReason, usage });
 
 /** The admin pages navigation may reach (an independent list: the nav's admin links). */
 const ALLOWED = new Set(["/admin/os", "/admin", "/db", "/admin/cloud-claw", "/admin/obsidian", "/admin/briefs",
@@ -74,11 +89,11 @@ async function main() {
     prod.use(express.json());
     prod.use("/admin", adminRoutes);
 
-    const harness = (commands?: readonly Command[]) => {
+    const harness = (commands?: readonly Command[], model: OsModel | null = fakeModel) => {
         const app = express();
         app.use(express.json());
         app.use("/admin/os", ...adminGate,
-            createOsRouter({ now: () => clock, model: fakeModel, ...(commands ? { commands } : {}) }));
+            createOsRouter({ now: () => clock, model, ...(commands ? { commands } : {}) }));
         return listen(app);
     };
 
@@ -90,6 +105,8 @@ async function main() {
     ];
 
     const P = await listen(prod), H = await harness(), F = await harness(firstWins);
+    // No ANTHROPIC_API_KEY: the router gets no model client.
+    const N = await harness(undefined, null);
 
     const post = async (base: string, path: string, body: unknown, token?: string) => {
         const res = await fetch(`${base}${path}${token ? `?token=${encodeURIComponent(token)}` : ""}`, {
@@ -153,15 +170,21 @@ async function main() {
                 { status: r.status, json: r.json });
         }
 
-        // ── tier 1: allowlist and no match ──────────────────────────────────
+        check("no tier-1 match called the model", fakeModel.calls.length === 0, fakeModel.calls.length);
+
+        // ── no match: tier 2, and still nowhere off the allowlist ───────────
         const unmatched = ["what's the weather", "open google.com", "go to evil.example.com/admin",
             "open /etc/passwd", "open", "navigate to https://example.com", "yes"];
         for (const text of unmatched) {
+            fakeModel.next.push(decided({ action: "cannot_answer", say: "I can't help with that from here." }));
             const r = await ask(text);
-            check(`"${text}" is not_understood at tier 1, with no url`,
-                r.status === 200 && r.json?.tier === 1 && r.json.kind === "not_understood" && !("url" in r.json)
-                    && typeof r.json.say === "string" && r.json.say.length > 0, r.json);
+            check(`"${text}" goes to tier 2, which can't answer it, with no url`,
+                r.status === 200 && r.json?.tier === 2 && r.json.kind === "not_understood" && !("url" in r.json)
+                    && r.json.say === "I can't help with that from here.", r.json);
         }
+        check("each unmatched ask called the model once, with its own text as the question",
+            fakeModel.calls.length === unmatched.length
+                && fakeModel.calls.every((c, i) => c.question === unmatched[i]), fakeModel.calls.map((c) => c.question));
 
         // ── the ask log ─────────────────────────────────────────────────────
         const rows = await asks();
@@ -169,8 +192,8 @@ async function main() {
         check("every ask wrote one os_asks row for the asking account", rows.length === total,
             `${rows.length} rows for ${total} asks`);
         check("every row has its tier, kind, a non-negative latency and the injected clock's time",
-            rows.every((r) => r.tier === 1 && Number.isInteger(r.latency_ms) && r.latency_ms >= 0
-                && new Date(r.asked_at).getTime() === clock.getTime()),
+            rows.every((r) => r.tier === (unmatched.includes(r.text) ? 2 : 1) && Number.isInteger(r.latency_ms)
+                && r.latency_ms >= 0 && new Date(r.asked_at).getTime() === clock.getTime()),
             rows.map((r) => ({ tier: r.tier, latency: r.latency_ms, at: r.asked_at })));
         const alpaca = rows.find((r) => r.text === "PLEASE, open ALPACA!!");
         check("the row keeps the trimmed text as asked, the source, the kind and the navigation intent",
@@ -178,8 +201,9 @@ async function main() {
                 && alpaca.error === null && alpaca.model === null && alpaca.skill === null, alpaca);
         check("a voice ask is logged as voice", rows.find((r) => r.text === "go to the vault")?.source === "voice");
         const none = rows.find((r) => r.text === "what's the weather");
-        check("an unmatched ask is logged as not_understood with no intent", none?.kind === "not_understood"
-            && none.intent === null, none);
+        check("an unmatched ask the model can't answer is logged as tier 2 not_understood, with the model's action",
+            none?.tier === 2 && none.kind === "not_understood" && none.intent === "model.cannot_answer"
+                && none.model === "claude-haiku-5-5" && none.error === null, none);
         check("every navigate response's url is an allowlisted admin page",
             navigatedTo.every((u) => typeof u === "string" && ALLOWED.has(u)), navigatedTo);
 
@@ -198,6 +222,8 @@ async function main() {
             check(`${name} is a 400 with a JSON error`, r.status === 400 && typeof r.json?.error === "string",
                 { status: r.status, body: r.body.slice(0, 120) });
         }
+        // The x's match no command, so this one reaches tier 2. (The emoji normalise away: "open alpaca".)
+        fakeModel.next.push(decided({ action: "cannot_answer", say: "No." }));
         const exactly500 = await ask(`open alpaca ${"x".repeat(488)}`);
         check("500 characters is accepted", exactly500.status === 200, exactly500.status);
         // 500 characters, but 988 UTF-16 units: counted as characters, as os_asks counts them.
@@ -253,13 +279,115 @@ async function main() {
         check("the page posts asks to /admin/os/ask and speaks replies with speechSynthesis, with no CDN scripts",
             /\/admin\/os\/ask/.test(page.body) && /speechSynthesis/.test(page.body) && !/<script[^>]+src=/.test(page.body));
 
-        // ── the model ───────────────────────────────────────────────────────
-        check("the fake model was never called", fakeModel.calls.length === 0, fakeModel.calls.length);
+        // ── tier 2: an answer ───────────────────────────────────────────────
+        const lastRow = async () => (await asks()).at(-1);
+        const near = (a: unknown, b: number) => Math.abs(Number(a) - b) < 1e-9;
+        fakeModel.calls.length = 0;
+        fakeModel.next.push(decided({ action: "answer", say: "Two tasks are due today." }, "end_turn",
+            { inputTokens: 10_000, cacheReadTokens: 20_000, cacheWriteTokens: 4_000, outputTokens: 1_000 }));
+        const answered = await ask("  What's due today?  ", "voice");
+        const answeredRow = await lastRow();
+        check("an open question gets the model's answer, to speak and show, at tier 2",
+            answered.status === 200 && answered.json?.tier === 2 && answered.json.kind === "answer"
+                && answered.json.say === "Two tasks are due today." && !("url" in answered.json)
+                && !("confirmation" in answered.json), answered.json);
+        check("its row: tier 2, kind answer, the model's action as the intent, the model id, no error",
+            answeredRow?.tier === 2 && answeredRow.kind === "answer" && answeredRow.intent === "model.answer"
+                && answeredRow.model === "claude-haiku-5-5" && answeredRow.error === null
+                && answeredRow.source === "voice" && answeredRow.text === "What's due today?", answeredRow);
+        // $0.10/MTok input, cache reads at 0.1x, cache writes at 1.25x, $0.50/MTok output:
+        // 0.001 + 0.0002 + 0.0005 + 0.0005.
+        check("its cost is priced from usage at the rate card: $0.0022", near(answeredRow?.cost_usd, 0.0022),
+            answeredRow?.cost_usd);
+        check("its tokens are logged: input counts uncached, cache reads and cache writes (34,000), output 1,000",
+            Number(answeredRow?.input_tokens) === 34_000 && Number(answeredRow?.output_tokens) === 1_000,
+            { input: answeredRow?.input_tokens, output: answeredRow?.output_tokens });
+        check("its latency is logged", Number.isInteger(answeredRow?.latency_ms) && answeredRow.latency_ms >= 0);
+
+        // ── tier 2: the prompt ──────────────────────────────────────────────
+        const firstCall = fakeModel.calls.at(-1)!;
+        const overviewJson = await (await fetch(`${H.base}/admin/os/api/overview?token=${encodeURIComponent(admin.token)}`)).text();
+        check("the model gets the trimmed question, a system prompt and the overview JSON as its context",
+            fakeModel.calls.length === 1 && firstCall.question === "What's due today?" && firstCall.system.length > 0
+                && firstCall.context.includes(overviewJson), { question: firstCall.question, context: firstCall.context.slice(0, 300) });
+        const earlier = clock;
+        clock = new Date(clock.getTime() + 3_600_000);
+        fakeModel.next.push(decided({ action: "answer", say: "Flat." }));
+        await ask("how is the book doing");
+        const laterCall = fakeModel.calls.at(-1)!;
+        check("the system prompt is stable: the same an hour later for another question, and holds neither",
+            laterCall.system === firstCall.system && !firstCall.system.includes("due today")
+                && !firstCall.system.includes(earlier.toISOString()) && laterCall.context !== firstCall.context);
+        clock = earlier;
+
+        fakeModel.next.push(decided({ action: "answer", say: "Long." }, "end_turn",
+            { inputTokens: 150_000, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 2_000 }));
+        await ask("summarise everything");
+        // Over 100K prompt tokens: $0.50/MTok input and $2.50/MTok output. 0.075 + 0.005.
+        check("a prompt over 100K tokens is priced at the long-prompt rate card: $0.08",
+            near((await lastRow())?.cost_usd, 0.08), (await lastRow())?.cost_usd);
+
+        // ── tier 2: navigate and run_skill wait for #157 ────────────────────
+        const until157: [string, ModelDecision][] = [
+            ["navigate", { action: "navigate", say: "Opening Alpaca.", page: "alpaca" }],
+            ["run_skill", { action: "run_skill", say: "Running the morning brief.", skill: "morning-brief" }],
+        ];
+        for (const [action, decision] of until157) {
+            fakeModel.next.push(decided(decision));
+            const r = await ask(`could you maybe do the ${action} thing`);
+            const row = await lastRow();
+            check(`until #157, a ${action} decision is answered as can't-answer: no url, no proposal, not its say`,
+                r.json?.tier === 2 && r.json.kind === "not_understood" && !("url" in r.json) && !("confirmation" in r.json)
+                    && r.json.say !== decision.say, r.json);
+            check(`... and logged with the model's action`, row?.intent === `model.${action}` && row.skill === null
+                && row.expires_at === null && row.error === null, row);
+        }
+
+        // ── tier 2: failures ────────────────────────────────────────────────
+        const failures: [string, ModelReply | Error, RegExp, boolean][] = [
+            ["a refusal", decided(null, "refusal"), /refusal/, true],
+            ["running out of tokens", decided(null, "max_tokens"), /max_tokens/, true],
+            ["a timeout", Object.assign(new Error("Request timed out."), { name: "APIConnectionTimeoutError" }), /timed out/i, false],
+            ["output that didn't parse", decided(null), /malformed/, true],
+            ["a page off the allowlist", decided({ action: "navigate", say: "Opening.", page: "evil" } as any), /malformed/, true],
+            ["a skill that isn't runnable", decided({ action: "run_skill", say: "Running.", skill: "rm-rf" } as any), /malformed/, true],
+            ["an action outside the schema", decided({ action: "delete_everything", say: "Done." } as any), /malformed/, true],
+            ["an empty answer", decided({ action: "answer", say: "   " }), /malformed/, true],
+        ];
+        for (const [name, canned, error, billed] of failures) {
+            fakeModel.next.push(canned);
+            const r = await ask(`what about ${name}`);
+            const row = await lastRow();
+            check(`${name} gives "I couldn't answer that", unavailable at tier 2`,
+                r.status === 200 && r.json?.tier === 2 && r.json.kind === "unavailable"
+                    && /couldn.t answer that/i.test(r.json.say) && !("url" in r.json), r.json);
+            check(`... and is logged with its error${billed ? " and what it cost" : ""}`,
+                row?.tier === 2 && row.kind === "unavailable" && error.test(row.error ?? "")
+                    && (billed ? row.model === "claude-haiku-5-5" && Number(row.cost_usd) > 0 : row.cost_usd === null), row);
+        }
+
+        // ── tier 2 without an API key ───────────────────────────────────────
+        const callsBefore = fakeModel.calls.length;
+        const noKeyNav = await ask("open alpaca", "typed", N.base);
+        check("without an API key, tier 1 still works", noKeyNav.json?.tier === 1 && noKeyNav.json.kind === "navigate"
+            && noKeyNav.json.url === "/admin/alpaca", noKeyNav.json);
+        const noKey = await ask("what's due today", "typed", N.base);
+        const noKeyRow = await lastRow();
+        check("without an API key, an open question gets tier 2 `unavailable`, with something to say",
+            noKey.status === 200 && noKey.json?.tier === 2 && noKey.json.kind === "unavailable"
+                && typeof noKey.json.say === "string" && noKey.json.say.length > 0, noKey.json);
+        check("... logged with the missing key as its error, and no model or cost", noKeyRow?.tier === 2
+            && /ANTHROPIC_API_KEY/.test(noKeyRow.error ?? "") && noKeyRow.model === null && noKeyRow.cost_usd === null, noKeyRow);
+        const shippedNoKey = await ask("what's due today", "typed", P.base);
+        check("the shipped router reads the key: with it unset, tier 2 is unavailable",
+            shippedNoKey.json?.tier === 2 && shippedNoKey.json.kind === "unavailable", shippedNoKey.json);
+        check("no model was called without a key", fakeModel.calls.length === callsBefore);
+        check("every canned model reply was used", fakeModel.next.length === 0, fakeModel.next.length);
     } finally {
         if (renamed) await pool.query(`ALTER TABLE os_asks_t146_renamed RENAME TO os_asks`).catch(() => {});
         // os_asks rows go with their account (ON DELETE CASCADE).
         for (const id of created) await pool.query(`DELETE FROM accounts WHERE id = $1`, [id]);
-        P.server.close(); H.server.close(); F.server.close();
+        P.server.close(); H.server.close(); F.server.close(); N.server.close();
     }
 
     console.log(`\n  ${pass} passed, ${fail} failed\n`);

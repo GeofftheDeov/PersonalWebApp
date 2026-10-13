@@ -1,5 +1,6 @@
 import { renderPage } from "../utils/adminUi.js";
 import { centralTime, esc } from "./format.js";
+import { ADMIN_PAGES } from "./commands.js";
 import { describeError, type Overview, type Tile, type TileSource, type ViewContext } from "./overview.js";
 
 /** The page reloads itself this often while it's visible. */
@@ -44,6 +45,152 @@ function renderTile(source: TileSource<any>, tile: Tile | undefined, view: ViewC
         </section>`;
 }
 
+/**
+ * The ask box (#146). Typed asks go through the same path as voice: the mic
+ * (#149) and the stop button (#150) go in #ask-controls and call window.OS.
+ */
+const ASK_BOX = `
+                <form id="ask-form" class="ask" autocomplete="off">
+                    <label for="ask-text" class="sr-only">Ask the OS</label>
+                    <div class="ask-row">
+                        <span id="ask-controls" class="ask-controls"></span>
+                        <input id="ask-text" name="text" type="text" maxlength="500" enterkeyhint="send"
+                            placeholder="Ask, e.g. “open alpaca” or “show the briefs”">
+                        <button id="ask-send" type="submit">ASK</button>
+                    </div>
+                    <div id="ask-reply" class="ask-reply" aria-live="polite" hidden>
+                        <div class="ask-say"></div>
+                        <div class="ask-display muted"></div>
+                    </div>
+                </form>`;
+
+/**
+ * The ask box's client. It exposes window.OS for the pieces that plug in later:
+ *
+ *   OS.ask(text, source)  POST /admin/os/ask; shows, speaks and acts on the reply.
+ *                         The mic (#149) calls OS.ask(transcript, 'voice').
+ *   OS.speak(text, done?) speaks with speechSynthesis, cancelling anything still
+ *                         being spoken; #150 swaps in voice choice and stop.
+ *   OS.cancelSpeech()     stops speech in progress and drops a navigation still
+ *                         waiting on its "Opening …" (a new ask does this too).
+ *   OS.onReply(fn)        fn(reply) after each reply is shown, before it's spoken
+ *                         (#148 renders confirmations, #153 starts polling).
+ *   OS.busy()             true while there's unsent text, an ask in flight, speech
+ *                         or a pending navigation; the reload holds off.
+ *
+ * The JSON API sits behind the HTML gate: an expired token comes back as a
+ * redirect to login and a non-admin as an HTML 403, never a JSON error.
+ */
+function askScript(token: string): string {
+    // JSON in a <script>: escape "<" so the token can't close the tag.
+    const tokenJson = JSON.stringify(token).replace(/</g, "\\u003c");
+    const pagesJson = JSON.stringify(ADMIN_PAGES.map((p) => p.path)).replace(/</g, "\\u003c");
+    return `
+        (function () {
+            var token = ${tokenJson};
+            // Navigation only ever goes to an allowlisted admin page (os/commands.ts ADMIN_PAGES).
+            var PAGES = ${pagesJson};
+            var form = document.getElementById('ask-form'), input = document.getElementById('ask-text');
+            var send = document.getElementById('ask-send'), out = document.getElementById('ask-reply');
+            var sayEl = out.querySelector('.ask-say'), displayEl = out.querySelector('.ask-display');
+            var pending = false, hooks = [];
+            // The navigation waiting for its "Opening …" to finish; a new ask or a stop drops it.
+            var leaving = null;
+
+            function withToken(path) { return path + (path.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(token); }
+
+            function show(say, display, kind) {
+                out.hidden = false;
+                out.setAttribute('data-kind', kind || '');
+                sayEl.textContent = say || '';
+                displayEl.textContent = display || '';
+            }
+
+            function stopVoice() {
+                try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) { /* no speech */ }
+            }
+
+            // Stop: silence, and drop a navigation still waiting on its "Opening …".
+            function cancelSpeech() { leaving = null; stopVoice(); }
+
+            // Speaks text, cutting off anything still being spoken. done() runs once:
+            // when speech ends or fails, after a few seconds, or at once without speech.
+            function speak(text, done) {
+                var finished = false;
+                function finish() { if (!finished) { finished = true; if (done) done(); } }
+                try {
+                    if (!window.speechSynthesis || !window.SpeechSynthesisUtterance || !text) return finish();
+                    stopVoice();
+                    var u = new SpeechSynthesisUtterance(text);
+                    u.onend = finish; u.onerror = finish;
+                    window.speechSynthesis.speak(u);
+                    if (done) setTimeout(finish, 3000);
+                } catch (e) { finish(); }
+            }
+
+            function handle(reply) {
+                show(reply.say, reply.display, reply.kind);
+                hooks.forEach(function (fn) { try { fn(reply); } catch (e) { console.error(e); } });
+                if (reply.kind === 'navigate' && PAGES.indexOf(reply.url) >= 0) {
+                    var trip = leaving = { url: reply.url };
+                    speak(reply.say, function () {
+                        if (leaving === trip) location.href = withToken(trip.url);
+                    });
+                } else {
+                    speak(reply.say);
+                }
+            }
+
+            function fail(message) { show(message, '', 'error'); speak(message); }
+
+            function ask(text, source) {
+                // 500 characters as the server counts them (code points; never half an emoji).
+                text = Array.from(String(text || '').trim()).slice(0, 500).join('');
+                if (!text || pending) return Promise.resolve(null);
+                cancelSpeech();
+                pending = true; send.disabled = true;
+                show('…', '', 'pending');
+                return fetch(withToken('/admin/os/ask'), {
+                    method: 'POST', redirect: 'manual', credentials: 'same-origin',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ text: text, source: source === 'voice' ? 'voice' : 'typed' }),
+                }).then(function (res) {
+                    if (res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400)) {
+                        fail('Your session has expired. Sign in again.'); return null;
+                    }
+                    if (res.status === 403) { fail('This account is not an administrator.'); return null; }
+                    var json = (res.headers.get('content-type') || '').indexOf('application/json') >= 0;
+                    if (!json) { fail('The ask failed (status ' + res.status + ').'); return null; }
+                    return res.json().then(function (body) {
+                        if (!res.ok) { fail(body && body.error ? 'Sorry: ' + body.error + '.' : 'The ask failed.'); return null; }
+                        handle(body);
+                        return body;
+                    });
+                }).catch(function () {
+                    fail("Couldn't reach the server."); return null;
+                }).then(function (reply) {
+                    pending = false; send.disabled = false;
+                    return reply;
+                });
+            }
+
+            form.addEventListener('submit', function (e) {
+                e.preventDefault();
+                ask(input.value, 'typed').then(function (reply) { if (reply) input.value = ''; });
+            });
+
+            window.OS = {
+                ask: ask, speak: speak, cancelSpeech: cancelSpeech,
+                onReply: function (fn) { hooks.push(fn); },
+                busy: function () {
+                    var speaking = false;
+                    try { speaking = !!(window.speechSynthesis && window.speechSynthesis.speaking); } catch (e) { /* none */ }
+                    return pending || speaking || !!leaving || input.value.trim() !== '';
+                },
+            };
+        })();`;
+}
+
 /** /admin/os: the tiles through the shared admin shell. Server-rendered; no chart library, no CDN scripts. */
 export function renderOverviewPage({ token, now, overview, sources, refreshMs = OVERVIEW_REFRESH_MS }: OverviewPageOptions): string {
     const view: ViewContext = {
@@ -61,14 +208,20 @@ export function renderOverviewPage({ token, now, overview, sources, refreshMs = 
                     <div class="os-title">AGENTIC OS</div>
                     <div class="muted">updated ${esc(centralTime(new Date(overview.generatedAt), now))}</div>
                 </div>
+                ${ASK_BOX}
                 <div class="os-tiles">${tiles}</div>
             </div>
         </div>
+        <script>${askScript(token)}</script>
         <script>
         // Reload while the page is visible; catch up as soon as a hidden tab comes back.
+        // Never while the ask box is in use (typing, waiting, or speaking a reply).
         (function () {
             var every = ${every}, loaded = Date.now();
-            function tick() { if (document.visibilityState === 'visible' && Date.now() - loaded >= every) location.reload(); }
+            function tick() {
+                if (window.OS && window.OS.busy()) return;
+                if (document.visibilityState === 'visible' && Date.now() - loaded >= every) location.reload();
+            }
             setInterval(tick, Math.min(every, 5000));
             document.addEventListener('visibilitychange', tick);
         })();
@@ -88,6 +241,22 @@ export function renderOverviewPage({ token, now, overview, sources, refreshMs = 
             .os-layout { padding: 1rem; }
             .os-tiles { grid-template-columns: 1fr; }
         }
+        .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+        .ask { margin-bottom: 1rem; }
+        .ask-row { display: flex; gap: 0.5rem; align-items: stretch; }
+        .ask-controls { display: contents; }
+        .ask-row input { flex: 1; min-width: 0; background: #111; color: #fff; border: 1px solid #444;
+            padding: 0.6rem 0.75rem; font: inherit; font-size: 1rem; }
+        .ask-row input:focus { outline: 2px solid #0d9488; outline-offset: -1px; border-color: #0d9488; }
+        .ask-row button { background: #0d9488; color: #000; border: 0; padding: 0 1rem; font: inherit;
+            font-weight: bold; letter-spacing: 1px; }
+        .ask-row button:disabled { background: #444; color: #999; }
+        .ask-reply { border-left: 3px solid #0d9488; background: #1e1e1e; padding: 0.6rem 0.9rem; margin-top: 0.5rem; }
+        .ask-reply[data-kind="error"], .ask-reply[data-kind="unavailable"] { border-left-color: #fab219; }
+        .ask-reply[data-kind="not_understood"] { border-left-color: #666; }
+        .ask-say { color: #fff; font-size: 0.95rem; line-height: 1.4; overflow-wrap: anywhere; }
+        .ask-display:empty { display: none; }
+        .ask-display { margin-top: 0.3rem; }
         .tile { border: 1px solid #333; background: #1e1e1e; padding: 1rem 1.25rem; min-width: 0; box-sizing: border-box; }
         .tile-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
         .tile-title { color: #0d9488; font-size: 0.75rem; letter-spacing: 2px; font-weight: bold; text-transform: uppercase; text-decoration: none; }

@@ -60,7 +60,9 @@ router.post('/runs/:id/complete', async (req, res) => {
         void pullVault();
         res.json({ run });
     } catch (err: any) {
-        console.error('[runner] complete failed:', err.message);
+        // 42703 = undefined column: the code deployed ahead of its migration.
+        console.error('[runner] complete failed:', err.message,
+            err.code === '42703' ? '(apply db/migrations/2026-10-12-agent-run-usage.sql)' : '');
         res.status(500).json({ error: 'complete failed' });
     }
 });

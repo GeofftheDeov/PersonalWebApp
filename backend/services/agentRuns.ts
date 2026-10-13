@@ -53,26 +53,37 @@ const MAX_COST_USD = 1_000;
 const MAX_TOKENS = 1_000_000_000;
 const MAX_DURATION_MS = 24 * 60 * 60 * 1000;
 
-const sane = (v: unknown, max: number, integer: boolean): number | null =>
-    typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= max && (!integer || Number.isInteger(v)) ? v : null;
+const sane = (v: unknown, max: number): number | null =>
+    typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= max ? v : null;
+const whole = (v: number | null) => (v === null ? null : Math.round(v));
+const asObject = (raw: unknown) =>
+    (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
 
 /**
  * Read a usage block as the runner sent it: `{ costUsd, inputTokens,
  * outputTokens, durationMs }`, any of them missing. Each field is checked on
- * its own (a finite, non-negative number under its ceiling; whole numbers for
- * tokens; durations rounded to the ms) and becomes null if it fails, so one bad
- * field never costs the others. Anything that isn't an object is no usage.
- * Never throws: usage must not be the reason a run fails to record.
+ * its own (a finite, non-negative number, not a numeric string, at most its
+ * ceiling) and becomes null if it fails, so one bad field never costs the
+ * others. Token counts and the duration go into integer columns and are
+ * rounded. Anything that isn't an object is no usage. Never throws: usage must
+ * not be the reason a run fails to record.
  */
 export function readUsage(raw: unknown): RunUsage {
-    const u = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
-    const durationMs = sane(u.durationMs, MAX_DURATION_MS, false);
+    const u = asObject(raw);
     return {
-        costUsd: sane(u.costUsd, MAX_COST_USD, false),
-        inputTokens: sane(u.inputTokens, MAX_TOKENS, true),
-        outputTokens: sane(u.outputTokens, MAX_TOKENS, true),
-        durationMs: durationMs === null ? null : Math.round(durationMs),
+        costUsd: sane(u.costUsd, MAX_COST_USD),
+        inputTokens: whole(sane(u.inputTokens, MAX_TOKENS)),
+        outputTokens: whole(sane(u.outputTokens, MAX_TOKENS)),
+        durationMs: whole(sane(u.durationMs, MAX_DURATION_MS)),
     };
+}
+
+/** Fields the runner sent a value for that readUsage dropped: worth a log line, since the runner gets no error. */
+function droppedUsage(raw: unknown, usage: RunUsage): string[] {
+    const u = asObject(raw);
+    return (Object.keys(usage) as (keyof RunUsage)[])
+        .filter(k => u[k] !== undefined && u[k] !== null && usage[k] === null)
+        .map(k => `${k}=${(typeof u[k] === 'number' ? String(u[k]) : JSON.stringify(u[k]))?.slice(0, 40)}`); // String: Infinity
 }
 
 // The runner calls /claim every ~30s, so its last call doubles as a heartbeat.
@@ -140,6 +151,8 @@ export async function completeRun(
     result: { ok: boolean; summary?: string; outputPath?: string; usage?: unknown },
 ): Promise<AgentRun | null> {
     const usage = readUsage(result.usage);
+    const dropped = droppedUsage(result.usage, usage);
+    if (dropped.length) console.warn(`[runner] run ${id}: usage stored as null for ${dropped.join(', ')}`);
     const { rows } = await query<AgentRun>(
         `UPDATE agent_runs SET status = $2, finished_at = now(), summary = $3, output_path = $4,
                 cost_usd = $5, input_tokens = $6, output_tokens = $7, duration_ms = $8

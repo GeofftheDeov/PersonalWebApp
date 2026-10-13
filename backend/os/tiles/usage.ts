@@ -59,7 +59,7 @@ export const usageTile: TileSource<UsageTileData> = {
         if (t.costUsd === null) {
             return `
             <div class="stat-label">API-equivalent cost · last ${USAGE_WINDOW_DAYS} days</div>
-            <div class="usage-empty">no runs with usage in the last ${USAGE_WINDOW_DAYS} days</div>
+            <div class="stat-delta">no runs with usage in the last ${USAGE_WINDOW_DAYS} days</div>
             ${without}
             <div class="stat-meta">${esc(window)}</div>`;
         }

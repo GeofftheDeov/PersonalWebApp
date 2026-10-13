@@ -125,10 +125,7 @@ export function createOsRouter({
         } else {
             // No match: tier 2 (#154), the model. askModel never throws.
             let built: Promise<Overview> | null = null;
-            const t2 = await askModel({
-                model: typeof model === "function" ? model() : model,
-                now: at, text, overview: () => (built ??= overview(at)),
-            });
+            const t2 = await askModel({ model, now: at, text, overview: () => (built ??= overview(at)) });
             reply = t2.reply;
             ({ intent, error, call } = t2.log);
         }

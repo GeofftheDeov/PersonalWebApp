@@ -95,8 +95,8 @@ function fromDecision(decision: ModelDecision): AskReply {
 }
 
 export interface AskModelInput {
-    /** null: no ANTHROPIC_API_KEY, so no tier 2. */
-    model: OsModel | null;
+    /** The client, or a function giving it per ask. null: no ANTHROPIC_API_KEY, so no tier 2. */
+    model: OsModel | null | (() => OsModel | null);
     now: Date;
     /** The ask, trimmed. */
     text: string;
@@ -110,12 +110,19 @@ export interface AskModelInput {
  * even when it can't be used.
  */
 export async function askModel({ model, now, text, overview }: AskModelInput): Promise<Tier2Result> {
-    if (!model) return { reply: NO_MODEL, log: { intent: null, error: "tier 2 unavailable: ANTHROPIC_API_KEY is not set", call: null } };
-    // #156: the daily budget gate goes here, before the call.
+    let client: OsModel | null;
+    try {
+        client = typeof model === "function" ? model() : model;
+    } catch (err) {
+        console.error("[os] tier 2 model client failed:", (err as any)?.message ?? err);
+        return { reply: COULD_NOT_ANSWER, log: { intent: null, error: `model client failed: ${describeError(err)}`, call: null } };
+    }
+    if (!client) return { reply: NO_MODEL, log: { intent: null, error: "tier 2 unavailable: ANTHROPIC_API_KEY is not set", call: null } };
+    // #156: the daily budget gate goes here, after the key gate and before the call.
 
     let res;
     try {
-        res = await model.route({ system: SYSTEM_PROMPT, context: buildContext({ now, overview: await overview() }), question: text });
+        res = await client.route({ system: SYSTEM_PROMPT, context: buildContext({ now, overview: await overview() }), question: text });
     } catch (err) {
         console.error("[os] tier 2 call failed:", (err as any)?.message ?? err);
         return { reply: COULD_NOT_ANSWER, log: { intent: null, error: `model call failed: ${describeError(err)}`, call: null } };

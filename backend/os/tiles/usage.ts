@@ -53,10 +53,11 @@ export const usageTile: TileSource<UsageTileData> = {
 
     render(t) {
         const window = `${shortDay(new Date(t.from))} – ${shortDay(new Date(new Date(t.to).getTime() - 1))} CT`;
-        const without = t.runsWithoutUsage
-            ? `<div class="stat-meta"><span class="warn">${esc(plural(t.runsWithoutUsage, "run"))} without usage</span>, not in the totals</div>`
+        const withoutLine = (note: string) => t.runsWithoutUsage
+            ? `<div class="stat-meta"><span class="warn">${esc(plural(t.runsWithoutUsage, "run"))} without usage</span>${note}</div>`
             : "";
         if (t.costUsd === null) {
+            const without = withoutLine("");
             return `
             <div class="stat-label">API-equivalent cost · last ${USAGE_WINDOW_DAYS} days</div>
             <div class="stat-delta">no runs with usage in the last ${USAGE_WINDOW_DAYS} days</div>
@@ -67,7 +68,7 @@ export const usageTile: TileSource<UsageTileData> = {
             <div class="stat-label">API-equivalent cost · last ${USAGE_WINDOW_DAYS} days</div>
             <div class="stat-value">${esc(cost(t.costUsd))}</div>
             <div class="stat-delta">${esc(tokens(t.inputTokens))} input · ${esc(tokens(t.outputTokens))} output tokens · ${esc(plural(t.runsWithUsage, "run"))}</div>
-            ${without}
+            ${withoutLine(", not in the totals")}
             <div class="stat-meta">${esc(window)} · not a bill: subscription runs aren't billed</div>`;
     },
 };

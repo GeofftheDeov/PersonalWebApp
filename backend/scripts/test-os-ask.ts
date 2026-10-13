@@ -16,9 +16,18 @@
  *
  *   DATABASE_URL=postgresql://postgres@127.0.0.1:5546/t146_test npx tsx scripts/test-os-ask.ts
  *
- * Extending it: tier-1 answers (#147) and run proposals (#148) add cases to
- * the "tier 1" section and seed what they read; tier 2 (#154) gives the fake
- * model canned replies (fakeModel.next) and asserts on fakeModel.calls. Don't
+ * Run proposals (#148) have their own "tier 3" sections: `confirm(id, who?,
+ * base?)` posts to /admin/os/ask/confirm, `askRow(id)` reads one os_asks row,
+ * `createdRuns()` the runs these personas queued, and `clock` is moved to
+ * test expiry. The duplicate check is global per skill, so the queue must
+ * start empty (checked as a precondition; the runs are deleted at the end).
+ * `harness(commands?, deps?)` takes any other router dep, e.g. a failing
+ * `enqueue` (the Q harness).
+ *
+ * Extending it: tier-1 answers (#147) add cases to the "tier 1" section and
+ * seed what they read; tier 2 (#154) gives the fake model canned replies
+ * (fakeModel.next) and asserts on fakeModel.calls; #157's run_skill should
+ * produce a proposal the tier-3 checks accept. Don't
  * stop this script with `pkill -f`: it matches the shell's own command line
  * and kills the shell.
  */

@@ -50,6 +50,9 @@ router.post('/runs/:id/complete', async (req, res) => {
             ok: req.body?.ok === true,
             summary: typeof req.body?.summary === 'string' ? req.body.summary : undefined,
             outputPath: typeof req.body?.outputPath === 'string' ? req.body.outputPath : undefined,
+            // Optional { costUsd, inputTokens, outputTokens, durationMs } (#137). Bad
+            // fields are stored as null, never a 4xx: the vault's runner lags the server.
+            usage: req.body?.usage,
         });
         if (!run) return res.status(409).json({ error: 'run is not running (unknown, already completed, or expired)' });
         // The output travels through the vault; Obsidian Git may not have pushed
@@ -57,7 +60,9 @@ router.post('/runs/:id/complete', async (req, res) => {
         void pullVault();
         res.json({ run });
     } catch (err: any) {
-        console.error('[runner] complete failed:', err.message);
+        // 42703 = undefined column: the code deployed ahead of its migration.
+        console.error('[runner] complete failed:', err.message,
+            err.code === '42703' ? '(apply db/migrations/2026-10-12-agent-run-usage.sql)' : '');
         res.status(500).json({ error: 'complete failed' });
     }
 });

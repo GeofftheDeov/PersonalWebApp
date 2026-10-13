@@ -220,6 +220,52 @@ async function main() {
             nan?.status === "unavailable" && /no usable equity/.test(nan.reason) && !/NaN/.test(nanHtml.body), nan);
         await pool.query(`DELETE FROM alpaca_snapshots WHERE ts = $1`, [nanTs]);
 
+        // ── Usage tile (#144) ───────────────────────────────────────────────
+        // Seeded in March 2026, far from the real clock, so nothing another case
+        // (or a live runner) writes lands in these windows. The clock sits on
+        // Tue Mar 10, two days after DST began: the window is 7 Central days
+        // including today, Wed Mar 4 00:00 CST (06:00Z) to Wed Mar 11 00:00 CDT
+        // (05:00Z), and its start and end carry different UTC offsets.
+        const usageRunner = `t144-${tag}`;
+        const run = (finishedAt: Date | null, usage: { cost?: number; input?: number; output?: number; ms?: number } = {},
+            opts: { skill?: string; trigger?: string; status?: string } = {}) => pool.query(
+            `INSERT INTO agent_runs (skill, status, requested_at, claimed_at, finished_at, runner,
+                                     cost_usd, input_tokens, output_tokens, duration_ms, trigger)
+             VALUES ($1, $2, $3, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            [opts.skill ?? "morning-brief", opts.status ?? (finishedAt ? "succeeded" : "running"),
+                new Date((finishedAt ?? clock).getTime() - 5 * MIN), finishedAt, usageRunner,
+                usage.cost ?? null, usage.input ?? null, usage.output ?? null, usage.ms ?? null, opts.trigger ?? "button"]);
+        const usageAt = async (at: Date) => {
+            clock = at;
+            return (await get(H.base, "/admin/os/api/overview", adminToken)).json?.tiles?.usage;
+        };
+        const usageNow = new Date("2026-03-10T18:00:00Z");
+        const windowStart = new Date("2026-03-04T06:00:00Z");
+        const windowEnd = new Date("2026-03-11T05:00:00Z");
+        const SEC = 1000;
+
+        // Inside: the first instant of the window, mid-window (a scheduled run), and today.
+        await run(windowStart, { cost: 0.5, input: 1_000, output: 100, ms: 60_000 });
+        await run(new Date("2026-03-07T12:00:00Z"), { cost: 1.25, input: 20_000, output: 3_000, ms: 90_000 },
+            { skill: "weekly-review", trigger: "scheduled" });
+        await run(new Date("2026-03-10T11:45:00Z"), { cost: 0.0025, input: 50, output: 5, ms: 1_000 },
+            { trigger: "manual" });
+        // Inside, but without usage: a failed run the runner sent nothing for.
+        await run(new Date("2026-03-09T12:00:00Z"), {}, { status: "failed" });
+        // Just outside: a second before the window opens, and the first instant of tomorrow.
+        await run(new Date(windowStart.getTime() - SEC), { cost: 9, input: 900_000, output: 90_000 });
+        await run(windowEnd, { cost: 7, input: 700_000, output: 70_000 });
+        // Still running: nothing finished, nothing to count.
+        await run(null, {}, { status: "running" });
+
+        const u = await usageAt(usageNow);
+        check("the usage tile is ok and covers 7 Central days including today, across the DST change",
+            u?.status === "ok" && u.from === windowStart.toISOString() && u.to === windowEnd.toISOString(), u);
+        check("the totals cover only the window: runs just outside it are excluded",
+            u?.costUsd === 1.7525 && u.inputTokens === 21_050 && u.outputTokens === 3_105, u);
+        check("runs without usage are counted separately, not added as zero",
+            u?.runs === 4 && u.runsWithUsage === 3 && u.runsWithoutUsage === 1, u);
+
         // ── degradation ─────────────────────────────────────────────────────
         clock = new Date(latest.getTime() + 5 * MIN);
 
@@ -267,6 +313,7 @@ async function main() {
     } finally {
         if (renamed) await pool.query(`ALTER TABLE alpaca_snapshots_t139_renamed RENAME TO alpaca_snapshots`).catch(() => {});
         await pool.query(`DELETE FROM alpaca_snapshots`).catch(() => {});
+        await pool.query(`DELETE FROM agent_runs WHERE runner = $1`, [`t144-${tag}`]).catch(() => {});
         for (const id of created) await pool.query(`DELETE FROM accounts WHERE id = $1`, [id]);
         P.server.close(); H.server.close(); D.server.close();
     }

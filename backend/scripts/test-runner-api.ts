@@ -1,6 +1,7 @@
 /**
  * The runner API (/api/runner), driven the way the PC runner and the admin
- * page drive it (spec #135; started by #137, later tickets extend it).
+ * page drive it (spec #135; started by #137, later tickets extend it: #159
+ * adds the W4 skills).
  *
  * Mounts the real admin router (which carries /admin/briefs, where the RUN
  * button enqueues) and the real runner router, then drives them over HTTP: the
@@ -19,6 +20,7 @@ import crypto from "crypto";
 import pool from "../db/index.js";
 import adminRoutes from "../routes/adminRoutes.js";
 import runnerRoutes from "../routes/runnerRoutes.js";
+import { SKILLS } from "../services/agentRuns.js";
 import { signJwt } from "../utils/jwt.js";
 
 if (!/(\/\/|@)(127\.0\.0\.1|localhost)[:/]/.test(process.env.DATABASE_URL ?? "")) {
@@ -86,10 +88,10 @@ async function main() {
     const complete = (id: number, body: unknown) => asRunner(`/runs/${id}/complete`, body);
 
     try {
-        // Nothing else may be queued for the skill, or claim would hand that over instead.
+        // Nothing else may be queued for a runnable skill, or claim would hand that over instead.
         const { rows: busy } = await pool.query(
-            `SELECT id FROM agent_runs WHERE skill = $1 AND status IN ('queued','running')`, [SKILL]);
-        if (busy.length) throw new Error(`database already has ${SKILL} runs in flight (${busy.map((r) => r.id)}); use a fresh one`);
+            `SELECT id, skill FROM agent_runs WHERE skill = ANY($1) AND status IN ('queued','running')`, [SKILLS.map((k) => k.id)]);
+        if (busy.length) throw new Error(`database already has runs in flight (${busy.map((r) => `${r.skill} ${r.id}`)}); use a fresh one`);
 
         const email = `t137-admin-${tag}@example.test`;
         const { rows: [admin] } = await pool.query(
@@ -250,8 +252,147 @@ async function main() {
             const res = await send("POST", "/api/runner/runs/1/complete", { authorization: "Bearer wrong" }, { ok: true });
             check("complete without the runner token gets 401", res.status === 401, res);
         }
+
+        // ══ W4 (#159): ingest-debrief, lint-wiki and weekly-review are runnable ══
+        const NEW_SKILLS = [
+            { id: "ingest-debrief", label: "Ingest debrief", output: "projects/alpaca-trading-bot/market-state.md" },
+            { id: "lint-wiki", label: "Lint wiki", output: "outputs/lint/2026-10-12.md" },
+            { id: "weekly-review", label: "Weekly review", output: "outputs/reviews/2026-W42.md" },
+        ];
+        const runner159 = `t159-${tag}`;
+        const claimAs = (skills: unknown) => asRunner("/claim", { runner: runner159, skills });
+
+        // ── the briefs page has a RUN button for each ──────────────────────────
+        {
+            const res = await fetch(`${base}/admin/briefs?token=${encodeURIComponent(adminToken)}`, { redirect: "manual" });
+            const html = await res.text();
+            for (const s of NEW_SKILLS) {
+                check(`/admin/briefs has a RUN ${s.label.toUpperCase()} button for ${s.id}`,
+                    res.status === 200 && html.includes(`data-skill="${s.id}"`) && html.includes(`RUN ${s.label.toUpperCase()}</button>`),
+                    { status: res.status });
+            }
+        }
+
+        // ── each can be enqueued and claimed by a runner that lists it ─────────
+        for (const s of NEW_SKILLS) {
+            const enq = await asAdmin("/briefs/runs", { skill: s.id });
+            check(`${s.id}: RUN enqueues a queued button run (201)`,
+                enq.status === 201 && enq.json?.created === true && enq.json?.run?.skill === s.id
+                && enq.json?.run?.status === "queued" && enq.json?.run?.trigger === "button", enq);
+            const id = Number(enq.json?.run?.id);
+
+            const again = await asAdmin("/briefs/runs", { skill: s.id });
+            check(`${s.id}: a second press while it's queued returns the same run (200, not created)`,
+                again.status === 200 && again.json?.created === false && Number(again.json?.run?.id) === id, again);
+
+            const claim = await claimAs(["morning-brief", s.id]);
+            check(`${s.id}: a runner that lists it claims it`,
+                claim.status === 200 && Number(claim.json?.run?.id) === id && claim.json?.run?.skill === s.id, claim);
+            const r = await row(id);
+            check(`${s.id}: the claimed run is running under that runner`,
+                r?.status === "running" && r?.runner === runner159 && r?.claimed_at !== null, r);
+
+            const done = await complete(id, {
+                ok: true, summary: `${s.id} ok`, outputPath: s.output,
+                usage: { costUsd: 0.25, inputTokens: 1000, outputTokens: 200, durationMs: 60_000 },
+            });
+            const after = await row(id);
+            check(`${s.id}: the runner completes it with its output path and usage`,
+                done.status === 200 && after.status === "succeeded" && after.output_path === s.output
+                && after.cost_usd === 0.25 && after.output_tokens === 200, { status: done.status, after });
+        }
+
+        // ── a runner that doesn't list a skill skips it ────────────────────────
+        {
+            const lint = await asAdmin("/briefs/runs", { skill: "lint-wiki" });
+            const lintId = Number(lint.json?.run?.id);
+            const none = await claimAs(["morning-brief"]);
+            check("a runner listing only morning-brief gets nothing while only lint-wiki is queued (204)", none.status === 204, none);
+            const bare = await claimAs("morning-brief");
+            check("so does an old runner sending the list as a bare string (204)", bare.status === 204, bare);
+            const empty = await claimAs([]);
+            check("and a runner listing nothing (204)", empty.status === 204, empty);
+            check("the skipped run stays queued and unclaimed",
+                (await row(lintId)).status === "queued" && (await row(lintId)).runner === null, await row(lintId));
+
+            // A newer morning-brief is claimed past the older, unlisted lint-wiki.
+            const brief = await asAdmin("/briefs/runs", { skill: "morning-brief" });
+            const briefId = Number(brief.json?.run?.id);
+            const got = await claimAs(["morning-brief"]);
+            check("a runner listing only morning-brief claims the newer brief, not the older lint-wiki",
+                got.status === 200 && Number(got.json?.run?.id) === briefId && got.json?.run?.skill === "morning-brief", got);
+            await complete(briefId, { ok: true });
+
+            const other = await claimAs(["weekly-review", "ingest-debrief"]);
+            check("a runner listing other new skills still skips lint-wiki (204)", other.status === 204, other);
+
+            const lintClaim = await claimAs(["lint-wiki"]);
+            check("the lint-wiki run waits for a runner that lists it",
+                lintClaim.status === 200 && Number(lintClaim.json?.run?.id) === lintId, lintClaim);
+            await complete(lintId, { ok: false, summary: "t159 cleanup" });
+        }
+
+        // ── the server still refuses what isn't runnable ───────────────────────
+        for (const skill of ["Lint-Wiki", "weekly_review", "ingest", "lint-wiki ", ""]) {
+            const res = await asAdmin("/briefs/runs", { skill });
+            check(`enqueueing ${JSON.stringify(skill)} gets 400`, res.status === 400, res);
+        }
+
+        // ── output paths, as the SKILLS entries give them ──────────────────────
+        {
+            const outputOf = (id: string, day: string) => SKILLS.find((k) => k.id === id)?.output(day);
+            check("ingest-debrief's output is the market-state page, whatever the day",
+                outputOf("ingest-debrief", "2026-10-12") === "projects/alpaca-trading-bot/market-state.md"
+                && outputOf("ingest-debrief", "2027-01-01") === "projects/alpaca-trading-bot/market-state.md");
+            check("lint-wiki's output is outputs/lint/YYYY-MM-DD.md",
+                outputOf("lint-wiki", "2026-10-12") === "outputs/lint/2026-10-12.md", outputOf("lint-wiki", "2026-10-12"));
+            check("morning-brief's output is unchanged",
+                outputOf("morning-brief", "2026-10-12") === "outputs/briefs/2026-10-12.md", outputOf("morning-brief", "2026-10-12"));
+
+            // Reference values from Python's date.isocalendar().
+            const weeks: [string, string][] = [
+                ["2026-10-12", "2026-W42"],   // Monday
+                ["2026-03-08", "2026-W10"],   // Sunday ends its week
+                ["2025-12-28", "2025-W52"],   // Sunday
+                ["2025-12-29", "2026-W01"],   // Monday: week 1 of 2026 starts in 2025
+                ["2026-01-01", "2026-W01"],   // Thursday
+                ["2026-12-28", "2026-W53"],   // 2026 has 53 weeks (it starts on a Thursday)
+                ["2027-01-01", "2026-W53"],   // Friday: still 2026's week 53
+                ["2027-01-03", "2026-W53"],   // Sunday
+                ["2027-01-04", "2027-W01"],   // Monday
+                ["2027-12-31", "2027-W52"],   // Friday: 2027 has 52
+                ["2028-01-01", "2027-W52"],   // Saturday
+                ["2028-01-03", "2028-W01"],   // Monday
+                ["2024-12-30", "2025-W01"],   // Monday in 2024, week 1 of 2025
+                ["2020-12-31", "2020-W53"],   // Thursday
+                ["2021-01-03", "2020-W53"],   // Sunday in 2021, 2020's last week
+            ];
+            for (const [day, week] of weeks) {
+                const got = outputOf("weekly-review", day);
+                check(`weekly-review on ${day} writes outputs/reviews/${week}.md`, got === `outputs/reviews/${week}.md`, got);
+            }
+        }
+
+        // ── the record-a-finished-run endpoint (#138) accepts the new skills ───
+        {
+            const probe = await asRunner("/runs", {});
+            if (probe.status === 404) {
+                console.log("  SKIP  POST /api/runner/runs isn't on this branch yet (#138): recording the new skills is unchecked");
+            } else {
+                for (const s of NEW_SKILLS) {
+                    const res = await asRunner("/runs", {
+                        skill: s.id, trigger: "manual", ok: true, runner: runner159, outputPath: s.output,
+                        usage: { costUsd: 0.1, inputTokens: 10, outputTokens: 5, durationMs: 1000 },
+                    });
+                    const r = res.json?.run?.id ? await row(Number(res.json.run.id)) : null;
+                    check(`POST /runs records a finished ${s.id} run (201)`,
+                        res.status === 201 && r?.skill === s.id && r?.status === "succeeded" && r?.trigger === "manual"
+                        && r?.output_path === s.output, { status: res.status, json: res.json, r });
+                }
+            }
+        }
     } finally {
-        await pool.query(`DELETE FROM agent_runs WHERE runner = $1 OR summary LIKE $2`, [`t137-${tag}`, `t137 legacy ${tag}`]);
+        await pool.query(`DELETE FROM agent_runs WHERE runner = ANY($1) OR summary LIKE $2`, [[`t137-${tag}`, `t159-${tag}`], `t137 legacy ${tag}`]);
         if (adminId) {
             await pool.query(`DELETE FROM agent_runs WHERE requested_by = $1`, [adminId]);
             await pool.query(`DELETE FROM accounts WHERE id = $1`, [adminId]);

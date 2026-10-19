@@ -389,6 +389,16 @@ async function main() {
             { tier2: capped?.tier2, cappedHtml });
         delete process.env.OS_ASK_DAILY_BUDGET_USD;
 
+        // A NaN cost in today's ask log: the tier-2 line says so; the week's run usage stays up.
+        await askSpend(new Date("2026-03-10T18:00:00Z"), NaN);
+        const nanAsk = await usageAt(usageNow);
+        const nanAskHtml = tileHtml((await get(H.base, "/admin/os", adminToken)).body, "usage");
+        check("a NaN tier-2 cost leaves the usage tile ok, with the spend unreadable and the reason",
+            nanAsk?.status === "ok" && nanAsk.costUsd === 1.7525 && nanAsk.tier2?.spentUsd === null
+                && nanAsk.tier2.capUsd === 0.25 && /isn't a number/.test(nanAsk.tier2.reason)
+                && /spend unreadable/.test(nanAskHtml) && !/NaN/.test(nanAskHtml), { tier2: nanAsk?.tier2 });
+        await pool.query(`DELETE FROM os_asks WHERE cost_usd = 'NaN'`);
+
         // The ask log not migrated: only the tier-2 line goes; the tile stays ok.
         await pool.query(`ALTER TABLE os_asks RENAME TO os_asks_t156_renamed`);
         asksRenamed = true;

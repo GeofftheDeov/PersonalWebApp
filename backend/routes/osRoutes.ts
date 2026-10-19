@@ -12,7 +12,7 @@ import { COMMANDS, isAllowedPage } from "../os/commands.js";
 import type { OsModel } from "../os/model.js";
 import { modelFromEnv } from "../os/haiku.js";
 import { askModel, type Tier2Log } from "../os/tier2.js";
-import { dailyBudgetFromEnv } from "../os/budget.js";
+import { dailyBudgetFromEnv, noteUnloggedSpend } from "../os/budget.js";
 import { logAsk } from "../os/askLog.js";
 import { confirmProposal, createProposal, type Enqueue } from "../os/proposals.js";
 import { enqueueRun, isSkill, type SkillId } from "../services/agentRuns.js";
@@ -149,7 +149,9 @@ export function createOsRouter({
                 reply = NOT_PROPOSED;
             }
         }
-        await logAsk(db, { ...entry, tier: reply.tier, kind: reply.kind, latencyMs: Math.round(performance.now() - started) });
+        const logged = await logAsk(db, { ...entry, tier: reply.tier, kind: reply.kind, latencyMs: Math.round(performance.now() - started) });
+        // The budget sums os_asks: a priced call whose row didn't land is held in memory so it still counts.
+        if (!logged && call?.costUsd) noteUnloggedSpend(at, call.costUsd);
         res.set("Cache-Control", "no-store").json(reply);
     });
 

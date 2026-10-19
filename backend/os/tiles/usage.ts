@@ -1,6 +1,6 @@
 import { describeError, ok, unavailable, type Queryable, type TileSource } from "../overview.js";
 import { esc, money, TIME_ZONE } from "../format.js";
-import { dailyBudgetFromEnv, tier2SpendToday } from "../budget.js";
+import { budgetMoney, dailyBudgetFromEnv, tier2SpendToday } from "../budget.js";
 import { summariseUsage, type UsageSummary } from "../../services/agentRuns.js";
 
 /**
@@ -27,25 +27,29 @@ export const USAGE_MAX_POINTS = 30;
 export const USAGE_MIGRATION = "db/migrations/2026-10-12-agent-run-usage.sql";
 const USAGE_COLUMNS = ["cost_usd", "input_tokens", "output_tokens", "duration_ms", "trigger"];
 
-/** Today's (Central) tier-2 spend and the daily cap it's held to, both USD. */
-export interface Tier2Budget {
-    spentUsd: number;
-    capUsd: number;
-}
+/**
+ * Today's (Central) tier-2 spend and the daily cap it's held to, both USD.
+ * spentUsd is null when the spend couldn't be read (a timeout, a cost that
+ * isn't a number), with the reason; the gate keeps tier 2 shut then too.
+ */
+export type Tier2Budget =
+    | { spentUsd: number; capUsd: number }
+    | { spentUsd: null; capUsd: number; reason: string };
 
 export type UsageTileData = UsageSummary & {
-    /** null when the ask log can't be read because os_asks or a column of it is missing. */
+    /** null when os_asks or a column of it is missing (its migration isn't applied): the line is dropped. */
     tier2: Tier2Budget | null;
 };
 
-/** Today's tier-2 budget, or null when os_asks isn't there yet (42P01, 42703). Other errors throw. */
+/** Today's tier-2 budget. Never throws, so tier 2 can't take the run usage down with it. */
 async function tier2Budget(db: Queryable, now: Date): Promise<Tier2Budget | null> {
     const capUsd = dailyBudgetFromEnv();
     try {
         return { spentUsd: await tier2SpendToday(db, now), capUsd };
     } catch (err: any) {
         if (err?.code === "42P01" || err?.code === "42703") return null;
-        throw err;
+        console.error("[os] tile usage: today's tier-2 spend failed:", err?.message ?? err);
+        return { spentUsd: null, capUsd, reason: describeError(err) };
     }
 }
 
@@ -90,9 +94,17 @@ export const usageTile: TileSource<UsageTileData> = {
             ? `<div class="stat-meta"><span class="warn">${esc(plural(t.runsWithoutUsage, "run"))} without usage</span>${note}</div>`
             : "";
         // Tier 2 is billed per call, unlike the runs above: its spend against the hard daily cap.
-        const tier2Line = t.tier2 ? `<div class="stat-meta">Open questions today: ${
-            esc(t.tier2.spentUsd > 0 ? `${cost(t.tier2.spentUsd)} spent` : "nothing spent")} of the ${esc(money(t.tier2.capUsd))} daily cap${
-            t.tier2.spentUsd >= t.tier2.capUsd ? ` · <span class="warn">budget reached</span>` : ""}</div>` : "";
+        const tier2Line = (() => {
+            const b = t.tier2;
+            if (!b) return "";
+            const cap = `the ${budgetMoney(b.capUsd)} daily cap`;
+            if (b.spentUsd === null) {
+                return `<div class="stat-meta">Open questions today: <span class="warn">spend unreadable (${esc(b.reason)}), so they're off</span> · ${esc(cap)}</div>`;
+            }
+            const spent = b.spentUsd > 0 ? `${budgetMoney(b.spentUsd)} spent` : "nothing spent";
+            const reached = b.spentUsd >= b.capUsd ? ` · <span class="warn">budget reached</span>` : "";
+            return `<div class="stat-meta">Open questions today: ${esc(`${spent} of ${cap}`)}${reached}</div>`;
+        })();
         if (t.costUsd === null) {
             const without = withoutLine("");
             return `

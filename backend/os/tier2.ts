@@ -1,9 +1,9 @@
 import type { AskReply } from "./ask.js";
 import { ADMIN_PAGES } from "./commands.js";
-import { money, TIME_ZONE } from "./format.js";
+import { TIME_ZONE } from "./format.js";
 import { costUsd, MAX_SAY_WORDS, parseDecision, promptTokens, type ModelDecision, type OsModel } from "./model.js";
 import { describeError, type Overview, type Queryable } from "./overview.js";
-import { tier2SpendToday } from "./budget.js";
+import { budgetMoney, tier2SpendToday } from "./budget.js";
 import { SKILLS } from "../services/agentRuns.js";
 
 /**
@@ -46,7 +46,7 @@ const NO_MODEL: AskReply = {
 const budgetReached = (spentUsd: number, capUsd: number): AskReply => ({
     tier: 2, kind: "unavailable",
     say: "Sorry, today's budget for open questions is reached. The built-in commands still work.",
-    display: `Open questions have used ${money(spentUsd)} of today's ${money(capUsd)} budget; it resets at midnight Central. `
+    display: `Open questions have used ${budgetMoney(spentUsd)} of today’s ${budgetMoney(capUsd)} budget; it resets at midnight Central. `
         + "Try “open alpaca”, “show the briefs” or “run the brief”.",
 });
 const NO_BUDGET_CHECK: AskReply = {

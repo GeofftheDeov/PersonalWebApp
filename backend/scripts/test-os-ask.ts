@@ -32,7 +32,7 @@
  * seed what they read. Tier-2 cases queue canned replies (fakeModel.next,
  * built with `decided()`) and assert on fakeModel.calls: #155 (vault context)
  * checks what the prompt holds, #156 (budget) seeds tier-2 spend on days of
- * its own in November 2026 and caps a harness with the `budgetUsd` dep, and #157
+ * its own in November 2030 and caps a harness with the `budgetUsd` dep, and #157
  * replaces the "until #157" cases; its run_skill should produce a proposal
  * the tier-3 checks accept. Don't stop this script with `pkill -f`: it matches the shell's own command line
  * and kills the shell.
@@ -45,6 +45,7 @@ import pool from "../db/index.js";
 import adminRoutes, { adminGate } from "../routes/adminRoutes.js";
 import { createOsRouter, type OsRouterDeps } from "../routes/osRoutes.js";
 import type { Command } from "../os/ask.js";
+import type { Queryable } from "../os/overview.js";
 import type { ModelDecision, ModelReply, ModelRequest, ModelUsage, OsModel } from "../os/model.js";
 import { signJwt } from "../utils/jwt.js";
 
@@ -545,7 +546,7 @@ async function main() {
 
         // ── tier 2: the daily budget (#156) ─────────────────────────────────
         // Spend is every priced model call logged in os_asks on the ask's
-        // Central day, whoever asked. Each case sits on its own November 2026
+        // Central day, whoever asked. Each case sits on its own November 2030
         // day, far from the cases above (Oct 12) and from the real clock, so
         // seeded spend never leaks between them. B caps at $0.05.
         const B = await harness(undefined, { budgetUsd: 0.05 });
@@ -558,13 +559,13 @@ async function main() {
             const reachedReply = (r: any) => r.status === 200 && r.json?.tier === 2 && r.json.kind === "unavailable"
                 && /budget/i.test(r.json.say) && /reached/i.test(r.json.say) && !("url" in r.json);
 
-            // Thu Nov 19, 2026 (CST, UTC-6): the Central day is 06:00Z to 06:00Z.
-            clock = new Date("2026-11-19T18:00:00Z");
+            // Tue Nov 19, 2030 (CST, UTC-6): the Central day is 06:00Z to 06:00Z.
+            clock = new Date("2030-11-19T18:00:00Z");
             // Under the cap: $0.04 today, from both admins' asks (spend is global, not per account).
-            await spend(new Date("2026-11-19T06:00:00Z"), 0.03, user.id);
-            await spend(new Date("2026-11-19T17:00:00Z"), 0.01);
+            await spend(new Date("2030-11-19T06:00:00Z"), 0.03, user.id);
+            await spend(new Date("2030-11-19T17:00:00Z"), 0.01);
             // Yesterday (23:59:59 CST on the 18th) doesn't count, however big.
-            await spend(new Date("2026-11-19T05:59:59Z"), 5);
+            await spend(new Date("2030-11-19T05:59:59Z"), 5);
             let calls = fakeModel.calls.length;
             // (This call reports no usage, so it adds nothing: the seeded rows are today's whole spend.)
             fakeModel.next.push(decided({ action: "answer", say: "Under budget." }, "end_turn", null));
@@ -574,9 +575,9 @@ async function main() {
                     && fakeModel.calls.length === calls + 1, under.json);
 
             // At the cap exactly: below is required, so $0.05 of $0.05 is reached.
-            await spend(new Date("2026-11-19T17:30:00Z"), 0.01);
+            await spend(new Date("2030-11-19T17:30:00Z"), 0.01);
             const today = (await pool.query(
-                `SELECT sum(cost_usd)::float8 AS s FROM os_asks WHERE asked_at >= '2026-11-19T06:00:00Z' AND asked_at < '2026-11-20T06:00:00Z'`)).rows[0].s;
+                `SELECT sum(cost_usd)::float8 AS s FROM os_asks WHERE asked_at >= '2030-11-19T06:00:00Z' AND asked_at < '2030-11-20T06:00:00Z'`)).rows[0].s;
             calls = fakeModel.calls.length;
             const reached = await budgetAsk("what is the meaning of life");
             const reachedRow = await lastRow();
@@ -591,33 +592,33 @@ async function main() {
             check("with the budget reached, tier 1 still works",
                 reachedNav.json?.tier === 1 && reachedNav.json.kind === "navigate" && reachedNav.json.url === "/admin/alpaca"
                     && fakeModel.calls.length === calls, reachedNav.json);
-            await spend(new Date("2026-11-19T17:45:00Z"), 0.5);
+            await spend(new Date("2030-11-19T17:45:00Z"), 0.5);
             check("over the cap it stays reached", reachedReply(await budgetAsk("and now?")) && fakeModel.calls.length === calls);
 
-            // Reset at the Central day boundary, across the end of DST: Sun Nov 1, 2026 began at
-            // 05:00Z (CDT) and ended at Mon Nov 2 06:00Z (CST), a 25-hour day.
-            await spend(new Date("2026-11-01T05:00:00Z"), 0.05);
+            // Reset at the Central day boundary, across the end of DST: Sun Nov 3, 2030 began at
+            // 05:00Z (CDT) and ended at Mon Nov 4 06:00Z (CST), a 25-hour day.
+            await spend(new Date("2030-11-03T05:00:00Z"), 0.05);
             calls = fakeModel.calls.length;
-            clock = new Date("2026-11-01T04:59:59Z");
+            clock = new Date("2030-11-03T04:59:59Z");
             fakeModel.next.push(decided({ action: "answer", say: "Saturday night." }));
             const satNight = await budgetAsk("is it still saturday");
-            check("the last second of Sat Oct 31 (Central) doesn't see Sunday's spend",
+            check("the last second of Sat Nov 2 (Central) doesn't see Sunday's spend",
                 satNight.json?.kind === "answer" && fakeModel.calls.length === calls + 1, satNight.json);
-            clock = new Date("2026-11-02T05:30:00Z"); // 23:30 CST on Sunday: a fixed UTC-5 day would have reset already
+            clock = new Date("2030-11-04T05:30:00Z"); // 23:30 CST on Sunday: a fixed UTC-5 day would have reset already
             calls = fakeModel.calls.length;
             check("23:30 Central on the 25-hour DST day is still that day: the budget stays reached",
                 reachedReply(await budgetAsk("is it still sunday")) && fakeModel.calls.length === calls);
-            clock = new Date("2026-11-02T06:00:00Z"); // Central midnight: Monday
+            clock = new Date("2030-11-04T06:00:00Z"); // Central midnight: Monday
             fakeModel.next.push(decided({ action: "answer", say: "A new day." }));
             const monday = await budgetAsk("is it monday yet");
             check("at Central midnight the spend resets and tier 2 calls the model again",
                 monday.json?.tier === 2 && monday.json.kind === "answer" && monday.json.say === "A new day."
                     && fakeModel.calls.length === calls + 1, monday.json);
 
-            // The model's own logged calls fill the budget, with no seeding: Tue Nov 24.
+            // The model's own logged calls fill the budget, with no seeding: Nov 24.
             const tight = await harness(undefined, { budgetUsd: 0.001 });
             try {
-                clock = new Date("2026-11-24T18:00:00Z");
+                clock = new Date("2030-11-24T18:00:00Z");
                 // 5,000 input at $0.10/MTok + 200 output at $0.50/MTok = $0.0006 a call.
                 const pricey: ModelUsage = { inputTokens: 5_000, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 200 };
                 calls = fakeModel.calls.length;
@@ -631,16 +632,16 @@ async function main() {
                     kinds.join() === "answer,answer,unavailable" && fakeModel.calls.length === calls + 2, kinds);
             } finally { tight.server.close(); }
 
-            // The default and the env var, resolved per ask: Wed Nov 25.
+            // The default and the env var, resolved per ask: Nov 25.
             const D = await harness();
             try {
-                clock = new Date("2026-11-25T18:00:00Z");
-                await spend(new Date("2026-11-25T12:00:00Z"), 0.24);
+                clock = new Date("2030-11-25T18:00:00Z");
+                await spend(new Date("2030-11-25T12:00:00Z"), 0.24);
                 calls = fakeModel.calls.length;
                 delete process.env.OS_ASK_DAILY_BUDGET_USD;
                 fakeModel.next.push(decided({ action: "answer", say: "Fine." }, "end_turn", null));
                 const def = await ask("under the default", "typed", D.base);
-                await spend(new Date("2026-11-25T12:01:00Z"), 0.01);
+                await spend(new Date("2030-11-25T12:01:00Z"), 0.01);
                 const atDefault = await ask("at the default", "typed", D.base);
                 check("the default cap is $0.25: $0.24 is under it, $0.25 reaches it",
                     def.json?.kind === "answer" && reachedReply(atDefault) && fakeModel.calls.length === calls + 1,
@@ -664,8 +665,8 @@ async function main() {
                 D.server.close();
             }
 
-            // Spend that can't be read is spend that can't be capped: tier 2 stays shut. Fri Nov 27.
-            clock = new Date("2026-11-27T18:00:00Z");
+            // Spend that can't be read is spend that can't be capped: tier 2 stays shut. Nov 27.
+            clock = new Date("2030-11-27T18:00:00Z");
             await pool.query(`ALTER TABLE os_asks RENAME TO os_asks_t156_renamed`);
             renamed = true;
             calls = fakeModel.calls.length;
@@ -675,6 +676,35 @@ async function main() {
                     && typeof unread.json.say === "string" && unread.json.say.length > 0 && fakeModel.calls.length === calls, unread.json);
             await pool.query(`ALTER TABLE os_asks_t156_renamed RENAME TO os_asks`);
             renamed = false;
+
+            // A cost that isn't a number (numeric takes NaN, and the CHECK lets it through): still shut.
+            await spend(new Date("2030-11-27T12:00:00Z"), NaN);
+            const nanSpend = await budgetAsk("is the budget a number");
+            check("with a NaN cost in today's log, tier 2 isn't called and says it's unavailable",
+                nanSpend.json?.tier === 2 && nanSpend.json.kind === "unavailable" && fakeModel.calls.length === calls
+                    && /budget check failed/.test((await lastRow())?.error ?? ""), nanSpend.json);
+
+            // A priced call whose row doesn't get written still counts (held in memory). Nov 28.
+            const insertsFail: Queryable = {
+                query: (text: string, params?: unknown[]) => /^\s*INSERT INTO os_asks/.test(text)
+                    ? Promise.reject(new Error("t156: os_asks insert refused"))
+                    : pool.query(text, params as any[]),
+            } as Queryable;
+            const unlogged = await harness(undefined, { budgetUsd: 0.001, db: insertsFail });
+            try {
+                clock = new Date("2030-11-28T18:00:00Z");
+                const pricey: ModelUsage = { inputTokens: 5_000, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 200 };
+                const kinds: string[] = [];
+                for (let i = 1; i <= 3; i++) {
+                    if (i < 3) fakeModel.next.push(decided({ action: "answer", say: `Unlogged ${i}.` }, "end_turn", pricey));
+                    kinds.push((await ask(`unlogged question ${i}`, "typed", unlogged.base)).json?.kind);
+                }
+                const rowsThatDay = (await pool.query(
+                    `SELECT count(*)::int AS n FROM os_asks WHERE asked_at >= '2030-11-28T06:00:00Z' AND asked_at < '2030-11-29T06:00:00Z'`)).rows[0].n;
+                check("priced calls whose ask row fails to write still count against the cap",
+                    kinds.join() === "answer,answer,unavailable" && rowsThatDay === 0 && fakeModel.calls.length === calls + 2,
+                    { kinds, rowsThatDay });
+            } finally { unlogged.server.close(); }
         } finally {
             B.server.close();
         }

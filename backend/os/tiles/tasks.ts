@@ -51,7 +51,7 @@ export interface TasksTileData {
     today: string;
     /** Tomorrow's Central day, YYYY-MM-DD. */
     tomorrow: string;
-    /** Every listed-worthy task, not just the shown ones. */
+    /** Every task due before the end of tomorrow, not just the shown ones. */
     counts: { overdue: number; today: number; tomorrow: number; total: number };
     /** The first TASKS_MAX_SHOWN, overdue first, then by due day and time. */
     tasks: DueTask[];
@@ -71,14 +71,8 @@ const notionUrl = (pageId: string) => {
     return /^[0-9a-f]{32}$/i.test(hex) ? `https://www.notion.so/${hex.toLowerCase()}` : null;
 };
 
-// The Notion tasks, and each one's due day: a UTC-midnight due_date is a date-only day.
-const NOTION_TASKS = `
-    FROM tasks
-    WHERE notion_page_id IS NOT NULL AND btrim(notion_page_id) <> ''`;
-const DUE_DAY = `
-    CASE WHEN (due_date AT TIME ZONE 'UTC')::time = '00:00'
-         THEN (due_date AT TIME ZONE 'UTC')::date
-         ELSE (due_date AT TIME ZONE '${TIME_ZONE}')::date END`;
+// The Notion tasks: a page id that isn't blank.
+const NOTION_TASKS = `tasks WHERE notion_page_id IS NOT NULL AND btrim(notion_page_id) <> ''`;
 
 export const tasksTile: TileSource<TasksTileData> = {
     id: "tasks",
@@ -86,38 +80,47 @@ export const tasksTile: TileSource<TasksTileData> = {
     href: "/db/tasks",
 
     async build({ now, db }) {
-        // Days are computed in Postgres, so "tomorrow" ends at Central midnight across DST.
-        const { rows: [d] } = await db.query(
-            `WITH t AS (SELECT ($1::timestamptz AT TIME ZONE '${TIME_ZONE}')::date AS today)
-             SELECT to_char(t.today, 'YYYY-MM-DD') AS today, to_char(t.today + 1, 'YYYY-MM-DD') AS tomorrow,
-                    (SELECT max(notion_last_synced) ${NOTION_TASKS}) AS last_sync
-             FROM t`, [now]);
+        // One round trip. Days are computed in Postgres, so "tomorrow" ends at
+        // Central midnight across DST. The lateral list yields one all-null row
+        // when nothing is due, so the day and sync columns always come back.
         const { rows } = await db.query(
-            `WITH due AS (
+            `WITH d AS (
+                SELECT ($1::timestamptz AT TIME ZONE '${TIME_ZONE}')::date AS today,
+                       (SELECT max(notion_last_synced) FROM ${NOTION_TASKS}) AS last_sync
+             ), pending AS (
                 SELECT id, title, status, due_date, notion_page_id,
-                       (due_date AT TIME ZONE 'UTC')::time = '00:00' AS date_only, ${DUE_DAY} AS due_day
-                ${NOTION_TASKS}
+                       (due_date AT TIME ZONE 'UTC')::time = '00:00' AS date_only
+                FROM ${NOTION_TASKS}
                   AND status <> $2
                   AND due_date IS NOT NULL
                   -- A coarse bound first: nothing due on or after the day after tomorrow starts (Central).
-                  AND due_date < (($1::date + 2)::timestamp AT TIME ZONE '${TIME_ZONE}')
-             ), listed AS (
-                SELECT *, CASE WHEN due_day < $1::date THEN 'overdue'
-                               WHEN due_day = $1::date THEN 'today' ELSE 'tomorrow' END AS bucket
-                FROM due WHERE due_day <= $1::date + 1
+                  AND due_date < (((SELECT today FROM d) + 2)::timestamp AT TIME ZONE '${TIME_ZONE}')
+             ), due AS (
+                -- The due day: a date-only due date's UTC date, else its Central day.
+                SELECT *, CASE WHEN date_only THEN (due_date AT TIME ZONE 'UTC')::date
+                               ELSE (due_date AT TIME ZONE '${TIME_ZONE}')::date END AS due_day
+                FROM pending
              )
-             SELECT id, title, status, due_date, notion_page_id, date_only,
-                    to_char(due_day, 'YYYY-MM-DD') AS due_day, bucket,
-                    count(*) FILTER (WHERE bucket = 'overdue') OVER () AS n_overdue,
-                    count(*) FILTER (WHERE bucket = 'today') OVER () AS n_today,
-                    count(*) OVER () AS n_total
-             FROM listed
-             ORDER BY due_day, due_date, title, id
-             LIMIT $3`, [d.today, TASKS_DONE_STATUS, TASKS_MAX_SHOWN]);
+             SELECT to_char(d.today, 'YYYY-MM-DD') AS today, to_char(d.today + 1, 'YYYY-MM-DD') AS tomorrow,
+                    d.last_sync, l.*
+             FROM d LEFT JOIN LATERAL (
+                SELECT id, title, status, due_date, notion_page_id, date_only,
+                       to_char(due_day, 'YYYY-MM-DD') AS due_day, bucket,
+                       count(*) FILTER (WHERE bucket = 'overdue') OVER () AS n_overdue,
+                       count(*) FILTER (WHERE bucket = 'today') OVER () AS n_today,
+                       count(*) OVER () AS n_total
+                FROM (SELECT *, CASE WHEN due_day < d.today THEN 'overdue'
+                                     WHEN due_day = d.today THEN 'today' ELSE 'tomorrow' END AS bucket
+                      FROM due WHERE due_day <= d.today + 1) listed
+                ORDER BY due_day, due_date, title, id
+                LIMIT $3
+             ) l ON true`, [now, TASKS_DONE_STATUS, TASKS_MAX_SHOWN]);
 
-        const total = rows.length ? Number(rows[0].n_total) : 0;
-        const overdue = rows.length ? Number(rows[0].n_overdue) : 0;
-        const today = rows.length ? Number(rows[0].n_today) : 0;
+        const d = rows[0];
+        const listed = d.id === null ? [] : rows;
+        const total = listed.length ? Number(d.n_total) : 0;
+        const overdue = listed.length ? Number(d.n_overdue) : 0;
+        const today = listed.length ? Number(d.n_today) : 0;
         const lastSync = d.last_sync ? new Date(d.last_sync) : null;
         const syncAgeMs = lastSync ? now.getTime() - lastSync.getTime() : null;
 
@@ -125,7 +128,7 @@ export const tasksTile: TileSource<TasksTileData> = {
             today: d.today,
             tomorrow: d.tomorrow,
             counts: { overdue, today, tomorrow: total - overdue - today, total },
-            tasks: rows.map((r): DueTask => ({
+            tasks: listed.map((r): DueTask => ({
                 id: r.id,
                 title: r.title,
                 status: r.status,
@@ -136,7 +139,7 @@ export const tasksTile: TileSource<TasksTileData> = {
                 notionPageId: r.notion_page_id,
                 url: notionUrl(r.notion_page_id),
             })),
-            more: total - rows.length,
+            more: total - listed.length,
             lastSync: lastSync ? lastSync.toISOString() : null,
             syncAgeMs,
             stale: syncAgeMs === null || syncAgeMs > TASKS_STALE_AFTER_MS,

@@ -117,7 +117,7 @@ async function main() {
 
     const tag = crypto.randomBytes(4).toString("hex");
     const created: string[] = [];
-    let renamed = false, usageRenamed = false;
+    let renamed = false, usageRenamed = false, asksRenamed = false;
 
     try {
         // ── personas ────────────────────────────────────────────────────────
@@ -355,6 +355,51 @@ async function main() {
         await pool.query(`ALTER TABLE agent_runs RENAME COLUMN cost_usd_t144_renamed TO cost_usd`);
         usageRenamed = false;
 
+        // ── Usage tile: today's tier-2 spend against its daily cap (#156) ───
+        // Tue Mar 10, 2026 (CDT, UTC-5): today is 05:00Z to Mar 11 05:00Z. The
+        // asks are the admin's; spend is every priced model call on the day.
+        const askSpend = (at: Date, cost: number | null, tier = 2) => pool.query(
+            `INSERT INTO os_asks (account_id, asked_at, text, source, tier, kind, intent, latency_ms, model, cost_usd)
+             VALUES ($1, $2, 't156 seeded spend', 'typed', $3, 'answer', 'model.answer', 0, $4, $5)`,
+            [created[0], at, tier, cost === null ? null : "claude-haiku-5-5", cost]);
+        delete process.env.OS_ASK_DAILY_BUDGET_USD;
+        const quiet = await usageAt(usageNow);
+        const quietHtml = tileHtml((await get(H.base, "/admin/os", adminToken)).body, "usage");
+        check("with no asks today, the tile shows nothing spent at tier 2 against the default $0.25 cap",
+            quiet?.status === "ok" && quiet.tier2?.spentUsd === 0 && quiet.tier2.capUsd === 0.25
+                && /open questions today/i.test(quietHtml) && quietHtml.includes("nothing spent of the $0.25 daily cap"), { tier2: quiet?.tier2, quietHtml });
+
+        await askSpend(new Date("2026-03-10T05:00:00Z"), 0.03);
+        await askSpend(new Date("2026-03-10T17:00:00Z"), 0.0125, 3); // a model proposal (#157) logs at tier 3
+        await askSpend(new Date("2026-03-10T17:30:00Z"), null, 1);    // tier 1 costs nothing
+        await askSpend(new Date("2026-03-10T04:59:59Z"), 4);          // 23:59:59 CDT yesterday
+        await askSpend(new Date("2026-03-11T05:00:00Z"), 6);          // midnight tomorrow
+        const spent = await usageAt(usageNow);
+        const spentHtml = tileHtml((await get(H.base, "/admin/os", adminToken)).body, "usage");
+        check("the tile shows today's tier-2 spend and the cap: $0.0425 of $0.25, yesterday and tomorrow excluded",
+            spent?.status === "ok" && Math.abs(spent.tier2?.spentUsd - 0.0425) < 1e-12 && spent.tier2.capUsd === 0.25
+                && spentHtml.includes("$0.04 spent of the $0.25 daily cap") && !/budget reached/i.test(spentHtml), { tier2: spent?.tier2 });
+        check("... and the week's run usage alongside it is unchanged", spent?.costUsd === 1.7525 && spent.runs === 4, spent);
+
+        process.env.OS_ASK_DAILY_BUDGET_USD = "0.04";
+        const capped = await usageAt(usageNow);
+        const cappedHtml = tileHtml((await get(H.base, "/admin/os", adminToken)).body, "usage");
+        check("the cap comes from OS_ASK_DAILY_BUDGET_USD, and a spent budget is flagged as reached",
+            capped?.tier2?.capUsd === 0.04 && cappedHtml.includes("$0.04 spent of the $0.04 daily cap") && /budget reached/i.test(cappedHtml),
+            { tier2: capped?.tier2, cappedHtml });
+        delete process.env.OS_ASK_DAILY_BUDGET_USD;
+
+        // The ask log not migrated: only the tier-2 line goes; the tile stays ok.
+        await pool.query(`ALTER TABLE os_asks RENAME TO os_asks_t156_renamed`);
+        asksRenamed = true;
+        const noAsks = await usageAt(usageNow);
+        const noAsksHtml = tileHtml((await get(H.base, "/admin/os", adminToken)).body, "usage");
+        check("without the os_asks table the usage tile is still ok, with no tier-2 line",
+            noAsks?.status === "ok" && noAsks.tier2 === null && noAsks.costUsd === 1.7525
+                && !/open questions today/i.test(noAsksHtml) && noAsksHtml.includes("$1.75"), noAsks);
+        await pool.query(`ALTER TABLE os_asks_t156_renamed RENAME TO os_asks`);
+        asksRenamed = false;
+
         // ── Brief & runner tile (#142): the next brief and the latest one ────
         // The morning brief runs weekdays at 06:45 Central. In 2026, DST ends
         // Sun Nov 1 (06:45 is 11:45Z before, 12:45Z after) and starts Sun Mar 8.
@@ -509,6 +554,8 @@ async function main() {
     } finally {
         if (renamed) await pool.query(`ALTER TABLE alpaca_snapshots_t139_renamed RENAME TO alpaca_snapshots`).catch(() => {});
         if (usageRenamed) await pool.query(`ALTER TABLE agent_runs RENAME COLUMN cost_usd_t144_renamed TO cost_usd`).catch(() => {});
+        if (asksRenamed) await pool.query(`ALTER TABLE os_asks_t156_renamed RENAME TO os_asks`).catch(() => {});
+        delete process.env.OS_ASK_DAILY_BUDGET_USD;
         await pool.query(`DELETE FROM alpaca_snapshots`).catch(() => {});
         await pool.query(`DELETE FROM agent_runs WHERE runner = $1`, [`t144-${tag}`]).catch(() => {});
         for (const id of created) await pool.query(`DELETE FROM accounts WHERE id = $1`, [id]);

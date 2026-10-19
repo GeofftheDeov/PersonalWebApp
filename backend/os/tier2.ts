@@ -1,8 +1,9 @@
 import type { AskReply } from "./ask.js";
 import { ADMIN_PAGES } from "./commands.js";
-import { TIME_ZONE } from "./format.js";
+import { money, TIME_ZONE } from "./format.js";
 import { costUsd, MAX_SAY_WORDS, parseDecision, promptTokens, type ModelDecision, type OsModel } from "./model.js";
-import { describeError, type Overview } from "./overview.js";
+import { describeError, type Overview, type Queryable } from "./overview.js";
+import { tier2SpendToday } from "./budget.js";
 import { SKILLS } from "../services/agentRuns.js";
 
 /**
@@ -15,7 +16,6 @@ import { SKILLS } from "../services/agentRuns.js";
  *
  * Extension points for the other tier-2 tickets:
  *   #155  vault context: add sections to buildContext (never private/ or raw/).
- *   #156  daily budget: a gate in askModel, after the key gate and before the call.
  *   #157  navigate/run_skill: fromDecision's two "until #157" branches.
  */
 
@@ -41,6 +41,18 @@ const NO_MODEL: AskReply = {
     tier: 2, kind: "unavailable",
     say: "Sorry, I can only do the built-in commands right now.",
     display: "Open questions need the model, which isn't configured. Try “open alpaca”, “show the briefs” or “run the brief”.",
+};
+/** The daily cap is spent (#156): tier 2 is off until Central midnight; tier 1 still works. */
+const budgetReached = (spentUsd: number, capUsd: number): AskReply => ({
+    tier: 2, kind: "unavailable",
+    say: "Sorry, today's budget for open questions is reached. The built-in commands still work.",
+    display: `Open questions have used ${money(spentUsd)} of today's ${money(capUsd)} budget; it resets at midnight Central. `
+        + "Try “open alpaca”, “show the briefs” or “run the brief”.",
+});
+const NO_BUDGET_CHECK: AskReply = {
+    tier: 2, kind: "unavailable",
+    say: "Sorry, I can only do the built-in commands right now.",
+    display: "Open questions are off because today's spend couldn't be checked. Try “open alpaca”, “show the briefs” or “run the brief”.",
 };
 const NOT_YET: AskReply = {
     tier: 2, kind: "not_understood",
@@ -98,6 +110,10 @@ export interface AskModelInput {
     /** The client, or a function giving it per ask. null: no ANTHROPIC_API_KEY, so no tier 2. */
     model: OsModel | null | (() => OsModel | null);
     now: Date;
+    /** Where the ask log is: today's tier-2 spend is read from os_asks. */
+    db: Queryable;
+    /** The daily cap in USD (os/budget.ts), or a function giving it per ask. */
+    budgetUsd: number | (() => number);
     /** The ask, trimmed. */
     text: string;
     /** The ask's overview, built at most once per ask. */
@@ -109,7 +125,7 @@ export interface AskModelInput {
  * reply whose log carries the error, and a response that came back is priced
  * even when it can't be used.
  */
-export async function askModel({ model, now, text, overview }: AskModelInput): Promise<Tier2Result> {
+export async function askModel({ model, now, db, budgetUsd, text, overview }: AskModelInput): Promise<Tier2Result> {
     let client: OsModel | null;
     try {
         client = typeof model === "function" ? model() : model;
@@ -118,7 +134,24 @@ export async function askModel({ model, now, text, overview }: AskModelInput): P
         return { reply: COULD_NOT_ANSWER, log: { intent: null, error: `model client failed: ${describeError(err)}`, call: null } };
     }
     if (!client) return { reply: NO_MODEL, log: { intent: null, error: "tier 2 unavailable: ANTHROPIC_API_KEY is not set", call: null } };
-    // #156: the daily budget gate goes here, after the key gate and before the call.
+
+    // The daily budget (#156): call only while today's logged spend is below the cap.
+    // Spend that can't be read can't be capped, so a failed read keeps tier 2 shut.
+    // Not atomic: asks racing past the check can each make one call, a fraction of a cent.
+    let spent: number, cap: number;
+    try {
+        cap = typeof budgetUsd === "function" ? budgetUsd() : budgetUsd;
+        spent = await tier2SpendToday(db, now);
+    } catch (err) {
+        console.error("[os] tier 2 budget check failed:", (err as any)?.message ?? err);
+        return { reply: NO_BUDGET_CHECK, log: { intent: null, error: `tier 2 budget check failed: ${describeError(err)}`, call: null } };
+    }
+    if (!(spent < cap)) {
+        return {
+            reply: budgetReached(spent, cap),
+            log: { intent: null, error: `tier 2 daily budget reached: $${spent.toFixed(4)} of $${cap}`, call: null },
+        };
+    }
 
     let res;
     try {

@@ -1,5 +1,6 @@
-import { describeError, ok, unavailable, type TileSource } from "../overview.js";
+import { describeError, ok, unavailable, type Queryable, type TileSource } from "../overview.js";
 import { esc, money, TIME_ZONE } from "../format.js";
+import { dailyBudgetFromEnv, tier2SpendToday } from "../budget.js";
 import { summariseUsage, type UsageSummary } from "../../services/agentRuns.js";
 
 /**
@@ -11,8 +12,11 @@ import { summariseUsage, type UsageSummary } from "../../services/agentRuns.js";
  * reported no usage are counted on their own line, never added in as $0, and a
  * window with no usage says so instead of showing $0.00.
  *
- * Later: the per-run sparkline from `points` (#145) and today's tier-2 spend
- * against its daily cap (#156).
+ * It also shows today's tier-2 spend against its daily cap (#156, the only
+ * metered API spend, from os_asks via os/budget.ts). Without the os_asks table
+ * (its migration not applied) only that line goes; the tile stays ok.
+ *
+ * Later: the per-run sparkline from `points` (#145).
  */
 
 /** The window: this many Central calendar days, today included. */
@@ -23,7 +27,27 @@ export const USAGE_MAX_POINTS = 30;
 export const USAGE_MIGRATION = "db/migrations/2026-10-12-agent-run-usage.sql";
 const USAGE_COLUMNS = ["cost_usd", "input_tokens", "output_tokens", "duration_ms", "trigger"];
 
-export type UsageTileData = UsageSummary;
+/** Today's (Central) tier-2 spend and the daily cap it's held to, both USD. */
+export interface Tier2Budget {
+    spentUsd: number;
+    capUsd: number;
+}
+
+export type UsageTileData = UsageSummary & {
+    /** null when the ask log can't be read because os_asks or a column of it is missing. */
+    tier2: Tier2Budget | null;
+};
+
+/** Today's tier-2 budget, or null when os_asks isn't there yet (42P01, 42703). Other errors throw. */
+async function tier2Budget(db: Queryable, now: Date): Promise<Tier2Budget | null> {
+    const capUsd = dailyBudgetFromEnv();
+    try {
+        return { spentUsd: await tier2SpendToday(db, now), capUsd };
+    } catch (err: any) {
+        if (err?.code === "42P01" || err?.code === "42703") return null;
+        throw err;
+    }
+}
 
 /** 1,284 / 12.9K / 4.2M */
 const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
@@ -39,13 +63,16 @@ export const usageTile: TileSource<UsageTileData> = {
     href: "/admin/briefs",
 
     async build({ now, db }) {
-        const summary = await summariseUsage(db, { now, days: USAGE_WINDOW_DAYS, maxPoints: USAGE_MAX_POINTS });
+        const [summary, tier2] = await Promise.all([
+            summariseUsage(db, { now, days: USAGE_WINDOW_DAYS, maxPoints: USAGE_MAX_POINTS }),
+            tier2Budget(db, now),
+        ]);
         // numeric accepts NaN (and NaN passes CHECK >= 0); completeRun never stores one, but a
         // hand-written row could, and a NaN total would read "$NaN" here and null in the JSON.
         if (summary.costUsd !== null && !Number.isFinite(summary.costUsd)) {
             return unavailable("a run in the window has a cost that isn't a number");
         }
-        return ok(summary);
+        return ok({ ...summary, tier2 });
     },
 
     explain(err: any) {
@@ -62,12 +89,17 @@ export const usageTile: TileSource<UsageTileData> = {
         const withoutLine = (note: string) => t.runsWithoutUsage
             ? `<div class="stat-meta"><span class="warn">${esc(plural(t.runsWithoutUsage, "run"))} without usage</span>${note}</div>`
             : "";
+        // Tier 2 is billed per call, unlike the runs above: its spend against the hard daily cap.
+        const tier2Line = t.tier2 ? `<div class="stat-meta">Open questions today: ${
+            esc(t.tier2.spentUsd > 0 ? `${cost(t.tier2.spentUsd)} spent` : "nothing spent")} of the ${esc(money(t.tier2.capUsd))} daily cap${
+            t.tier2.spentUsd >= t.tier2.capUsd ? ` · <span class="warn">budget reached</span>` : ""}</div>` : "";
         if (t.costUsd === null) {
             const without = withoutLine("");
             return `
             <div class="stat-label">API-equivalent cost · last ${USAGE_WINDOW_DAYS} days</div>
             <div class="stat-delta">no runs with usage in the last ${USAGE_WINDOW_DAYS} days</div>
             ${without}
+            ${tier2Line}
             <div class="stat-meta">${esc(window)}</div>`;
         }
         return `
@@ -75,6 +107,7 @@ export const usageTile: TileSource<UsageTileData> = {
             <div class="stat-value">${esc(cost(t.costUsd))}</div>
             <div class="stat-delta">${esc(tokens(t.inputTokens))} input · ${esc(tokens(t.outputTokens))} output tokens · ${esc(plural(t.runsWithUsage, "run"))}</div>
             ${withoutLine(", not in the totals")}
+            ${tier2Line}
             <div class="stat-meta">${esc(window)} · not a bill: subscription runs aren't billed</div>`;
     },
 };

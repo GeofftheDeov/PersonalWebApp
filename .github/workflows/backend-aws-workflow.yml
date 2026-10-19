@@ -193,6 +193,8 @@ jobs:
           SF_CLIENT_ID=${{ secrets.SF_CLIENT_ID }}
           SF_PRIVATE_KEY_CONTENT=${{ secrets.SF_PRIVATE_KEY_CONTENT }}
           GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
+          SESSION_COOKIE_NAME=gtd_session
+          SESSION_COOKIE_DOMAIN=.geoffthedeov.net
 
     - name: Fill in the new frontend image ID in the Amazon ECS task definition
       id: frontend-task-def

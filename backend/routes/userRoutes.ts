@@ -9,6 +9,7 @@ import { getAuthorizedCampaignIds } from "../utils/gameNightPlannerUtils.js";
 import { findPersonById, toPublicPerson } from "../utils/personUtils.js";
 import bcrypt from "bcryptjs";
 import { signJwt } from "../utils/jwt.js";
+import { clearSessionCookie, setSessionCookie } from "../utils/sessionCookie.js";
 import crypto from "crypto";
 import multer from "multer";
 import path from "path";
@@ -63,6 +64,16 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
  */
 const signToken = (person: any) =>
     signJwt({ id: person._id, email: person.email }, { expiresIn: "1h" });
+
+/**
+ * Sign a token, put it in this environment's session cookie (#69), and return
+ * it for the response body, which bearer clients keep reading.
+ */
+const issueSession = (res: express.Response, person: any) => {
+    const token = signToken(person);
+    setSessionCookie(res, token);
+    return token;
+};
 
 /** The user object the client stores. Capability comes from explicit columns. */
 const publicUser = (person: any) => ({
@@ -199,7 +210,7 @@ router.post("/login", async (req, res) => {
 
         await bindPendingInvites(user);
 
-        res.json({ token: signToken(user), user: publicUser(user) });
+        res.json({ token: issueSession(res, user), user: publicUser(user) });
     } catch (error: any) {
         console.error("Login error:", error);
         res.status(500).json({ error: "Login failed" });
@@ -258,11 +269,21 @@ router.post("/google-login", async (req, res) => {
 
         await bindPendingInvites(user);
 
-        res.json({ token: signToken(user), user: publicUser(user) });
+        res.json({ token: issueSession(res, user), user: publicUser(user) });
     } catch (error: any) {
         console.error("Google login error:", error);
         res.status(500).json({ error: "Google login failed" });
     }
+});
+
+/**
+ * Log out (#69): clear the session cookie on the parent domain, so both sites
+ * are logged out. No auth required, so an expired session can still clear it,
+ * and nothing here writes as the user, so it needs no CSRF header either.
+ */
+router.post("/logout", (_req, res) => {
+    clearSessionCookie(res);
+    res.status(204).end();
 });
 
 router.get("/profile", auth, async (req: any, res) => {

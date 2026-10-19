@@ -211,6 +211,72 @@ export async function completeRun(
     return rows[0] ?? null;
 }
 
+/** The triggers a run recorded after the fact can carry: button runs always go through the queue. */
+export const RECORDED_TRIGGERS = ['scheduled', 'manual'] as const satisfies readonly RunTrigger[];
+export type RecordedTrigger = typeof RECORDED_TRIGGERS[number];
+export const isRecordedTrigger = (t: unknown): t is RecordedTrigger => RECORDED_TRIGGERS.some(k => k === t);
+
+/** How far back a recorded run's start may be; an older (or future) start is a bad clock, not a long run. */
+const RECORDED_START_WINDOW = '24 hours';
+
+/**
+ * An ISO 8601 instant with an explicit offset (`Z` or `±HH:MM`), as the vault
+ * wrapper writes it (`yyyy-MM-ddTHH:mm:ss.fffZ`). Anything else, a bare date,
+ * a time with no offset, PowerShell 5.1's `/Date(…)/`, epoch numbers, is not a
+ * start time we can place, so it reads as null.
+ */
+function readInstant(raw: unknown): Date | null {
+    if (typeof raw !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/.test(raw)) return null;
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) return null;
+    // Date may roll 2026-02-30 over to March: shifted by its own offset, the parsed
+    // instant must land on the calendar day the string names.
+    const offset = raw.endsWith('Z') ? 0
+        : (raw[raw.length - 6] === '-' ? -1 : 1) * (Number(raw.slice(-5, -3)) * 60 + Number(raw.slice(-2)));
+    return new Date(d.getTime() + offset * 60_000).toISOString().slice(0, 10) === raw.slice(0, 10) ? d : null;
+}
+
+/**
+ * Record a run that already finished outside the queue (#138): a scheduled
+ * 6:45 brief or one started from a terminal, reported once by its wrapper.
+ * The row goes in finished (`succeeded` or `failed`), so claimNext and
+ * enqueueRun's duplicate check, which look only at queued and running rows,
+ * never see it, and completeRun refuses it.
+ *
+ * `claimed_at` (and `requested_at`, so the history lists the run when it
+ * started) is `startedAt` when that is a readable instant within the last 24
+ * hours and not in the future, by the database clock; otherwise now.
+ * `finished_at` is now. Usage, summary and output path are read exactly as on
+ * completeRun. Not idempotent: each call is a new row.
+ */
+export async function recordFinishedRun(input: {
+    skill: SkillId;
+    trigger: RecordedTrigger;
+    ok: boolean;
+    runner?: string;
+    startedAt?: unknown;
+    summary?: string;
+    outputPath?: string;
+    usage?: unknown;
+}): Promise<AgentRun> {
+    const usage = readUsage(input.usage);
+    const dropped = droppedUsage(input.usage, usage);
+    if (dropped.length) console.warn(`[runner] recorded ${input.skill} run: usage stored as null for ${dropped.join(', ')}`);
+    const { rows } = await query<AgentRun>(
+        `WITH s AS (
+           SELECT CASE WHEN $3::timestamptz BETWEEN now() - interval '${RECORDED_START_WINDOW}' AND now()
+                       THEN $3::timestamptz ELSE now() END AS started
+         )
+         INSERT INTO agent_runs (skill, trigger, status, requested_at, claimed_at, finished_at, runner,
+                                 summary, output_path, cost_usd, input_tokens, output_tokens, duration_ms)
+         SELECT $1, $2, $4, s.started, s.started, now(), $5, $6, $7, $8, $9, $10, $11 FROM s
+         RETURNING *`,
+        [input.skill, input.trigger, readInstant(input.startedAt), input.ok ? 'succeeded' : 'failed',
+            input.runner?.slice(0, 100) ?? null, input.summary?.slice(0, 500) ?? null, input.outputPath?.slice(0, 300) ?? null,
+            usage.costUsd, usage.inputTokens, usage.outputTokens, usage.durationMs]);
+    return rows[0];
+}
+
 /** One finished run that reported usage: a point on the usage tile's sparkline (#145). */
 export interface UsagePoint {
     id: number;

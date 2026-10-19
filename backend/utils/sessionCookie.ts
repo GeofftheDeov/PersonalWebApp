@@ -98,3 +98,40 @@ export function passesCsrfCheck(req: Pick<Request, "method" | "headers">): boole
     if (SAFE_METHODS.has(req.method.toUpperCase())) return true;
     return req.headers[CSRF_HEADER] === CSRF_VALUE;
 }
+
+/**
+ * The pages allowed to open the live channel with the session cookie (#107):
+ *   SESSION_COOKIE_ORIGINS  comma-separated origins, e.g.
+ *                           https://deov.geoffthedeov.net,https://deov.hearthside.geoffthedeov.net
+ * A browser sends the cookie on a WebSocket upgrade from any page on the
+ * parent domain, and an upgrade has no CORS preflight or custom header to lean
+ * on, so the Origin header is the CSRF check here. Unset means no page may:
+ * the cookie is ignored on upgrades and the first-frame token is the only way in.
+ */
+export function cookieOriginAllowed(origin: string | undefined): boolean {
+    if (!origin) return false;
+    const want = normalizeOrigin(origin);
+    return (process.env.SESSION_COOKIE_ORIGINS ?? "")
+        .split(",")
+        .map(normalizeOrigin)
+        .some((allowed) => allowed !== "" && allowed === want);
+}
+
+function normalizeOrigin(origin: string): string {
+    return origin.trim().replace(/\/+$/, "").toLowerCase();
+}
+
+/**
+ * This environment's session token from a WebSocket upgrade, or null when the
+ * cookie is off, absent, or came from a page not in SESSION_COOKIE_ORIGINS.
+ */
+export function readUpgradeSessionCookie(req: Pick<Request, "headers">): string | null {
+    const token = readSessionCookie(req);
+    if (!token) return null;
+    const origin = req.headers.origin;
+    if (!cookieOriginAllowed(origin)) {
+        console.warn(`[live] session cookie ignored: origin ${origin ?? "(none)"} is not in SESSION_COOKIE_ORIGINS`);
+        return null;
+    }
+    return token;
+}

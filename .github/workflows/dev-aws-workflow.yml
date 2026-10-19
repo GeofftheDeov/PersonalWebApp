@@ -103,6 +103,7 @@ jobs:
             OBSIDIAN_VAULT_PATH=/obsidian-vault
             SESSION_COOKIE_NAME=gtd_session_deov
             SESSION_COOKIE_DOMAIN=.geoffthedeov.net
+            SESSION_COOKIE_ORIGINS=https://deov.geoffthedeov.net,https://deov.hearthside.geoffthedeov.net
 
       - name: Fill in the new frontend image ID in the Amazon ECS task definition
         id: frontend-task-def

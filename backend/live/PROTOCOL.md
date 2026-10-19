@@ -4,7 +4,7 @@ One WebSocket per signed-in person. It carries live events for every thread that
 
 - Server: `backend/live/liveChannel.ts`
 - Web client: `frontend/src/lib/realtime/liveClient.ts`, wrapped by the `useLiveThread` hook (threads), `useTyping` (typing) and `useThreads` (the thread list)
-- Tests: `backend/scripts/test-live-channel.ts` (campaigns, auth, heartbeat, client), `backend/scripts/test-live-dms.ts` (DMs), `backend/scripts/test-live-typing.ts` (typing), `backend/scripts/test-live-list.ts` (`thread.updated`, `thread.read`), `backend/scripts/test-live-two-tasks.ts` (every frame across two backend processes), `backend/scripts/test-live-redis-recovery.ts` (Redis outages), `backend/scripts/test-live-access.ts` (access changes, token expiry), `backend/scripts/test-live-combined.ts` (how the tickets' frames combine: access changes with the thread list and typing, resends with unread counts, namespaces, per-stream dedupe), `backend/scripts/test-live-noticeboard.ts` (`noticeboard.changed`)
+- Tests: `backend/scripts/test-live-channel.ts` (campaigns, auth, heartbeat, client), `backend/scripts/test-live-cookie.ts` (session cookie on the upgrade), `backend/scripts/test-live-dms.ts` (DMs), `backend/scripts/test-live-typing.ts` (typing), `backend/scripts/test-live-list.ts` (`thread.updated`, `thread.read`), `backend/scripts/test-live-two-tasks.ts` (every frame across two backend processes), `backend/scripts/test-live-redis-recovery.ts` (Redis outages), `backend/scripts/test-live-access.ts` (access changes, token expiry), `backend/scripts/test-live-combined.ts` (how the tickets' frames combine: access changes with the thread list and typing, resends with unread counts, namespaces, per-stream dedupe), `backend/scripts/test-live-noticeboard.ts` (`noticeboard.changed`)
 
 ## Connecting
 
@@ -28,6 +28,8 @@ The client's first frame carries its JWT:
 - A token in the query string (`/api/live?token=<jwt>`) also works, but use the first frame where possible: URLs end up in logs.
 - A missing, malformed, expired or wrong-secret token, or one whose subject isn't an account, closes the socket with **4001**. So does a first frame that isn't an auth frame, and a connection that sends nothing for 10 seconds.
 - A socket doesn't outlive its token: when the token's `exp` passes, the server closes the socket with **4001** (#105). Reconnect with a fresh token. Deleting the account closes its open sockets with **4001** too.
+- **Session cookie (#107).** A browser signed in by cookie (#69) needs no auth frame: the upgrade carries this environment's session cookie (`SESSION_COOKIE_NAME`, `gtd_session` in prod and `gtd_session_deov` in dev), and the server authenticates it as soon as the socket opens. The cookie only counts when the upgrade's `Origin` is listed in `SESSION_COOKIE_ORIGINS`. An upgrade has no CORS preflight, so this is the CSRF check. From any other origin, or with the other environment's cookie name, the cookie is ignored and the handshake waits for an auth frame as usual. A cookie that is expired, signed with another secret, or names no account closes the socket with **4001**. A cookie client speaks version 1.
+- Precedence: a query-string token, then the session cookie, then the first frame. Once the query token or cookie has started auth, an auth frame that follows is ignored.
 - The 10 seconds cover the whole handshake. If the server is still checking a token when they run out (a slow database), it closes with **1011** instead, and the client should retry.
 
 When auth succeeds, the server answers:

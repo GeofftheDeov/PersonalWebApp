@@ -4,6 +4,7 @@ import pool from "../db/index.js";
 import { buildOverview, describeError, type Overview, type Queryable, type TileSource } from "../os/overview.js";
 import { renderOverviewPage } from "../os/page.js";
 import { TILES } from "../os/tiles/index.js";
+import { ACTIVE_RUN_REFRESH_MS, runActive } from "../os/tiles/brief.js";
 import {
     ASK_SOURCES, MAX_ASK_CHARS, matchCommand, normaliseAsk,
     type AskReply, type AskSource, type Command,
@@ -63,8 +64,11 @@ export function createOsRouter({
         const at = now();
         try {
             const token = String(req.query.token ?? "");
+            const built = await overview(at);
+            // Faster while a run is queued or running, so its result shows up soon after it lands (#143).
+            const refreshMs = runActive(built) ? ACTIVE_RUN_REFRESH_MS : undefined;
             // The page carries the admin token in every link: keep it out of caches.
-            res.set("Cache-Control", "no-store").send(renderOverviewPage({ token, now: at, overview: await overview(at), sources: tiles }));
+            res.set("Cache-Control", "no-store").send(renderOverviewPage({ token, now: at, overview: built, sources: tiles, refreshMs }));
         } catch (err: any) {
             console.error("[os] overview page failed:", err?.message ?? err);
             res.status(500).send("overview failed");

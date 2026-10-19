@@ -1,33 +1,83 @@
 import fs from "fs";
-import { ok, type TileSource } from "../overview.js";
-import { centralDay, esc, TIME_ZONE } from "../format.js";
+import { describeError, ok, type Overview, type Queryable, type TileSource } from "../overview.js";
+import { ago, centralDay, centralTime, esc, TIME_ZONE } from "../format.js";
 import { nextScheduledRun, scheduledOn, type SkillSchedule } from "../schedule.js";
-import { skillSchedule, type SkillId } from "../../services/agentRuns.js";
+import {
+    RUNNER_ONLINE_WITHIN_MS, SKILLS, STALE_AFTER, runnerLastSeen, skillSchedule,
+    type AgentRun, type RunTrigger, type SkillId,
+} from "../../services/agentRuns.js";
 import { listBriefs, type BriefMeta } from "../../utils/briefs.js";
+import { USAGE_MIGRATION } from "./usage.js";
 
 /**
- * The Brief & runner tile (#142, part 1): when the next morning brief is due,
- * the latest brief in the local vault checkout, and a flag when today's is
- * missing after its scheduled time.
+ * The Brief & runner tile.
  *
- * The schedule is SKILLS data (services/agentRuns.ts), mirroring the PC's Task
- * Scheduler registration, which the server can't see. The latest brief is read
- * with the briefs utility (utils/briefs.ts) /admin/briefs uses.
+ * Part 1 (#142): when the next morning brief is due, the latest brief in the
+ * local vault checkout, and a flag when today's is missing after its scheduled
+ * time. The schedule is SKILLS data (services/agentRuns.ts), mirroring the PC's
+ * Task Scheduler registration, which the server can't see. The latest brief is
+ * read with the briefs utility (utils/briefs.ts) /admin/briefs uses.
  *
- * The tile stays ok when the vault can't be read: the next run doesn't depend
- * on it, and `latestNote` says why there's no brief. Only a throw makes it
- * unavailable.
+ * Part 2 (#143): whether a RUN press will be picked up, and whether the last
+ * scheduled brief worked. The runner's online state is the in-memory
+ * heartbeat (its last /claim; one backend task assumed), any queued or running
+ * run comes from `agent_runs`, and so does the brief's last `scheduled` run,
+ * which the vault wrapper reports after the fact (#138, V#10).
  *
- * Part 2 (#143) adds the runner (online/offline and last seen), any queued or
- * running run, and the last scheduled run's outcome: new fields on
- * BriefTileData, read in `build` alongside the brief, and new sections in
- * `render` after the brief's.
+ * The tile stays ok when the vault or the run history can't be read: the next
+ * run doesn't depend on either, and `latestNote` / `runsNote` say what's
+ * missing. Only a throw anywhere else makes it unavailable.
  */
 
 /** The skill whose schedule and output this tile reports. */
 export const BRIEF_SKILL: SkillId = "morning-brief";
 
+/** The overview page reloads this often while a run is queued or running (os/page.ts reloads every 2 minutes otherwise). */
+export const ACTIVE_RUN_REFRESH_MS = 15_000;
+
 export type LatestBrief = BriefMeta;
+
+/** The runner, from the in-memory heartbeat: its last /claim. */
+export interface RunnerStatus {
+    /** Polled within RUNNER_ONLINE_WITHIN_MS of now. */
+    online: boolean;
+    /** ISO time of its last poll; null when it hasn't polled since this server started. */
+    lastSeen: string | null;
+    /** The name it polled with (the PC's), or null. */
+    name: string | null;
+    /** now − lastSeen in ms (never negative), or null. */
+    ageMs: number | null;
+}
+
+/** A queued or running run, of any skill. */
+export interface ActiveRun {
+    id: number;
+    skill: string;
+    /** The skill's SKILLS label ("Morning brief"), or its id if it's no longer runnable. */
+    label: string;
+    status: "queued" | "running";
+    trigger: RunTrigger;
+    requestedAt: string;
+    /** When the runner claimed it; null while queued. */
+    claimedAt: string | null;
+    /** The runner that claimed it; null while queued. */
+    runner: string | null;
+}
+
+/** A finished run's outcome, as recorded in agent_runs. */
+export interface RunOutcome {
+    id: number;
+    skill: string;
+    ok: boolean;
+    status: "succeeded" | "failed";
+    /** When it started (claimed_at), ISO; null if unknown. */
+    startedAt: string | null;
+    finishedAt: string | null;
+    summary: string | null;
+    outputPath: string | null;
+    durationMs: number | null;
+    costUsd: number | null;
+}
 
 export interface BriefTileData {
     /** The brief's schedule, as SKILLS carries it; null if it has none. */
@@ -48,6 +98,77 @@ export interface BriefTileData {
     latest: LatestBrief | null;
     /** Why `latest` is null: no briefs yet, or the vault can't be read. Null when there is one. */
     latestNote: string | null;
+    /** The runner's heartbeat (#143). Always present: it's in memory, not in the database. */
+    runner: RunnerStatus;
+    /**
+     * The run a RUN press would wait behind (#143): the oldest running run,
+     * else the oldest queued one, of any skill. A run still `running`
+     * STALE_AFTER after its claim is presumed dead and isn't active. Null when
+     * nothing is active or the run history can't be read.
+     */
+    activeRun: ActiveRun | null;
+    /** How many runs are queued or running (live ones only), activeRun included. */
+    activeCount: number;
+    /** The brief's newest finished `scheduled` run (#143), or null when none is recorded or the history can't be read. */
+    lastScheduled: RunOutcome | null;
+    /** Why the run history couldn't be read (e.g. a migration not applied); null when it could. */
+    runsNote: string | null;
+}
+
+/** True when the overview's brief tile has a queued or running run: the page then reloads every ACTIVE_RUN_REFRESH_MS. */
+export const runActive = (overview: Overview): boolean => {
+    const t = overview.tiles[briefTile.id] as { status: string; activeRun?: unknown } | undefined;
+    return t?.status === "ok" && !!t.activeRun;
+};
+
+function readRunner(now: Date): RunnerStatus {
+    const seen = runnerLastSeen();
+    if (!seen) return { online: false, lastSeen: null, name: null, ageMs: null };
+    const ageMs = Math.max(0, now.getTime() - seen.at.getTime());
+    return { online: ageMs < RUNNER_ONLINE_WITHIN_MS, lastSeen: seen.at.toISOString(), name: seen.runner, ageMs };
+}
+
+const iso = (v: unknown) => (v == null ? null : new Date(v as string).toISOString());
+const skillLabel = (id: string) => SKILLS.find((k) => k.id === id)?.label ?? id;
+
+/** The active runs and the brief's last scheduled run, in one round trip. Throws on a missing table or column. */
+async function readRuns(db: Queryable, now: Date): Promise<Pick<BriefTileData, "activeRun" | "activeCount" | "lastScheduled">> {
+    const cols = `id, skill, status, trigger, requested_at, claimed_at, finished_at, runner, summary, output_path, duration_ms, cost_usd`;
+    const { rows } = await db.query<AgentRun & { kind: "active" | "scheduled"; n: number | null }>(
+        `(SELECT 'active' AS kind, ${cols}, (count(*) OVER ())::int AS n
+            FROM agent_runs
+           WHERE status = 'queued'
+              OR (status = 'running' AND (claimed_at IS NULL OR claimed_at >= $2::timestamptz - $3::interval))
+           ORDER BY status = 'running' DESC, requested_at, id
+           LIMIT 1)
+         UNION ALL
+         (SELECT 'scheduled', ${cols}, NULL
+            FROM agent_runs
+           WHERE skill = $1 AND trigger = 'scheduled' AND status IN ('succeeded', 'failed')
+           ORDER BY finished_at DESC NULLS LAST, id DESC
+           LIMIT 1)`,
+        [BRIEF_SKILL, now, STALE_AFTER]);
+    const active = rows.find((r) => r.kind === "active");
+    const sched = rows.find((r) => r.kind === "scheduled");
+    return {
+        activeRun: active ? {
+            id: active.id, skill: active.skill, label: skillLabel(active.skill),
+            status: active.status as ActiveRun["status"], trigger: active.trigger,
+            requestedAt: iso(active.requested_at)!, claimedAt: iso(active.claimed_at), runner: active.runner,
+        } : null,
+        activeCount: active?.n ?? 0,
+        lastScheduled: sched ? {
+            id: sched.id, skill: sched.skill, ok: sched.status === "succeeded", status: sched.status as RunOutcome["status"],
+            startedAt: iso(sched.claimed_at), finishedAt: iso(sched.finished_at), summary: sched.summary,
+            outputPath: sched.output_path, durationMs: sched.duration_ms, costUsd: sched.cost_usd,
+        } : null,
+    };
+}
+
+/** Why the run history is unreadable, naming the migration when one is missing. */
+function runsNoteFor(err: any): string {
+    const fix = err?.code === "42P01" ? "db/migrations/2026-09-26-agent-runs.sql" : err?.code === "42703" ? USAGE_MIGRATION : null;
+    return `run history unavailable: ${describeError(err)}${fix ? `; apply ${fix}` : ""}`;
 }
 
 /** The newest brief, or why there's none. `known` is false when the vault couldn't be read at all. */
@@ -99,14 +220,25 @@ export const briefTile: TileSource<BriefTileData> = {
     title: "Brief & runner",
     href: "/admin/briefs",
 
-    async build({ now }) {
+    async build({ now, db }) {
         const schedule = skillSchedule(BRIEF_SKILL);
         const today = centralDay(now);
         const next = schedule ? nextScheduledRun(schedule, now) : null;
         const due = schedule ? scheduledOn(schedule, today) : null;
         const { latest, note, known } = readLatest();
         const haveToday = !!latest && latest.date >= today;
+        let runs: Pick<BriefTileData, "activeRun" | "activeCount" | "lastScheduled">;
+        let runsNote: string | null = null;
+        try { runs = await readRuns(db, now); }
+        catch (err) {
+            runs = { activeRun: null, activeCount: 0, lastScheduled: null };
+            runsNote = runsNoteFor(err);
+            console.error("[os] brief tile: run history unavailable:", (err as any)?.message ?? err);
+        }
         return ok({
+            runner: readRunner(now),
+            ...runs,
+            runsNote,
             schedule,
             nextRun: next?.toISOString() ?? null,
             today,
@@ -151,6 +283,49 @@ export const briefTile: TileSource<BriefTileData> = {
             <div class="stat-label">Next brief</div>
             ${nextHtml}
             ${flag}
-            ${latestHtml}`;
+            ${latestHtml}
+            ${renderRunner(t, now)}`;
     },
 };
+
+/** "6:49 AM CT" today, "Oct 12, 6:49 AM CT" otherwise. */
+const when = (v: string | null, now: Date) => (v ? centralTime(new Date(v), now) : "an unknown time");
+
+/** #143: the runner, any active run, and the brief's last scheduled run, under the latest-brief lines. */
+function renderRunner(t: BriefTileData, now: Date): string {
+    const r = t.runner;
+    const runner = r.online
+        ? `<div class="stat-meta" data-runner="online"><span class="dir-up" aria-hidden="true">●</span> Runner online · ${
+            esc(r.name ?? "unknown")} · polled ${esc(ago(r.ageMs ?? 0))}</div>`
+        : `<div class="stat-meta" data-runner="offline"><span class="warn"><span aria-hidden="true">○</span> Runner offline</span> · ${
+            r.lastSeen
+                ? `last seen ${esc(ago(r.ageMs ?? 0))} (${esc(when(r.lastSeen, now))}${r.name ? `, ${esc(r.name)}` : ""})`
+                : "never seen since this server started"}</div>`;
+
+    let active = "";
+    const a = t.activeRun;
+    if (a) {
+        const more = t.activeCount > 1 ? ` · +${t.activeCount - 1} more` : "";
+        active = a.status === "running"
+            ? `<div class="stat-meta" data-active-run="running">Running: ${esc(a.label)} · started ${
+                esc(when(a.claimedAt, now))}${a.runner ? ` on ${esc(a.runner)}` : ""}${more}</div>`
+            : `<div class="stat-meta" data-active-run="queued">Queued: ${esc(a.label)} · since ${esc(when(a.requestedAt, now))}${more}${
+                r.online ? "" : ` · <span class="warn">the runner is offline, so it won't be picked up yet</span>`}</div>`;
+    }
+
+    let last: string;
+    const s = t.lastScheduled;
+    if (t.runsNote) {
+        last = `<div class="stat-meta" data-last-scheduled="unknown"><span class="warn">${esc(t.runsNote)}</span></div>`;
+    } else if (!s) {
+        last = `<div class="stat-meta" data-last-scheduled="none">Last scheduled run: none recorded yet</div>`;
+    } else {
+        const outcome = s.ok ? "succeeded" : `<span class="warn"><span aria-hidden="true">⚠</span> failed</span>`;
+        const summary = s.summary ? `\n            <div class="muted${s.ok ? "" : " warn"}">${esc(s.summary)}</div>` : "";
+        last = `<div class="stat-meta${s.ok ? "" : " warn"}" data-last-scheduled="${esc(s.status)}">Last scheduled run: ${
+            outcome} · ${esc(when(s.finishedAt ?? s.startedAt, now))}${summary}</div>`;
+    }
+
+    return `${runner}${active ? `\n            ${active}` : ""}
+            ${last}`;
+}

@@ -4,7 +4,9 @@
  * #69's shared package can lift it as is and a backend test can drive it with
  * the `ws` package. The wire protocol is in backend/live/PROTOCOL.md.
  *
- * - Authenticates with the JWT in the first frame (`{ type: "auth", v, token }`).
+ * - Authenticates with the JWT in the first frame (`{ type: "auth", v, token }`),
+ *   or, with `cookieAuth` and no token, sends no auth frame and lets the
+ *   browser's session cookie authenticate the upgrade (#107).
  * - Answers `ping` with `pong`, and treats a silent socket as dead.
  * - Reconnects with exponential backoff and full jitter, except after an auth
  *   or protocol-version refusal: retrying with the same token can't help.
@@ -115,8 +117,15 @@ type SocketCtor = new (url: string) => SocketLike;
 
 export interface LiveClientOptions {
     url: string | (() => string);
-    /** The current JWT, or null when signed out (then nothing connects). */
+    /** The current JWT, or null when signed out (then nothing connects, unless `cookieAuth`). */
     getToken: () => string | null;
+    /**
+     * Connect even with no token, relying on the HttpOnly session cookie the
+     * browser sends on the upgrade (#69, #107). Without a valid cookie the
+     * server refuses with 4001, so this is for pages that know the person is
+     * signed in.
+     */
+    cookieAuth?: boolean;
     WebSocket?: SocketCtor;
     backoff?: { baseMs?: number; maxMs?: number };
     /** No frame for this long means the socket is dead (the server pings every 25 s). */
@@ -157,6 +166,7 @@ export class LiveClient {
         this.opts = {
             url: options.url,
             getToken: options.getToken,
+            cookieAuth: options.cookieAuth ?? false,
             WebSocket: options.WebSocket,
             baseMs: options.backoff?.baseMs ?? 500,
             maxMs: options.backoff?.maxMs ?? 30_000,
@@ -265,7 +275,7 @@ export class LiveClient {
         if (this.socket) return;
         this.clearReconnect();
         const token = this.opts.getToken();
-        if (!token) return this.setStatus("idle");
+        if (!token && !this.opts.cookieAuth) return this.setStatus("idle");
         const Ctor = this.opts.WebSocket ?? (globalThis as any).WebSocket;
         if (!Ctor) return this.setStatus("idle");
 
@@ -277,7 +287,7 @@ export class LiveClient {
         this.watchOnline();
 
         socket.onopen = () => {
-            socket.send(JSON.stringify({ type: "auth", v: PROTOCOL_VERSION, token }));
+            if (token) socket.send(JSON.stringify({ type: "auth", v: PROTOCOL_VERSION, token }));
             this.touch();
         };
         socket.onmessage = (ev) => {

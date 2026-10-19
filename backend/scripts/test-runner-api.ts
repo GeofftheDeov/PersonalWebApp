@@ -422,6 +422,10 @@ async function main() {
             const r = id ? await row(id) : null;
             check("recording without a runner is 201 with a null runner", res.status === 201 && r?.runner === null, { status: res.status, r });
             if (id) await pool.query(`DELETE FROM agent_runs WHERE id = $1`, [id]);
+            const empty = await record({ skill: SKILL, trigger: "manual", ok: true, runner: "", summary: `t138 no runner ${tag}` });
+            const er = empty.json?.run?.id ? await row(Number(empty.json.run.id)) : null;
+            check("an empty runner name is stored as null", empty.status === 201 && er?.runner === null, { status: empty.status, er });
+            if (er) await pool.query(`DELETE FROM agent_runs WHERE id = $1`, [er.id]);
             const long = await record({ skill: SKILL, trigger: "manual", ok: true, runner: runner138 + "x".repeat(200) });
             const lr = await row(Number(long.json?.run?.id));
             check("a long runner name is cut to 100 characters, as on claim",

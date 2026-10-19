@@ -1,6 +1,6 @@
 import express from 'express';
 import crypto from 'crypto';
-import { claimNext, completeRun, isSkill, isRecordedTrigger, recordFinishedRun, RECORDED_TRIGGERS } from '../services/agentRuns.js';
+import { claimNext, completeRun, isSkill, isRecordedTrigger, recordFinishedRun, RECORDED_TRIGGERS, type RunResult } from '../services/agentRuns.js';
 import { pullVault } from '../services/vaultSync.js';
 
 /**
@@ -26,6 +26,20 @@ const authenticateRunner = (req: express.Request, res: express.Response, next: e
 };
 
 router.use(authenticateRunner);
+
+/**
+ * A run's outcome from a complete or record body: `ok` must be exactly true,
+ * and a summary or output path that isn't a string is none. `usage` is an
+ * optional `{ costUsd, inputTokens, outputTokens, durationMs }` (#137), passed
+ * on unchecked: bad fields are stored as null, never a 4xx, since the vault's
+ * runner lags the server.
+ */
+const readResult = (body: any): RunResult => ({
+    ok: body?.ok === true,
+    summary: typeof body?.summary === 'string' ? body.summary : undefined,
+    outputPath: typeof body?.outputPath === 'string' ? body.outputPath : undefined,
+    usage: body?.usage,
+});
 
 /** 200 with { run } when there is work, 204 when there is none. */
 router.post('/claim', async (req, res) => {
@@ -60,12 +74,9 @@ router.post('/runs', async (req, res) => {
         const run = await recordFinishedRun({
             skill: body.skill,
             trigger: body.trigger,
-            ok: body.ok === true,
             runner: typeof body.runner === 'string' ? body.runner : undefined,
             startedAt: body.startedAt,
-            summary: typeof body.summary === 'string' ? body.summary : undefined,
-            outputPath: typeof body.outputPath === 'string' ? body.outputPath : undefined,
-            usage: body.usage,
+            ...readResult(body),
         });
         // As on complete: the run's output may already be on its way through the vault.
         void pullVault();
@@ -81,14 +92,7 @@ router.post('/runs/:id/complete', async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'bad run id' });
     try {
-        const run = await completeRun(id, {
-            ok: req.body?.ok === true,
-            summary: typeof req.body?.summary === 'string' ? req.body.summary : undefined,
-            outputPath: typeof req.body?.outputPath === 'string' ? req.body.outputPath : undefined,
-            // Optional { costUsd, inputTokens, outputTokens, durationMs } (#137). Bad
-            // fields are stored as null, never a 4xx: the vault's runner lags the server.
-            usage: req.body?.usage,
-        });
+        const run = await completeRun(id, readResult(req.body));
         if (!run) return res.status(409).json({ error: 'run is not running (unknown, already completed, or expired)' });
         // The output travels through the vault; Obsidian Git may not have pushed
         // yet, but an early pull is cheap and often catches it.

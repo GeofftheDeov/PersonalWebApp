@@ -10,6 +10,8 @@ import {
 } from "../os/ask.js";
 import { COMMANDS, isAllowedPage } from "../os/commands.js";
 import type { OsModel } from "../os/model.js";
+import { modelFromEnv } from "../os/haiku.js";
+import { askModel, type Tier2Log } from "../os/tier2.js";
 import { logAsk } from "../os/askLog.js";
 import { confirmProposal, createProposal, type Enqueue } from "../os/proposals.js";
 import { enqueueRun, isSkill, type SkillId } from "../services/agentRuns.js";
@@ -37,29 +39,23 @@ export interface OsRouterDeps {
     /** Tier 1's command table, in match order. */
     commands?: readonly Command[];
     /**
-     * Tier 2's model client (#154). null (the default until #154 wires the
-     * Haiku client) means no tier 2: an ask no command matches is
-     * `not_understood`. Tier 1 never calls it.
+     * Tier 2's model client (os/tier2.ts), called only when no command
+     * matches. A function is resolved on each ask: the default, modelFromEnv,
+     * gives the Haiku client, or null without ANTHROPIC_API_KEY. null means
+     * tier 2 is unavailable while tier 1 keeps working.
      */
-    model?: OsModel | null;
+    model?: OsModel | null | (() => OsModel | null);
     /** Queues a confirmed proposal's run: the RUN button's enqueue, duplicate check included. */
     enqueue?: Enqueue;
 }
 
-const NOT_UNDERSTOOD: AskReply = {
-    tier: 1, kind: "not_understood",
-    say: "Sorry, I didn't understand that.",
-    display: "Try “open alpaca”, “show the briefs” or “run the brief”.",
-};
 const FAILED: AskReply = { tier: 1, kind: "unavailable", say: "Sorry, something went wrong answering that." };
 const NOT_PROPOSED: AskReply = { tier: 1, kind: "unavailable", say: "Sorry, I couldn't set up that run. Nothing was queued." };
 
 export function createOsRouter({
-    now = () => new Date(), tiles = TILES, db = pool, commands = COMMANDS, model = null, enqueue = enqueueRun,
+    now = () => new Date(), tiles = TILES, db = pool, commands = COMMANDS, model = modelFromEnv, enqueue = enqueueRun,
 }: OsRouterDeps = {}) {
     const router = express.Router();
-    // Taken now so tests already pin "tier 1 never calls the model"; tier 2 (#154) uses it.
-    void model;
 
     const overview = (at: Date) => buildOverview(tiles, { now: at, db });
 
@@ -97,9 +93,11 @@ export function createOsRouter({
         const accountId: string = req.adminUser.id;
 
         const normalised = normaliseAsk(text);
-        let reply: AskReply = NOT_UNDERSTOOD;
+        let reply: AskReply;
         let intent: string | null = null;
         let error: string | null = null;
+        /** Tier 2's model call: model id, tokens and cost, logged with the ask. */
+        let call: Tier2Log["call"] = null;
         /** A skill to propose (tier 3): the reply becomes a proposal once its row is written. */
         let propose: SkillId | null = null;
 
@@ -124,10 +122,15 @@ export function createOsRouter({
                 error = describeError(err);
                 reply = FAILED;
             }
+        } else {
+            // No match: tier 2 (#154), the model. askModel never throws.
+            let built: Promise<Overview> | null = null;
+            const t2 = await askModel({ model, now: at, text, overview: () => (built ??= overview(at)) });
+            reply = t2.reply;
+            ({ intent, error, call } = t2.log);
         }
-        // No match: tier 2 (#154) goes here, through `model`. Until then, not understood.
 
-        const entry = { accountId, askedAt: at, text, source: source as AskSource, intent, error };
+        const entry = { accountId, askedAt: at, text, source: source as AskSource, intent, error, ...call };
         if (propose) {
             // The row IS the proposal: without it there's nothing to confirm, so the ask fails.
             try {

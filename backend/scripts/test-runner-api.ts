@@ -1,7 +1,7 @@
 /**
  * The runner API (/api/runner), driven the way the PC runner and the admin
- * page drive it (spec #135; started by #137, later tickets extend it: #159
- * adds the W4 skills).
+ * page drive it (spec #135; started by #137, later tickets extend it: #138
+ * records runs that finished outside the queue, #159 adds the W4 skills).
  *
  * Mounts the real admin router (which carries /admin/briefs, where the RUN
  * button enqueues) and the real runner router, then drives them over HTTP: the
@@ -253,6 +253,219 @@ async function main() {
             check("complete without the runner token gets 401", res.status === 401, res);
         }
 
+        // ══ #138: recording a run that finished outside the queue ══════════════
+        // POST /api/runner/runs, called once by a vault wrapper after a scheduled
+        // (Task Scheduler) or manual (terminal) run. No retry, so no idempotency.
+        const runner138 = `t138-${tag}`;
+        const record = (body: unknown) => asRunner("/runs", body);
+        const recordedCount = async () =>
+            Number((await pool.query(`SELECT count(*) FROM agent_runs WHERE runner = $1`, [runner138])).rows[0].count);
+        const ms = (v: unknown) => (v === null || v === undefined ? NaN : new Date(v as string).getTime());
+        const near = (v: unknown, at: number, slackMs = 15_000) => Math.abs(ms(v) - at) <= slackMs;
+
+        // ── auth ───────────────────────────────────────────────────────────────
+        {
+            const before = await recordedCount();
+            const body = { skill: SKILL, trigger: "scheduled", ok: true, runner: runner138 };
+            const none = await send("POST", "/api/runner/runs", {}, body);
+            const wrong = await send("POST", "/api/runner/runs", { authorization: "Bearer wrong" }, body);
+            const bare = await send("POST", "/api/runner/runs", { authorization: process.env.RUNNER_TOKEN! }, body);
+            check("recording without the runner token gets 401", none.status === 401, none);
+            check("recording with a wrong token gets 401", wrong.status === 401, wrong);
+            check("recording with the token but no Bearer prefix gets 401", bare.status === 401, bare);
+            const adminTry = await send("POST", "/api/runner/runs", { authorization: `Bearer ${adminToken}` }, body);
+            check("an admin JWT is not a runner token (401)", adminTry.status === 401, adminTry);
+            check("a refused record writes no row", (await recordedCount()) === before, await recordedCount());
+        }
+
+        // ── validation: the skill and the trigger ──────────────────────────────
+        {
+            const before = await recordedCount();
+            const ok = { skill: SKILL, trigger: "scheduled", ok: true, runner: runner138 };
+            const refused: [string, unknown][] = [
+                ["an unknown skill", { ...ok, skill: "t138-not-a-skill" }],
+                ["a skill in the wrong case", { ...ok, skill: "Morning-Brief" }],
+                ["a skill with trailing space", { ...ok, skill: "morning-brief " }],
+                ["a missing skill", { trigger: "scheduled", ok: true, runner: runner138 }],
+                ["a non-string skill", { ...ok, skill: ["morning-brief"] }],
+                ["trigger 'button' (button runs go through the queue)", { ...ok, trigger: "button" }],
+                ["a missing trigger", { skill: SKILL, ok: true, runner: runner138 }],
+                ["an unknown trigger", { ...ok, trigger: "cron" }],
+                ["a trigger in the wrong case", { ...ok, trigger: "Scheduled" }],
+                ["a null trigger", { ...ok, trigger: null }],
+                ["a body that's an array", [ok]],
+            ];
+            for (const [label, body] of refused) {
+                const res = await record(body);
+                check(`recording with ${label} gets 400 with an error`, res.status === 400 && typeof res.json?.error === "string", res);
+            }
+            check("a 400 writes no row", (await recordedCount()) === before, await recordedCount());
+        }
+
+        // ── a scheduled run with everything ────────────────────────────────────
+        {
+            const startedAt = new Date(Date.now() - 20 * 60_000);
+            startedAt.setUTCMilliseconds(123);
+            const res = await record({
+                skill: SKILL, trigger: "scheduled", ok: true, runner: runner138, startedAt: startedAt.toISOString(),
+                summary: "brief status: ok", outputPath: "outputs/briefs/2026-10-18.md",
+                usage: { costUsd: 0.4321, inputTokens: 1_234_567, outputTokens: 8_910, durationMs: 95_432 },
+            });
+            const id = Number(res.json?.run?.id);
+            const r = id ? await row(id) : null;
+            check("recording a scheduled run answers 201 with { run }", res.status === 201 && id > 0, res);
+            check("the row is a succeeded scheduled run, never queued or running",
+                r?.skill === SKILL && r?.status === "succeeded" && r?.trigger === "scheduled" && r?.runner === runner138, r);
+            check("claimed_at is the startedAt it sent (in the last 24 hours)", ms(r?.claimed_at) === startedAt.getTime(),
+                { claimed_at: r?.claimed_at, startedAt });
+            check("finished_at is now", near(r?.finished_at, Date.now()), r?.finished_at);
+            check("requested_at is the start too, so the history lists it when it started",
+                ms(r?.requested_at) === startedAt.getTime(), r?.requested_at);
+            check("the usage is stored",
+                r?.cost_usd === 0.4321 && r?.input_tokens === 1_234_567 && r?.output_tokens === 8_910 && r?.duration_ms === 95_432, r);
+            check("the summary and output path are stored",
+                r?.summary === "brief status: ok" && r?.output_path === "outputs/briefs/2026-10-18.md", r);
+            check("the response's run is the stored row",
+                res.json?.run?.status === "succeeded" && res.json?.run?.trigger === "scheduled" && res.json?.run?.cost_usd === 0.4321
+                && ms(res.json?.run?.claimed_at) === startedAt.getTime(), res.json?.run);
+        }
+
+        // ── a failed manual run, with the PowerShell wrapper's own timestamp format ──
+        {
+            const startedAt = new Date(Date.now() - 3 * 60_000);
+            const ps = startedAt.toISOString();   // the wrapper writes yyyy-MM-ddTHH:mm:ss.fffZ, which is this
+            const res = await record({ skill: "lint-wiki", trigger: "manual", ok: false, runner: runner138, startedAt: ps,
+                summary: "lint_wiki.ps1 exited 1" });
+            const r = await row(Number(res.json?.run?.id));
+            check("ok: false records a failed manual run (201)",
+                res.status === 201 && r?.status === "failed" && r?.trigger === "manual" && r?.skill === "lint-wiki"
+                && ms(r?.claimed_at) === startedAt.getTime(), { status: res.status, r });
+            check("a run that reports no usage stores null usage, never 0",
+                r?.cost_usd === null && r?.input_tokens === null && r?.output_tokens === null && r?.duration_ms === null, r);
+
+            const offset = new Date(Date.now() - 10 * 60_000);
+            offset.setUTCMilliseconds(0);
+            const local = new Date(offset.getTime() - 5 * 3_600_000).toISOString().slice(0, 19) + "-05:00";
+            const res2 = await record({ skill: SKILL, trigger: "manual", ok: true, runner: runner138, startedAt: local });
+            check("a startedAt with a UTC offset is read as that instant",
+                res2.status === 201 && ms((await row(Number(res2.json?.run?.id)))?.claimed_at) === offset.getTime(),
+                { local, json: res2.json });
+
+            const yes = await record({ skill: SKILL, trigger: "manual", ok: "yes", runner: runner138 });
+            check("anything but ok: true is recorded as failed, as on complete",
+                yes.status === 201 && (await row(Number(yes.json?.run?.id)))?.status === "failed", yes);
+        }
+
+        // ── startedAt outside the window, in the future or unreadable: now ─────
+        {
+            const H = 3_600_000;
+            const fallbacks: [string, unknown][] = [
+                ["25 hours ago", new Date(Date.now() - 25 * H).toISOString()],
+                ["a week ago", new Date(Date.now() - 7 * 24 * H).toISOString()],
+                ["an hour in the future", new Date(Date.now() + H).toISOString()],
+                ["a minute in the future", new Date(Date.now() + 60_000).toISOString()],
+                ["missing", undefined],
+                ["null", null],
+                ["not a date", "yesterday"],
+                ["an impossible day", "2026-02-30T06:45:00Z"],
+                ["a date with no time", new Date().toISOString().slice(0, 10)],
+                ["a time with no offset (whose clock?)", new Date(Date.now() - H).toISOString().slice(0, 19)],
+                ["a US-style date", "10/18/2026 06:45"],
+                ["PowerShell 5.1's DateTime JSON", `/Date(${Date.now() - H})/`],
+                ["epoch milliseconds", Date.now() - H],
+                ["an object", { value: new Date(Date.now() - H).toISOString() }],
+            ];
+            for (const [label, startedAt] of fallbacks) {
+                const res = await record({ skill: SKILL, trigger: "scheduled", ok: true, runner: runner138, startedAt });
+                const r = res.json?.run?.id ? await row(Number(res.json.run.id)) : null;
+                check(`startedAt ${label}: still 201, and claimed_at falls back to now (= finished_at)`,
+                    res.status === 201 && r?.claimed_at && ms(r.claimed_at) === ms(r.finished_at) && near(r.claimed_at, Date.now()),
+                    { status: res.status, r });
+            }
+            const edge = new Date(Date.now() - 24 * H + 5 * 60_000);
+            const res = await record({ skill: SKILL, trigger: "scheduled", ok: true, runner: runner138, startedAt: edge.toISOString() });
+            check("startedAt just inside 24 hours is kept",
+                res.status === 201 && ms((await row(Number(res.json?.run?.id)))?.claimed_at) === edge.getTime(), res.json);
+        }
+
+        // ── usage, summary and output path are read as on complete ─────────────
+        for (const [label, usage, want] of malformed) {
+            const res = await record({ skill: SKILL, trigger: "manual", ok: true, runner: runner138, usage });
+            const r = res.json?.run?.id ? await row(Number(res.json.run.id)) : null;
+            const got = r && { cost_usd: r.cost_usd, input_tokens: r.input_tokens, output_tokens: r.output_tokens, duration_ms: r.duration_ms };
+            check(`recorded malformed usage (${label}): 201, stored as null field by field`,
+                res.status === 201 && JSON.stringify(got) === JSON.stringify(want), { status: res.status, got, want });
+        }
+        for (const usage of ["0.5", 42, [0.5, 1, 2, 3], null, true]) {
+            const res = await record({ skill: SKILL, trigger: "manual", ok: true, runner: runner138, usage });
+            const r = res.json?.run?.id ? await row(Number(res.json.run.id)) : null;
+            check(`recorded usage of ${JSON.stringify(usage)} is ignored: 201, all usage null`,
+                res.status === 201 && r?.cost_usd === null && r?.input_tokens === null && r?.output_tokens === null
+                && r?.duration_ms === null, { status: res.status, r });
+        }
+        {
+            const res = await record({ skill: SKILL, trigger: "manual", ok: true, runner: runner138,
+                summary: "s".repeat(600), outputPath: "p".repeat(400) });
+            const r = await row(Number(res.json?.run?.id));
+            check("a long summary and output path are truncated (500 and 300), as on complete",
+                res.status === 201 && r?.summary === "s".repeat(500) && r?.output_path === "p".repeat(300), { status: res.status });
+            const res2 = await record({ skill: SKILL, trigger: "manual", ok: true, runner: runner138, summary: 42, outputPath: ["x"] });
+            const r2 = await row(Number(res2.json?.run?.id));
+            check("a non-string summary or output path is stored as null",
+                res2.status === 201 && r2?.summary === null && r2?.output_path === null, { status: res2.status, r2 });
+        }
+
+        // ── runner is optional ─────────────────────────────────────────────────
+        {
+            const res = await record({ skill: SKILL, trigger: "manual", ok: true, summary: `t138 no runner ${tag}` });
+            const id = Number(res.json?.run?.id);
+            const r = id ? await row(id) : null;
+            check("recording without a runner is 201 with a null runner", res.status === 201 && r?.runner === null, { status: res.status, r });
+            if (id) await pool.query(`DELETE FROM agent_runs WHERE id = $1`, [id]);
+            const empty = await record({ skill: SKILL, trigger: "manual", ok: true, runner: "", summary: `t138 no runner ${tag}` });
+            const er = empty.json?.run?.id ? await row(Number(empty.json.run.id)) : null;
+            check("an empty runner name is stored as null", empty.status === 201 && er?.runner === null, { status: empty.status, er });
+            if (er) await pool.query(`DELETE FROM agent_runs WHERE id = $1`, [er.id]);
+            const long = await record({ skill: SKILL, trigger: "manual", ok: true, runner: runner138 + "x".repeat(200) });
+            const lr = await row(Number(long.json?.run?.id));
+            check("a long runner name is cut to 100 characters, as on claim",
+                long.status === 201 && lr?.runner === (runner138 + "x".repeat(200)).slice(0, 100), lr?.runner);
+            if (lr) await pool.query(`DELETE FROM agent_runs WHERE id = $1`, [lr.id]);
+        }
+
+        // ── not idempotent: a second post is a second row ──────────────────────
+        {
+            const body = { skill: SKILL, trigger: "scheduled", ok: true, runner: runner138, startedAt: new Date(Date.now() - 60_000).toISOString() };
+            const a = await record(body);
+            const b = await record(body);
+            check("posting the same run twice records two rows",
+                a.status === 201 && b.status === 201 && Number(a.json?.run?.id) !== Number(b.json?.run?.id), { a: a.json, b: b.json });
+        }
+
+        // ── a recorded run never touches the queue ─────────────────────────────
+        {
+            const rec = await record({ skill: SKILL, trigger: "scheduled", ok: true, runner: runner138 });
+            const recId = Number(rec.json?.run?.id);
+            const claim = await asRunner("/claim", { runner: runner138, skills: SKILLS.map((k) => k.id) });
+            check("with only recorded runs in the table, claim finds nothing (204)", claim.status === 204, claim);
+            const enq = await asAdmin("/briefs/runs", { skill: SKILL });
+            check("a recorded run doesn't block an enqueue of the same skill (201, created)",
+                enq.status === 201 && enq.json?.created === true && Number(enq.json?.run?.id) !== recId, enq);
+            const got = await asRunner("/claim", { runner: `t137-${tag}`, skills: [SKILL] });
+            check("the claim then gets the enqueued run, not the recorded one",
+                got.status === 200 && Number(got.json?.run?.id) === Number(enq.json?.run?.id), got);
+            const late = await complete(recId, { ok: false, summary: "late" });
+            check("a recorded run can't be completed (409), so its outcome stands",
+                late.status === 409 && (await row(recId))?.status === "succeeded", late);
+            await complete(Number(got.json?.run?.id), { ok: true });
+            const recordedFailed = await record({ skill: SKILL, trigger: "manual", ok: false, runner: runner138 });
+            const enq2 = await asAdmin("/briefs/runs", { skill: SKILL });
+            check("nor does a recorded failed run (201, created)",
+                recordedFailed.status === 201 && enq2.status === 201 && enq2.json?.created === true, enq2);
+            const got2 = await asRunner("/claim", { runner: `t137-${tag}`, skills: [SKILL] });
+            await complete(Number(got2.json?.run?.id), { ok: true });
+        }
+
         // ══ W4 (#159): ingest-debrief, lint-wiki and weekly-review are runnable ══
         const NEW_SKILLS = [
             { id: "ingest-debrief", label: "Ingest debrief", output: "projects/alpaca-trading-bot/market-state.md" },
@@ -399,7 +612,8 @@ async function main() {
             }
         }
     } finally {
-        await pool.query(`DELETE FROM agent_runs WHERE runner = ANY($1) OR summary LIKE $2`, [[`t137-${tag}`, `t159-${tag}`], `t137 legacy ${tag}`]);
+        await pool.query(`DELETE FROM agent_runs WHERE runner = ANY($1) OR summary = ANY($2) OR runner LIKE $3`,
+            [[`t137-${tag}`, `t159-${tag}`], [`t137 legacy ${tag}`, `t138 no runner ${tag}`], `t138-${tag}%`]);
         if (adminId) {
             await pool.query(`DELETE FROM agent_runs WHERE requested_by = $1`, [adminId]);
             await pool.query(`DELETE FROM accounts WHERE id = $1`, [adminId]);

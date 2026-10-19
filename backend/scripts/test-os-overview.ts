@@ -15,6 +15,9 @@
  *
  *   DATABASE_URL=postgresql://postgres@127.0.0.1:5433/t139_test npx tsx scripts/test-os-overview.ts
  *
+ * OBSIDIAN_VAULT_PATH points at a temporary vault (scripts/temp-vault.ts),
+ * never the real one; the brief tile reads its briefs from there.
+ *
  * Adding a tile (#141-#145): seed its rows, then add cases to the "tiles"
  * section below; the degradation and no-external-calls cases already cover
  * every tile in TILES. Don't stop this script with `pkill -f`: it matches the
@@ -31,6 +34,7 @@ import { createOsRouter } from "../routes/osRoutes.js";
 import { TILES } from "../os/tiles/index.js";
 import { ok, type TileSource } from "../os/overview.js";
 import { signJwt } from "../utils/jwt.js";
+import { createTempVault } from "./temp-vault.js";
 
 if (!/(\/\/|@)(127\.0\.0\.1|localhost)[:/]/.test(process.env.DATABASE_URL ?? "")) {
     console.error("\n  Refusing to run: DATABASE_URL must be a local throwaway database.\n");
@@ -65,6 +69,10 @@ const tileHtml = (html: string, id: string) =>
     html.match(new RegExp(`<section[^>]*data-tile="${id}"[^>]*>[\\s\\S]*?</section>`))?.[0] ?? "";
 
 async function main() {
+    // The brief tile reads the local vault checkout: a throwaway one, set before any tile builds.
+    const vault = createTempVault("t142");
+    process.env.OBSIDIAN_VAULT_PATH = vault.dir;
+
     // The clock the harness router reads; each case sets it.
     let clock = new Date();
     const prod = express();
@@ -144,6 +152,9 @@ async function main() {
         check("/admin/os has a Claude usage tile, ahead of the Alpaca tile",
             tileTag(osPage.body, "usage") !== null
                 && osPage.body.indexOf(`data-tile="usage"`) < osPage.body.indexOf(`data-tile="alpaca"`));
+        check("/admin/os has a Brief & runner tile, after the Alpaca tile",
+            tileTag(osPage.body, "brief") !== null
+                && osPage.body.indexOf(`data-tile="alpaca"`) < osPage.body.indexOf(`data-tile="brief"`));
 
         // ── gate ────────────────────────────────────────────────────────────
         for (const path of ["/admin/os", "/admin/os/api/overview"]) {
@@ -344,6 +355,111 @@ async function main() {
         await pool.query(`ALTER TABLE agent_runs RENAME COLUMN cost_usd_t144_renamed TO cost_usd`);
         usageRenamed = false;
 
+        // ── Brief & runner tile (#142): the next brief and the latest one ────
+        // The morning brief runs weekdays at 06:45 Central. In 2026, DST ends
+        // Sun Nov 1 (06:45 is 11:45Z before, 12:45Z after) and starts Sun Mar 8.
+        const briefAt = async (at: Date) => {
+            clock = at;
+            return (await get(H.base, "/admin/os/api/overview", adminToken)).json?.tiles?.brief;
+        };
+        const briefPage = async () => tileHtml((await get(H.base, "/admin/os", adminToken)).body, "brief");
+        const nextRunCases: [string, string, string][] = [
+            // [case, now, expected next run]
+            ["Friday evening is followed by Monday 06:45", "2026-10-09T23:00:00Z", "2026-10-12T11:45:00.000Z"],
+            ["Friday just after 06:45 is followed by Monday", "2026-10-09T11:46:00Z", "2026-10-12T11:45:00.000Z"],
+            ["Saturday is followed by Monday", "2026-10-10T17:00:00Z", "2026-10-12T11:45:00.000Z"],
+            ["late Sunday is followed by Monday", "2026-10-12T04:59:00Z", "2026-10-12T11:45:00.000Z"],
+            ["Monday just before 06:45 is followed by today's 06:45", "2026-10-12T11:44:00Z", "2026-10-12T11:45:00.000Z"],
+            ["Monday at 06:45 exactly is followed by Tuesday", "2026-10-12T11:45:00Z", "2026-10-13T11:45:00.000Z"],
+            ["Monday just after 06:45 is followed by Tuesday", "2026-10-12T11:46:00Z", "2026-10-13T11:45:00.000Z"],
+            ["Central midnight starts the new day, not UTC midnight", "2026-10-13T03:00:00Z", "2026-10-13T11:45:00.000Z"],
+            ["across the fall-back weekend, Monday 06:45 is CST", "2026-10-30T23:00:00Z", "2026-11-02T12:45:00.000Z"],
+            ["across the spring-forward weekend, Monday 06:45 is CDT", "2026-03-07T00:00:00Z", "2026-03-09T11:45:00.000Z"],
+            ["on the fall-back Sunday itself, Monday 06:45 is CST", "2026-11-01T07:30:00Z", "2026-11-02T12:45:00.000Z"],
+        ];
+        for (const [name, at, expected] of nextRunCases) {
+            const b = await briefAt(new Date(at));
+            check(`next brief: ${name}`, b?.status === "ok" && b.nextRun === expected, { at, nextRun: b?.nextRun, expected });
+        }
+        const sched = await briefAt(new Date("2026-10-12T17:00:00Z"));
+        check("the schedule is reported as data: weekdays at 06:45 America/Chicago",
+            JSON.stringify(sched?.schedule) === JSON.stringify({ days: [1, 2, 3, 4, 5], at: "06:45", timeZone: "America/Chicago" }),
+            sched?.schedule);
+
+        // The latest brief: its date, status and unavailable sections.
+        vault.clearBriefs();
+        vault.writeBrief("2026-10-08", { generated: "2026-10-08T06:47-05:00", run: "scheduled", status: "ok", failed: "[]" });
+        vault.writeBrief("2026-10-09", {
+            generated: "2026-10-09T06:52-05:00", run: "scheduled", status: "partial", failed: "[trading.account, email]",
+        });
+        const sat = await briefAt(new Date("2026-10-10T15:00:00Z"));
+        check("the latest brief is the newest: its date, status and unavailable sections",
+            sat?.latest?.date === "2026-10-09" && sat.latest.status === "partial"
+                && JSON.stringify(sat.latest.failed) === JSON.stringify(["trading.account", "email"])
+                && sat.latest.run === "scheduled" && sat.latest.generated === "2026-10-09T06:52-05:00", sat?.latest);
+        check("a weekend day with no brief is not flagged", sat?.missingToday === false && sat.dueToday === null, sat);
+        const satPage = await get(H.base, "/admin/os", adminToken);
+        const satHtml = tileHtml(satPage.body, "brief");
+        check("the tile shows the latest brief's date, its partial status and the unavailable sections, and links to /admin/briefs",
+            tileTag(satPage.body, "brief")?.status === "ok" && satHtml.includes("Oct 9") && /partial/.test(satHtml)
+                && satHtml.includes("trading.account") && satHtml.includes("email")
+                && /href="\/admin\/briefs\?token=/.test(satHtml) && /Mon 6:45 AM/.test(satHtml) && /Mon, Oct 12 · runs weekdays at 6:45 AM CT/.test(satHtml), satHtml);
+        const sun = await briefAt(new Date("2026-10-11T18:00:00Z"));
+        check("Sunday with no brief is not flagged either", sun?.missingToday === false, sun);
+
+        // Monday with no brief yet: not before 06:45, flagged from 06:45.
+        const monEarly = await briefAt(new Date("2026-10-12T11:44:00Z"));
+        check("a weekday with no brief yet is not flagged before 06:45",
+            monEarly?.missingToday === false && monEarly.dueToday === "2026-10-12T11:45:00.000Z", monEarly);
+        const monEarlyHtml = await briefPage();
+        check("...and the tile shows no missing-brief flag", !/data-flag="brief-missing"/.test(monEarlyHtml), monEarlyHtml);
+        const monLate = await briefAt(new Date("2026-10-12T12:30:00Z"));
+        check("a weekday with no brief after 06:45 is flagged, with the time it was due",
+            monLate?.missingToday === true && monLate.dueToday === "2026-10-12T11:45:00.000Z" && monLate.today === "2026-10-12"
+                && monLate.latest?.date === "2026-10-09", monLate);
+        const monLateHtml = await briefPage();
+        const flag = monLateHtml.match(/<div[^>]*data-flag="brief-missing"[^>]*>[\s\S]*?<\/div>/)?.[0] ?? "";
+        check("...and the tile flags it as a prompt to look, not a failure",
+            /6:45 AM CT/.test(flag) && /worth a look/i.test(flag) && !/fail/i.test(flag), monLateHtml);
+        // At 23:00 Central on Monday it's already Tuesday in UTC; Monday's brief is still the one due.
+        const monNight = await briefAt(new Date("2026-10-13T04:00:00Z"));
+        check("late Monday evening (Tuesday in UTC) still flags Monday's missing brief",
+            monNight?.missingToday === true && monNight.today === "2026-10-12", monNight);
+
+        vault.writeBrief("2026-10-12", { generated: "2026-10-12T06:49-05:00", run: "scheduled", status: "ok", failed: "[]" });
+        const monDone = await briefAt(new Date("2026-10-12T12:30:00Z"));
+        check("once today's brief is in, nothing is flagged and it is the latest",
+            monDone?.missingToday === false && monDone.latest?.date === "2026-10-12" && monDone.latest.status === "ok"
+                && monDone.latest.failed?.length === 0, monDone);
+        const monDoneHtml = await briefPage();
+        check("...and the tile shows today's brief as ok, with no flag",
+            !/data-flag="brief-missing"/.test(monDoneHtml) && /data-brief-status="ok"/.test(monDoneHtml), monDoneHtml);
+
+        // No brief at all: the tile stays ok with the next run, and says why there's no brief.
+        vault.clearBriefs();
+        const none = await briefAt(new Date("2026-10-12T12:30:00Z"));
+        check("with no briefs at all the tile is still ok, with the next run, no latest brief and a note",
+            none?.status === "ok" && none.nextRun === "2026-10-13T11:45:00.000Z" && none.latest === null
+                && /no briefs yet/i.test(none.latestNote ?? "") && none.missingToday === true, none);
+        const noneHtml = await briefPage();
+        check("...and the tile says there are no briefs yet, and still flags today's",
+            /no briefs yet/i.test(noneHtml) && /data-flag="brief-missing"/.test(noneHtml), noneHtml);
+
+        delete process.env.OBSIDIAN_VAULT_PATH;
+        const unset = await briefAt(new Date("2026-10-12T12:30:00Z"));
+        const unsetHtml = await briefPage();
+        check("with OBSIDIAN_VAULT_PATH unset the tile stays ok, names the variable, and flags nothing it can't know",
+            unset?.status === "ok" && unset.nextRun === "2026-10-13T11:45:00.000Z" && unset.latest === null
+                && /OBSIDIAN_VAULT_PATH/.test(unset.latestNote ?? "") && unset.missingToday === false
+                && /OBSIDIAN_VAULT_PATH/.test(unsetHtml) && !/data-flag="brief-missing"/.test(unsetHtml), unset);
+        process.env.OBSIDIAN_VAULT_PATH = `${vault.dir}-t142-missing`;
+        const gone = await briefAt(new Date("2026-10-12T12:30:00Z"));
+        check("with the vault checkout missing the tile stays ok and says the checkout isn't there",
+            gone?.status === "ok" && gone.latest === null && /vault checkout/i.test(gone.latestNote ?? "")
+                && gone.missingToday === false, gone);
+        process.env.OBSIDIAN_VAULT_PATH = vault.dir;
+        vault.writeBrief("2026-10-12", { generated: "2026-10-12T06:49-05:00", run: "scheduled", status: "ok", failed: "[]" });
+
         // ── degradation ─────────────────────────────────────────────────────
         clock = new Date(latest.getTime() + 5 * MIN);
 
@@ -353,7 +469,8 @@ async function main() {
         const bt = broken.json?.tiles ?? {};
         check("a renamed table makes only the Alpaca tile unavailable, naming the table, and the JSON is still 200",
             broken.status === 200 && bt.alpaca?.status === "unavailable" && /alpaca_snapshots/.test(bt.alpaca.reason)
-                && bt.canary?.status === "ok" && bt.canary.accounts >= 2 && bt.usage?.status === "ok",
+                && bt.canary?.status === "ok" && bt.canary.accounts >= 2 && bt.usage?.status === "ok"
+                && bt.brief?.status === "ok",
             { status: broken.status, bt });
         check("a tile that throws is unavailable with the reason", bt.thrower?.status === "unavailable"
             && /source exploded/.test(bt.thrower.reason), bt.thrower);
@@ -396,6 +513,7 @@ async function main() {
         await pool.query(`DELETE FROM agent_runs WHERE runner = $1`, [`t144-${tag}`]).catch(() => {});
         for (const id of created) await pool.query(`DELETE FROM accounts WHERE id = $1`, [id]);
         P.server.close(); H.server.close(); D.server.close();
+        vault.remove();
     }
 
     console.log(`\n  ${pass} passed, ${fail} failed\n`);

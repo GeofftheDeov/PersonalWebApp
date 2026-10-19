@@ -373,6 +373,16 @@ export function renderOverviewPage({ token, now, overview, sources, refreshMs = 
         .dir { font-size: 0.75rem; margin-right: 0.15rem; }
         .dir-up { color: #0d9488; } .dir-down { color: #f97316; } .dir-flat { color: #666; }
         .stat-meta { color: #888; font-size: 0.75rem; margin-top: 0.6rem; }
+        .task-counts { color: #aaa; font-size: 0.8rem; margin-bottom: 0.5rem; }
+        .task-counts b { color: #fff; font-size: 0.95rem; }
+        .task-count.warn b { color: #fab219; }
+        .task-clear { color: #0d9488; font-weight: 600; font-size: 1.5rem; line-height: 1.3; }
+        .task-list { list-style: none; margin: 0; padding: 0; }
+        .task-list li { color: #e0e0e0; font-size: 0.9rem; line-height: 1.4; padding: 0.2rem 0; overflow-wrap: anywhere; }
+        .task-list a { color: #e0e0e0; }
+        .task-list a:hover { color: #fff; }
+        .task-tag { background: #fab219; color: #000; font-size: 0.6rem; letter-spacing: 1px; font-weight: bold; padding: 0.05rem 0.3rem; }
+        .task-more { margin-top: 0.3rem; }
         .warn { color: #fab219; }
         .muted { color: #777; font-size: 0.75rem; }
         .unavail { color: #bbb; font-size: 0.85rem; line-height: 1.5; overflow-wrap: anywhere; }

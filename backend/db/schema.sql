@@ -968,3 +968,5 @@ CREATE TABLE agent_runs (
 );
 CREATE INDEX idx_agent_runs_queued ON agent_runs (requested_at) WHERE status = 'queued';
 CREATE INDEX idx_agent_runs_recent ON agent_runs (requested_at DESC);
+-- At most one queued-or-running run per skill; enqueueRun relies on it (#172).
+CREATE UNIQUE INDEX idx_agent_runs_one_active ON agent_runs (skill) WHERE status IN ('queued','running');

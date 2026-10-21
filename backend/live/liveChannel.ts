@@ -5,6 +5,7 @@ import os from "os";
 import { WebSocketServer, WebSocket, type RawData } from "ws";
 import { bus as defaultBus, type EventBus, type EventMap } from "../events/index.js";
 import { verifyJwt } from "../utils/jwt.js";
+import { readUpgradeSessionCookie } from "../utils/sessionCookie.js";
 import { resolveAccountId } from "../utils/accountRefs.js";
 import { campaignThreadKey, dmThreadKey, visibleThreadKeys, type ThreadKey } from "../services/threads.js";
 import { canAccessThread } from "../services/threads.js";
@@ -21,7 +22,9 @@ import { withAttachmentUrls, type Attachment } from "../services/attachments.js"
  *   - takes upgrades on LIVE_PATH (under /api, so it stays same-origin behind
  *     the frontend's rewrite);
  *   - authenticates with the JWT from the first frame (or, less preferred, the
- *     `token` query parameter), through utils/jwt.ts like every other route;
+ *     `token` query parameter), or from this environment's session cookie on
+ *     the upgrade when the page's Origin is allowed (#107), through
+ *     utils/jwt.ts like every other route;
  *   - asks Threads which threads the person can see, at connect and again
  *     whenever a membership or friendship event names them (#105), and
  *     re-sends `ready` when a socket's set changes;
@@ -624,8 +627,11 @@ export async function attachLiveChannel(
         };
 
         // The query parameter is accepted but not preferred: URLs end up in logs.
+        // Then the session cookie (#107), which needs no frame at all. Either
+        // one starts auth now, so a first frame that follows is ignored.
         const queryToken = new URL(req.url ?? "/", "http://live").searchParams.get("token");
-        if (queryToken) startAuth(queryToken);
+        const upgradeToken = queryToken || readUpgradeSessionCookie(req);
+        if (upgradeToken) startAuth(upgradeToken);
 
         ws.on("message", (data: RawData) => {
             conn.alive = true;

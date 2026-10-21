@@ -218,6 +218,7 @@ jobs:
           GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
           SESSION_COOKIE_NAME=gtd_session
           SESSION_COOKIE_DOMAIN=.geoffthedeov.net
+          SESSION_COOKIE_ORIGINS=https://geoffthedeov.net,https://www.geoffthedeov.net,https://hearthside.geoffthedeov.net
 
     - name: Fill in the new frontend image ID in the Amazon ECS task definition
       id: frontend-task-def

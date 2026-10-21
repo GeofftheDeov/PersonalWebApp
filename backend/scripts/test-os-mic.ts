@@ -239,17 +239,27 @@ async function main() {
         check("stopped with only an interim result, that interim text is asked, whitespace tidied",
             c.asked[0] === "run my morning brief", c.asked);
     }
-    for (const code of ["not-allowed", "service-not-allowed"]) {
+    for (const [code, msg] of [["not-allowed", MIC_MESSAGES.denied], ["service-not-allowed", MIC_MESSAGES.serviceDenied]] as const) {
         const c = controller();
         c.mic.start();
         c.instances[0].error(code); c.instances[0].end();
-        check(`a "${code}" error shows the permission message and asks nothing`,
-            c.mic.state() === "denied" && c.mic.snapshot().message === MIC_MESSAGES.denied && c.asked.length === 0 && !c.mic.busy(),
+        check(`a "${code}" error shows how to fix the permission and asks nothing`,
+            c.mic.state() === "denied" && c.mic.snapshot().message === msg && c.asked.length === 0 && !c.mic.busy(),
             c.mic.snapshot());
         check(`... and the mic can be pressed again after fixing it (${code})`, c.mic.start() === true && c.instances.length === 2);
     }
+    {
+        const c = controller();
+        c.mic.start(); c.instances[0].error("not-allowed"); c.instances[0].end();
+        c.mic.clearMessage();
+        check("clearMessage() drops a leftover note", c.mic.state() === "idle" && c.mic.snapshot().message === "");
+        c.mic.start();
+        c.mic.clearMessage();
+        check("... but never the listening one", c.mic.state() === "listening" && c.mic.snapshot().message === MIC_MESSAGES.listening);
+    }
     for (const [code, msg] of [["no-speech", MIC_MESSAGES.noSpeech], ["audio-capture", MIC_MESSAGES.noMic],
-        ["network", MIC_MESSAGES.network], ["language-not-supported", MIC_MESSAGES.failed]] as const) {
+        ["network", MIC_MESSAGES.network], ["language-not-supported", MIC_MESSAGES.failed],
+        ["aborted", MIC_MESSAGES.failed]] as const) {
         const c = controller();
         c.mic.start();
         c.instances[0].results(["half a sent", false]);
@@ -317,6 +327,7 @@ async function main() {
         c.timers.advance(3000);
         check("... and if the browser never ends it, it's finished after the grace period with what was heard",
             c.asked[0] === "keep talking" && c.mic.state() === "submitting", { asked: c.asked, state: c.mic.state() });
+        check("... and the stuck recognition is aborted, releasing the microphone", r.aborted);
         r.end();
         check("... and the browser's late end doesn't ask twice", c.asked.length === 1);
     }
@@ -365,6 +376,8 @@ async function main() {
         check("the page reads SpeechRecognition or webkitSpeechRecognition and asks with source 'voice', no CDN scripts",
             /webkitSpeechRecognition/.test(html) && /SpeechRecognition/.test(html) && /OS\.ask\([^)]*'voice'\)/.test(html)
                 && !/<script[^>]+src=/.test(html));
+        check("the page has no raw line or paragraph separators (they'd break an inline script)",
+            !html.includes(String.fromCharCode(0x2028)) && !html.includes(String.fromCharCode(0x2029)));
     }
 
     // ── page scripts ────────────────────────────────────────────────────────
@@ -403,11 +416,46 @@ async function main() {
     {
         const p = bootPage({ prefixed: false });
         check("the unprefixed SpeechRecognition works too", !p.els["ask-mic"].hidden && p.OS.listen() === true && p.instances.length === 1);
+        p.instances[0].results(["what's due", false]);
+        const prevented = p.els["ask-send"].fire("click");
+        check("ASK (or Enter, which clicks it) while listening doesn't submit the box: it stops the mic",
+            prevented && p.instances[0].stopped && !p.instances[0].aborted && p.fetches.length === 0);
+        p.instances[0].results(["what's due today", true]); p.instances[0].end();
+        await flush();
+        check("... and the utterance goes as voice", p.fetches.length === 1 && p.fetches[0].body.source === "voice"
+            && p.fetches[0].body.text === "what's due today", p.fetches);
+        check("ASK when not listening isn't touched", p.els["ask-send"].fire("click") === false);
+    }
+    {
+        const p = bootPage();
+        p.OS.listen();
         p.instances[0].results(["what's", false]);
         p.els["ask-form"].fire("submit");
-        check("submitting the form while listening cancels the mic, and the shown text goes as typed",
+        check("any other submit while listening cancels the mic, and the shown text goes as typed",
             p.instances[0].aborted && p.OS.micState() === "idle" && p.fetches[0]?.body.source === "typed"
                 && p.fetches[0]?.body.text === "what's", p.fetches);
+    }
+    {
+        const p = bootPage();
+        p.els["ask-text"].value = "open alpaca";
+        p.els["ask-form"].fire("submit");
+        check("(precondition) a typed ask in flight disables ASK", p.els["ask-send"].disabled === true);
+        check("while an ask is in flight the mic won't start (the utterance would be dropped)",
+            p.OS.listen() === false && p.instances.length === 0 && p.OS.micState() === "idle");
+        await flush(); await flush();
+        check("... and once it's answered it will", p.els["ask-send"].disabled === false && p.OS.listen() === true);
+    }
+    {
+        const p = bootPage({ reply: { tier: 3, kind: "confirm_run", say: "Run the Morning brief?",
+            confirmation: { id: 7, skill: "morning-brief", label: "Morning brief", expiresAt: new Date(Date.now() + 60_000).toISOString() } } });
+        p.els["ask-text"].value = "run my morning brief";
+        p.els["ask-form"].fire("submit");
+        await flush(); await flush();
+        p.OS.listen();
+        p.instances[0].results(["ye", false]);
+        p.els["ask-confirm-no"].fire("click");
+        check("tapping Cancel on a proposal while listening wins: the mic lets go, nothing is posted",
+            p.instances[0].aborted && p.OS.micState() === "idle" && p.fetches.length === 1 && p.OS.proposal() === null);
     }
     {
         const p = bootPage();
@@ -425,10 +473,16 @@ async function main() {
         p.els["ask-mic"].fire("click");
         p.instances[0].end();
         check("a press that hears nothing leaves typed text alone", p.els["ask-text"].value === "half-typed");
+        p.OS.listen();
+        p.instances[1].results(["something gar", false]);
+        check("(precondition) the interim transcript replaced the draft in the box", p.els["ask-text"].value === "something gar");
+        p.instances[1].error("network"); p.instances[1].end();
+        check("an utterance that fails after interim results puts the typed draft back", p.els["ask-text"].value === "half-typed",
+            p.els["ask-text"].value);
         const states: string[] = [];
         p.OS.onMicState((s: any) => states.push(s.state));
         p.OS.listen(); p.OS.cancelListening();
-        check("OS.cancelListening() aborts, and onMicState hooks see it", p.instances[1].aborted && states.join(",") === "listening,idle", states);
+        check("OS.cancelListening() aborts, and onMicState hooks see it", p.instances[2].aborted && states.join(",") === "listening,idle", states);
     }
     {
         const p = bootPage();
@@ -439,6 +493,9 @@ async function main() {
             !note.hidden && note.textContent === MIC_MESSAGES.denied && p.fetches.length === 0 && note.getAttribute("data-state") === "denied",
             { hidden: note.hidden, text: note.textContent });
         check("... the mic stays visible to try again", !p.els["ask-mic"].hidden && p.OS.busy() === false);
+        p.els["ask-text"].value = "open alpaca";
+        p.els["ask-form"].fire("submit");
+        check("a typed ask afterwards clears the stale note", note.hidden && note.textContent === "", note.textContent);
     }
     {
         const p = bootPage({ recognition: false });

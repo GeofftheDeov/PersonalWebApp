@@ -34,6 +34,8 @@ export const MIC_MESSAGES = {
     unsupported: "Voice input isn't available in this browser. Type your ask instead.",
     denied: "Microphone access is blocked for this site. To fix it, open the site settings from the icon at the left "
         + "of the address bar, set Microphone to Allow, then press MIC again. You can still type.",
+    serviceDenied: "Speech recognition isn't allowed here. Check the microphone is allowed for this site (site settings, "
+        + "from the icon at the left of the address bar); on an iPhone, also turn on Siri & Dictation. You can still type.",
     listening: "Listening… press MIC again to send.",
     noSpeech: "I didn't catch that. Press MIC and try again.",
     noMic: "No microphone was found. Check one is connected, or type instead.",
@@ -62,8 +64,8 @@ export const MIC_NOTE = `<div id="ask-mic-note" class="ask-mic-note" role="statu
  *                 the ask's value (null when it failed) or the hook's
  *   onChange(snapshot)    on every change
  *   setTimeout, clearTimeout, maxMs, graceMs   for tests
- * Controller: start(), stop(), abort(), toggle(), state(), snapshot(), busy(),
- * onTranscript(fn), onState(fn).
+ * Controller: start(), stop(), abort(), toggle(), clearMessage(), state(),
+ * snapshot(), busy(), onTranscript(fn), onState(fn).
  */
 export const MIC_CONTROLLER_JS = String.raw`function createMic(opts) {
     var Rec = opts.Recognition || null, M = opts.messages;
@@ -79,14 +81,20 @@ export const MIC_CONTROLLER_JS = String.raw`function createMic(opts) {
         state = s; message = msg || '';
         var snap = snapshot();
         if (opts.onChange) { try { opts.onChange(snap); } catch (e) { console.error(e); } }
-        stateHooks.forEach(function (fn) { try { fn(snapshot()); } catch (e) { console.error(e); } });
+        stateHooks.forEach(function (fn) { try { fn(snap); } catch (e) { console.error(e); } });
     }
     function clearTimers() {
         if (cap) { clearT(cap); cap = null; }
         if (grace) { clearT(grace); grace = null; }
     }
+    // A recognition error code → [state, message]. A browser-raised 'aborted'
+    // (another app took the mic) lands on failed; abort() never gets here.
+    function outcomeFor(code) {
+        if (code === 'not-allowed') return ['denied', M.denied];
+        if (code === 'service-not-allowed') return ['denied', M.serviceDenied];
+        return ['idle', messageFor(code)];
+    }
     function messageFor(code) {
-        if (code === 'not-allowed' || code === 'service-not-allowed') return M.denied;
         if (code === 'no-speech') return M.noSpeech;
         if (code === 'audio-capture') return M.noMic;
         if (code === 'network') return M.network;
@@ -129,8 +137,8 @@ export const MIC_CONTROLLER_JS = String.raw`function createMic(opts) {
     function finish(id) {
         if (id !== session || state !== 'listening') return;
         clearTimers(); rec = null;
-        if (error === 'aborted') return set('idle');
-        if (error) return set(error === 'not-allowed' || error === 'service-not-allowed' ? 'denied' : 'idle', messageFor(error));
+        session++;   // done with this recognition: ignore anything else it sends
+        if (error) { var o = outcomeFor(error); return set(o[0], o[1]); }
         if (!text) return set('idle', M.noSpeech);
         submit(text);
     }
@@ -158,7 +166,13 @@ export const MIC_CONTROLLER_JS = String.raw`function createMic(opts) {
         var id = session;
         if (cap) { clearT(cap); cap = null; }
         try { rec.stop(); } catch (e) { /* already stopping */ }
-        if (!grace) grace = setT(function () { grace = null; finish(id); }, graceMs);
+        // Some browsers never end a stopped recognition: finish without it, and
+        // abort it so the microphone is released.
+        if (!grace) grace = setT(function () {
+            var r = rec;
+            grace = null; finish(id);
+            try { if (r) r.abort(); } catch (e) { /* already ended */ }
+        }, graceMs);
         return true;
     }
 
@@ -172,8 +186,14 @@ export const MIC_CONTROLLER_JS = String.raw`function createMic(opts) {
         return true;
     }
 
+    // Drops a leftover note ("I didn't catch that", the permission help) once
+    // the user has moved on, e.g. by typing an ask.
+    function clearMessage() {
+        if ((state === 'idle' || state === 'denied') && message) set('idle');
+    }
+
     return {
-        start: start, stop: stop, abort: abort,
+        start: start, stop: stop, abort: abort, clearMessage: clearMessage,
         toggle: function () { return state === 'listening' ? stop() : start(); },
         state: function () { return state; },
         snapshot: snapshot,
@@ -185,7 +205,9 @@ export const MIC_CONTROLLER_JS = String.raw`function createMic(opts) {
 
 /** The page script: wires createMic to the DOM and extends window.OS. Runs after the ask box's script. */
 export function micScript(): string {
-    const messagesJson = JSON.stringify(MIC_MESSAGES).replace(/</g, "\\u003c");
+    // JSON in a <script>: no "<" (it could close the tag) and no raw line or paragraph separators.
+    const messagesJson = JSON.stringify(MIC_MESSAGES)
+        .replace(new RegExp("[<" + String.fromCharCode(0x2028, 0x2029) + "]", "g"), (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
     return `
         (function () {
             var OS = window.OS;
@@ -193,8 +215,11 @@ export function micScript(): string {
             var input = document.getElementById('ask-text'), form = document.getElementById('ask-form');
             if (!OS || !btn || !note || !input) return;
             var createMic = ${MIC_CONTROLLER_JS};
+            var send = document.getElementById('ask-send');
             var Rec = window.SpeechRecognition || window.webkitSpeechRecognition || null;
             var placeholder = input.placeholder;
+            // What was in the box when the press began; put back if nothing is sent.
+            var draft = null, last = 'idle';
             var mic = createMic({
                 Recognition: Rec,
                 lang: (window.navigator && navigator.language) || 'en-US',
@@ -212,27 +237,45 @@ export function micScript(): string {
                 btn.setAttribute('aria-pressed', s.state === 'listening' ? 'true' : 'false');
                 btn.setAttribute('data-state', s.state);
                 if (s.state === 'listening') {
-                    // Typed text survives a press that hears nothing.
                     if (s.text) input.value = s.text;
                     input.placeholder = 'Listening…';
                 } else {
                     input.placeholder = placeholder;
+                    // Ended without sending (nothing heard, an error, a cancel): the typed draft comes back.
+                    if (last === 'listening' && s.state !== 'submitting' && draft !== null) input.value = draft;
+                    draft = null;
                 }
+                last = s.state;
                 note.textContent = s.message;
                 note.hidden = !s.message;
                 note.setAttribute('data-state', s.state);
             }
             render(mic.snapshot());
 
+            // An ask or confirm in flight would drop the utterance (OS.ask refuses while pending).
+            function inFlight() { return !!(send && send.disabled); }
+
             function listen() {
-                if (mic.state() === 'unsupported' || mic.busy()) return false;
+                if (mic.state() === 'unsupported' || mic.busy() || inFlight()) return false;
                 OS.cancelSpeech();   // don't capture the OS's own voice
+                draft = input.value;
                 return mic.start();
             }
 
             btn.addEventListener('click', function () { if (mic.state() === 'listening') mic.stop(); else listen(); });
-            // ASK while listening sends the box as typed; the mic lets go.
-            if (form) form.addEventListener('submit', function () { mic.abort(); });
+            // ASK (or Enter, which clicks it) while listening sends the speech as voice, not the box as typed.
+            if (send) send.addEventListener('click', function (e) {
+                if (mic.state() === 'listening') { e.preventDefault(); mic.stop(); }
+            });
+            if (form) form.addEventListener('submit', function () {
+                // Anything else that submits while listening: the box goes as typed and the mic lets go.
+                if (!mic.abort()) mic.clearMessage();
+            });
+            // Confirm or Cancel while listening: the tap wins.
+            ['ask-confirm-yes', 'ask-confirm-no'].forEach(function (id) {
+                var b = document.getElementById(id);
+                if (b) b.addEventListener('click', function () { mic.abort(); });
+            });
 
             var busy = OS.busy;
             OS.busy = function () { return mic.busy() || busy(); };

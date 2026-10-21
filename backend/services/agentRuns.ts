@@ -40,15 +40,24 @@ export function runnerOnline(): boolean {
 /**
  * Enqueue, unless the same skill is already queued or running — pressing the
  * button twice should not run the brief twice. Returns the run either way.
+ *
+ * The unique partial index idx_agent_runs_one_active (migration 0002) decides
+ * races: of two concurrent requests, one inserts and the other conflicts and
+ * gets that run back (#172). The active run can finish between the conflict
+ * and the SELECT, so that case just tries the insert again.
  */
 export async function enqueueRun(skill: SkillId, requestedBy: string | null): Promise<{ run: AgentRun; created: boolean }> {
-    const existing = await query<AgentRun>(
-        `SELECT * FROM agent_runs WHERE skill = $1 AND status IN ('queued','running')
-          ORDER BY requested_at DESC LIMIT 1`, [skill]);
-    if (existing.rows[0]) return { run: existing.rows[0], created: false };
-    const { rows } = await query<AgentRun>(
-        `INSERT INTO agent_runs (skill, requested_by) VALUES ($1, $2) RETURNING *`, [skill, requestedBy]);
-    return { run: rows[0], created: true };
+    for (let attempt = 0; ; attempt++) {
+        const inserted = await query<AgentRun>(
+            `INSERT INTO agent_runs (skill, requested_by) VALUES ($1, $2)
+             ON CONFLICT (skill) WHERE status IN ('queued','running') DO NOTHING
+             RETURNING *`, [skill, requestedBy]);
+        if (inserted.rows[0]) return { run: inserted.rows[0], created: true };
+        const existing = await query<AgentRun>(
+            `SELECT * FROM agent_runs WHERE skill = $1 AND status IN ('queued','running')`, [skill]);
+        if (existing.rows[0]) return { run: existing.rows[0], created: false };
+        if (attempt >= 2) throw new Error(`enqueueRun(${skill}): active run kept appearing and finishing`);
+    }
 }
 
 async function expireStale(): Promise<void> {

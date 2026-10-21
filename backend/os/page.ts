@@ -1,6 +1,7 @@
 import { renderPage } from "../utils/adminUi.js";
 import { centralTime, esc } from "./format.js";
 import { ADMIN_PAGES } from "./commands.js";
+import { MIC_BUTTON, MIC_NOTE, MIC_STYLES, micScript } from "./mic.js";
 import { describeError, type Overview, type Tile, type TileSource, type ViewContext } from "./overview.js";
 
 /** The page reloads itself this often while it's visible. */
@@ -53,11 +54,12 @@ const ASK_BOX = `
                 <form id="ask-form" class="ask" autocomplete="off">
                     <label for="ask-text" class="sr-only">Ask the OS</label>
                     <div class="ask-row">
-                        <span id="ask-controls" class="ask-controls"></span>
+                        <span id="ask-controls" class="ask-controls">${MIC_BUTTON}</span>
                         <input id="ask-text" name="text" type="text" maxlength="500" enterkeyhint="send"
                             placeholder="Ask, e.g. “open alpaca” or “show the briefs”">
                         <button id="ask-send" type="submit">ASK</button>
                     </div>
+                    ${MIC_NOTE}
                     <div id="ask-reply" class="ask-reply" aria-live="polite" hidden>
                         <div class="ask-say"></div>
                         <div class="ask-display muted"></div>
@@ -309,6 +311,7 @@ export function renderOverviewPage({ token, now, overview, sources, refreshMs = 
             </div>
         </div>
         <script>${askScript(token)}</script>
+        <script>${micScript()}</script>
         <script>
         // Reload while the page is visible; catch up as soon as a hidden tab comes back.
         // Never while the ask box is in use (typing, waiting, or speaking a reply).
@@ -360,6 +363,7 @@ export function renderOverviewPage({ token, now, overview, sources, refreshMs = 
         #ask-confirm-yes { background: #0d9488; color: #000; border: 0; }
         #ask-confirm-no { background: transparent; color: #ddd; border: 1px solid #555; }
         .ask-confirm button:disabled { opacity: 0.5; }
+        ${MIC_STYLES}
         .tile { border: 1px solid #333; background: #1e1e1e; padding: 1rem 1.25rem; min-width: 0; box-sizing: border-box; }
         .tile-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
         .tile-title { color: #0d9488; font-size: 0.75rem; letter-spacing: 2px; font-weight: bold; text-transform: uppercase; text-decoration: none; }

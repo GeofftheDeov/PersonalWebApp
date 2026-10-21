@@ -1,5 +1,6 @@
 import { normaliseAsk, type Command } from "./ask.js";
 import { proposalSay } from "./proposals.js";
+import { READ_BRIEF_INTENT, readTodaysBrief } from "./briefSpeech.js";
 import { SKILLS, type SkillId } from "../services/agentRuns.js";
 
 /**
@@ -70,6 +71,17 @@ const runs: Command[] = SKILLS.map((skill) => {
 });
 
 /**
+ * "read the brief" (#152): speaks today's Say block, or the Top 3 when there's
+ * none (os/briefSpeech.ts). "please read me today's brief", "read my morning
+ * brief aloud", "can you read out the briefing".
+ */
+const readBrief: Command[] = [{
+    pattern: new RegExp(`^${POLITE}read (?:me )?(?:out )?(?:the |my )?(?:todays )?(?:morning )?brief(?:ing)?(?: (?:aloud|out loud|out|to me))?(?: please)?$`),
+    intent: READ_BRIEF_INTENT,
+    handler: ({ now }) => readTodaysBrief(now),
+}];
+
+/**
  * "Yes" or "no" that reaches the router: the page answers these itself while a
  * proposal is pending (#151), so here there's nothing pending.
  */
@@ -90,5 +102,6 @@ const nothingPending: Command[] = [
 export const COMMANDS: readonly Command[] = [
     ...nothingPending,
     ...runs,
+    ...readBrief,
     ...navigation,
 ];

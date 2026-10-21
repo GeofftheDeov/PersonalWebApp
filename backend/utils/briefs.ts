@@ -29,7 +29,10 @@ export interface BriefMeta {
 }
 
 export interface Brief extends BriefMeta {
+    /** The markdown body, without its `## Say` section (the briefs page renders this). */
     body: string;
+    /** The `## Say` section as plain prose, or null when there's none (or it's empty). */
+    say: string | null;
 }
 
 /**
@@ -92,9 +95,119 @@ export function readBrief(vaultPath: string, date: string): Brief | null {
     if (!BRIEF_DATE.test(date)) return null;
     try {
         const raw = fs.readFileSync(path.join(vaultPath, BRIEFS_DIR, `${date}.md`), 'utf-8');
-        const { fields, body } = parseFrontmatter(raw);
-        return { ...toMeta(date, fields), body };
+        const { fields, body: full } = parseFrontmatter(raw);
+        const { body, say } = splitSay(full);
+        return { ...toMeta(date, fields), body, say };
     } catch {
         return null;
     }
+}
+
+/*
+ * Speech (spec #135 W3, #152). The vault's /morning-brief skill ends the brief
+ * with a spoken summary (obsidian-vault#11):
+ *
+ *   ## Say
+ *
+ *   Good morning. Sixty to ninety words of plain prose, leading with the Top 3.
+ *
+ * The section starts at a level-2 heading whose text is exactly "Say" (any
+ * case, trailing spaces or closing #s allowed) and runs to the next level-1 or
+ * level-2 heading, or the end of the file. Its lines are joined into
+ * paragraphs (a blank line separates paragraphs) and any stray markdown is
+ * stripped. An empty section counts as no Say block. Briefs written before the
+ * Say block existed fall back to their `## Top 3` section (heading "Top 3" or
+ * "Top three"): one line per top-level list item, as plain text.
+ */
+const SAY_HEADING = /^##[ \t]+say[ \t]*#*[ \t]*$/i;
+const TOP3_HEADING = /^##[ \t]+top[ \t]+(?:3|three)[ \t]*#*[ \t]*$/i;
+/** Ends a section: the next level-1 or level-2 heading. */
+const SECTION_END = /^#{1,2}[ \t]/;
+
+/** [start, end) line range of the section under the first heading matching `heading`, heading line included. */
+function sectionRange(lines: string[], heading: RegExp): [number, number] | null {
+    const start = lines.findIndex((l) => heading.test(l.trim()));
+    if (start < 0) return null;
+    let end = start + 1;
+    while (end < lines.length && !SECTION_END.test(lines[end])) end++;
+    return [start, end];
+}
+
+/** One line of markdown as plain text: links keep their text, emphasis and code marks go. */
+export function plainText(md: string): string {
+    return md
+        .replace(/!?\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2')                                  // [[page|alias]]
+        .replace(/!?\[\[([^\]]+)\]\]/g, (_m, t: string) => t.split('#')[0].split('/').pop() || t) // [[path/page]]
+        .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')                                          // [text](url), ![alt](src)
+        .replace(/<https?:[^>]*>/g, '')                                                     // <https://…>
+        .replace(/<[^>]+>/g, '')                                                            // inline HTML
+        .replace(/`([^`]*)`/g, '$1')
+        .replace(/(\*\*|__|~~)(.+?)\1/g, '$2')
+        .replace(/(^|[^\w*])[*_](?=\S)(.+?)(?<=\S)[*_](?![\w*])/g, '$1$2')                  // *em*, _em_
+        .replace(/\*/g, '')
+        .replace(/^\s*>\s?/, '')                                                            // blockquote
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+/** Paragraphs of plain text: lines joined with spaces, paragraphs with a blank line. */
+function paragraphs(lines: string[]): string {
+    const out: string[] = [];
+    let current: string[] = [];
+    for (const line of [...lines, '']) {
+        const text = plainText(line);
+        if (text) { current.push(text); continue; }
+        if (current.length) out.push(current.join(' '));
+        current = [];
+    }
+    return out.join('\n\n');
+}
+
+/** Splits the `## Say` section out of a brief body. */
+export function splitSay(body: string): { body: string; say: string | null } {
+    const lines = body.split(/\r?\n/);
+    const range = sectionRange(lines, SAY_HEADING);
+    if (!range) return { body, say: null };
+    const say = paragraphs(lines.slice(range[0] + 1, range[1]));
+    const rest = [...lines.slice(0, range[0]), ...lines.slice(range[1])].join('\n').replace(/\s+$/, '\n');
+    return { body: rest, say: say || null };
+}
+
+const LIST_ITEM = /^ {0,3}(?:\d+[.)]|[-*+])[ \t]+/;
+
+/** The `## Top 3` section as plain text, one line per top-level item; null when missing or empty. */
+export function topThreeText(body: string): string | null {
+    const lines = body.split(/\r?\n/);
+    const range = sectionRange(lines, TOP3_HEADING);
+    if (!range) return null;
+    const section = lines.slice(range[0] + 1, range[1]);
+    const items: string[] = [];
+    for (const line of section) {
+        if (LIST_ITEM.test(line)) items.push(line.replace(LIST_ITEM, ''));
+        else if (line.trim() && items.length) items[items.length - 1] += ' ' + line.trim();
+    }
+    const text = items.length
+        ? items.map(plainText).filter(Boolean).map((t) => /[.!?]$/.test(t) ? t : `${t}.`).join('\n')
+        : paragraphs(section);
+    return text || null;
+}
+
+/** Where spoken text came from: the Say block, the Top 3 fallback, or neither. */
+export type BriefSpeechSource = 'say' | 'top3' | 'none';
+
+export interface BriefSpeech {
+    date: string;
+    source: BriefSpeechSource;
+    /** Plain text to speak; '' when `source` is 'none'. */
+    text: string;
+    status: string | null;
+    generated: string | null;
+}
+
+/** What to say for a brief: its Say block, else its Top 3 as plain text, else nothing. */
+export function briefSpeech(brief: Brief): BriefSpeech {
+    const meta = { date: brief.date, status: brief.status, generated: brief.generated };
+    if (brief.say) return { ...meta, source: 'say', text: brief.say };
+    const top3 = topThreeText(brief.body);
+    return top3 ? { ...meta, source: 'top3', text: top3 } : { ...meta, source: 'none', text: '' };
 }

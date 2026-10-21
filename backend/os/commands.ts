@@ -1,5 +1,6 @@
 import { normaliseAsk, type Command } from "./ask.js";
 import { proposalSay } from "./proposals.js";
+import { readBriefCommands } from "./briefSpeech.js";
 import { SKILLS, type SkillId } from "../services/agentRuns.js";
 
 /**
@@ -90,5 +91,6 @@ const nothingPending: Command[] = [
 export const COMMANDS: readonly Command[] = [
     ...nothingPending,
     ...runs,
+    ...readBriefCommands,
     ...navigation,
 ];

@@ -16,6 +16,9 @@ import { dailyBudgetFromEnv, noteUnloggedSpend } from "../os/budget.js";
 import { logAsk } from "../os/askLog.js";
 import { confirmProposal, createProposal, type Enqueue } from "../os/proposals.js";
 import { enqueueRun, isSkill, type SkillId } from "../services/agentRuns.js";
+import { lookupBriefSpeech } from "../os/briefSpeech.js";
+import { centralDay } from "../os/format.js";
+import { BRIEF_DATE } from "../utils/briefs.js";
 
 /**
  * /admin/os — the agentic OS home screen (spec #135, W2) and its ask router (W3).
@@ -26,6 +29,10 @@ import { enqueueRun, isSkill, type SkillId } from "../services/agentRuns.js";
  *   POST /admin/os/ask/confirm    { id } -> { run, created, say }: queues a tier-3 proposal's run
  *                                 (os/proposals.ts); 404 unknown or another account's, 409
  *                                 already confirmed, 410 expired
+ *   GET  /admin/os/api/brief/say  ?date=YYYY-MM-DD (default: today, Central) -> the brief's speech
+ *                                 (os/briefSpeech.ts): 200 { date, source: 'say'|'top3'|'none',
+ *                                 text, status, generated }; 404 { error: 'no brief', date };
+ *                                 400 bad date; 503 no vault configured
  *
  * Mounted inside adminRoutes after verifyToken + requireAdmin, so every route
  * here is admin-only. Built from a factory so tests inject the clock, the tile
@@ -84,6 +91,21 @@ export function createOsRouter({
         } catch (err: any) {
             console.error("[os] overview JSON failed:", err?.message ?? err);
             res.status(500).json({ error: "overview failed" });
+        }
+    });
+
+    router.get("/api/brief/say", (req, res) => {
+        res.set("Cache-Control", "no-store");
+        const raw = req.query.date;
+        if (raw !== undefined && (typeof raw !== "string" || !BRIEF_DATE.test(raw))) {
+            return res.status(400).json({ error: "date must be YYYY-MM-DD" });
+        }
+        const date = typeof raw === "string" ? raw : centralDay(now());
+        const lookup = lookupBriefSpeech(date);
+        switch (lookup.found) {
+            case "speech": return res.json(lookup.speech);
+            case "no_brief": return res.status(404).json({ error: "no brief", date });
+            case "no_vault": return res.status(503).json({ error: "OBSIDIAN_VAULT_PATH is not configured" });
         }
     });
 

@@ -41,6 +41,8 @@ import "./use-test-jwt-secret.js";
 import express from "express";
 import type { AddressInfo } from "net";
 import crypto from "crypto";
+import fs from "fs";
+import path from "path";
 import pool from "../db/index.js";
 import adminRoutes, { adminGate } from "../routes/adminRoutes.js";
 import { createOsRouter, type OsRouterDeps } from "../routes/osRoutes.js";
@@ -741,6 +743,14 @@ async function main() {
                 "# Morning Brief\r\n\r\n## say\r\nShort and sweet.\r\nStill the same paragraph.\r\n\r\nA second paragraph.\r\n## Calendar\r\n- t152 calendar after say\r\n");
             // An empty Say section falls back to the Top 3.
             sayVault.writeBrief("2031-03-04", {}, `# Morning Brief\n\n${TOP3}\n## Say\n\n`);
+            // Comments across lines, a fenced block (a "## Say" and "# x" inside it don't count),
+            // comparisons, entities, a stray heading, bullet and rule; an indented heading ends it.
+            sayVault.writeBrief("2031-03-03", {}, "# Morning Brief\n\n```\n## Say\nt152 fenced say\n```\n\n"
+                + "## Say\n\n### Today\nKeep SPY < 500 and VIX > 20 in view &amp; reply to Sam.\n<!--\nt152 hidden note\n-->\n"
+                + "%%t152 draft\nstill draft%%\n```\n# t152 fenced comment\n```\n- Tasks &amp; deploys are fine.\n\n---\n\nBye.\n"
+                + "  ## Calendar\n- t152 calendar after indented heading\n");
+            // A brief file that can't be read (a directory where the file should be).
+            fs.mkdirSync(path.join(sayVault.dir, "outputs", "briefs", "2031-03-02.md"));
 
             clock = new Date("2031-03-10T15:00:00Z");
             const sayGet = async (query: string, token = admin.token, base = H.base) => {
@@ -775,6 +785,14 @@ async function main() {
             check("a Say section ends at the next heading; its paragraphs are kept apart",
                 sayMid.json?.source === "say" && sayMid.json.text === "Short and sweet. Still the same paragraph.\n\nA second paragraph.",
                 sayMid.json);
+            const sayMessy = await sayGet("&date=2031-03-03");
+            check("comments, fenced code and markdown marks are never spoken; comparisons and entities read right",
+                sayMessy.json?.source === "say"
+                    && sayMessy.json.text === "Today Keep SPY < 500 and VIX > 20 in view & reply to Sam. Tasks & deploys are fine.\n\nBye.",
+                sayMessy.json);
+            const sayUnreadable = await sayGet("&date=2031-03-02");
+            check("a brief file that can't be read is 500 { error: 'brief unreadable' }, not 404",
+                sayUnreadable.status === 500 && sayUnreadable.json?.error === "brief unreadable", sayUnreadable);
             const sayNone = await sayGet("&date=2031-03-06");
             check("a brief with neither a Say block nor a Top 3 is 200 with source 'none' and no text",
                 sayNone.status === 200 && sayNone.json?.source === "none" && sayNone.json.text === "", sayNone.json);
@@ -797,6 +815,10 @@ async function main() {
             const sayPageMid = await fetch(`${P.base}/admin/briefs?date=2031-03-05&token=${encodeURIComponent(admin.token)}`).then((r) => r.text());
             check("... and keeps the sections after a mid-brief Say block",
                 sayPageMid.includes("t152 calendar after say") && !sayPageMid.includes("Short and sweet"));
+            const sayPageMessy = await fetch(`${P.base}/admin/briefs?date=2031-03-03&token=${encodeURIComponent(admin.token)}`).then((r) => r.text());
+            check("... and a fenced \"## Say\" before the real one stays on the page",
+                sayPageMessy.includes("t152 fenced say") && sayPageMessy.includes("t152 calendar after indented heading")
+                    && !sayPageMessy.includes("VIX"));
 
             // "Read the brief": tier 1, never the model.
             const sayCalls = fakeModel.calls.length;
@@ -824,6 +846,11 @@ async function main() {
             clock = new Date("2031-03-06T15:00:00Z");
             const readNone = await ask("read the brief");
             check("a brief with nothing to read says so", readNone.json?.tier === 1 && /nothing to read/i.test(readNone.json.say), readNone.json);
+            clock = new Date("2031-03-02T15:00:00Z");
+            const readUnreadable = await ask("read the brief");
+            check("an unreadable brief is tier-1 unavailable, not \"no brief\"",
+                readUnreadable.json?.tier === 1 && readUnreadable.json.kind === "unavailable" && !/no brief/i.test(readUnreadable.json.say),
+                readUnreadable.json);
             delete process.env.OBSIDIAN_VAULT_PATH;
             const readNoVault = await ask("read the brief");
             const sayNoVault = await sayGet("&date=2031-03-10");

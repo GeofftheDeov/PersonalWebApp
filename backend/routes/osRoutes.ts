@@ -32,7 +32,7 @@ import { BRIEF_DATE } from "../utils/briefs.js";
  *   GET  /admin/os/api/brief/say  ?date=YYYY-MM-DD (default: today, Central) -> the brief's speech
  *                                 (os/briefSpeech.ts): 200 { date, source: 'say'|'top3'|'none',
  *                                 text, status, generated }; 404 { error: 'no brief', date };
- *                                 400 bad date; 503 no vault configured
+ *                                 400 bad date; 500 file unreadable; 503 no vault configured
  *
  * Mounted inside adminRoutes after verifyToken + requireAdmin, so every route
  * here is admin-only. Built from a factory so tests inject the clock, the tile
@@ -105,6 +105,7 @@ export function createOsRouter({
         switch (lookup.found) {
             case "speech": return res.json(lookup.speech);
             case "no_brief": return res.status(404).json({ error: "no brief", date });
+            case "unreadable": return res.status(500).json({ error: "brief unreadable", date });
             case "no_vault": return res.status(503).json({ error: "OBSIDIAN_VAULT_PATH is not configured" });
         }
     });

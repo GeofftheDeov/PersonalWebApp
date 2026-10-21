@@ -69,16 +69,21 @@ function toMeta(date: string, fields: Record<string, string>): BriefMeta {
     };
 }
 
-/** Newest first. Returns [] when the vault or the folder is missing. */
-export function listBriefs(vaultPath: string, limit = 30): BriefMeta[] {
-    const dir = path.join(vaultPath, BRIEFS_DIR);
+/** The dates that have a brief file, newest first, without reading any. [] when the vault or the folder is missing. */
+export function briefDates(vaultPath: string): string[] {
     let names: string[];
-    try { names = fs.readdirSync(dir); } catch { return []; }
+    try { names = fs.readdirSync(path.join(vaultPath, BRIEFS_DIR)); } catch { return []; }
     return names
         .map(n => n.match(BRIEF_FILE)?.[1])
         .filter((d): d is string => !!d)
         .sort()
-        .reverse()
+        .reverse();
+}
+
+/** Newest first. Returns [] when the vault or the folder is missing. */
+export function listBriefs(vaultPath: string, limit = 30): BriefMeta[] {
+    const dir = path.join(vaultPath, BRIEFS_DIR);
+    return briefDates(vaultPath)
         .slice(0, limit)
         .map(date => {
             try {
@@ -112,40 +117,66 @@ export function readBrief(vaultPath: string, date: string): Brief | null {
  *   Good morning. Sixty to ninety words of plain prose, leading with the Top 3.
  *
  * The section starts at a level-2 heading whose text is exactly "Say" (any
- * case, trailing spaces or closing #s allowed) and runs to the next level-1 or
- * level-2 heading, or the end of the file. Its lines are joined into
- * paragraphs (a blank line separates paragraphs) and any stray markdown is
- * stripped. An empty section counts as no Say block. Briefs written before the
- * Say block existed fall back to their `## Top 3` section (heading "Top 3" or
- * "Top three"): one line per top-level list item, as plain text.
+ * case, up to three leading spaces, trailing spaces or closing #s allowed) and
+ * runs to the next level-1 or level-2 heading outside a code fence, or the end
+ * of the file. HTML comments, Obsidian %%comments%% and fenced code are
+ * dropped; the remaining lines are joined into paragraphs (a blank line
+ * separates paragraphs) and any stray markdown is stripped. An empty section
+ * counts as no Say block. Briefs written before the Say block existed fall
+ * back to their `## Top 3` section (heading "Top 3" or "Top three"): one line
+ * per top-level list item, as plain text.
  */
-const SAY_HEADING = /^##[ \t]+say[ \t]*#*[ \t]*$/i;
-const TOP3_HEADING = /^##[ \t]+top[ \t]+(?:3|three)[ \t]*#*[ \t]*$/i;
+const SAY_HEADING = /^ {0,3}##[ \t]+say[ \t]*#*[ \t]*$/i;
+const TOP3_HEADING = /^ {0,3}##[ \t]+top[ \t]+(?:3|three)[ \t]*#*[ \t]*$/i;
 /** Ends a section: the next level-1 or level-2 heading. */
-const SECTION_END = /^#{1,2}[ \t]/;
+const SECTION_END = /^ {0,3}#{1,2}(?:[ \t]|$)/;
+const FENCE = /^ {0,3}(?:```|~~~)/;
 
-/** [start, end) line range of the section under the first heading matching `heading`, heading line included. */
+/** [start, end) line range of the section under the first heading matching `heading` (outside code fences), heading line included. */
 function sectionRange(lines: string[], heading: RegExp): [number, number] | null {
-    const start = lines.findIndex((l) => heading.test(l.trim()));
-    if (start < 0) return null;
-    let end = start + 1;
-    while (end < lines.length && !SECTION_END.test(lines[end])) end++;
-    return [start, end];
+    let fenced = false, start = -1;
+    for (let i = 0; i < lines.length; i++) {
+        if (FENCE.test(lines[i])) { fenced = !fenced; continue; }
+        if (fenced) continue;
+        if (start < 0) { if (heading.test(lines[i])) start = i; }
+        else if (SECTION_END.test(lines[i])) return [start, i];
+    }
+    return start < 0 ? null : [start, lines.length];
 }
 
-/** One line of markdown as plain text: links keep their text, emphasis and code marks go. */
+/** A section's lines without comments (HTML or Obsidian, even across lines) or fenced code. */
+function proseLines(lines: string[]): string[] {
+    // A comment on lines of its own goes with its line breaks, so it doesn't split a paragraph.
+    const uncommented = ('\n' + lines.join('\n'))
+        .replace(/\n[ \t]*<!--[\s\S]*?-->[ \t]*(?=\n|$)/g, '').replace(/<!--[\s\S]*?(?:-->|$)/g, '')
+        .replace(/\n[ \t]*%%[\s\S]*?%%[ \t]*(?=\n|$)/g, '').replace(/%%[\s\S]*?(?:%%|$)/g, '')
+        .slice(1).split('\n');
+    let fenced = false;
+    return uncommented.filter((l) => {
+        if (FENCE.test(l)) { fenced = !fenced; return false; }
+        return !fenced;
+    });
+}
+
+const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', '#39': "'" };
+
+/** One line of markdown as plain text: links keep their text; heading, list, quote, emphasis and code marks go. */
 export function plainText(md: string): string {
+    if (/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(md)) return '';                                // --- rule
     return md
+        .replace(/^\s*(?:>\s?)+/, '')                                                       // blockquote
+        .replace(/^\s*#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/, '$1')                         // heading marks
+        .replace(/^\s*(?:\d+[.)]|[-*+])[ \t]+(?:\[[ xX]\][ \t]+)?/, '')                     // list marker, task box
         .replace(/!?\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2')                                  // [[page|alias]]
         .replace(/!?\[\[([^\]]+)\]\]/g, (_m, t: string) => t.split('#')[0].split('/').pop() || t) // [[path/page]]
-        .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')                                          // [text](url), ![alt](src)
+        .replace(/!?\[([^\]]*)\]\((?:[^()\s]|\([^()]*\))*(?:\s+"[^"]*")?\)/g, '$1')        // [text](url), ![alt](src)
         .replace(/<https?:[^>]*>/g, '')                                                     // <https://…>
-        .replace(/<[^>]+>/g, '')                                                            // inline HTML
+        .replace(/<\/?[A-Za-z][^<>]*>/g, '')                                                // HTML tags (not "a < b > c")
         .replace(/`([^`]*)`/g, '$1')
         .replace(/(\*\*|__|~~)(.+?)\1/g, '$2')
         .replace(/(^|[^\w*])[*_](?=\S)(.+?)(?<=\S)[*_](?![\w*])/g, '$1$2')                  // *em*, _em_
         .replace(/\*/g, '')
-        .replace(/^\s*>\s?/, '')                                                            // blockquote
+        .replace(/&(amp|lt|gt|quot|apos|nbsp|#39);/g, (_m, e: string) => ENTITIES[e])
         .replace(/\s+/g, ' ')
         .trim();
 }
@@ -154,7 +185,7 @@ export function plainText(md: string): string {
 function paragraphs(lines: string[]): string {
     const out: string[] = [];
     let current: string[] = [];
-    for (const line of [...lines, '']) {
+    for (const line of [...proseLines(lines), '']) {
         const text = plainText(line);
         if (text) { current.push(text); continue; }
         if (current.length) out.push(current.join(' '));
@@ -182,7 +213,7 @@ export function topThreeText(body: string): string | null {
     const lines = body.split(/\r?\n/);
     const range = sectionRange(lines, TOP3_HEADING);
     if (!range) return null;
-    const section = lines.slice(range[0] + 1, range[1]);
+    const section = proseLines(lines.slice(range[0] + 1, range[1]));
     const items: string[] = [];
     for (const line of section) {
         if (LIST_ITEM.test(line)) items.push(line.replace(LIST_ITEM, ''));

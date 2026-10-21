@@ -1,12 +1,12 @@
-import type { Command, CommandReply } from "./ask.js";
+import type { CommandReply } from "./ask.js";
 import { centralDay } from "./format.js";
-import { briefSpeech, listBriefs, readBrief, type BriefSpeech } from "../utils/briefs.js";
+import { briefDates, briefSpeech, readBrief, type BriefSpeech } from "../utils/briefs.js";
 
 /**
  * The brief, read aloud (spec #135 W3, #152).
  *
  *   GET /admin/os/api/brief/say?date=YYYY-MM-DD   (routes/osRoutes.ts)
- *   "read the brief"                              (tier 1, intent `brief.read`)
+ *   "read the brief"                              (tier 1, intent `brief.read`, os/commands.ts)
  *
  * Both read the vault checkout at OBSIDIAN_VAULT_PATH on every call, like the
  * brief tile. The text is the brief's `## Say` section, or its Top 3 as plain
@@ -18,8 +18,10 @@ export const READ_BRIEF_INTENT = "brief.read";
 
 export type BriefSpeechLookup =
     | { found: "speech"; speech: BriefSpeech }
-    /** No brief file for that day (or it couldn't be read). */
+    /** No brief file for that day. */
     | { found: "no_brief"; date: string }
+    /** The file is there but couldn't be read. */
+    | { found: "unreadable"; date: string }
     /** OBSIDIAN_VAULT_PATH is unset on this service. */
     | { found: "no_vault" };
 
@@ -27,7 +29,8 @@ export type BriefSpeechLookup =
 export function lookupBriefSpeech(date: string, vaultPath = process.env.OBSIDIAN_VAULT_PATH): BriefSpeechLookup {
     if (!vaultPath) return { found: "no_vault" };
     const brief = readBrief(vaultPath, date);
-    return brief ? { found: "speech", speech: briefSpeech(brief) } : { found: "no_brief", date };
+    if (brief) return { found: "speech", speech: briefSpeech(brief) };
+    return briefDates(vaultPath).includes(date) ? { found: "unreadable", date } : { found: "no_brief", date };
 }
 
 /** "Thursday, October 15" for a YYYY-MM-DD day. */
@@ -41,9 +44,11 @@ export function readTodaysBrief(now: Date, vaultPath = process.env.OBSIDIAN_VAUL
     switch (lookup.found) {
         case "no_vault":
             return { kind: "unavailable", say: "I can't read the brief: the vault isn't configured on this service." };
+        case "unreadable":
+            return { kind: "unavailable", say: "I can't read the brief: today's brief file couldn't be read." };
         case "no_brief": {
-            const latest = listBriefs(vaultPath!, 30).find((b) => b.date < today);
-            const since = latest ? ` The latest is from ${spokenDay(latest.date)}.` : "";
+            const latest = briefDates(vaultPath!).find((d) => d < today);
+            const since = latest ? ` The latest is from ${spokenDay(latest)}.` : "";
             return { kind: "answer", say: `There's no brief for today yet.${since}` };
         }
         case "speech": {
@@ -54,17 +59,8 @@ export function readTodaysBrief(now: Date, vaultPath = process.env.OBSIDIAN_VAUL
             return {
                 kind: "answer",
                 say: speech.text,
-                ...(speech.source === "top3" ? { display: "From the brief's Top 3: it has no Say section." } : {}),
+                ...(speech.source === "top3" ? { display: "Read from the brief's Top 3: its Say section is missing or empty." } : {}),
             };
         }
     }
 }
-
-// "read the brief", "please read me today's brief", "read my morning brief aloud", "can you read out the briefing".
-const POLITE = "(?:please )?(?:(?:can|could|would|will) you )?";
-
-export const readBriefCommands: Command[] = [{
-    pattern: new RegExp(`^${POLITE}read (?:me )?(?:out )?(?:the |my )?(?:todays )?(?:morning )?brief(?:ing)?(?: (?:aloud|out loud|out|to me))?(?: please)?$`),
-    intent: READ_BRIEF_INTENT,
-    handler: ({ now }) => readTodaysBrief(now),
-}];

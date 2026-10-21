@@ -44,11 +44,14 @@ export async function insertAsk(db: Queryable, row: AskLogEntry): Promise<number
  * Best effort, for tiers 1 and 2: a failed write (say, the migration isn't
  * applied yet) is logged and the admin still gets the answer. A tier-3
  * proposal IS its row, so it goes through insertAsk (createProposal) instead.
+ * Resolves true when the row was written.
  */
-export async function logAsk(db: Queryable, row: AskLogEntry): Promise<void> {
+export async function logAsk(db: Queryable, row: AskLogEntry): Promise<boolean> {
     try {
         await insertAsk(db, row);
+        return true;
     } catch (err: any) {
         console.error("[os] could not log an ask:", err?.message ?? err);
+        return false;
     }
 }

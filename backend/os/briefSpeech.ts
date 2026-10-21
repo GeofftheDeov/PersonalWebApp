@@ -42,8 +42,8 @@ export function readTodaysBrief(now: Date, vaultPath = process.env.OBSIDIAN_VAUL
         case "no_vault":
             return { kind: "unavailable", say: "I can't read the brief: the vault isn't configured on this service." };
         case "no_brief": {
-            const [latest] = listBriefs(vaultPath!, 1);
-            const since = latest && latest.date < today ? ` The latest is from ${spokenDay(latest.date)}.` : "";
+            const latest = listBriefs(vaultPath!, 30).find((b) => b.date < today);
+            const since = latest ? ` The latest is from ${spokenDay(latest.date)}.` : "";
             return { kind: "answer", say: `There's no brief for today yet.${since}` };
         }
         case "speech": {

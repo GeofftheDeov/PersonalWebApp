@@ -48,6 +48,7 @@ import type { Command } from "../os/ask.js";
 import type { Queryable } from "../os/overview.js";
 import type { ModelDecision, ModelReply, ModelRequest, ModelUsage, OsModel } from "../os/model.js";
 import { signJwt } from "../utils/jwt.js";
+import { createTempVault } from "./temp-vault.js";
 
 // Never a real model call: the prod wiring reads the key per ask, so without it tier 2 is unavailable.
 delete process.env.ANTHROPIC_API_KEY;
@@ -707,6 +708,137 @@ async function main() {
             } finally { unlogged.server.close(); }
         } finally {
             B.server.close();
+        }
+
+        // ── the brief, read aloud (#152) ────────────────────────────────────
+        // Fixture briefs in a temporary vault, on days of their own in March 2031.
+        const sayVault = createTempVault("t152");
+        const sayVaultBefore = process.env.OBSIDIAN_VAULT_PATH;
+        const sayClockBefore = clock;
+        process.env.OBSIDIAN_VAULT_PATH = sayVault.dir;
+        try {
+            const SAY_PROSE = "Good morning. First, the deploy is red. Second, reply to Sam. Third, PPI lands at 8:30.";
+            const SAY_CANARY = "t152-say-canary";
+            const TOP3 = "## Top 3\n"
+                + "1. **Overdue: ship the [invite button](https://example.com/x).** Still *in progress*\n"
+                + "   since May.\n"
+                + "2. Rotate `VAULT_TOKEN` before [[projects/personal-web-app/index|PersonalWebApp]] sync breaks.\n"
+                + "   - a sub-point, folded into its item\n"
+                + "3. Check [[projects/alpaca-trading-bot/market-state]] _today_!\n";
+            const TOP3_SPOKEN = "Overdue: ship the invite button. Still in progress since May.\n"
+                + "Rotate VAULT_TOKEN before PersonalWebApp sync breaks. a sub-point, folded into its item.\n"
+                + "Check market-state today!";
+            // Today (Central) is 2031-03-10: a Say block written the way V#11 writes it (last, after a blank line).
+            sayVault.writeBrief("2031-03-10", { status: "ok" },
+                `# Morning Brief\n\n${TOP3}\n## Calendar\n- Nothing today.\n\n## Say\n\n`
+                + `Good morning. First, the deploy is red.\nSecond, reply to Sam. Third, PPI lands at 8:30.\n\n<!-- ${SAY_CANARY} -->\n`);
+            // No Say block: the Top 3 fallback.
+            sayVault.writeBrief("2031-03-07", { status: "partial" }, `# Morning Brief\n\n${TOP3}\n## Calendar\n- Lunch.\n`);
+            // Neither.
+            sayVault.writeBrief("2031-03-06", {}, "# Morning Brief\n\n## Calendar\n- Lunch.\n");
+            // A Say block in the middle (other case, CRLF) ends at the next heading; one with two paragraphs.
+            sayVault.writeBrief("2031-03-05", {},
+                "# Morning Brief\r\n\r\n## say\r\nShort and sweet.\r\nStill the same paragraph.\r\n\r\nA second paragraph.\r\n## Calendar\r\n- t152 calendar after say\r\n");
+            // An empty Say section falls back to the Top 3.
+            sayVault.writeBrief("2031-03-04", {}, `# Morning Brief\n\n${TOP3}\n## Say\n\n`);
+
+            clock = new Date("2031-03-10T15:00:00Z");
+            const sayGet = async (query: string, token = admin.token, base = H.base) => {
+                const res = await fetch(`${base}/admin/os/api/brief/say?token=${encodeURIComponent(token)}${query}`, { redirect: "manual" });
+                const text = await res.text();
+                let json: any = null;
+                try { json = JSON.parse(text); } catch { /* HTML */ }
+                return { status: res.status, type: res.headers.get("content-type") ?? "", json, text };
+            };
+
+            // The endpoint.
+            const sayToday = await sayGet("&date=2031-03-10");
+            check("the Say endpoint returns the brief's ## Say section as JSON, as one plain paragraph",
+                sayToday.status === 200 && /application\/json/.test(sayToday.type) && sayToday.json?.source === "say"
+                    && sayToday.json.text === SAY_PROSE && sayToday.json.date === "2031-03-10" && sayToday.json.status === "ok",
+                sayToday);
+            check("... without HTML comments or anything else markdown-only", !sayToday.text.includes(SAY_CANARY));
+            const sayDefault = await sayGet("");
+            check("with no date it reads today's brief (the injected clock's Central day)",
+                sayDefault.status === 200 && sayDefault.json?.date === "2031-03-10" && sayDefault.json.text === SAY_PROSE, sayDefault.json);
+            const sayLate = await (async () => { clock = new Date("2031-03-11T04:30:00Z"); try { return await sayGet(""); } finally { clock = new Date("2031-03-10T15:00:00Z"); } })();
+            check("... where today is the Central day, not the UTC one (23:30 CDT is still the 10th)",
+                sayLate.json?.date === "2031-03-10", sayLate.json);
+            const sayFallback = await sayGet("&date=2031-03-07");
+            check("a brief without a Say block falls back to its Top 3 as plain text, one line per item",
+                sayFallback.status === 200 && sayFallback.json?.source === "top3" && sayFallback.json.text === TOP3_SPOKEN,
+                sayFallback.json);
+            const sayEmpty = await sayGet("&date=2031-03-04");
+            check("an empty Say section falls back to the Top 3 too",
+                sayEmpty.json?.source === "top3" && sayEmpty.json.text === TOP3_SPOKEN, sayEmpty.json);
+            const sayMid = await sayGet("&date=2031-03-05");
+            check("a Say section ends at the next heading; its paragraphs are kept apart",
+                sayMid.json?.source === "say" && sayMid.json.text === "Short and sweet. Still the same paragraph.\n\nA second paragraph.",
+                sayMid.json);
+            const sayNone = await sayGet("&date=2031-03-06");
+            check("a brief with neither a Say block nor a Top 3 is 200 with source 'none' and no text",
+                sayNone.status === 200 && sayNone.json?.source === "none" && sayNone.json.text === "", sayNone.json);
+            const sayMissing = await sayGet("&date=2031-03-09");
+            check("no brief that day gives 404 { error: 'no brief', date }",
+                sayMissing.status === 404 && sayMissing.json?.error === "no brief" && sayMissing.json.date === "2031-03-09", sayMissing);
+            const sayBad = await Promise.all(["&date=2031-3-9", "&date=../../etc", "&date=2031-03-10&date=2031-03-07"].map((q) => sayGet(q)));
+            check("a malformed date gives 400", sayBad.every((r) => r.status === 400), sayBad.map((r) => r.status));
+            const sayGated = await sayGet("&date=2031-03-10", user.token);
+            check("a non-admin can't read the Say endpoint", sayGated.status === 403 && !sayGated.text.includes("Good morning"), sayGated.status);
+            const sayShipped = await sayGet("&date=2031-03-10", admin.token, P.base);
+            check("the shipped admin router serves it at /admin/os/api/brief/say",
+                sayShipped.status === 200 && sayShipped.json?.text === SAY_PROSE, sayShipped.status);
+
+            // The briefs page.
+            const sayPage = await fetch(`${P.base}/admin/briefs?date=2031-03-10&token=${encodeURIComponent(admin.token)}`).then((r) => r.text());
+            check("the briefs page renders the brief but not its Say block",
+                sayPage.includes("Nothing today.") && sayPage.includes("Overdue") && !sayPage.includes("reply to Sam")
+                    && !/<h2[^>]*>\s*Say\s*<\/h2>/i.test(sayPage) && !sayPage.includes(SAY_CANARY));
+            const sayPageMid = await fetch(`${P.base}/admin/briefs?date=2031-03-05&token=${encodeURIComponent(admin.token)}`).then((r) => r.text());
+            check("... and keeps the sections after a mid-brief Say block",
+                sayPageMid.includes("t152 calendar after say") && !sayPageMid.includes("Short and sweet"));
+
+            // "Read the brief": tier 1, never the model.
+            const sayCalls = fakeModel.calls.length;
+            const readAsks = ["read the brief", "Read me today's brief.", "please read my morning brief aloud",
+                "can you read out the briefing", "read brief"];
+            for (const text of readAsks) {
+                const r = await ask(text, "voice");
+                check(`"${text}" speaks today's Say block at tier 1`,
+                    r.status === 200 && r.json?.tier === 1 && r.json.kind === "answer" && r.json.say === SAY_PROSE, r.json);
+            }
+            const readRows = (await asks()).slice(-readAsks.length);
+            check("... logged as tier 1, intent brief.read",
+                readRows.every((row) => row.tier === 1 && row.intent === "brief.read" && row.kind === "answer"), readRows.map((row) => row.intent));
+            clock = new Date("2031-03-07T15:00:00Z");
+            const readFallback = await ask("read the brief");
+            check("on a day whose brief has no Say block it speaks the Top 3",
+                readFallback.json?.tier === 1 && readFallback.json.say === TOP3_SPOKEN && typeof readFallback.json.display === "string",
+                readFallback.json);
+            clock = new Date("2031-03-09T15:00:00Z");
+            const readMissing = await ask("read the brief");
+            check("with no brief today it says so (and when the latest is from)",
+                readMissing.json?.tier === 1 && readMissing.json.kind === "answer"
+                    && /no brief for today/i.test(readMissing.json.say) && /latest is from Friday, March 7/.test(readMissing.json.say),
+                readMissing.json);
+            clock = new Date("2031-03-06T15:00:00Z");
+            const readNone = await ask("read the brief");
+            check("a brief with nothing to read says so", readNone.json?.tier === 1 && /nothing to read/i.test(readNone.json.say), readNone.json);
+            delete process.env.OBSIDIAN_VAULT_PATH;
+            const readNoVault = await ask("read the brief");
+            const sayNoVault = await sayGet("&date=2031-03-10");
+            process.env.OBSIDIAN_VAULT_PATH = sayVault.dir;
+            check("without a vault the ask is tier-1 unavailable and the endpoint 503",
+                readNoVault.json?.tier === 1 && readNoVault.json.kind === "unavailable" && sayNoVault.status === 503,
+                { ask: readNoVault.json, status: sayNoVault.status });
+            check("no \"read the brief\" ask called the model", fakeModel.calls.length === sayCalls, fakeModel.calls.length - sayCalls);
+            const readShipped = await ask("read the brief", "typed", P.base);
+            check("the shipped command table has \"read the brief\" at tier 1", readShipped.json?.tier === 1, readShipped.json);
+        } finally {
+            clock = sayClockBefore;
+            if (sayVaultBefore === undefined) delete process.env.OBSIDIAN_VAULT_PATH;
+            else process.env.OBSIDIAN_VAULT_PATH = sayVaultBefore;
+            sayVault.remove();
         }
 
         check("every canned model reply was used", fakeModel.next.length === 0, fakeModel.next.length);

@@ -173,7 +173,9 @@ export function splitSay(body: string): { body: string; say: string | null } {
     return { body: rest, say: say || null };
 }
 
-const LIST_ITEM = /^ {0,3}(?:\d+[.)]|[-*+])[ \t]+/;
+/** A top-level list item (indented at most one space); deeper items fold into the item above. */
+const LIST_ITEM = /^ ?(?:\d+[.)]|[-*+])[ \t]+/;
+const ANY_LIST_MARK = /^\s*(?:\d+[.)]|[-*+])[ \t]+/;
 
 /** The `## Top 3` section as plain text, one line per top-level item; null when missing or empty. */
 export function topThreeText(body: string): string | null {
@@ -184,7 +186,7 @@ export function topThreeText(body: string): string | null {
     const items: string[] = [];
     for (const line of section) {
         if (LIST_ITEM.test(line)) items.push(line.replace(LIST_ITEM, ''));
-        else if (line.trim() && items.length) items[items.length - 1] += ' ' + line.trim();
+        else if (line.trim() && items.length) items[items.length - 1] += ' ' + line.replace(ANY_LIST_MARK, '').trim();
     }
     const text = items.length
         ? items.map(plainText).filter(Boolean).map((t) => /[.!?]$/.test(t) ? t : `${t}.`).join('\n')

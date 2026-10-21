@@ -199,20 +199,97 @@ export async function claimNext(runner: string, supported: string[]): Promise<Ag
  * `usage` is the runner's usage block as sent, unchecked; see readUsage. A runner
  * that sends none (every runner before #137) leaves the run's usage null.
  */
-export async function completeRun(
-    id: number,
-    result: { ok: boolean; summary?: string; outputPath?: string; usage?: unknown },
-): Promise<AgentRun | null> {
-    const usage = readUsage(result.usage);
-    const dropped = droppedUsage(result.usage, usage);
-    if (dropped.length) console.warn(`[runner] run ${id}: usage stored as null for ${dropped.join(', ')}`);
+export async function completeRun(id: number, result: RunResult): Promise<AgentRun | null> {
     const { rows } = await query<AgentRun>(
         `UPDATE agent_runs SET status = $2, finished_at = now(), summary = $3, output_path = $4,
                 cost_usd = $5, input_tokens = $6, output_tokens = $7, duration_ms = $8
           WHERE id = $1 AND status = 'running' RETURNING *`,
-        [id, result.ok ? 'succeeded' : 'failed', result.summary?.slice(0, 500) ?? null, result.outputPath?.slice(0, 300) ?? null,
-            usage.costUsd, usage.inputTokens, usage.outputTokens, usage.durationMs]);
+        [id, ...resultColumns(`run ${id}`, result)]);
     return rows[0] ?? null;
+}
+
+/** A finished run's outcome as the runner reports it, on complete or on record. */
+export interface RunResult {
+    ok: boolean;
+    summary?: string;
+    outputPath?: string;
+    /** As sent, unchecked; see readUsage. */
+    usage?: unknown;
+}
+
+/** RunResult as column values: status, summary, output_path, cost_usd, input_tokens, output_tokens, duration_ms. */
+function resultColumns(subject: string, result: RunResult) {
+    const usage = readUsage(result.usage);
+    const dropped = droppedUsage(result.usage, usage);
+    if (dropped.length) console.warn(`[runner] ${subject}: usage stored as null for ${dropped.join(', ')}`);
+    return [result.ok ? 'succeeded' : 'failed', result.summary?.slice(0, 500) ?? null, result.outputPath?.slice(0, 300) ?? null,
+        usage.costUsd, usage.inputTokens, usage.outputTokens, usage.durationMs] as const;
+}
+
+/** The triggers a run recorded after the fact can carry: button runs always go through the queue. */
+export const RECORDED_TRIGGERS = ['scheduled', 'manual'] as const satisfies readonly RunTrigger[];
+export type RecordedTrigger = typeof RECORDED_TRIGGERS[number];
+export const isRecordedTrigger = (t: unknown): t is RecordedTrigger => RECORDED_TRIGGERS.some(k => k === t);
+
+/** How far back a recorded run's start may be; an older (or future) start is a bad clock, not a long run. */
+const RECORDED_START_WINDOW = '24 hours';
+
+/**
+ * An ISO 8601 instant with an explicit offset (`Z` or `±HH:MM`), as the vault
+ * wrapper writes it (`yyyy-MM-ddTHH:mm:ss.fffZ`). Anything else, a bare date,
+ * a time with no offset, PowerShell 5.1's `/Date(…)/`, epoch numbers, is not a
+ * start time we can place, so it reads as null.
+ */
+function readInstant(raw: unknown): Date | null {
+    const m = typeof raw === 'string'
+        ? /^(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/.exec(raw) : null;
+    if (!m) return null;
+    // Date rolls 2026-02-30 over to March 2; the day must exist in its month.
+    const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+    const day = new Date(Date.UTC(y, mo - 1, d));
+    if (day.getUTCMonth() !== mo - 1 || day.getUTCDate() !== d) return null;
+    const at = new Date(raw as string);
+    return isNaN(at.getTime()) ? null : at;
+}
+
+/**
+ * Record a run that already finished outside the queue (#138): a scheduled
+ * 6:45 brief or one started from a terminal, reported once by its wrapper.
+ * The row goes in finished (`succeeded` or `failed`), so claimNext and
+ * enqueueRun's duplicate check, which look only at queued and running rows,
+ * never see it, and completeRun refuses it.
+ *
+ * `claimed_at` (and `requested_at`, so the history lists the run when it
+ * started) is `startedAt` when that is a readable instant within the last 24
+ * hours and not in the future, by the database clock; otherwise now (with a
+ * log line, since the wrapper gets no error). `finished_at` is now. The result
+ * is read exactly as on completeRun. Not idempotent: each call is a new row.
+ */
+export async function recordFinishedRun(input: RunResult & {
+    skill: SkillId;
+    trigger: RecordedTrigger;
+    runner?: string;
+    /** As sent, unchecked: an ISO 8601 instant with an offset, or it's ignored. */
+    startedAt?: unknown;
+}): Promise<AgentRun> {
+    const subject = `recorded ${input.trigger} ${input.skill} run`;
+    const { rows: [run] } = await query<AgentRun>(
+        `WITH s AS (
+           SELECT CASE WHEN $3::timestamptz BETWEEN now() - interval '${RECORDED_START_WINDOW}' AND now()
+                       THEN $3::timestamptz ELSE now() END AS started
+         )
+         INSERT INTO agent_runs (skill, trigger, status, requested_at, claimed_at, finished_at, runner,
+                                 summary, output_path, cost_usd, input_tokens, output_tokens, duration_ms)
+         SELECT $1, $2, $5, s.started, s.started, now(), $4, $6, $7, $8, $9, $10, $11 FROM s
+         RETURNING *`,
+        [input.skill, input.trigger, readInstant(input.startedAt), input.runner?.slice(0, 100) || null,
+            ...resultColumns(subject, input)]);
+    if (input.startedAt !== undefined && input.startedAt !== null
+        && new Date(run.claimed_at!).getTime() === new Date(run.finished_at!).getTime()) {
+        console.warn(`[runner] ${subject} ${run.id}: startedAt ${JSON.stringify(input.startedAt)?.slice(0, 60)} `
+            + `is unreadable, in the future or over ${RECORDED_START_WINDOW} old; recorded as starting now`);
+    }
+    return run;
 }
 
 /** One finished run that reported usage: a point on the usage tile's sparkline (#145). */

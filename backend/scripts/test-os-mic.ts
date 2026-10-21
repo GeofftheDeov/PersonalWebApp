@@ -327,8 +327,15 @@ async function main() {
     }
     {
         const c = controller({ throwOnStart: true });
-        check("a recognition that fails to start reports it and isn't busy",
-            c.mic.start() === false && c.mic.state() === "idle" && c.mic.snapshot().message === MIC_MESSAGES.failed && !c.mic.busy());
+        const errors: unknown[] = [];
+        const realError = console.error; console.error = (e: unknown) => errors.push(e);
+        const started = c.mic.start();
+        const retried = c.mic.start();
+        console.error = realError;
+        check("a recognition that fails to start reports it, logs the error and isn't busy",
+            started === false && c.mic.state() === "idle" && c.mic.snapshot().message === MIC_MESSAGES.failed
+                && !c.mic.busy() && errors.length >= 1);
+        check("... and the next press tries again with a fresh recognition", retried === false && c.instances.length === 2);
     }
     {
         const c = controller();

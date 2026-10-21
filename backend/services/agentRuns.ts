@@ -64,7 +64,7 @@ export const skillSchedule = (id: SkillId): SkillSchedule | null =>
     (SKILLS as readonly Skill[]).find(k => k.id === id)?.schedule ?? null;
 
 /** A run still `running` after this long is presumed dead (PC slept, runner killed). */
-const STALE_AFTER = '45 minutes';
+export const STALE_AFTER = '45 minutes';
 
 /** What started a run: the RUN button (through the queue), the Task Scheduler, or a hand-run wrapper. */
 export const TRIGGERS = ['button', 'scheduled', 'manual'] as const;
@@ -136,11 +136,15 @@ function droppedUsage(raw: unknown, usage: RunUsage): string[] {
 }
 
 // The runner calls /claim every ~30s, so its last call doubles as a heartbeat.
-// In memory: a restart just shows "offline" until the next poll.
+// In memory: a restart just shows "offline" until the next poll. That assumes
+// one backend task (the desired count is 1); with two, each sees only the polls
+// that reached it.
+/** The runner is online while its last /claim is younger than this. */
+export const RUNNER_ONLINE_WITHIN_MS = 2 * 60 * 1000;
 let lastSeen: { at: Date; runner: string } | null = null;
 export function runnerLastSeen() { return lastSeen; }
-export function runnerOnline(): boolean {
-    return !!lastSeen && Date.now() - lastSeen.at.getTime() < 2 * 60 * 1000;
+export function runnerOnline(now: Date = new Date()): boolean {
+    return !!lastSeen && now.getTime() - lastSeen.at.getTime() < RUNNER_ONLINE_WITHIN_MS;
 }
 
 /**

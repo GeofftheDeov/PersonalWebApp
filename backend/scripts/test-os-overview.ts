@@ -30,6 +30,7 @@ import crypto from "crypto";
 import pool from "../db/index.js";
 import adminRoutes, { adminGate } from "../routes/adminRoutes.js";
 import dbRoutes from "../routes/dbRoutes.js";
+import runnerRoutes from "../routes/runnerRoutes.js";
 import { createOsRouter } from "../routes/osRoutes.js";
 import { TILES } from "../os/tiles/index.js";
 import { ok, type TileSource } from "../os/overview.js";
@@ -40,6 +41,9 @@ if (!/(\/\/|@)(127\.0\.0\.1|localhost)[:/]/.test(process.env.DATABASE_URL ?? "")
     console.error("\n  Refusing to run: DATABASE_URL must be a local throwaway database.\n");
     process.exit(2);
 }
+
+// The runner token is whatever this process says it is (the heartbeat cases claim through the runner API).
+process.env.RUNNER_TOKEN = `t143-${crypto.randomBytes(16).toString("hex")}`;
 
 const MIN = 60_000;
 
@@ -104,7 +108,13 @@ async function main() {
         render: () => "",
     };
 
+    // The runner API, for the heartbeat: the runner's /claim is what marks it online (#143).
+    const runnerApp = express();
+    runnerApp.use(express.json());
+    runnerApp.use("/api/runner", runnerRoutes);
+
     const P = await listen(prod), H = await harness(), D = await harness([...TILES, canary, thrower]);
+    const R = await listen(runnerApp);
 
     const get = async (base: string, path: string, token?: string) => {
         const sep = path.includes("?") ? "&" : "?";
@@ -117,7 +127,9 @@ async function main() {
 
     const tag = crypto.randomBytes(4).toString("hex");
     const created: string[] = [];
-    let renamed = false, usageRenamed = false, asksRenamed = false;
+    let renamed = false, usageRenamed = false, asksRenamed = false, triggerRenamed = false;
+    /** Runs #143 queues without a runner name (the runner sets it on claim). */
+    const t143Runs: number[] = [];
 
     try {
         // ── personas ────────────────────────────────────────────────────────
@@ -519,6 +531,157 @@ async function main() {
         process.env.OBSIDIAN_VAULT_PATH = vault.dir;
         vault.writeBrief("2026-10-12", { generated: "2026-10-12T06:49-05:00", run: "scheduled", status: "ok", failed: "[]" });
 
+        // ── Brief & runner tile (#143): the runner, active runs, the last scheduled run ──
+        // The heartbeat is the runner's last /claim, kept in memory with the real
+        // clock, so these cases claim through the real runner API and set the
+        // harness clock from what the tile reports. Nothing before this claims.
+        const runnerName = `t143-${tag}`;
+        const claim = (skills: string[]) => fetch(`${R.base}/api/runner/claim`, {
+            method: "POST",
+            headers: { "content-type": "application/json", authorization: `Bearer ${process.env.RUNNER_TOKEN}` },
+            body: JSON.stringify({ runner: runnerName, skills }),
+        });
+        const pageAt = async (at: Date) => {
+            clock = at;
+            const page = await get(H.base, "/admin/os", adminToken);
+            return { body: page.body, html: tileHtml(page.body, "brief"), every: page.body.match(/var every = (\d+),/)?.[1] };
+        };
+
+        const unseen = await briefAt(new Date());
+        check("the runner shows offline when it's never been seen",
+            unseen?.status === "ok" && unseen.runner?.online === false && unseen.runner.lastSeen === null
+                && unseen.runner.name === null && unseen.runner.ageMs === null, unseen?.runner);
+        const unseenHtml = (await pageAt(new Date())).html;
+        check("...and the tile says offline, never seen",
+            /data-runner="offline"/.test(unseenHtml) && /never/i.test(unseenHtml), unseenHtml);
+
+        const claimed = await claim([]);
+        check("a runner poll with nothing to do is a 204", claimed.status === 204, claimed.status);
+        const seen = await briefAt(new Date());
+        check("after a poll the runner is online, with its name and last-seen time",
+            seen?.runner?.online === true && seen.runner.name === runnerName && typeof seen.runner.lastSeen === "string"
+                && Math.abs(Date.parse(seen.runner.lastSeen) - Date.now()) < 60_000 && seen.runner.ageMs >= 0, seen?.runner);
+        const seenAt = Date.parse(seen?.runner?.lastSeen ?? "");
+        const onlineHtml = (await pageAt(new Date(seenAt + 1000))).html;
+        check("...and the tile says online, naming the runner",
+            /data-runner="online"/.test(onlineHtml) && onlineHtml.includes(runnerName), onlineHtml);
+        const justIn = await briefAt(new Date(seenAt + 2 * MIN - 1));
+        const justOut = await briefAt(new Date(seenAt + 2 * MIN));
+        check("seen just under 2 minutes ago is online; 2 minutes ago is offline, keeping the last-seen time",
+            justIn?.runner?.online === true && justOut?.runner?.online === false
+                && justOut.runner.lastSeen === seen?.runner?.lastSeen && justOut.runner.ageMs === 2 * MIN,
+            { justIn: justIn?.runner, justOut: justOut?.runner });
+        const offHtml = (await pageAt(new Date(seenAt + 10 * MIN))).html;
+        check("...and the offline tile shows when it was last seen, in Central",
+            /data-runner="offline"/.test(offHtml) && /last seen[^<]*10 min ago/.test(offHtml) && /CT/.test(offHtml), offHtml);
+
+        // Nothing queued or running (the claim above expired the usage cases' March "running" row): no active run, 2-minute refresh.
+        const idle = await briefAt(new Date());
+        check("with nothing queued or running there's no active run",
+            idle?.activeRun === null && idle.activeCount === 0, { activeRun: idle?.activeRun, activeCount: idle?.activeCount });
+        const idlePage = await pageAt(new Date());
+        check("...and the page uses the 2-minute refresh", idlePage.every === "120000"
+            && !/data-active-run=/.test(idlePage.html), idlePage.every);
+
+        // A queued run, then the runner claims it.
+        const { rows: [queued] } = await pool.query(
+            `INSERT INTO agent_runs (skill) VALUES ('lint-wiki') RETURNING id, requested_at`);
+        t143Runs.push(queued.id);
+        const q = await briefAt(new Date());
+        check("a queued run is shown: its skill, label, status and when it was requested",
+            q?.activeRun?.id === queued.id && q.activeRun.status === "queued" && q.activeRun.skill === "lint-wiki"
+                && q.activeRun.label === "Lint wiki" && q.activeRun.trigger === "button"
+                && q.activeRun.requestedAt === new Date(queued.requested_at).toISOString() && q.activeRun.claimedAt === null
+                && q.activeCount === 1, q?.activeRun);
+        const qPage = await pageAt(new Date());
+        check("...the tile shows it queued, and the page uses the 15-second refresh",
+            /data-active-run="queued"/.test(qPage.html) && /Lint wiki/.test(qPage.html) && qPage.every === "15000", qPage.every);
+        const qOff = await pageAt(new Date(seenAt + 10 * MIN));
+        check("...and with the runner offline the tile says the queued run won't be picked up yet",
+            /data-active-run="queued"/.test(qOff.html) && /offline/i.test(qOff.html.match(/<div[^>]*data-active-run[^>]*>[\s\S]*?<\/div>/)?.[0] ?? ""),
+            qOff.html);
+
+        const took = await claim(["lint-wiki"]);
+        const tookBody: any = took.status === 200 ? await took.json() : null;
+        t143Runs.push((await pool.query(`INSERT INTO agent_runs (skill) VALUES ('morning-brief') RETURNING id`)).rows[0].id);
+        const r = await briefAt(new Date());
+        check("a running run is shown ahead of a queued one, with when it started and on which runner",
+            tookBody?.run?.id === queued.id && r?.activeRun?.id === queued.id && r.activeRun.status === "running"
+                && r.activeRun.runner === runnerName && typeof r.activeRun.claimedAt === "string" && r.activeCount === 2, r?.activeRun);
+        const rPage = await pageAt(new Date());
+        check("...the tile shows it running, and the page keeps the 15-second refresh",
+            /data-active-run="running"/.test(rPage.html) && rPage.html.includes(runnerName) && /\+1 more/.test(rPage.html)
+                && rPage.every === "15000", rPage.html);
+        await pool.query(`UPDATE agent_runs SET status = 'succeeded', finished_at = now() WHERE id = ANY($1)`, [t143Runs]);
+
+        // A run claimed more than 45 minutes ago (by the tile's clock) is presumed dead; just under isn't.
+        const runningSince = async (minutes: number) => (await pool.query(
+            `INSERT INTO agent_runs (skill, status, claimed_at, runner) VALUES ('weekly-review', 'running', $1, $2) RETURNING id`,
+            [new Date(clock.getTime() - minutes * MIN), runnerName])).rows[0].id;
+        clock = new Date("2026-10-12T15:00:00Z");
+        const dead = await runningSince(46);
+        const alive = await runningSince(44);
+        const mixed = await briefAt(clock);
+        check("a run claimed over 45 minutes ago isn't active; one claimed 44 minutes ago is",
+            mixed?.activeRun?.id === alive && mixed.activeCount === 1, { activeRun: mixed?.activeRun, dead, alive });
+        await pool.query(`DELETE FROM agent_runs WHERE id = ANY($1)`, [[dead, alive]]);
+        const after = await pageAt(new Date());
+        check("once nothing is active the page is back on the 2-minute refresh", after.every === "120000", after.every);
+
+        // The last scheduled run of the brief: none yet, then a success, then a failure.
+        const noSched = await briefAt(new Date("2026-10-13T13:00:00Z"));
+        check("with no scheduled run recorded, lastScheduled is null", noSched?.lastScheduled === null && noSched.runsNote === null,
+            noSched?.lastScheduled);
+        const noSchedHtml = await briefPage();
+        check("...and the tile says none is recorded yet", /data-last-scheduled="none"/.test(noSchedHtml), noSchedHtml);
+        const finished = async (skill: string, trigger: string, ok: boolean, startedAt: string, finishedAt: string, summary: string | null = null) =>
+            (await pool.query(
+                `INSERT INTO agent_runs (skill, status, trigger, requested_at, claimed_at, finished_at, runner, summary, output_path, duration_ms, cost_usd)
+                 VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8, 240000, 0.42) RETURNING id`,
+                [skill, ok ? "succeeded" : "failed", trigger, startedAt, finishedAt, runnerName, summary,
+                    ok ? "outputs/briefs/2026-10-12.md" : null])).rows[0].id;
+        const monRun = await finished("morning-brief", "scheduled", true, "2026-10-12T11:45:10Z", "2026-10-12T11:49:10Z", "brief status: ok");
+        // Later, but not the brief's scheduled run: a button brief, a manual brief, a scheduled lint.
+        await finished("morning-brief", "button", false, "2026-10-12T15:00:00Z", "2026-10-12T15:01:00Z");
+        await finished("morning-brief", "manual", false, "2026-10-12T16:00:00Z", "2026-10-12T16:01:00Z");
+        await finished("lint-wiki", "scheduled", false, "2026-10-12T17:00:00Z", "2026-10-12T17:01:00Z");
+        const okSched = await briefAt(new Date("2026-10-13T11:00:00Z"));
+        check("the last scheduled run is the brief's newest scheduled one, not a button, manual or other skill's run",
+            okSched?.lastScheduled?.id === monRun && okSched.lastScheduled.ok === true && okSched.lastScheduled.status === "succeeded"
+                && okSched.lastScheduled.skill === "morning-brief" && okSched.lastScheduled.startedAt === "2026-10-12T11:45:10.000Z"
+                && okSched.lastScheduled.finishedAt === "2026-10-12T11:49:10.000Z" && okSched.lastScheduled.summary === "brief status: ok"
+                && okSched.lastScheduled.durationMs === 240000 && okSched.lastScheduled.costUsd === 0.42, okSched?.lastScheduled);
+        const okSchedHtml = await briefPage();
+        check("...and the tile shows it succeeded, with its Central time",
+            /data-last-scheduled="succeeded"/.test(okSchedHtml) && /6:49 AM CT/.test(okSchedHtml), okSchedHtml);
+
+        const tueRun = await finished("morning-brief", "scheduled", false, "2026-10-13T11:45:05Z", "2026-10-13T11:46:00Z",
+            "morning_brief.ps1 exited 1; see private\\logs\\morning_brief_2026-10-13.log");
+        const failed = await briefAt(new Date("2026-10-13T13:00:00Z"));
+        check("a failed scheduled run is the outcome shown, with its summary",
+            failed?.lastScheduled?.id === tueRun && failed.lastScheduled.ok === false && failed.lastScheduled.status === "failed"
+                && /exited 1/.test(failed.lastScheduled.summary ?? ""), failed?.lastScheduled);
+        const failedHtml = await briefPage();
+        const failedLine = failedHtml.match(/<div[^>]*data-last-scheduled[^>]*>[\s\S]*?<\/div>/)?.[0] ?? "";
+        check("...and the tile flags the failure with its summary",
+            /data-last-scheduled="failed"/.test(failedLine) && /class="[^"]*warn/.test(failedLine) && /failed/.test(failedLine)
+                && /exited 1/.test(failedLine), failedHtml);
+
+        // The usage migration not applied (no `trigger`): the tile stays ok with the brief and runner, and says why.
+        await pool.query(`ALTER TABLE agent_runs RENAME COLUMN trigger TO trigger_t143_renamed`);
+        triggerRenamed = true;
+        const noTrigger = await get(H.base, "/admin/os/api/overview", adminToken);
+        const nt = noTrigger.json?.tiles?.brief;
+        check("without the trigger column the tile stays ok: next brief and runner intact, no runs, and a note naming the migration",
+            noTrigger.status === 200 && nt?.status === "ok" && nt.nextRun === "2026-10-14T11:45:00.000Z" && nt.runner?.name === runnerName && typeof nt.runner.lastSeen === "string"
+                && nt.lastScheduled === null && nt.activeRun === null
+                && /trigger/.test(nt.runsNote ?? "") && (nt.runsNote ?? "").includes("2026-10-12-agent-run-usage.sql"), nt);
+        const noTriggerHtml = await briefPage();
+        check("...and the tile says the run history is unavailable, naming the migration",
+            noTriggerHtml.includes("2026-10-12-agent-run-usage.sql"), noTriggerHtml);
+        await pool.query(`ALTER TABLE agent_runs RENAME COLUMN trigger_t143_renamed TO trigger`);
+        triggerRenamed = false;
+
         // ── Tasks tile (#141) ───────────────────────────────────────────────
         // Mid-October is CDT (UTC-5): Central midnight starting Tue Oct 13 is
         // 05:00Z. Notion date-only due dates arrive as UTC midnight of that
@@ -737,13 +900,14 @@ async function main() {
     } finally {
         if (renamed) await pool.query(`ALTER TABLE alpaca_snapshots_t139_renamed RENAME TO alpaca_snapshots`).catch(() => {});
         if (usageRenamed) await pool.query(`ALTER TABLE agent_runs RENAME COLUMN cost_usd_t144_renamed TO cost_usd`).catch(() => {});
+        if (triggerRenamed) await pool.query(`ALTER TABLE agent_runs RENAME COLUMN trigger_t143_renamed TO trigger`).catch(() => {});
         if (asksRenamed) await pool.query(`ALTER TABLE os_asks_t156_renamed RENAME TO os_asks`).catch(() => {});
         delete process.env.OS_ASK_DAILY_BUDGET_USD;
         await pool.query(`DELETE FROM alpaca_snapshots`).catch(() => {});
         await pool.query(`DELETE FROM tasks`).catch(() => {});
-        await pool.query(`DELETE FROM agent_runs WHERE runner = $1`, [`t144-${tag}`]).catch(() => {});
+        await pool.query(`DELETE FROM agent_runs WHERE runner = ANY($1) OR id = ANY($2)`, [[`t144-${tag}`, `t143-${tag}`], t143Runs]).catch(() => {});
         for (const id of created) await pool.query(`DELETE FROM accounts WHERE id = $1`, [id]);
-        P.server.close(); H.server.close(); D.server.close();
+        P.server.close(); H.server.close(); D.server.close(); R.server.close();
         vault.remove();
     }
 

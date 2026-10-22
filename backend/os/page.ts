@@ -2,6 +2,7 @@ import { renderPage } from "../utils/adminUi.js";
 import { centralTime, esc } from "./format.js";
 import { ADMIN_PAGES } from "./commands.js";
 import { MIC_BUTTON, MIC_NOTE, MIC_STYLES, micScript } from "./mic.js";
+import { SPEAKER_JS, STOP_BUTTON, VOICE_PICKER, VOICE_STYLES, voiceScript } from "./voice.js";
 import { describeError, type Overview, type Tile, type TileSource, type ViewContext } from "./overview.js";
 
 /** The page reloads itself this often while it's visible. */
@@ -48,13 +49,14 @@ function renderTile(source: TileSource<any>, tile: Tile | undefined, view: ViewC
 
 /**
  * The ask box (#146). Typed asks go through the same path as voice: the mic
- * (#149) and the stop button (#150) go in #ask-controls and call window.OS.
+ * (#149) and the stop button (#150) go in #ask-controls and call window.OS;
+ * the voice picker (#150) sits at the end.
  */
 const ASK_BOX = `
                 <form id="ask-form" class="ask" autocomplete="off">
                     <label for="ask-text" class="sr-only">Ask the OS</label>
                     <div class="ask-row">
-                        <span id="ask-controls" class="ask-controls">${MIC_BUTTON}</span>
+                        <span id="ask-controls" class="ask-controls">${MIC_BUTTON}${STOP_BUTTON}</span>
                         <input id="ask-text" name="text" type="text" maxlength="500" enterkeyhint="send"
                             placeholder="Ask, e.g. “open alpaca” or “show the briefs”">
                         <button id="ask-send" type="submit">ASK</button>
@@ -67,7 +69,7 @@ const ASK_BOX = `
                             <button id="ask-confirm-yes" type="button">CONFIRM</button>
                             <button id="ask-confirm-no" type="button">CANCEL</button>
                         </div>
-                    </div>
+                    </div>${VOICE_PICKER}
                 </form>`;
 
 /**
@@ -75,10 +77,21 @@ const ASK_BOX = `
  *
  *   OS.ask(text, source)  POST /admin/os/ask; shows, speaks and acts on the reply.
  *                         The mic (#149) calls OS.ask(transcript, 'voice').
- *   OS.speak(text, done?) speaks with speechSynthesis, cancelling anything still
- *                         being spoken; #150 swaps in voice choice and stop.
- *   OS.cancelSpeech()     stops speech in progress and drops a navigation still
- *                         waiting on its "Opening …" (a new ask does this too).
+ *   OS.speak(text, done?) speaks with speechSynthesis in the chosen voice (#150),
+ *                         cutting off anything still being spoken. Long text is
+ *                         queued in sentence-sized pieces (os/voice.ts). done(cut)
+ *                         runs once: cut is true when stop, a new ask or another
+ *                         speak() cut it off. Speaking over a navigation's
+ *                         "Opening …" drops that navigation.
+ *   OS.cancelSpeech()     stops speech in progress, drops a navigation still
+ *                         waiting on its "Opening …", and silences the reply to an
+ *                         ask or confirm in flight: it's shown, not spoken, and a
+ *                         navigation in it isn't followed (the request isn't
+ *                         aborted: a confirm already sent still queues its run).
+ *                         A new ask cancels speech too.
+ *   OS.speaking()         true while the OS is speaking (#150).
+ *   OS.pending()          true while an ask or confirm is in flight (#150).
+ *   OS.onActivity(fn)     fn() whenever speaking() or pending() changes (#150).
  *   OS.onReply(fn)        fn(reply) after each reply is shown, before it's spoken.
  *   OS.busy()             true while there's unsent text, an ask or confirm in
  *                         flight, speech, a pending navigation or a pending
@@ -113,7 +126,9 @@ function askScript(token: string): string {
             var form = document.getElementById('ask-form'), input = document.getElementById('ask-text');
             var send = document.getElementById('ask-send'), out = document.getElementById('ask-reply');
             var sayEl = out.querySelector('.ask-say'), displayEl = out.querySelector('.ask-display');
-            var pending = false, hooks = [], confirmHooks = [];
+            var pending = false, hooks = [], confirmHooks = [], activityHooks = [];
+            // Stop pressed while an ask or confirm was in flight: its reply is shown, not spoken or acted on.
+            var hushed = false;
             var confirmBox = document.getElementById('ask-confirm');
             var yesBtn = document.getElementById('ask-confirm-yes'), noBtn = document.getElementById('ask-confirm-no');
             // The run proposal waiting for Confirm or Cancel, and its expiry timer.
@@ -130,26 +145,36 @@ function askScript(token: string): string {
                 displayEl.textContent = display || '';
             }
 
-            function stopVoice() {
-                try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) { /* no speech */ }
+            function activity() { activityHooks.forEach(function (fn) { try { fn(); } catch (e) { console.error(e); } }); }
+            function setPending(on) { pending = on; send.disabled = on; activity(); }
+
+            // Speech (#150): os/voice.ts createSpeaker, in the voice the picker chose.
+            var synth = null, Utt = null;
+            try { synth = window.speechSynthesis || null; Utt = window.SpeechSynthesisUtterance || null; } catch (e) { /* no speech */ }
+            var createSpeaker = ${SPEAKER_JS};
+            var speaker = createSpeaker({
+                synth: synth, Utterance: Utt,
+                voice: function () { return window.OS && typeof window.OS.voice === 'function' ? window.OS.voice() : null; },
+                onChange: activity,
+            });
+
+            // Stop: silence, drop a navigation still waiting on its "Opening …", and
+            // hush the reply to anything in flight.
+            function cancelSpeech() {
+                leaving = null;
+                if (pending) hushed = true;
+                speaker.cancel();
             }
 
-            // Stop: silence, and drop a navigation still waiting on its "Opening …".
-            function cancelSpeech() { leaving = null; stopVoice(); }
+            // Speaks text, cutting off anything still being spoken. done(cut) runs once:
+            // when speech ends or fails, when the wait for its end runs out, at once
+            // without speech, or with cut = true when it's cut off.
+            function speak(text, done) { speaker.speak(text, done); }
 
-            // Speaks text, cutting off anything still being spoken. done() runs once:
-            // when speech ends or fails, after a few seconds, or at once without speech.
-            function speak(text, done) {
-                var finished = false;
-                function finish() { if (!finished) { finished = true; if (done) done(); } }
-                try {
-                    if (!window.speechSynthesis || !window.SpeechSynthesisUtterance || !text) return finish();
-                    stopVoice();
-                    var u = new SpeechSynthesisUtterance(text);
-                    u.onend = finish; u.onerror = finish;
-                    window.speechSynthesis.speak(u);
-                    if (done) setTimeout(finish, 3000);
-                } catch (e) { finish(); }
+            // A reply's speech: nothing when stop hushed it.
+            function say(text, done) {
+                if (hushed) { if (done) done(true); return; }
+                speak(text, done);
             }
 
             // Shows (c) or clears (null) the pending proposal's Confirm and Cancel.
@@ -174,16 +199,19 @@ function askScript(token: string): string {
                 setProposal(reply.kind === 'confirm_run' && reply.confirmation ? reply.confirmation : null);
                 hooks.forEach(function (fn) { try { fn(reply); } catch (e) { console.error(e); } });
                 if (reply.kind === 'navigate' && PAGES.indexOf(reply.url) >= 0) {
+                    if (hushed) { show(reply.say, 'Stopped.', reply.kind); return; }
                     var trip = leaving = { url: reply.url };
-                    speak(reply.say, function () {
-                        if (leaving === trip) location.href = withToken(trip.url);
+                    say(reply.say, function (cut) {
+                        if (leaving !== trip) return;
+                        // Cut off (stop, a new ask, another speak()): stay on the page.
+                        if (cut) leaving = null; else location.href = withToken(trip.url);
                     });
                 } else {
-                    speak(reply.say);
+                    say(reply.say);
                 }
             }
 
-            function fail(message) { show(message, '', 'error'); speak(message); }
+            function fail(message) { show(message, '', 'error'); say(message); }
 
             // POSTs JSON behind the admin gate. Resolves to { status, ok, body }, or to
             // null once a failure (expired session, not an admin, no JSON, no server) is shown.
@@ -210,9 +238,10 @@ function askScript(token: string): string {
                 text = Array.from(String(text || '').trim()).slice(0, 500).join('');
                 if (!text || pending) return Promise.resolve(null);
                 cancelSpeech();
+                hushed = false;
                 // A new ask abandons a pending proposal; it just expires on the server.
                 setProposal(null);
-                pending = true; send.disabled = true;
+                setPending(true);
                 show('…', '', 'pending');
                 return postJson('/admin/os/ask', { text: text, source: source === 'voice' ? 'voice' : 'typed' }).then(function (r) {
                     if (!r) return null;
@@ -220,7 +249,7 @@ function askScript(token: string): string {
                     handle(r.body);
                     return r.body;
                 }).then(function (reply) {
-                    pending = false; send.disabled = false;
+                    setPending(false);
                     return reply;
                 });
             }
@@ -230,7 +259,8 @@ function askScript(token: string): string {
                 var p = proposal;
                 if (!p || pending) return Promise.resolve(null);
                 cancelSpeech();
-                pending = true; send.disabled = true; yesBtn.disabled = noBtn.disabled = true;
+                hushed = false;
+                setPending(true); yesBtn.disabled = noBtn.disabled = true;
                 show('…', '', 'pending');
                 return postJson('/admin/os/ask/confirm', { id: p.id }).then(function (r) {
                     if (!r) return null;
@@ -246,10 +276,10 @@ function askScript(token: string): string {
                     }
                     show(r.body.say, '', 'confirmed');
                     confirmHooks.forEach(function (fn) { try { fn(r.body.run, r.body); } catch (e) { console.error(e); } });
-                    speak(r.body.say);
+                    say(r.body.say);
                     return r.body;
                 }).then(function (body) {
-                    pending = false; send.disabled = false;
+                    setPending(false);
                     if (proposal === p) yesBtn.disabled = noBtn.disabled = false;
                     return body;
                 });
@@ -274,16 +304,19 @@ function askScript(token: string): string {
 
             window.OS = {
                 ask: ask, speak: speak, cancelSpeech: cancelSpeech,
+                speaking: speaker.speaking,
+                pending: function () { return pending; },
+                onActivity: function (fn) { activityHooks.push(fn); },
                 onReply: function (fn) { hooks.push(fn); },
                 confirm: confirm, dismiss: dismiss,
                 proposal: function () {
                     return proposal ? { id: proposal.id, skill: proposal.skill, label: proposal.label, expiresAt: proposal.expiresAt } : null;
                 },
                 onConfirm: function (fn) { confirmHooks.push(fn); },
+                // Speech counts as busy, so a reload never cuts a reply off; the
+                // speaker's own wait bounds it if the browser never ends speech.
                 busy: function () {
-                    var speaking = false;
-                    try { speaking = !!(window.speechSynthesis && window.speechSynthesis.speaking); } catch (e) { /* none */ }
-                    return pending || speaking || !!leaving || !!proposal || input.value.trim() !== '';
+                    return pending || speaker.speaking() || !!leaving || !!proposal || input.value.trim() !== '';
                 },
             };
         })();`;
@@ -312,6 +345,7 @@ export function renderOverviewPage({ token, now, overview, sources, refreshMs = 
         </div>
         <script>${askScript(token)}</script>
         <script>${micScript()}</script>
+        <script>${voiceScript()}</script>
         <script>
         // Reload while the page is visible; catch up as soon as a hidden tab comes back.
         // Never while the ask box is in use (typing, waiting, or speaking a reply).
@@ -364,6 +398,7 @@ export function renderOverviewPage({ token, now, overview, sources, refreshMs = 
         #ask-confirm-no { background: transparent; color: #ddd; border: 1px solid #555; }
         .ask-confirm button:disabled { opacity: 0.5; }
         ${MIC_STYLES}
+        ${VOICE_STYLES}
         .tile { border: 1px solid #333; background: #1e1e1e; padding: 1rem 1.25rem; min-width: 0; box-sizing: border-box; }
         .tile-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
         .tile-title { color: #0d9488; font-size: 0.75rem; letter-spacing: 2px; font-weight: bold; text-transform: uppercase; text-decoration: none; }

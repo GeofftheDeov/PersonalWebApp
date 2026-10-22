@@ -1,7 +1,7 @@
 import { describeError, ok, unavailable, type Queryable, type TileSource } from "../overview.js";
-import { esc, money, TIME_ZONE } from "../format.js";
+import { centralTime, esc, money, TIME_ZONE } from "../format.js";
 import { budgetMoney, dailyBudgetFromEnv, tier2SpendToday } from "../budget.js";
-import { summariseUsage, type UsageSummary } from "../../services/agentRuns.js";
+import { summariseUsage, type UsagePoint, type UsageSummary } from "../../services/agentRuns.js";
 
 /**
  * The Claude usage tile (#144): what the OS's skill runs consumed over the
@@ -16,7 +16,9 @@ import { summariseUsage, type UsageSummary } from "../../services/agentRuns.js";
  * metered API spend, from os_asks via os/budget.ts). Without the os_asks table
  * (its migration not applied) only that line goes; the tile stays ok.
  *
- * Later: the per-run sparkline from `points` (#145).
+ * Under the totals, a per-run cost sparkline (#145) plots `points`: one mark
+ * per run with usage, so a ballooning run explains itself. Runs without usage
+ * aren't plotted at all (never as $0); they're only in the "without usage" count.
  */
 
 /** The window: this many Central calendar days, today included. */
@@ -61,6 +63,99 @@ const cost = (v: number) => (v > 0 && v < 0.005 ? "<$0.01" : money(v));
 const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
 const shortDay = (d: Date) => d.toLocaleDateString("en-US", { timeZone: TIME_ZONE, month: "short", day: "numeric" });
 
+/**
+ * The sparkline's drawing box, in viewBox units. The SVG scales to the tile's
+ * width (CSS .spark in os/page.ts), so these set its proportions, not its size.
+ */
+const SPARK_W = 320;
+const SPARK_H = 64;
+/** Room for the end marker and its ring: dots never clip at the edges. */
+const SPARK_PAD = 6;
+
+/** One point's text, formatted once for both its <title> and its table row. Plain text; escaped by the caller. */
+function describePoint(p: UsagePoint, now: Date) {
+    const when = centralTime(new Date(p.finishedAt), now);
+    const spend = cost(p.costUsd);
+    const io = `${tokens(p.inputTokens)} / ${tokens(p.outputTokens)}`;
+    const title = [when, p.skill, p.trigger, spend,
+        `${tokens(p.inputTokens)} in / ${tokens(p.outputTokens)} out tokens`, ...(p.ok ? [] : ["failed"])].join(" · ");
+    return { p, when, spend, io, title };
+}
+
+/**
+ * The per-run cost sparkline (#145): inline SVG built here, no chart library.
+ * One series, so no legend: the caption names it. Runs are evenly spaced,
+ * oldest to newest; cost rises from a $0 baseline to the window's peak. Every
+ * point carries a <title> (the hover tooltip) inside a full-height hit band,
+ * since a 4px dot is too small to aim at; the newest run is the accent dot,
+ * and a failed run is a hollow one (shape, not colour). The table under it
+ * holds the same values for anyone who can't hover (touch, keyboard, screen
+ * readers: role="img" reads only the aria-label).
+ *
+ * `points` is plotted as given: summariseUsage caps it at USAGE_MAX_POINTS
+ * runs with usage, oldest first, and build() turns a non-finite cost into an
+ * unavailable tile, so the plot always matches the JSON.
+ */
+function sparkline(points: UsagePoint[], now: Date): string {
+    const n = points.length;
+    if (n === 0) return "";
+    const peak = points.reduce((best, p) => (p.costUsd > best.costUsd ? p : best), points[0]);
+    const latest = points[n - 1];
+    const free = peak.costUsd <= 0;
+    const scale = free ? 1 : peak.costUsd; // all $0: a flat line on the baseline
+    const top = SPARK_PAD, base = SPARK_H - SPARK_PAD;
+    const step = n > 1 ? (SPARK_W - 2 * SPARK_PAD) / (n - 1) : SPARK_W;
+    const f = (v: number) => v.toFixed(1);
+    const xy = points.map((p, i) => ({
+        x: n > 1 ? SPARK_PAD + i * step : SPARK_W / 2,
+        y: base - (p.costUsd / scale) * (base - top),
+    }));
+    const described = points.map((p) => describePoint(p, now));
+
+    const line = n > 1
+        ? `<polyline class="spark-line" points="${xy.map((c) => `${f(c.x)},${f(c.y)}`).join(" ")}"/>`
+        : "";
+    const marks = described.map(({ p, title }, i) => {
+        const { x, y } = xy[i];
+        const last = i === n - 1;
+        // The hit band runs halfway to each neighbour, the full height of the plot.
+        const x0 = Math.max(0, x - step / 2), x1 = Math.min(SPARK_W, x + step / 2);
+        const cls = `spark-pt${last ? " spark-last" : ""}${p.ok ? "" : " spark-failed"}`;
+        return `<g class="${cls}" data-run="${esc(p.id)}"><title>${esc(title)}</title>`
+            + `<rect class="spark-hit" x="${f(x0)}" y="0" width="${f(x1 - x0)}" height="${SPARK_H}"/>`
+            + `<circle class="spark-dot" cx="${f(x)}" cy="${f(y)}" r="${last ? 4 : 2.5}"/></g>`;
+    }).join("");
+
+    // What the plot says, in words: the caption for sighted readers, the aria-label for the rest.
+    // One run has no peak; all-$0 runs have no peak either, so neither names one.
+    const runs = n === 1 ? "1 run" : `the last ${n} runs`;
+    const summary = n === 1 ? `${cost(latest.costUsd)} (${latest.skill}, ${shortDay(new Date(latest.finishedAt))})`
+        : free ? `every run $0.00`
+        : `peak ${cost(peak.costUsd)} (${peak.skill}, ${shortDay(new Date(peak.finishedAt))})`;
+    const label = `Cost per run for ${runs} with usage, oldest to newest: ${summary}`
+        + (n > 1 && !free ? `, latest ${cost(latest.costUsd)} (${latest.skill}).` : ".");
+    const caption = `Cost per run, ${runs} with usage · ${summary}`;
+    const svg = `<svg class="spark" viewBox="0 0 ${SPARK_W} ${SPARK_H}" role="img" aria-label="${esc(label)}" focusable="false">`
+        + `<line class="spark-base" x1="0" y1="${base}" x2="${SPARK_W}" y2="${base}"/>${line}${marks}</svg>`;
+
+    const rows = described.slice().reverse().map(({ p, when, spend, io }) => `
+                    <tr${p.ok ? "" : ` class="warn"`}><td>${esc(when)}</td><td>${esc(p.skill)}</td>`
+        + `<td>${esc(p.trigger)}${p.ok ? "" : " (failed)"}</td><td class="num">${esc(spend)}</td>`
+        + `<td class="num">${esc(io)}</td></tr>`).join("");
+    return `
+            <div class="spark-wrap">
+                ${svg}
+                <div class="stat-meta spark-cap">${esc(caption)}</div>
+                <details class="spark-runs">
+                    <summary>Runs as a table</summary>
+                    <div class="spark-scroll"><table>
+                    <thead><tr><th>Finished</th><th>Skill</th><th>Trigger</th><th class="num">Cost</th><th class="num">Tokens in / out</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                    </table></div>
+                </details>
+            </div>`;
+}
+
 export const usageTile: TileSource<UsageTileData> = {
     id: "usage",
     title: "Claude usage",
@@ -88,7 +183,7 @@ export const usageTile: TileSource<UsageTileData> = {
         return undefined;
     },
 
-    render(t) {
+    render(t, view) {
         const window = `${shortDay(new Date(t.from))} – ${shortDay(new Date(new Date(t.to).getTime() - 1))} CT`;
         const withoutLine = (note: string) => t.runsWithoutUsage
             ? `<div class="stat-meta"><span class="warn">${esc(plural(t.runsWithoutUsage, "run"))} without usage</span>${note}</div>`
@@ -118,6 +213,7 @@ export const usageTile: TileSource<UsageTileData> = {
             <div class="stat-label">API-equivalent cost · last ${USAGE_WINDOW_DAYS} days</div>
             <div class="stat-value">${esc(cost(t.costUsd))}</div>
             <div class="stat-delta">${esc(tokens(t.inputTokens))} input · ${esc(tokens(t.outputTokens))} output tokens · ${esc(plural(t.runsWithUsage, "run"))}</div>
+            ${sparkline(t.points, view.now)}
             ${withoutLine(", not in the totals")}
             ${tier2Line}
             <div class="stat-meta">${esc(window)} · not a bill: subscription runs aren't billed</div>`;

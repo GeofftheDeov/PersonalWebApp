@@ -151,6 +151,8 @@ export function createOsRouter({
         const text = rawText.trim();
         // Characters as Postgres counts them (code points), not UTF-16 units.
         if ([...text].length > MAX_ASK_CHARS) return res.status(400).json({ error: `text is over ${MAX_ASK_CHARS} characters` });
+        // Postgres text can't hold NUL: such an ask could be answered (even priced) but never logged or proposed.
+        if (text.includes("\u0000")) return res.status(400).json({ error: "text must not contain NUL characters" });
         if (!ASK_SOURCES.includes(source)) return res.status(400).json({ error: "source must be 'voice' or 'typed'" });
         const accountId: string = req.adminUser.id;
 

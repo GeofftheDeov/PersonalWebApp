@@ -147,9 +147,11 @@ function sectionRange(lines: string[], heading: RegExp): [number, number] | null
 /** A section's lines without comments (HTML or Obsidian, even across lines) or fenced code. */
 function proseLines(lines: string[]): string[] {
     // A comment on lines of its own goes with its line breaks, so it doesn't split a paragraph.
+    // Its body can't contain its own closer: otherwise a comment followed by text on the
+    // same line would stretch to a later comment's end and take the prose between with it.
     const uncommented = ('\n' + lines.join('\n'))
-        .replace(/\n[ \t]*<!--[\s\S]*?-->[ \t]*(?=\n|$)/g, '').replace(/<!--[\s\S]*?(?:-->|$)/g, '')
-        .replace(/\n[ \t]*%%[\s\S]*?%%[ \t]*(?=\n|$)/g, '').replace(/%%[\s\S]*?(?:%%|$)/g, '')
+        .replace(/\n[ \t]*<!--(?:(?!-->)[\s\S])*-->[ \t]*(?=\n|$)/g, '').replace(/<!--[\s\S]*?(?:-->|$)/g, '')
+        .replace(/\n[ \t]*%%(?:(?!%%)[\s\S])*%%[ \t]*(?=\n|$)/g, '').replace(/%%[\s\S]*?(?:%%|$)/g, '')
         .slice(1).split('\n');
     let fenced = false;
     return uncommented.filter((l) => {

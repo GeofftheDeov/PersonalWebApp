@@ -152,8 +152,11 @@ export function runnerOnline(now: Date = new Date()): boolean {
 /**
  * Enqueue, unless the same skill is already queued or running — pressing the
  * button twice should not run the brief twice. Returns the run either way.
+ * A `running` row past STALE_AFTER is expired first, so a dead run doesn't
+ * block the RUN button or a voice/tap confirm with "already running".
  */
 export async function enqueueRun(skill: SkillId, requestedBy: string | null): Promise<{ run: AgentRun; created: boolean }> {
+    await expireStale();
     const existing = await query<AgentRun>(
         `SELECT * FROM agent_runs WHERE skill = $1 AND status IN ('queued','running')
           ORDER BY requested_at DESC LIMIT 1`, [skill]);
@@ -235,6 +238,13 @@ export const isRecordedTrigger = (t: unknown): t is RecordedTrigger => RECORDED_
 
 /** How far back a recorded run's start may be; an older (or future) start is a bad clock, not a long run. */
 const RECORDED_START_WINDOW = '24 hours';
+/**
+ * How far ahead of the database clock a recorded run's start may be and still
+ * count as a real start: the PC's clock running a few seconds fast. Such a
+ * start is taken as now (a run can't end before it began), without the
+ * "bad clock" warning.
+ */
+export const RECORDED_START_SKEW_MS = 30_000;
 
 /**
  * An ISO 8601 instant with an explicit offset (`Z` or `±HH:MM`), as the vault
@@ -263,9 +273,11 @@ function readInstant(raw: unknown): Date | null {
  *
  * `claimed_at` (and `requested_at`, so the history lists the run when it
  * started) is `startedAt` when that is a readable instant within the last 24
- * hours and not in the future, by the database clock; otherwise now (with a
- * log line, since the wrapper gets no error). `finished_at` is now. The result
- * is read exactly as on completeRun. Not idempotent: each call is a new row.
+ * hours and not in the future, by the database clock; a start up to
+ * RECORDED_START_SKEW_MS ahead (a fast PC clock) is taken as now. Otherwise
+ * it's now, with a log line, since the wrapper gets no error. `finished_at` is
+ * now. The result is read exactly as on completeRun. Not idempotent: each call
+ * is a new row.
  */
 export async function recordFinishedRun(input: RunResult & {
     skill: SkillId;
@@ -275,19 +287,24 @@ export async function recordFinishedRun(input: RunResult & {
     startedAt?: unknown;
 }): Promise<AgentRun> {
     const subject = `recorded ${input.trigger} ${input.skill} run`;
+    const instant = readInstant(input.startedAt);
     const { rows: [run] } = await query<AgentRun>(
         `WITH s AS (
-           SELECT CASE WHEN $3::timestamptz BETWEEN now() - interval '${RECORDED_START_WINDOW}' AND now()
-                       THEN $3::timestamptz ELSE now() END AS started
+           SELECT CASE WHEN $3::timestamptz BETWEEN now() - interval '${RECORDED_START_WINDOW}'
+                                                AND now() + $12::int * interval '1 millisecond'
+                       THEN LEAST($3::timestamptz, now()) ELSE now() END AS started
          )
          INSERT INTO agent_runs (skill, trigger, status, requested_at, claimed_at, finished_at, runner,
                                  summary, output_path, cost_usd, input_tokens, output_tokens, duration_ms)
          SELECT $1, $2, $5, s.started, s.started, now(), $4, $6, $7, $8, $9, $10, $11 FROM s
          RETURNING *`,
-        [input.skill, input.trigger, readInstant(input.startedAt), input.runner?.slice(0, 100) || null,
-            ...resultColumns(subject, input)]);
-    if (input.startedAt !== undefined && input.startedAt !== null
-        && new Date(run.claimed_at!).getTime() === new Date(run.finished_at!).getTime()) {
+        [input.skill, input.trigger, instant, input.runner?.slice(0, 100) || null,
+            ...resultColumns(subject, input), RECORDED_START_SKEW_MS]);
+    const claimed = new Date(run.claimed_at!).getTime(), finished = new Date(run.finished_at!).getTime();
+    // Kept as sent, or a little ahead of the database clock and so taken as now: either way, accepted.
+    const accepted = instant !== null && (claimed === instant.getTime()
+        || (claimed === finished && instant.getTime() > finished && instant.getTime() - finished <= RECORDED_START_SKEW_MS));
+    if (input.startedAt !== undefined && input.startedAt !== null && !accepted) {
         console.warn(`[runner] ${subject} ${run.id}: startedAt ${JSON.stringify(input.startedAt)?.slice(0, 60)} `
             + `is unreadable, in the future or over ${RECORDED_START_WINDOW} old; recorded as starting now`);
     }

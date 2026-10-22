@@ -811,6 +811,11 @@ async function main() {
         if (keeps) {
             await t151Say(p, "yes");
             check("... and a second \"yes\" confirms it again", t151Confirms(p).length === 2 && t151Asks(p).length === 1);
+            p.synth.endAll();
+            p.timers.advance(61_000);
+            check("... and when it then lapses, the question comes back marked expired, not the confirm's error",
+                p.OS.proposal() === null && p.say() === "Run the morning brief?" && /Expired/.test(p.display()),
+                { shown: p.say(), display: p.display() });
         }
     }
     {

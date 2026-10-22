@@ -212,6 +212,9 @@ function askScript(token: string): string {
                 confirmBox.hidden = !proposal;
                 yesBtn.disabled = noBtn.disabled = false;
                 if (!proposal) return;
+                // The question as first shown: a failed confirm (a 500, no server) replaces the
+                // text with its error while the proposal stays up, and expiry shouldn't repeat that.
+                var question = sayEl.textContent;
                 var ms = Date.parse(proposal.expiresAt) - Date.now();
                 // A skewed client clock: fall back to the full two minutes; the server still says 410.
                 if (!(ms > 0 && ms <= 120000)) ms = 120000;
@@ -219,7 +222,7 @@ function askScript(token: string): string {
                     if (proposal !== c) return;
                     setProposal(null);
                     lapsed = true;
-                    show(sayEl.textContent, 'Expired. Ask again to run it.', 'expired');
+                    show(question, 'Expired. Ask again to run it.', 'expired');
                 }, ms);
             }
 

@@ -386,6 +386,27 @@ async function main() {
             const res = await record({ skill: SKILL, trigger: "scheduled", ok: true, runner: runner138, startedAt: edge.toISOString() });
             check("startedAt just inside 24 hours is kept",
                 res.status === 201 && ms((await row(Number(res.json?.run?.id)))?.claimed_at) === edge.getTime(), res.json);
+
+            // A PC clock a few seconds fast: a short run's start is just ahead of the database's now.
+            const skewWarnings: string[] = [];
+            const realWarn = console.warn;
+            console.warn = (...args: unknown[]) => { skewWarnings.push(args.map(String).join(" ")); };
+            let skewed: any, badClock: any;
+            try {
+                skewed = await record({ skill: SKILL, trigger: "scheduled", ok: true, runner: runner138,
+                    startedAt: new Date(Date.now() + 5_000).toISOString() });
+                badClock = await record({ skill: SKILL, trigger: "scheduled", ok: true, runner: runner138,
+                    startedAt: new Date(Date.now() + H).toISOString() });
+            } finally {
+                console.warn = realWarn;
+            }
+            const skewRow = skewed.json?.run?.id ? await row(Number(skewed.json.run.id)) : null;
+            check("startedAt a few seconds ahead of the database clock: 201, taken as now (never after finished_at)",
+                skewed.status === 201 && ms(skewRow?.claimed_at) === ms(skewRow?.finished_at), skewRow);
+            check("... without the bad-clock warning, which an hour ahead still gets",
+                skewWarnings.filter((w) => w.includes(`run ${skewed.json?.run?.id}:`)).length === 0
+                    && skewWarnings.some((w) => w.includes(`run ${badClock.json?.run?.id}:`) && /in the future/.test(w)),
+                skewWarnings);
         }
 
         // ── usage, summary and output path are read as on complete ─────────────

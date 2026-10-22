@@ -245,6 +245,9 @@ async function main() {
             ["blank text", "   ", "typed"],
             ["text that isn't a string", 42, "typed"],
             ["text over 500 characters", "a".repeat(501), "typed"],
+            // Postgres text can't store NUL, so it would be answered but never logged.
+            ["text with a NUL character", "run the brief\u0000", "typed"],
+            ["text with a NUL inside", "what's\u0000the weather", "typed"],
             ["an unknown source", "open alpaca", "shout"],
             ["no source", "open alpaca", undefined],
         ];
@@ -781,6 +784,9 @@ async function main() {
                 + "## Say\n\n### Today\nKeep SPY < 500 and VIX > 20 in view &amp; reply to Sam.\n<!--\nt152 hidden note\n-->\n"
                 + "%%t152 draft\nstill draft%%\n```\n# t152 fenced comment\n```\n- Tasks &amp; deploys are fine.\n\n---\n\nBye.\n"
                 + "  ## Calendar\n- t152 calendar after indented heading\n");
+            // A comment with text after it on the same line, then a later comment: the prose between stays.
+            sayVault.writeBrief("2031-03-01", {}, "# Morning Brief\n\n## Say\n\n<!-- t152 lead note --> Good morning, keep this.\n"
+                + "And this too. <!-- t152 tail note -->\nLast line.\n\n%% t152 draft %% Also kept.\nMore. %% t152 aside %%\n");
             // A brief file that can't be read (a directory where the file should be).
             fs.mkdirSync(path.join(sayVault.dir, "outputs", "briefs", "2031-03-02.md"));
 
@@ -822,6 +828,11 @@ async function main() {
                 sayMessy.json?.source === "say"
                     && sayMessy.json.text === "Today Keep SPY < 500 and VIX > 20 in view & reply to Sam. Tasks & deploys are fine.\n\nBye.",
                 sayMessy.json);
+            const sayInline = await sayGet("&date=2031-03-01");
+            check("a comment followed by text on its line doesn't swallow the prose up to a later comment",
+                sayInline.json?.source === "say"
+                    && sayInline.json.text === "Good morning, keep this. And this too. Last line.\n\nAlso kept. More.",
+                sayInline.json);
             const sayUnreadable = await sayGet("&date=2031-03-02");
             check("a brief file that can't be read is 500 { error: 'brief unreadable' }, not 404",
                 sayUnreadable.status === 500 && sayUnreadable.json?.error === "brief unreadable", sayUnreadable);

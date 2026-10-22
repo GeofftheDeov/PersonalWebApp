@@ -51,6 +51,10 @@ import type { Queryable } from "../os/overview.js";
 import type { ModelDecision, ModelReply, ModelRequest, ModelUsage, OsModel } from "../os/model.js";
 import { signJwt } from "../utils/jwt.js";
 import { createTempVault } from "./temp-vault.js";
+import { ok as t147Ok, unavailable as t147Unavailable, type Tile as T147Tile, type TileSource as T147TileSource } from "../os/overview.js";
+import { matchCommand as t147Match, normaliseAsk as t147Normalise } from "../os/ask.js";
+import { COMMANDS as T147_COMMANDS } from "../os/commands.js";
+import { speakAgo as t147Ago, speakChange as t147Change, speakMoney as t147Money, speakPercent as t147Pct, speakTime as t147Time } from "../os/speech.js";
 
 // Never a real model call: the prod wiring reads the key per ask, so without it tier 2 is unavailable.
 delete process.env.ANTHROPIC_API_KEY;
@@ -450,7 +454,7 @@ async function main() {
         const overviewJson = await (await fetch(`${H.base}/admin/os/api/overview?token=${encodeURIComponent(admin.token)}`)).text();
         fakeModel.next.push(decided({ action: "answer", say: "Two tasks are due today." }, "end_turn",
             { inputTokens: 10_000, cacheReadTokens: 20_000, cacheWriteTokens: 4_000, outputTokens: 1_000 }));
-        const answered = await ask("  What's due today?  ", "voice");
+        const answered = await ask("  What should I focus on today?  ", "voice");
         const answeredRow = await lastRow();
         check("an open question gets the model's answer, to speak and show, at tier 2",
             answered.status === 200 && answered.json?.tier === 2 && answered.json.kind === "answer"
@@ -459,7 +463,7 @@ async function main() {
         check("its row: tier 2, kind answer, the model's action as the intent, the model id, no error",
             answeredRow?.tier === 2 && answeredRow.kind === "answer" && answeredRow.intent === "model.answer"
                 && answeredRow.model === "claude-haiku-5-5" && answeredRow.error === null
-                && answeredRow.source === "voice" && answeredRow.text === "What's due today?", answeredRow);
+                && answeredRow.source === "voice" && answeredRow.text === "What should I focus on today?", answeredRow);
         // $0.10/MTok input, cache reads at 0.1x, cache writes at 1.25x, $0.50/MTok output:
         // 0.001 + 0.0002 + 0.0005 + 0.0005.
         check("its cost is priced from usage at the rate card: $0.0022", near(answeredRow?.cost_usd, 0.0022),
@@ -472,7 +476,7 @@ async function main() {
         // ── tier 2: the prompt ──────────────────────────────────────────────
         const firstCall = fakeModel.calls.at(-1)!;
         check("the model gets the trimmed question, a system prompt and the overview JSON as its context",
-            fakeModel.calls.length === 1 && firstCall.question === "What's due today?" && firstCall.system.length > 0
+            fakeModel.calls.length === 1 && firstCall.question === "What should I focus on today?" && firstCall.system.length > 0
                 && firstCall.context.includes(overviewJson), { question: firstCall.question, context: firstCall.context.slice(0, 300) });
         const earlier = clock;
         clock = new Date(clock.getTime() + 3_600_000);
@@ -480,7 +484,7 @@ async function main() {
         await ask("how is the book doing");
         const laterCall = fakeModel.calls.at(-1)!;
         check("the system prompt is stable: the same an hour later for another question, and holds neither",
-            laterCall.system === firstCall.system && !firstCall.system.includes("due today")
+            laterCall.system === firstCall.system && !firstCall.system.includes("focus on today")
                 && !firstCall.system.includes(earlier.toISOString()) && laterCall.context !== firstCall.context);
         clock = earlier;
 
@@ -535,14 +539,14 @@ async function main() {
         const noKeyNav = await ask("open alpaca", "typed", N.base);
         check("without an API key, tier 1 still works", noKeyNav.json?.tier === 1 && noKeyNav.json.kind === "navigate"
             && noKeyNav.json.url === "/admin/alpaca", noKeyNav.json);
-        const noKey = await ask("what's due today", "typed", N.base);
+        const noKey = await ask("what should I focus on today", "typed", N.base);
         const noKeyRow = await lastRow();
         check("without an API key, an open question gets tier 2 `unavailable`, with something to say",
             noKey.status === 200 && noKey.json?.tier === 2 && noKey.json.kind === "unavailable"
                 && typeof noKey.json.say === "string" && noKey.json.say.length > 0, noKey.json);
         check("... logged with the missing key as its error, and no model or cost", noKeyRow?.tier === 2
             && /ANTHROPIC_API_KEY/.test(noKeyRow.error ?? "") && noKeyRow.model === null && noKeyRow.cost_usd === null, noKeyRow);
-        const shippedNoKey = await ask("what's due today", "typed", P.base);
+        const shippedNoKey = await ask("what should I focus on today", "typed", P.base);
         check("the shipped router reads the key: with it unset, tier 2 is unavailable",
             shippedNoKey.json?.tier === 2 && shippedNoKey.json.kind === "unavailable", shippedNoKey.json);
         check("no model was called without a key", fakeModel.calls.length === callsBefore);
@@ -866,6 +870,243 @@ async function main() {
             if (sayVaultBefore === undefined) delete process.env.OBSIDIAN_VAULT_PATH;
             else process.env.OBSIDIAN_VAULT_PATH = sayVaultBefore;
             sayVault.remove();
+        }
+
+        // ── tier 1: answers from the overview (#147) ────────────────────────
+        // A harness whose tiles return whatever t147Seed holds, so each answer
+        // is checked against a known overview; the shipped tiles get one
+        // seeded Alpaca snapshot and one prod-wiring pass at the end. Days of
+        // their own in April 2031: Tue Apr 15, 9:00 AM CDT.
+        const t147ClockBefore = clock;
+        const t147Now = new Date("2031-04-15T14:00:00Z");
+        const t147At = (msAgo: number) => new Date(t147Now.getTime() - msAgo).toISOString();
+        const t147Seed: Record<string, T147Tile> = {};
+        const t147Builds: Record<string, number> = {};
+        const t147Source = (id: string): T147TileSource<any> => ({
+            id, title: `t147 ${id}`, href: "/admin/os",
+            async build() {
+                t147Builds[id] = (t147Builds[id] ?? 0) + 1;
+                return t147Seed[id] ?? t147Unavailable("t147: not seeded");
+            },
+            render: () => "",
+        });
+        const t147Server = await harness(undefined, { tiles: ["usage", "alpaca", "tasks", "brief"].map(t147Source) });
+        const t147Ask = (text: string) => ask(text, "voice", t147Server.base);
+        const t147CallsBefore = fakeModel.calls.length;
+        let t147Asked = 0;
+        /** Every tier-1 answer: 200, tier 1, the intent logged, and speech without symbols or "CT". */
+        const t147Expect = async (name: string, text: string, intent: string, kind: "answer" | "unavailable",
+            test: (say: string, display: string) => boolean) => {
+            const r = await t147Ask(text);
+            t147Asked++;
+            const [row] = (await asks()).slice(-1);
+            const say: string = r.json?.say ?? "";
+            check(name, r.status === 200 && r.json?.tier === 1 && r.json.kind === kind
+                && row?.intent === intent && row.tier === 1 && row.kind === kind
+                && !/[$%+−]|\bCT\b|&/.test(say) && test(say, r.json.display ?? ""),
+                { status: r.status, json: r.json, intent: row?.intent });
+            return r;
+        };
+
+        const t147Alpaca = (over: object = {}) => t147Ok({
+            wallet: "Cloud-Claw paper", asOf: t147At(120_000), ageMs: 120_000, stale: false,
+            equity: 100412.10, lastEquity: 100000, dayPl: 412.10, dayPlPct: 0.4121, ...over,
+        });
+        const t147Task = (title: string, bucket: string, dueDay: string) => ({
+            id: `t147-${title}`, title, status: "Not Started", due: `${dueDay}T00:00:00.000Z`, dueDay, dateOnly: true,
+            bucket, notionPageId: "0123456789abcdef0123456789abcdef", url: null,
+        });
+        const t147Tasks = (over: object = {}) => t147Ok({
+            today: "2031-04-15", tomorrow: "2031-04-16",
+            counts: { overdue: 1, today: 2, tomorrow: 3, total: 6 },
+            tasks: [t147Task("Renew passport", "overdue", "2031-04-11"), t147Task("Call the bank", "today", "2031-04-15"),
+                t147Task("  File \n expenses ", "today", "2031-04-15"), t147Task("Dentist", "tomorrow", "2031-04-16")],
+            more: 2, lastSync: t147At(5 * 60_000), syncAgeMs: 5 * 60_000, stale: false, ...over,
+        });
+        const t147Brief = (over: object = {}) => t147Ok({
+            schedule: { days: [1, 2, 3, 4, 5], at: "06:45", timeZone: "America/Chicago" },
+            nextRun: "2031-04-16T11:45:00.000Z", today: "2031-04-15", dueToday: "2031-04-15T11:45:00.000Z",
+            missingToday: false, latest: null, latestNote: "no briefs yet",
+            runner: { online: true, lastSeen: t147At(30_000), name: "GEOFF-PC", ageMs: 30_000 },
+            activeRun: null, activeCount: 0, lastScheduled: null, runsNote: null, ...over,
+        });
+        const t147Usage = (over: object = {}) => t147Ok({
+            from: "2031-04-09T05:00:00.000Z", to: "2031-04-16T05:00:00.000Z", days: 7,
+            runs: 13, runsWithUsage: 12, runsWithoutUsage: 1, costUsd: 4.1234, inputTokens: 120000, outputTokens: 9000,
+            points: [], tier2: { spentUsd: 0.03, capUsd: 0.25 }, ...over,
+        });
+
+        try {
+            clock = t147Now;
+            Object.assign(t147Seed, { alpaca: t147Alpaca(), tasks: t147Tasks(), brief: t147Brief(), usage: t147Usage() });
+
+            // P&L: equity and day P&L, spoken; the exact figures in `display`.
+            for (const k of Object.keys(t147Builds)) delete t147Builds[k];
+            await t147Expect(`"What's my P&L?" speaks equity and day P&L`, "What's my P&L?", "alpaca.pnl", "answer",
+                (say, display) => say === "Your equity is 100,412 dollars. Today you're up 412 dollars, 0.4 percent."
+                    && display.includes("$100,412.10") && display.includes("+$412.10") && display.includes("+0.41%"));
+            check("... built the overview once for the ask (each tile once)",
+                ["usage", "alpaca", "tasks", "brief"].every((id) => t147Builds[id] === 1), t147Builds);
+            t147Seed.alpaca = t147Alpaca({ dayPl: -4.12, dayPlPct: -0.0041 });
+            await t147Expect("a small loss reads as dollars and cents", "how's my portfolio doing today", "alpaca.pnl", "answer",
+                (say) => say === "Your equity is 100,412 dollars. Today you're down 4 dollars and 12 cents, less than 0.1 percent.");
+            t147Seed.alpaca = t147Alpaca({ dayPl: 0, dayPlPct: 0 });
+            await t147Expect("a flat day says flat", "am I up today", "alpaca.pnl", "answer", (say) => /You're flat today\.$/.test(say));
+            t147Seed.alpaca = t147Alpaca({ asOf: t147At(20 * 3_600_000), ageMs: 20 * 3_600_000, stale: true });
+            await t147Expect("a stale snapshot from yesterday names its day and says it's stale", "what's my equity", "alpaca.pnl", "answer",
+                (say) => /On April 14 you were up 412 dollars, 0\.4 percent\./.test(say) && /20 hours ago/.test(say) && /stopped/.test(say));
+            t147Seed.alpaca = t147Unavailable("timed out");
+            await t147Expect("an unavailable Alpaca tile is reported with its reason, and no number", "what's my p&l", "alpaca.pnl", "unavailable",
+                (say) => say === "I can't tell you your P and L right now. The Alpaca tile is unavailable: timed out." && !/\d/.test(say));
+            t147Seed.alpaca = t147Alpaca();
+
+            // Tasks: today (with overdue), tomorrow, overdue; buckets as the tile gives them.
+            await t147Expect(`"what's due today" lists today's tasks, then the overdue ones`, "What's due today?", "tasks.due_today", "answer",
+                (say, display) => say === "2 tasks are due today: Call the bank and File expenses. 1 task is overdue: Renew passport."
+                    && display.startsWith("1 overdue · 2 today · 3 tomorrow"));
+            await t147Expect("tomorrow's tasks, with the ones the tile didn't list counted", "what's due tomorrow", "tasks.due_tomorrow", "answer",
+                (say) => say === "3 tasks are due tomorrow: Dentist and 2 more.");
+            await t147Expect("the overdue tasks", "anything overdue?", "tasks.overdue", "answer",
+                (say) => say === "1 task is overdue: Renew passport.");
+            t147Seed.tasks = t147Tasks({ counts: { overdue: 0, today: 0, tomorrow: 0, total: 0 }, tasks: [], more: 0,
+                lastSync: t147At(3 * 3_600_000), syncAgeMs: 3 * 3_600_000, stale: true });
+            await t147Expect("nothing due, and a stale sync is mentioned", "what's on my plate today", "tasks.due_today", "answer",
+                (say) => say === "Nothing's due today. Nothing's overdue either. The last Notion sync was 3 hours ago, so this may be out of date.");
+            t147Seed.tasks = t147Tasks({ counts: { overdue: 0, today: 0, tomorrow: 0, total: 0 }, tasks: [], more: 0,
+                lastSync: null, syncAgeMs: null, stale: true });
+            await t147Expect("a never-synced task list says so", "my tasks", "tasks.due_today", "answer",
+                (say) => /never synced from Notion/.test(say));
+            t147Seed.tasks = t147Unavailable("table missing (tasks)");
+            await t147Expect("an unavailable tasks tile is reported with its reason", "what's due", "tasks.due_today", "unavailable",
+                (say) => say === "I can't tell you what's due today right now. The tasks tile is unavailable: table missing (tasks).");
+            t147Seed.tasks = t147Tasks();
+
+            // The runner.
+            await t147Expect(`"is the runner online" when it is`, "Is the runner online?", "runner.status", "answer",
+                (say) => say === "Yes, the runner is online on GEOFF-PC. It last checked in just now.");
+            t147Seed.brief = t147Brief({
+                runner: { online: false, lastSeen: t147At(3 * 3_600_000), name: "GEOFF-PC", ageMs: 3 * 3_600_000 },
+                activeRun: { id: 1, skill: "lint-wiki", label: "Lint wiki", status: "queued", trigger: "manual",
+                    requestedAt: t147At(60_000), claimedAt: null, runner: null }, activeCount: 1,
+            });
+            await t147Expect("offline: when it was last seen, and that a queued run is stuck", "is my pc up", "runner.status", "answer",
+                (say) => say === "No, the runner is offline. It was last seen 3 hours ago, at 6 this morning. "
+                    + "One run is queued, and won't start until the runner is back.");
+            t147Seed.brief = t147Brief({ runner: { online: false, lastSeen: null, name: null, ageMs: null },
+                runsNote: "run history unavailable: table missing (agent_runs); apply db/migrations/2026-09-26-agent-runs.sql" });
+            await t147Expect("never seen, and an unreadable run history is said, not taken as none", "runner status", "runner.status", "answer",
+                (say) => /hasn't checked in since the server started/.test(say) && /run history is unavailable/.test(say)
+                    && !/\bnone\b|nothing is queued/i.test(say));
+            t147Seed.brief = t147Brief({ activeRun: { id: 2, skill: "morning-brief", label: "Morning brief", status: "running",
+                trigger: "manual", requestedAt: t147At(120_000), claimedAt: t147At(60_000), runner: "GEOFF-PC" }, activeCount: 1 });
+            await t147Expect("a running run is named", "is the runner running", "runner.status", "answer",
+                (say) => /It's running the morning brief\.$/.test(say));
+
+            // The next brief.
+            t147Seed.brief = t147Brief();
+            await t147Expect(`"when's the next brief": spoken in Central`, "When's the next brief?", "brief.next", "answer",
+                (say) => say === "The next brief is at 6:45 tomorrow morning.");
+            t147Seed.brief = t147Brief({ missingToday: true });
+            await t147Expect("a missing brief today is mentioned", "when does the morning brief run", "brief.next", "answer",
+                (say) => say === "The next brief is at 6:45 tomorrow morning. Today's hasn't arrived yet; it was due at 6:45 this morning.");
+            t147Seed.brief = t147Brief({ schedule: null, nextRun: null, dueToday: null });
+            await t147Expect("no schedule says on demand", "when is the next brief", "brief.next", "answer",
+                (say) => /no schedule/.test(say) && !/\d/.test(say));
+            t147Seed.brief = t147Unavailable("vault unreadable");
+            await t147Expect("an unavailable brief tile is reported for the next brief", "whens my next morning brief", "brief.next", "unavailable",
+                (say) => /brief and runner tile is unavailable: vault unreadable\.$/.test(say) && !/\d/.test(say));
+            await t147Expect("... and for the runner", "is the runner online", "runner.status", "unavailable",
+                (say) => /unavailable: vault unreadable\.$/.test(say));
+            t147Seed.brief = t147Brief();
+
+            // Spend over the week.
+            await t147Expect(`"how much have I spent this week": the 7-day cost, runs without usage, today's tier 2`,
+                "How much have I spent this week?", "usage.week", "answer",
+                (say, display) => say === "In the last 7 days your runs came to 4 dollars and 12 cents, API-equivalent, over 12 runs. "
+                    + "1 other run didn't record usage, so it isn't counted. Open questions have cost 3 cents today, of the 25 cents daily cap."
+                    && display.includes("$4.12"));
+            t147Seed.usage = t147Usage({ runsWithUsage: 0, runsWithoutUsage: 2, costUsd: null, inputTokens: null, outputTokens: null,
+                tier2: { spentUsd: 0, capUsd: 0.25 } });
+            await t147Expect("no usage is not zero dollars", "what's my claude usage", "usage.week", "answer",
+                (say) => say === "No runs recorded usage in the last 7 days. 2 runs finished without recording any.");
+            t147Seed.usage = t147Unavailable("column missing (cost_usd): apply db/migrations/2026-10-12-agent-run-usage.sql");
+            await t147Expect("an unavailable usage tile is reported with its reason", "how much has claude cost me", "usage.week", "unavailable",
+                (say) => /^I can't tell you what you've spent right now\. The usage tile is unavailable: column missing/.test(say));
+            t147Seed.usage = t147Usage();
+
+            check("no tier-1 answer called the model", fakeModel.calls.length === t147CallsBefore, fakeModel.calls.length - t147CallsBefore);
+
+            // The shipped command table: phrasings reach their intents, and nothing else is shadowed.
+            const t147Intent = (text: string) => t147Match(T147_COMMANDS, t147Normalise(text))?.command.intent ?? null;
+            const t147Phrasings: [string, string | null][] = [
+                ["What's my P&L?", "alpaca.pnl"], ["what is my PnL today", "alpaca.pnl"], ["P and L", "alpaca.pnl"],
+                ["how much is my portfolio worth", "alpaca.pnl"], ["can you tell me my profit and loss", "alpaca.pnl"],
+                ["am I up or down today?", "alpaca.pnl"],
+                ["what's due today", "tasks.due_today"], ["What do I have due?", "tasks.due_today"],
+                ["is there anything due today", "tasks.due_today"], ["what's on my to-do list", "tasks.due_today"],
+                ["what do I need to do today", "tasks.due_today"],
+                ["what's due tomorrow?", "tasks.due_tomorrow"], ["any tasks due tomorrow", "tasks.due_tomorrow"],
+                ["what's overdue", "tasks.overdue"], ["do I have anything overdue?", "tasks.overdue"], ["overdue tasks", "tasks.overdue"],
+                ["is the runner online", "runner.status"], ["Is the runner offline?", "runner.status"], ["how's the runner", "runner.status"],
+                ["when's the next brief", "brief.next"], ["What time is the morning brief?", "brief.next"],
+                ["when will the brief be ready", "brief.next"],
+                ["how much have I spent this week", "usage.week"], ["how much did I spend in the last 7 days", "usage.week"],
+                ["what's my spend so far", "usage.week"],
+                // Not shadowed: navigation, run proposals, "read the brief", nothing-pending.
+                ["show me my portfolio", "navigate.alpaca"], ["open alpaca", "navigate.alpaca"], ["show the briefs", "navigate.briefs"],
+                ["go to the wallet", "navigate.alpaca"], ["open the brief", "navigate.briefs"],
+                ["run the morning brief", "run.morning-brief"], ["run brief", "run.morning-brief"],
+                ["read the brief", "brief.read"], ["yes", "confirm.nothing_pending"],
+                // Still tier 2.
+                ["what's the weather", null], ["how's the market", null], ["what's due on friday", null],
+                ["how much have I spent today", null], ["is the runner online and what's due", null],
+            ];
+            const t147Wrong = t147Phrasings.map(([text, want]) => ({ text, want, got: t147Intent(text) })).filter((x) => x.got !== x.want);
+            check("the shipped table sends each phrasing to its intent, and the answers shadow nothing", t147Wrong.length === 0, t147Wrong);
+
+            // Speech helpers.
+            const t147Fri = new Date("2031-04-18T14:00:00Z");
+            const t147Speech: [string, string][] = [
+                [t147Money(100412.1), "100,412 dollars"], [t147Money(1), "1 dollar"], [t147Money(0.35), "35 cents"],
+                [t147Money(0.001), "less than a cent"], [t147Money(4.1), "4 dollars and 10 cents"],
+                [t147Change(-412.4), "down 412 dollars"], [t147Change(0.001), "flat"],
+                [t147Pct(0.4121), "0.4 percent"], [t147Pct(-12), "12 percent"],
+                [t147Ago(90_000), "a minute ago"], [t147Ago(3_600_000), "an hour ago"],
+                [t147Time(new Date("2031-04-21T11:45:00Z"), t147Fri), "6:45 Monday morning"],
+                [t147Time(new Date("2031-04-25T11:45:00Z"), t147Fri), "6:45 next Friday morning"],
+                [t147Time(new Date("2031-04-18T02:30:00Z"), t147Fri), "9:30 last night"],
+                [t147Time(new Date("2031-04-19T17:00:00Z"), t147Fri), "noon tomorrow"],
+                [t147Time(new Date("2031-04-18T23:15:00Z"), t147Fri), "6:15 this evening"],
+                // Across the November DST change: 6:45 Central both sides.
+                [t147Time(new Date("2031-11-03T12:45:00Z"), new Date("2031-10-31T14:00:00Z")), "6:45 Monday morning"],
+            ];
+            const t147SpeechWrong = t147Speech.filter(([got, want]) => got !== want);
+            check("speech helpers: money, change, percent, ago and time read naturally", t147SpeechWrong.length === 0, t147SpeechWrong);
+
+            // The shipped tiles: an Alpaca snapshot seeded in the database answers through the real overview.
+            const { rows: [t147Snap] } = await pool.query(
+                `INSERT INTO alpaca_snapshots (ts, equity, last_equity, day_pl) VALUES ($1, 25000.00, 25500.00, -500.00) RETURNING id`,
+                [t147At(60_000)]);
+            try {
+                const real = await ask("what's my P&L", "voice");
+                check("with the real tiles, a seeded snapshot is what's spoken",
+                    real.json?.tier === 1 && real.json.kind === "answer"
+                        && real.json.say === "Your equity is 25,000 dollars. Today you're down 500 dollars, 2 percent.", real.json);
+            } finally {
+                await pool.query(`DELETE FROM alpaca_snapshots WHERE id = $1`, [t147Snap.id]);
+            }
+            const t147Prod = ["what's my P&L", "what's due today", "is the runner online", "when's the next brief",
+                "how much have I spent this week"];
+            for (const text of t147Prod) {
+                const r = await ask(text, "voice", P.base);
+                check(`prod wiring: "${text}" is tier 1`, r.status === 200 && r.json?.tier === 1
+                    && (r.json.kind === "answer" || r.json.kind === "unavailable") && r.json.say.length > 0, r.json);
+            }
+            check("... and the model was never called", fakeModel.calls.length === t147CallsBefore, fakeModel.calls.length - t147CallsBefore);
+            check(`all ${t147Asked} seeded answers were logged`, t147Asked > 20, t147Asked);
+        } finally {
+            clock = t147ClockBefore;
+            t147Server.server.close();
         }
 
         check("every canned model reply was used", fakeModel.next.length === 0, fakeModel.next.length);

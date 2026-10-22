@@ -287,23 +287,21 @@ export async function recordFinishedRun(input: RunResult & {
     startedAt?: unknown;
 }): Promise<AgentRun> {
     const subject = `recorded ${input.trigger} ${input.skill} run`;
-    const instant = readInstant(input.startedAt);
-    const { rows: [run] } = await query<AgentRun>(
+    // `accepted`: the start was used (as sent, or taken as now when a little ahead).
+    const { rows: [{ start_accepted: accepted, ...run }] } = await query<AgentRun & { start_accepted: boolean }>(
         `WITH s AS (
-           SELECT CASE WHEN $3::timestamptz BETWEEN now() - interval '${RECORDED_START_WINDOW}'
-                                                AND now() + $12::int * interval '1 millisecond'
-                       THEN LEAST($3::timestamptz, now()) ELSE now() END AS started
+           SELECT COALESCE($3::timestamptz BETWEEN now() - interval '${RECORDED_START_WINDOW}'
+                                               AND now() + $12::int * interval '1 millisecond', false) AS accepted
+         ), ins AS (
+           INSERT INTO agent_runs (skill, trigger, status, requested_at, claimed_at, finished_at, runner,
+                                   summary, output_path, cost_usd, input_tokens, output_tokens, duration_ms)
+           SELECT $1, $2, $5, st.started, st.started, now(), $4, $6, $7, $8, $9, $10, $11
+             FROM s, LATERAL (SELECT CASE WHEN s.accepted THEN LEAST($3::timestamptz, now()) ELSE now() END AS started) st
+           RETURNING *
          )
-         INSERT INTO agent_runs (skill, trigger, status, requested_at, claimed_at, finished_at, runner,
-                                 summary, output_path, cost_usd, input_tokens, output_tokens, duration_ms)
-         SELECT $1, $2, $5, s.started, s.started, now(), $4, $6, $7, $8, $9, $10, $11 FROM s
-         RETURNING *`,
-        [input.skill, input.trigger, instant, input.runner?.slice(0, 100) || null,
+         SELECT ins.*, s.accepted AS start_accepted FROM ins, s`,
+        [input.skill, input.trigger, readInstant(input.startedAt), input.runner?.slice(0, 100) || null,
             ...resultColumns(subject, input), RECORDED_START_SKEW_MS]);
-    const claimed = new Date(run.claimed_at!).getTime(), finished = new Date(run.finished_at!).getTime();
-    // Kept as sent, or a little ahead of the database clock and so taken as now: either way, accepted.
-    const accepted = instant !== null && (claimed === instant.getTime()
-        || (claimed === finished && instant.getTime() > finished && instant.getTime() - finished <= RECORDED_START_SKEW_MS));
     if (input.startedAt !== undefined && input.startedAt !== null && !accepted) {
         console.warn(`[runner] ${subject} ${run.id}: startedAt ${JSON.stringify(input.startedAt)?.slice(0, 60)} `
             + `is unreadable, in the future or over ${RECORDED_START_WINDOW} old; recorded as starting now`);

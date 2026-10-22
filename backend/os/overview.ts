@@ -17,7 +17,11 @@ import type pg from "pg";
  * `render` draws the ok state; the unavailable state is drawn for it.
  */
 
-export type Unavailable = { status: "unavailable"; reason: string };
+export const TILE_BUDGET_MS = 400;
+export const TILE_DEADLINE_GRACE_MS = 100;
+export const OVERVIEW_BUDGET_MS = 1_000;
+
+export type Unavailable ={ status: "unavailable"; reason: string };
 export type Ok<T extends object> = { status: "ok" } & T;
 export type Tile<T extends object = object> = Ok<T> | Unavailable;
 

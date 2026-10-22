@@ -1,6 +1,7 @@
 import { normaliseAsk, type Command } from "./ask.js";
 import { proposalSay } from "./proposals.js";
 import { READ_BRIEF_INTENT, readTodaysBrief } from "./briefSpeech.js";
+import { ANSWER_COMMANDS } from "./answers.js";
 import { SKILLS, type SkillId } from "../services/agentRuns.js";
 
 /**
@@ -98,10 +99,16 @@ const nothingPending: Command[] = [
     },
 ];
 
-/** The tier-1 command table, in match order. */
+/**
+ * The tier-1 command table, in match order. The answers (#147, os/answers.ts)
+ * are questions ("what's my P&L", "is the runner online"), so they sit after
+ * the run and read commands and before navigation; none of their patterns
+ * starts with "run", "read" or a navigation verb.
+ */
 export const COMMANDS: readonly Command[] = [
     ...nothingPending,
     ...runs,
     ...readBrief,
+    ...ANSWER_COMMANDS,
     ...navigation,
 ];

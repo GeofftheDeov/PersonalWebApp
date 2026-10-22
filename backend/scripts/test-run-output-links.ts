@@ -240,6 +240,41 @@ async function main() {
             check("a folder is not a file", folder.status === 404, folder.status);
         }
 
+        // ── on Windows, an 8.3 short name for private/ is still private/ ──────
+        {
+            const short = await fileApi("PRIVAT~1/t158-secret.md");
+            check("an 8.3 short name for private/ is not served",
+                short.status !== 200 && !short.text.includes(PRIVATE), { status: short.status });
+        }
+
+        // ── what the tree lists, the browser opens ───────────────────────────
+        {
+            const percent = "outputs/lint/t158 image%20(1).md";
+            const encodedDots = "outputs/lint/t158 %2e%2e.md";
+            t158Vault.writeFile(percent, `t158 percent ${tag}`);
+            t158Vault.writeFile(encodedDots, `t158 encoded dots ${tag}`);
+            const tree = await get("/admin/obsidian/api/tree");
+            const listed: string[] = [];
+            const walk = (nodes: any[]) => nodes.forEach((n) => n.type === "file" ? listed.push(n.path) : walk(n.children ?? []));
+            walk(tree.json?.tree ?? []);
+            check("a name with an ordinary %-sequence is listed and opens",
+                listed.includes(percent) && (await fileApi(percent)).status === 200, listed);
+            check("a name with an encoded dot is neither listed nor opened",
+                !listed.includes(encodedDots) && (await fileApi(encodedDots)).status === 400, listed);
+            const unopenable = [];
+            for (const rel of listed) if ((await fileApi(rel)).status !== 200) unopenable.push(rel);
+            check("every note the tree lists opens", listed.length > 0 && unopenable.length === 0, unopenable);
+        }
+
+        // ── no vault configured ───────────────────────────────────────────────
+        {
+            delete process.env.OBSIDIAN_VAULT_PATH;
+            const deep = await browser(SKILLS[0].output(day));
+            process.env.OBSIDIAN_VAULT_PATH = t158Vault.dir;
+            check("with no vault configured, a deep link says so (503)",
+                deep.status === 503 && deep.text.includes("OBSIDIAN_VAULT_PATH is not set"), deep.status);
+        }
+
         // ── the browser without a deep link, and the tree, are as before ──────
         {
             const plain = await get("/admin/obsidian");

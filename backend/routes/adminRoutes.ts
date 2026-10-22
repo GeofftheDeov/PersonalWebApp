@@ -10,7 +10,7 @@ import {
 } from '../services/alpacaStream.js';
 import { renderPage } from '../utils/adminUi.js';
 import { renderMarkdown } from '../utils/markdown.js';
-import { resolveVaultFile, isHiddenVaultName } from '../utils/vaultPath.js';
+import { resolveVaultFile, isServableVaultName } from '../utils/vaultPath.js';
 import AlpacaSnapshot from '../models/AlpacaSnapshot.js';
 import { getDecryptedKeys } from './apiKeyRoutes.js';
 import { evaluateLiveApplyGate } from '../utils/liveApplyGate.js';
@@ -176,7 +176,7 @@ function buildVaultTree(dir: string, base: string = ''): VaultNode[] {
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; }
     const nodes: VaultNode[] = [];
     for (const e of entries) {
-        if (isHiddenVaultName(e.name)) continue;
+        if (!isServableVaultName(e.name)) continue;  // hidden (private/, dot entries), or a name the file API refuses
         const full = path.join(dir, e.name);
         const rel = (base ? base + '/' : '') + e.name;
         if (e.isDirectory()) {
@@ -836,13 +836,16 @@ router.get('/obsidian', (req, res) => {
     let initialPath: string | null = null;
     let deepLinkError: string | null = null;
     let status = 200;
-    if (req.query.path !== undefined) {
-        const file = vaultPath ? resolveVaultFile(vaultPath, req.query.path) : { ok: false as const, reason: 'missing' as const };
+    if (req.query.path !== undefined && !vaultPath) {
+        status = 503;
+        deepLinkError = 'OBSIDIAN_VAULT_PATH is not set on this server.';
+    } else if (req.query.path !== undefined && vaultPath) {
+        const file = resolveVaultFile(vaultPath, req.query.path);
         if (file.ok) initialPath = file.rel;
         else ({ status, error: deepLinkError } = VAULT_REFUSAL[file.reason]);
     }
-    // Inside a <script>: JSON, with < escaped so a file name can't close the tag.
-    const initialPathJs = JSON.stringify(initialPath).replace(/</g, '\\u003c');
+    // Inside a <script>: JSON, with < escaped so a value can't close the tag.
+    const scriptJson = (v: unknown) => JSON.stringify(v).replace(/</g, '\\u003c');
 
     const content = `
         <div class="vault-layout">
@@ -866,8 +869,8 @@ router.get('/obsidian', (req, res) => {
             </div>
         </div>
         <script>
-        const TOKEN = '${token}';
-        const INITIAL_PATH = ${initialPathJs};
+        const TOKEN = encodeURIComponent(${scriptJson(token ?? '')});
+        const INITIAL_PATH = ${scriptJson(initialPath)};
         let fullTree = [];
 
         function treeMessage(text, isError) {
@@ -1027,14 +1030,24 @@ router.get('/obsidian', (req, res) => {
 
         function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
-        // A deep link (?path=) opens its file, and marks it in the tree once that loads.
+        // A deep link (?path=) opens its file, then marks it in the tree once that
+        // loads, opening the folders above it (renderTree builds them collapsed).
+        function revealInTree(p) {
+            if (document.querySelector('.tree-file.active')) return;  // the admin already picked another note
+            const label = Array.prototype.find.call(document.querySelectorAll('.tree-file'), function(el) { return el.title === p; });
+            if (!label) return;
+            label.classList.add('active');
+            for (let el = label.parentElement; el && el.id !== 'vault-tree'; el = el.parentElement) {
+                if (el.tagName === 'DIV' && el.style.display === 'none') {
+                    el.style.display = 'block';
+                    const dir = el.previousElementSibling;
+                    if (dir && dir.classList.contains('tree-dir')) dir.textContent = dir.textContent.replace('▶', '▼');
+                }
+            }
+            label.scrollIntoView({ block: 'nearest' });
+        }
         if (INITIAL_PATH) openFile(INITIAL_PATH);
-        loadTree().then(function() {
-            if (!INITIAL_PATH) return;
-            document.querySelectorAll('.tree-file').forEach(function(el) {
-                if (el.title === INITIAL_PATH) el.classList.add('active');
-            });
-        });
+        loadTree().then(function() { if (INITIAL_PATH) revealInTree(INITIAL_PATH); });
         loadStatus();
         </script>
     `;

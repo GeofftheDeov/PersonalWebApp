@@ -12,6 +12,9 @@
  *     voiceschanged, utterances with onend and onerror), a fake recognition, a
  *     fake fetch and a localStorage that can throw. A "reload" is a second boot
  *     with the same storage.
+ *   - #153's run watch (os/runWatch.ts) on the same boot: `get` answers the
+ *     page's GETs, `session` is the tab's sessionStorage and `startAt` puts
+ *     Date.now() on the fake timers' clock, so 45 minutes pass in t153Pass().
  *
  *   npx tsx scripts/test-os-speech.ts
  *

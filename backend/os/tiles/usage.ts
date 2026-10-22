@@ -72,14 +72,14 @@ const SPARK_H = 64;
 /** Room for the end marker and its ring: dots never clip at the edges. */
 const SPARK_PAD = 6;
 
-/** One point's tooltip: when (Central), what, why, how much. Plain text; escaped by the caller. */
-function pointTitle(p: UsagePoint, now: Date): string {
-    const parts = [
-        centralTime(new Date(p.finishedAt), now), p.skill, p.trigger, cost(p.costUsd),
-        `${tokens(p.inputTokens)} in / ${tokens(p.outputTokens)} out tokens`,
-    ];
-    if (!p.ok) parts.push("failed");
-    return parts.join(" · ");
+/** One point's text, formatted once for both its <title> and its table row. Plain text; escaped by the caller. */
+function describePoint(p: UsagePoint, now: Date) {
+    const when = centralTime(new Date(p.finishedAt), now);
+    const spend = cost(p.costUsd);
+    const io = `${tokens(p.inputTokens)} / ${tokens(p.outputTokens)}`;
+    const title = [when, p.skill, p.trigger, spend,
+        `${tokens(p.inputTokens)} in / ${tokens(p.outputTokens)} out tokens`, ...(p.ok ? [] : ["failed"])].join(" · ");
+    return { p, when, spend, io, title };
 }
 
 /**
@@ -89,49 +89,59 @@ function pointTitle(p: UsagePoint, now: Date): string {
  * point carries a <title> (the hover tooltip) inside a full-height hit band,
  * since a 4px dot is too small to aim at; the newest run is the accent dot,
  * and a failed run is a hollow one (shape, not colour). The table under it
- * holds the same values for anyone who can't hover.
+ * holds the same values for anyone who can't hover (touch, keyboard, screen
+ * readers: role="img" reads only the aria-label).
+ *
+ * `points` is plotted as given: summariseUsage caps it at USAGE_MAX_POINTS
+ * runs with usage, oldest first, and build() turns a non-finite cost into an
+ * unavailable tile, so the plot always matches the JSON.
  */
-function sparkline(all: UsagePoint[], now: Date): string {
-    // summariseUsage already caps and filters these; the plot holds to the same rules on its own.
-    const points = all.filter((p) => Number.isFinite(p.costUsd)).slice(-USAGE_MAX_POINTS);
-    if (points.length === 0) return "";
+function sparkline(points: UsagePoint[], now: Date): string {
     const n = points.length;
+    if (n === 0) return "";
     const peak = points.reduce((best, p) => (p.costUsd > best.costUsd ? p : best), points[0]);
-    const scale = peak.costUsd > 0 ? peak.costUsd : 1; // all $0: a flat line on the baseline
+    const latest = points[n - 1];
+    const free = peak.costUsd <= 0;
+    const scale = free ? 1 : peak.costUsd; // all $0: a flat line on the baseline
     const top = SPARK_PAD, base = SPARK_H - SPARK_PAD;
     const step = n > 1 ? (SPARK_W - 2 * SPARK_PAD) / (n - 1) : SPARK_W;
-    const at = (i: number, p: UsagePoint) => ({
+    const f = (v: number) => v.toFixed(1);
+    const xy = points.map((p, i) => ({
         x: n > 1 ? SPARK_PAD + i * step : SPARK_W / 2,
         y: base - (p.costUsd / scale) * (base - top),
-    });
-    const f = (v: number) => v.toFixed(1);
-    const xy = points.map((p, i) => at(i, p));
-    const latest = points[n - 1];
+    }));
+    const described = points.map((p) => describePoint(p, now));
 
     const line = n > 1
         ? `<polyline class="spark-line" points="${xy.map((c) => `${f(c.x)},${f(c.y)}`).join(" ")}"/>`
         : "";
-    const marks = points.map((p, i) => {
+    const marks = described.map(({ p, title }, i) => {
         const { x, y } = xy[i];
         const last = i === n - 1;
         // The hit band runs halfway to each neighbour, the full height of the plot.
         const x0 = Math.max(0, x - step / 2), x1 = Math.min(SPARK_W, x + step / 2);
         const cls = `spark-pt${last ? " spark-last" : ""}${p.ok ? "" : " spark-failed"}`;
-        return `<g class="${cls}" data-run="${esc(p.id)}"><title>${esc(pointTitle(p, now))}</title>`
+        return `<g class="${cls}" data-run="${esc(p.id)}"><title>${esc(title)}</title>`
             + `<rect class="spark-hit" x="${f(x0)}" y="0" width="${f(x1 - x0)}" height="${SPARK_H}"/>`
             + `<circle class="spark-dot" cx="${f(x)}" cy="${f(y)}" r="${last ? 4 : 2.5}"/></g>`;
     }).join("");
-    const label = `Cost per run for the last ${plural(n, "run")} with usage, oldest to newest: `
-        + `peak ${cost(peak.costUsd)} (${peak.skill}), latest ${cost(latest.costUsd)} (${latest.skill}).`;
+
+    // What the plot says, in words: the caption for sighted readers, the aria-label for the rest.
+    // One run has no peak; all-$0 runs have no peak either, so neither names one.
+    const runs = n === 1 ? "1 run" : `the last ${n} runs`;
+    const summary = n === 1 ? `${cost(latest.costUsd)} (${latest.skill}, ${shortDay(new Date(latest.finishedAt))})`
+        : free ? `every run $0.00`
+        : `peak ${cost(peak.costUsd)} (${peak.skill}, ${shortDay(new Date(peak.finishedAt))})`;
+    const label = `Cost per run for ${runs} with usage, oldest to newest: ${summary}`
+        + (n > 1 && !free ? `, latest ${cost(latest.costUsd)} (${latest.skill}).` : ".");
+    const caption = `Cost per run, ${runs} with usage · ${summary}`;
     const svg = `<svg class="spark" viewBox="0 0 ${SPARK_W} ${SPARK_H}" role="img" aria-label="${esc(label)}" focusable="false">`
         + `<line class="spark-base" x1="0" y1="${base}" x2="${SPARK_W}" y2="${base}"/>${line}${marks}</svg>`;
 
-    const peakAt = shortDay(new Date(peak.finishedAt));
-    const caption = `Cost per run, ${n === 1 ? "1 run" : `last ${n} runs`} with usage · peak ${cost(peak.costUsd)} (${peak.skill}, ${peakAt})`;
-    const rows = points.slice().reverse().map((p) => `
-                    <tr${p.ok ? "" : ` class="warn"`}><td>${esc(centralTime(new Date(p.finishedAt), now))}</td><td>${esc(p.skill)}</td>`
-        + `<td>${esc(p.trigger)}${p.ok ? "" : " (failed)"}</td><td class="num">${esc(cost(p.costUsd))}</td>`
-        + `<td class="num">${esc(tokens(p.inputTokens))} / ${esc(tokens(p.outputTokens))}</td></tr>`).join("");
+    const rows = described.slice().reverse().map(({ p, when, spend, io }) => `
+                    <tr${p.ok ? "" : ` class="warn"`}><td>${esc(when)}</td><td>${esc(p.skill)}</td>`
+        + `<td>${esc(p.trigger)}${p.ok ? "" : " (failed)"}</td><td class="num">${esc(spend)}</td>`
+        + `<td class="num">${esc(io)}</td></tr>`).join("");
     return `
             <div class="spark-wrap">
                 ${svg}

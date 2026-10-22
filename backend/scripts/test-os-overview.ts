@@ -972,13 +972,18 @@ async function main() {
             const sparkOne = await t145SparkAt(new Date("2026-02-02T18:00:00Z"));
             check("a week with a single run with usage plots one point, with no NaN",
                 sparkOne.json?.points?.length === 1 && sparkOne.marks.length === 1 && sparkOne.marks[0].id === sparkOnlyId
-                    && /\b1 run\b/.test(sparkOne.aria ?? "") && !/NaN|Infinity/.test(sparkOne.svg), { marks: sparkOne.marks, svg: sparkOne.svg });
+                    && /\b1 run\b/.test(sparkOne.aria ?? "") && !/NaN|Infinity/.test(sparkOne.svg) && !/peak/.test(sparkOne.html),
+                { marks: sparkOne.marks, svg: sparkOne.svg });
             // Every run free: a flat line on the baseline, not a division by zero.
             await pool.query(`UPDATE agent_runs SET cost_usd = 0 WHERE id = $1`, [sparkOnlyId]);
             await t145Run(new Date("2026-02-02T16:00:00Z"), 0);
             const sparkFree = await t145SparkAt(new Date("2026-02-02T18:00:00Z"));
-            check("runs that all cost $0 plot on the baseline, with no NaN",
-                sparkFree.marks.length === 2 && sparkFree.svg !== "" && !/NaN|Infinity/.test(sparkFree.svg), sparkFree.svg);
+            const sparkBaseY = sparkFree.svg.match(/<line class="spark-base"[^>]*\sy1="([^"]+)"/)?.[1];
+            const sparkDotYs = [...sparkFree.svg.matchAll(/<circle class="spark-dot"[^>]*\scy="([^"]+)"/g)].map((m) => Number(m[1]));
+            check("runs that all cost $0 plot flat on the $0 baseline, with no NaN and no 'peak' named",
+                sparkFree.marks.length === 2 && sparkBaseY !== undefined && sparkDotYs.length === 2
+                    && sparkDotYs.every((y) => y === Number(sparkBaseY)) && !/NaN|Infinity/.test(sparkFree.svg)
+                    && !/peak/.test(sparkFree.html), { sparkBaseY, sparkDotYs });
 
             // A week with no runs with usage has nothing to plot: no sparkline at all.
             const sparkNone = await t145SparkAt(new Date("2026-02-10T18:00:00Z"));

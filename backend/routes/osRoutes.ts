@@ -162,6 +162,8 @@ export function createOsRouter({
             const t2 = await askModel({ model, now: at, db, budgetUsd, text, overview: () => (built ??= overview(at)) });
             reply = t2.reply;
             ({ intent, error, call } = t2.log);
+            // A run_skill decision (#157): proposed below like a tier-1 "run", its model call on the tier-3 row.
+            propose = t2.propose ?? null;
         }
 
         const entry = { accountId, askedAt: at, text, source: source as AskSource, intent, error, ...call };
@@ -173,7 +175,8 @@ export function createOsRouter({
             } catch (err) {
                 console.error(`[os] could not record a proposal of ${propose}:`, (err as any)?.message ?? err);
                 entry.error = describeError(err);
-                reply = NOT_PROPOSED;
+                // Tier 2's reply is already its own tier-2 fallback (os/tier2.ts).
+                if (hit) reply = NOT_PROPOSED;
             }
         }
         const logged = await logAsk(db, { ...entry, tier: reply.tier, kind: reply.kind, latencyMs: Math.round(performance.now() - started) });

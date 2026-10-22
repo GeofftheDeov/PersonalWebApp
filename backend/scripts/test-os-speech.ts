@@ -114,6 +114,8 @@ function t150Timers() {
             clock = end;
         },
         get count() { return pending.size; },
+        /** Milliseconds advanced so far (#153's fake clock reads it). */
+        get now() { return clock; },
     };
 }
 
@@ -204,6 +206,12 @@ type T150Reply = { status?: number; body?: unknown; json?: boolean; network?: bo
 function t150Boot(opts: {
     synth?: any | null; storage?: "ok" | "methods-throw" | "getter-throws" | "none"; store?: Map<string, string>;
     reply?: (n: number, body: any) => T150Reply | unknown; hold?: boolean; recognition?: boolean;
+    /** #153: answers each GET (the run and Say polls); default a 404. */
+    get?: (url: string, n: number) => T150Reply | unknown;
+    /** #153: the tab's sessionStorage (a fresh one by default), one whose methods throw, or none. */
+    session?: Map<string, string> | "methods-throw" | "none";
+    /** #153: Date.now() is this plus the fake timers' clock, so deadlines move with timers.advance(). */
+    startAt?: number;
 } = {}) {
     const html = t150Render();
     const els = t150Dom(html);
@@ -211,6 +219,7 @@ function t150Boot(opts: {
     const synth = opts.synth === undefined ? t150Synth() : opts.synth;
     const store = opts.store ?? new Map<string, string>();
     const fetches: { url: string; body: any }[] = [];
+    const gets: string[] = [];
     const held: (() => void)[] = [];
     const intervals: (() => void)[] = [];
     const recs: any[] = [];
@@ -227,9 +236,11 @@ function t150Boot(opts: {
             createElement: (tag: string) => new T150El("", tag),
         },
         fetch: (url: string, init: any) => {
-            const body = JSON.parse(init.body);
-            fetches.push({ url, body });
-            const raw: any = opts.reply ? opts.reply(fetches.length, body) : { tier: 1, kind: "answer", say: "Up 412 dollars." };
+            const isGet = (init?.method ?? "GET") === "GET";
+            const body = isGet ? null : JSON.parse(init.body);
+            if (isGet) gets.push(url); else fetches.push({ url, body });
+            const raw: any = isGet ? (opts.get ? opts.get(url, gets.length) : { status: 404, body: { error: "not found" } })
+                : opts.reply ? opts.reply(fetches.length, body) : { tier: 1, kind: "answer", say: "Up 412 dollars." };
             const r: T150Reply = raw && ("status" in raw || "network" in raw || "redirect" in raw) ? raw : { status: 200, body: raw };
             const respond = () => {
                 if (r.network) return Promise.reject(new TypeError("Failed to fetch"));
@@ -240,11 +251,19 @@ function t150Boot(opts: {
                     json: () => Promise.resolve(r.body),
                 });
             };
-            if (!opts.hold) return respond();
+            if (!opts.hold || isGet) return respond();
             return new Promise((resolve, reject) => { held.push(() => respond().then(resolve, reject)); });
         },
     };
     win.window = win;
+    if (opts.startAt !== undefined) {
+        const startAt = opts.startAt;
+        win.Date = class T153Date extends Date { static now() { return startAt + timers.now; } };
+    }
+    const session = opts.session ?? new Map<string, string>();
+    if (session !== "none") {
+        win.sessionStorage = t150Storage(session instanceof Map ? session : new Map(), session instanceof Map ? "ok" : session);
+    }
     if (synth) { win.speechSynthesis = synth; win.SpeechSynthesisUtterance = T150Utterance; }
     if (opts.recognition) {
         win.webkitSpeechRecognition = class {
@@ -271,7 +290,9 @@ function t150Boot(opts: {
         try { intervals.forEach((fn) => fn()); } finally { Date.now = realNow; }
         return win.reloaded ?? 0;
     };
-    return { html, els, win, OS: win.OS, synth, timers, store, fetches, recs, say, display, submit, release, reloadDue };
+    /** #153: one tick of the page's reload timer, on the page's own clock. */
+    const reloadTick = () => { intervals.forEach((fn) => fn()); return win.reloaded ?? 0; };
+    return { html, els, win, OS: win.OS, synth, timers, store, fetches, gets, recs, say, display, submit, release, reloadDue, reloadTick };
 }
 
 const lastSpoken = (synth: any) => synth.spoken.at(-1)?.text;
@@ -823,6 +844,396 @@ async function main() {
         await p.release(); await sayThen;
         check("... the outcome is shown but not spoken (the run is still queued)",
             p.say() === "Queued the morning brief." && lastSpoken(p.synth) !== "Queued the morning brief." && !p.OS.pending());
+    }
+
+    // ── page scripts: a confirmed run is followed and its outcome said (#153) ──
+    const T153_START = Date.parse("2026-10-22T11:45:00Z");
+    const T153_SAY = "Good morning. You have three things due today, and the first is the dentist at ten. "
+        + "The paper account is up 47 dollars, half a percent, with SPY flat. The lint wiki run found two stale pages. "
+        + "Nothing in the inbox needs you before noon, and the runner is online. That's the brief.";
+    const T153_LABELS: Record<string, string> = { "morning-brief": "Morning brief", "lint-wiki": "Lint wiki", "weekly-review": "Weekly review" };
+    /** A fake server for one run: `s.run` is what GET /runs/:id says; `s.say` and `s.runReply` override the replies. */
+    const t153Server = (id: number, skill: string) => {
+        const s = {
+            run: { status: "queued", summary: null as string | null, outputPath: null as string | null, finishedAt: null as string | null },
+            say: { status: 404, body: { error: "no brief", date: "2026-10-22" } } as T150Reply,
+            runReply: null as T150Reply | null,
+        };
+        const get = (url: string) => {
+            if (url.startsWith(`/admin/os/api/runs/${id}?`)) {
+                return s.runReply ?? { status: 200, body: { id, skill, label: T153_LABELS[skill], trigger: "button",
+                    requestedAt: new Date(T153_START).toISOString(), claimedAt: null, ...s.run } };
+            }
+            if (url.startsWith("/admin/os/api/brief/say")) return s.say;
+            return { status: 404, body: { error: "no such run" } };
+        };
+        return { s, get };
+    };
+    /** Asks propose `skill`; the confirm queues run `id` (or `confirmBody` says otherwise). */
+    const t153Replies = (id: number, skill: string, confirmBody?: () => unknown) => (_n: number, body: any) => {
+        if ("id" in body) return confirmBody ? confirmBody()
+            : { status: 201, body: { run: { id, skill, status: "queued" }, created: true, say: `Queued the ${T153_LABELS[skill].toLowerCase()}.` } };
+        if (/^run/.test(body.text)) return { tier: 3, kind: "confirm_run", say: `Run the ${T153_LABELS[skill].toLowerCase()}?`,
+            confirmation: { id: 500 + id, skill, label: T153_LABELS[skill], expiresAt: new Date(Date.now() + 60_000).toISOString() } };
+        return { tier: 1, kind: "answer", say: `Router heard: ${body.text}` };
+    };
+    /** Time passes on the page, a second at a time, letting each poll's response land. */
+    const t153Pass = async (p: ReturnType<typeof t150Boot>, ms: number) => {
+        for (let t = 0; t < ms; t += 1000) { p.timers.advance(Math.min(1000, ms - t)); await flush(); }
+    };
+    type T153Opts = Parameters<typeof t150Boot>[0] & { id?: number; skill?: string };
+    /** A page with run `id` of `skill` proposed and confirmed with a tap, its "Queued …" already spoken. */
+    const t153Confirmed = async (o: T153Opts = {}) => {
+        const id = o.id ?? 7, skill = o.skill ?? "morning-brief";
+        const srv = t153Server(id, skill);
+        const p = t150Boot({ startAt: T153_START, reply: t153Replies(id, skill), get: srv.get, ...o });
+        p.submit(`run the ${skill}`); await flush();
+        p.els["ask-confirm-yes"].fire("click"); await flush();
+        p.synth.endAll();
+        return { p, srv, id, skill };
+    };
+    const t153Line = (p: ReturnType<typeof t150Boot>) => p.els["ask-watch"].textContent;
+    const t153Spoken = (p: ReturnType<typeof t150Boot>, from = 0) => p.synth.spoken.slice(from).map((u: T150Utterance) => u.text).join(" ");
+
+    {
+        const { p, srv } = await t153Confirmed();
+        check("a tap-confirmed brief run is followed: OS.watching() has it, and the status line says so",
+            JSON.stringify(p.OS.watching()) === JSON.stringify([{ id: 7, skill: "morning-brief", label: "morning brief", phase: "run" }])
+                && !p.els["ask-watch"].hidden && t153Line(p) === "Waiting for the morning brief run (queued)…" && p.say() === "Queued the morning brief.",
+            { watching: p.OS.watching(), line: t153Line(p), say: p.say() });
+        await t153Pass(p, 14_000);
+        check("... nothing is polled before 15 seconds", p.gets.length === 0, p.gets);
+        await t153Pass(p, 1_000);
+        check("... then GET /admin/os/api/runs/7 with the token", p.gets.length === 1 && p.gets[0] === "/admin/os/api/runs/7?token=tok", p.gets);
+        srv.s.run.status = "running";
+        await t153Pass(p, 15_000);
+        check("... every 15 seconds while it runs, and the line follows its status",
+            p.gets.length === 2 && t153Line(p) === "Waiting for the morning brief run (running)…", { gets: p.gets, line: t153Line(p) });
+        const spokenBefore = p.synth.spoken.length;
+        Object.assign(srv.s.run, { status: "succeeded", outputPath: "outputs/briefs/2026-10-22.md", summary: "brief status: ok" });
+        await t153Pass(p, 15_000);
+        check("once it succeeds, the Say endpoint is asked at once, for the day in its output path",
+            p.gets.length === 4 && p.gets[3] === "/admin/os/api/brief/say?date=2026-10-22&token=tok", p.gets);
+        check("... a 404 (no brief in the vault yet) says nothing, and the line says what it's waiting for",
+            p.synth.spoken.length === spokenBefore && p.OS.watching()[0]?.phase === "say"
+                && t153Line(p) === "The morning brief run finished. Waiting for the brief to reach the vault…", t153Line(p));
+        await t153Pass(p, 14_000);
+        check("... and it doesn't ask again before 15 seconds", p.gets.length === 4);
+        srv.s.say = { status: 200, body: { date: "2026-10-22", source: "say", text: T153_SAY, status: "ok", generated: "2026-10-22T11:58:00Z" } };
+        await t153Pass(p, 1_000);
+        check("when the Say block is there, it's spoken, all of it, in sentence-sized pieces",
+            t153Spoken(p, spokenBefore) === T153_SAY && p.synth.spoken.length - spokenBefore > 1, t153Spoken(p, spokenBefore));
+        check("... and shown in the status line; the ask reply is left alone",
+            t153Line(p) === T153_SAY && p.say() === "Queued the morning brief.", { line: t153Line(p), say: p.say() });
+        check("... while it's spoken the page counts as busy and won't reload", p.OS.busy() && p.reloadTick() === 0);
+        p.synth.endAll();
+        const getsAfter = p.gets.length;
+        await t153Pass(p, 20 * 60_000);
+        check("... it's said once: no more polls, nothing more spoken, the watch gone from the tab's storage",
+            p.gets.length === getsAfter && t153Spoken(p, spokenBefore) === T153_SAY && p.OS.watching().length === 0
+                && !p.store.has("pwa.os.watch") && !p.OS.busy(), { gets: p.gets.length - getsAfter, watching: p.OS.watching() });
+    }
+    {
+        const { p, srv } = await t153Confirmed();
+        Object.assign(srv.s.run, { status: "succeeded", outputPath: "outputs/briefs/2026-10-22.md" });
+        await t153Pass(p, 15_000);
+        const sayGets = () => p.gets.filter((u) => u.startsWith("/admin/os/api/brief/say")).length;
+        await t153Pass(p, 15 * 60_000 - 1_000);
+        check("a brief that never reaches the vault: the Say endpoint is asked every 15 s for 15 minutes, nothing spoken yet",
+            sayGets() === 60 && p.OS.watching().length === 1 && !/brief isn't/.test(t153Spoken(p)), sayGets());
+        await t153Pass(p, 1_000);
+        const said = "The morning brief run finished, but the brief isn't in the vault yet, so I've stopped waiting for it.";
+        check("... then it stops and says so, shown and spoken", sayGets() === 60 && t153Line(p) === said && p.synth.spoken.at(-1)?.text === said,
+            { line: t153Line(p), gets: sayGets() });
+        await t153Pass(p, 5 * 60_000);
+        check("... and asks nothing more", sayGets() === 60 && p.OS.watching().length === 0);
+    }
+    {
+        const { p, srv } = await t153Confirmed();
+        srv.s.run.status = "running";
+        await t153Pass(p, 45 * 60_000 - 1_000);
+        check("a run that never finishes is polled every 15 s for 45 minutes (179 polls), nothing said yet",
+            p.gets.length === 179 && p.OS.watching().length === 1, p.gets.length);
+        await t153Pass(p, 1_000);
+        const said = "The morning brief run hasn't finished after 45 minutes, so I've stopped waiting for it.";
+        check("... at 45 minutes it stops and says so", p.gets.length === 179 && t153Line(p) === said && lastSpoken(p.synth) === said,
+            { line: t153Line(p), gets: p.gets.length });
+        await t153Pass(p, 30 * 60_000);
+        check("... and polls no more", p.gets.length === 179 && p.OS.watching().length === 0);
+    }
+    for (const [summary, said] of [
+        ["morning_brief.ps1 exited 1; see private\\logs\\morning_brief_2026-10-22.log", "The morning brief run failed: morning_brief.ps1 exited 1; see private\\logs\\morning_brief_2026-10-22.log."],
+        ["no result from runner within 45 minutes.", "The morning brief run failed: no result from runner within 45 minutes."],
+        [null, "The morning brief run failed."],
+    ] as const) {
+        const { p, srv } = await t153Confirmed();
+        Object.assign(srv.s.run, { status: "failed", summary });
+        await t153Pass(p, 15_000);
+        check(`a failed run is said with its reason: "${said}"`, lastSpoken(p.synth) === said && t153Line(p) === said,
+            { spoken: lastSpoken(p.synth), line: t153Line(p) });
+        await t153Pass(p, 5 * 60_000);
+        check("... once, with no Say poll and no more run polls", p.gets.length === 1 && t153Spoken(p).split(said).length === 2, p.gets);
+    }
+    for (const [skill, said] of [["lint-wiki", "The lint wiki run finished."], ["weekly-review", "The weekly review run finished."]] as const) {
+        const { p, srv } = await t153Confirmed({ id: 11, skill });
+        Object.assign(srv.s.run, { status: "succeeded", outputPath: "outputs/lint/2026-10-22.md" });
+        await t153Pass(p, 15_000);
+        check(`another skill that succeeds is said as such: "${said}", without asking for a brief`,
+            lastSpoken(p.synth) === said && t153Line(p) === said && p.gets.every((u) => u.startsWith("/admin/os/api/runs/11?")), p.gets);
+    }
+    {
+        const { p, srv } = await t153Confirmed({ id: 12, skill: "lint-wiki" });
+        Object.assign(srv.s.run, { status: "failed", summary: "lint status: partial (unavailable: Notion)" });
+        await t153Pass(p, 15_000);
+        check("... and one that fails, with its reason", lastSpoken(p.synth) === "The lint wiki run failed: lint status: partial (unavailable: Notion).");
+    }
+    {
+        const { p, srv } = await t153Confirmed();
+        srv.s.runReply = { status: 500, body: { error: "could not read the run" } };
+        await t153Pass(p, 15_000);
+        srv.s.runReply = { network: true };
+        await t153Pass(p, 15_000);
+        srv.s.runReply = { status: 502, json: false };
+        await t153Pass(p, 15_000);
+        check("a 500, no answer, or a non-JSON reply just means look again in 15 s",
+            p.gets.length === 3 && p.OS.watching().length === 1 && lastSpoken(p.synth) === "Queued the morning brief.", p.gets);
+        srv.s.runReply = null;
+        Object.assign(srv.s.run, { status: "succeeded", outputPath: "outputs/briefs/2026-10-22.md" });
+        srv.s.say = { status: 500, body: { error: "brief unreadable", date: "2026-10-22" } };
+        await t153Pass(p, 15_000);
+        check("... the Say endpoint's 500 (a brief caught mid-pull) too", p.OS.watching()[0]?.phase === "say" && lastSpoken(p.synth) === "Queued the morning brief.");
+        srv.s.say = { status: 200, body: { date: "2026-10-22", source: "top3", text: "Ship the release.\nCall Sam.", status: "ok", generated: null } };
+        await t153Pass(p, 15_000);
+        check("... and an older brief's Top 3 is read when there's no Say block", lastSpoken(p.synth) === "Ship the release. Call Sam." || t153Spoken(p).endsWith("Ship the release. Call Sam."),
+            t153Spoken(p));
+    }
+    for (const [what, reply, said] of [
+        ["a Say reply with nothing to read", { status: 200, body: { date: "2026-10-22", source: "none", text: "", status: "ok", generated: null } },
+            "The morning brief run finished, but the brief has nothing to read aloud."],
+        ["no vault configured (503)", { status: 503, body: { error: "OBSIDIAN_VAULT_PATH is not configured" } },
+            "The morning brief run finished, but I can't read the brief here."],
+    ] as const) {
+        const { p, srv } = await t153Confirmed();
+        Object.assign(srv.s.run, { status: "succeeded", outputPath: "outputs/briefs/2026-10-22.md" });
+        srv.s.say = reply;
+        await t153Pass(p, 15_000);
+        check(`${what}: "${said}", and the watch ends`, lastSpoken(p.synth) === said && p.OS.watching().length === 0, lastSpoken(p.synth));
+    }
+    {
+        const { p, srv } = await t153Confirmed();
+        Object.assign(srv.s.run, { status: "succeeded", outputPath: "projects/somewhere/else.md" });
+        await t153Pass(p, 15_000);
+        check("a brief with no dated output path asks for the server's today", p.gets[1] === "/admin/os/api/brief/say?token=tok", p.gets);
+    }
+    for (const [what, reply, said] of [
+        ["an expired session (redirect)", { redirect: true }, "I stopped following the morning brief run: your session has expired."],
+        ["a non-admin (403)", { status: 403, json: false }, "I stopped following the morning brief run: this account is not an administrator."],
+        ["a run that's gone (404)", { status: 404, body: { error: "no such run" } }, "I can't find the morning brief run any more."],
+    ] as const) {
+        const { p, srv } = await t153Confirmed();
+        srv.s.runReply = reply;
+        await t153Pass(p, 15_000);
+        await t153Pass(p, 60_000);
+        check(`${what}: it stops following the run and says why, once`, p.gets.length === 1 && lastSpoken(p.synth) === said
+            && t153Line(p) === said && p.OS.watching().length === 0, { gets: p.gets.length, spoken: lastSpoken(p.synth) });
+    }
+
+    // Never over the admin.
+    {
+        const srv = t153Server(21, "lint-wiki");
+        const p = t150Boot({ startAt: T153_START, hold: true, reply: t153Replies(21, "lint-wiki"), get: srv.get });
+        p.submit("run the lint wiki"); await p.release();
+        p.els["ask-confirm-yes"].fire("click"); await p.release(); p.synth.endAll();
+        check("(precondition) the run is followed", p.OS.watching().length === 1);
+        p.submit("what's due today");
+        Object.assign(srv.s.run, { status: "succeeded" });
+        await t153Pass(p, 15_000);
+        check("an outcome landing while an ask is in flight waits: shown, not spoken, and the page is held",
+            t153Line(p) === "The lint wiki run finished." && !/lint wiki run finished/.test(t153Spoken(p)) && p.OS.busy(), t153Spoken(p));
+        await p.release();
+        check("... the ask's reply is spoken first", lastSpoken(p.synth) === "Router heard: what's due today");
+        await t153Pass(p, 1_000);
+        check("... and the outcome still waits while that reply is being spoken", lastSpoken(p.synth) === "Router heard: what's due today");
+        p.synth.endAll(); await flush();
+        check("... then it's said", lastSpoken(p.synth) === "The lint wiki run finished.", lastSpoken(p.synth));
+    }
+    {
+        const { p, srv } = await t153Confirmed({ recognition: true });
+        await t153Pass(p, 10_000);
+        p.OS.listen();   // the mic gives up by itself after 15 s: the poll lands at 15 s, 5 s in
+        Object.assign(srv.s.run, { status: "failed", summary: "boom" });
+        await t153Pass(p, 10_000);
+        check("an outcome landing while the mic listens waits (and isn't heard by it)",
+            p.OS.micState() === "listening" && !/failed/.test(t153Spoken(p)) && t153Line(p) === "The morning brief run failed: boom.");
+        p.OS.cancelListening(); await t153Pass(p, 1_000);
+        check("... and is said once the mic lets go", lastSpoken(p.synth) === "The morning brief run failed: boom.", lastSpoken(p.synth));
+    }
+    {
+        const { p, srv } = await t153Confirmed({ id: 22, skill: "lint-wiki" });
+        p.submit("run the lint-wiki"); await flush();   // a new proposal, waiting for yes or no
+        p.synth.endAll();
+        Object.assign(srv.s.run, { status: "succeeded" });
+        await t153Pass(p, 15_000);
+        check("an outcome waits while a run proposal is waiting for an answer", !!p.OS.proposal() && lastSpoken(p.synth) === "Run the lint wiki?");
+        p.els["ask-confirm-no"].fire("click"); p.synth.endAll();
+        await t153Pass(p, 1_000);
+        check("... and is said once it's answered", lastSpoken(p.synth) === "The lint wiki run finished.", lastSpoken(p.synth));
+    }
+    {
+        const { p, srv } = await t153Confirmed();
+        Object.assign(srv.s.run, { status: "succeeded", outputPath: "outputs/briefs/2026-10-22.md" });
+        srv.s.say = { status: 200, body: { date: "2026-10-22", source: "say", text: T153_SAY, status: "ok", generated: null } };
+        await t153Pass(p, 15_000);
+        check("(precondition) the brief is being read", p.OS.speaking() && t153Line(p) === T153_SAY);
+        p.els["ask-stop"].fire("click");
+        const n = p.synth.spoken.length;
+        await t153Pass(p, 5 * 60_000);
+        check("STOP cuts the brief off, and it isn't read again", !p.OS.speaking() && p.synth.spoken.length === n
+            && t153Line(p) === T153_SAY && p.OS.watching().length === 0);
+    }
+
+    // Typed and spoken confirms start a watch too; a confirm that finds the same run doesn't start a second.
+    {
+        const srv = t153Server(31, "morning-brief");
+        const p = t150Boot({ startAt: T153_START, recognition: true, reply: t153Replies(31, "morning-brief", () =>
+            ({ status: 200, body: { run: { id: 31, skill: "morning-brief", status: "running" }, created: false, say: "The morning brief is already running." } })),
+            get: srv.get });
+        p.submit("run my morning brief"); await flush();
+        p.submit("yes"); await flush();
+        check("a typed \"yes\" starts following the run", p.OS.watching().length === 1 && p.OS.watching()[0].id === 31
+            && t153Line(p) === "Waiting for the morning brief run (running)…", t153Line(p));
+        p.submit("run my morning brief"); await flush();
+        await t151Say(p, "yes");
+        check("a spoken \"yes\" that finds the same run doesn't follow it twice", p.OS.watching().length === 1);
+        await t153Pass(p, 15_000);
+        check("... one poll per 15 s", p.gets.length === 1, p.gets);
+    }
+
+    // Reloads: the watch is kept in the tab's sessionStorage, so the reload carries on as usual.
+    {
+        const session = new Map<string, string>();
+        const { p, srv } = await t153Confirmed({ session, id: 41 });
+        srv.s.run.status = "running";
+        await t153Pass(p, 20_000);
+        check("a followed run is kept in the tab's sessionStorage, with wall-clock deadlines",
+            (() => { const w = JSON.parse(session.get("pwa.os.watch") ?? "[]")[0];
+                return w?.id === 41 && w.phase === "run" && w.runUntil === T153_START + 45 * 60_000 && w.nextAt === T153_START + 30_000; })(),
+            session.get("pwa.os.watch"));
+        await t153Pass(p, 2 * 60_000);
+        check("... so it doesn't hold off the overview's reload", !p.OS.busy() && p.reloadTick() === 1);
+        const reloaded = t150Boot({ startAt: p.win.Date.now(), session, get: srv.get });
+        check("after the reload the run is still followed", reloaded.OS.watching().length === 1 && reloaded.OS.watching()[0].id === 41
+            && t153Line(reloaded) === "Waiting for the morning brief run…", t153Line(reloaded));
+        await t153Pass(reloaded, 4_000);
+        check("... on the same 15 s beat: not polled again at once", reloaded.gets.length === 0, reloaded.gets);
+        Object.assign(srv.s.run, { status: "succeeded", outputPath: "outputs/briefs/2026-10-22.md" });
+        srv.s.say = { status: 200, body: { date: "2026-10-22", source: "say", text: T153_SAY, status: "ok", generated: null } };
+        await t153Pass(reloaded, 15_000);
+        check("... and the brief is read by the reloaded page", t153Spoken(reloaded) === T153_SAY && !session.has("pwa.os.watch"),
+            t153Spoken(reloaded));
+    }
+    {
+        const session = new Map<string, string>();
+        const { p, srv } = await t153Confirmed({ session, id: 42 });
+        srv.s.run.status = "running";
+        await t153Pass(p, 44 * 60_000);
+        const reloaded = t150Boot({ startAt: p.win.Date.now(), session, get: srv.get });
+        await t153Pass(reloaded, 59_000);
+        check("reloads don't extend the 45 minutes: still followed at 44:59", reloaded.OS.watching().length === 1);
+        await t153Pass(reloaded, 1_000);
+        check("... and it gives up at 45:00 from the confirm", reloaded.OS.watching().length === 0
+            && lastSpoken(reloaded.synth) === "The morning brief run hasn't finished after 45 minutes, so I've stopped waiting for it.");
+    }
+    {
+        const session = new Map<string, string>();
+        const { p, srv } = await t153Confirmed({ session, id: 43 });
+        Object.assign(srv.s.run, { status: "succeeded", outputPath: "outputs/briefs/2026-10-22.md" });
+        await t153Pass(p, 15_000);
+        await t153Pass(p, 10 * 60_000);
+        const reloaded = t150Boot({ startAt: p.win.Date.now(), session, get: srv.get });
+        check("a reload while waiting for the Say block carries on waiting for it",
+            reloaded.OS.watching()[0]?.phase === "say" && t153Line(reloaded) === "The morning brief run finished. Waiting for the brief to reach the vault…");
+        await t153Pass(reloaded, 5 * 60_000);
+        check("... and still stops 15 minutes after the run finished", reloaded.OS.watching().length === 0
+            && lastSpoken(reloaded.synth) === "The morning brief run finished, but the brief isn't in the vault yet, so I've stopped waiting for it.",
+            lastSpoken(reloaded.synth));
+    }
+    {
+        const { p, srv } = await t153Confirmed({ session: "methods-throw" });
+        srv.s.run.status = "running";
+        await t153Pass(p, 2 * 60_000);
+        check("with sessionStorage blocked, the watch holds the reload off instead (it would be lost)", p.OS.busy() && p.reloadTick() === 0);
+        Object.assign(srv.s.run, { status: "failed", summary: "boom" });
+        await t153Pass(p, 15_000);
+        p.synth.endAll();
+        check("... until the run's outcome is said", lastSpoken(p.synth) === "The morning brief run failed: boom." && !p.OS.busy() && p.reloadTick() === 1);
+    }
+    {
+        const { p, srv } = await t153Confirmed({ session: "methods-throw" });
+        srv.s.run.status = "running";
+        await t153Pass(p, 45 * 60_000);
+        p.synth.endAll();
+        check("... and never for longer than the 45 minutes", p.OS.watching().length === 0 && !p.OS.busy() && p.reloadTick() === 1);
+    }
+    for (const [what, stored] of [
+        ["a deadline further off than 45 minutes (a skewed or tampered entry)",
+            [{ id: 51, skill: "lint-wiki", phase: "run", runUntil: T153_START + 10 * 3600_000, sayUntil: null, date: null, nextAt: T153_START }]],
+        ["a Say deadline further off than 15 minutes",
+            [{ id: 52, skill: "morning-brief", phase: "say", runUntil: T153_START, sayUntil: T153_START + 3600_000, date: null, nextAt: T153_START }]],
+        ["a watch whose deadline passed long ago (the tab came back hours later)",
+            [{ id: 53, skill: "lint-wiki", phase: "run", runUntil: T153_START - 3600_000, sayUntil: null, date: null, nextAt: T153_START - 3600_000 }]],
+        ["a skill that isn't runnable", [{ id: 54, skill: "rm -rf", phase: "run", runUntil: T153_START + 60_000, sayUntil: null, date: null, nextAt: T153_START }]],
+        ["a bad date", [{ id: 55, skill: "morning-brief", phase: "say", runUntil: T153_START, sayUntil: T153_START + 60_000, date: "../x", nextAt: T153_START }]],
+        ["not JSON", "{oops"],
+        ["not a list", { id: 56 }],
+    ] as const) {
+        const session = new Map([["pwa.os.watch", typeof stored === "string" ? stored : JSON.stringify(stored)]]);
+        let p: ReturnType<typeof t150Boot> | null = null, threw: unknown = null;
+        try { p = t150Boot({ startAt: T153_START, session, get: () => ({ status: 200, body: { id: 51, skill: "lint-wiki", status: "running" } }) }); }
+        catch (e) { threw = e; }
+        if (!p) { check(`stored ${what}: the page boots`, false, String(threw)); continue; }
+        await t153Pass(p, 60 * 60_000);
+        check(`stored ${what}: dropped, never polled or spoken, and the page isn't held`,
+            p.OS.watching().length === 0 && p.gets.length === 0 && p.synth.spoken.length === 0 && !p.OS.busy() && p.els["ask-watch"].hidden,
+            { watching: p.OS.watching(), gets: p.gets });
+    }
+    {
+        const session = new Map([["pwa.os.watch", JSON.stringify(
+            [{ id: 57, skill: "lint-wiki", phase: "run", runUntil: T153_START + 10_000, sayUntil: null, date: null, nextAt: T153_START }])]]);
+        const p = t150Boot({ startAt: T153_START, session, get: (url) => url.startsWith("/admin/os/api/runs/57?")
+            ? { status: 200, body: { id: 57, skill: "lint-wiki", status: "running" } } : { status: 404, body: {} } });
+        p.timers.advance(0); await flush();
+        check("a stored watch that's due is polled as soon as the page loads", p.gets.length === 1 && p.OS.watching().length === 1, p.gets);
+        await t153Pass(p, 15_000);
+        check("... and keeps its stored deadline", p.OS.watching().length === 0
+            && lastSpoken(p.synth) === "The lint wiki run hasn't finished after 45 minutes, so I've stopped waiting for it.");
+    }
+
+    // Closing the page ends it: nothing is pushed or spoken anywhere else.
+    {
+        const { p, srv } = await t153Confirmed({ id: 61 });
+        await t153Pass(p, 15_000);
+        // The tab closes (its timers never run again); its sessionStorage goes with it. A new tab starts clean.
+        Object.assign(srv.s.run, { status: "succeeded", outputPath: "outputs/briefs/2026-10-22.md" });
+        srv.s.say = { status: 200, body: { date: "2026-10-22", source: "say", text: T153_SAY, status: "ok", generated: null } };
+        const newTab = t150Boot({ startAt: T153_START + 20 * 60_000, get: srv.get });
+        await t153Pass(newTab, 60 * 60_000);
+        check("a run confirmed in a tab that's since closed is never followed or spoken in a new one",
+            newTab.gets.length === 0 && newTab.synth.spoken.length === 0 && newTab.els["ask-watch"].hidden);
+        check("... and the page has no push, notification or background channel to speak through",
+            !/serviceWorker|Notification|sendBeacon|EventSource|WebSocket|BroadcastChannel/.test(p.html));
+        p.OS.unwatch();
+        await t153Pass(p, 60 * 60_000);
+        check("OS.unwatch() stops following, silently", p.OS.watching().length === 0 && p.gets.length === 1 && !p.store.has("pwa.os.watch")
+            && lastSpoken(p.synth) === "Queued the morning brief.");
+    }
+    {
+        const p = t150Boot({ startAt: T153_START, synth: null, reply: t153Replies(71, "lint-wiki"),
+            get: () => ({ status: 200, body: { id: 71, skill: "lint-wiki", status: "succeeded" } }) });
+        p.submit("run the lint wiki"); await flush();
+        p.els["ask-confirm-yes"].fire("click"); await flush();
+        await t153Pass(p, 15_000);
+        check("without speechSynthesis the outcome is still shown", t153Line(p) === "The lint wiki run finished." && !p.OS.busy());
     }
 
     // ── page scripts: no speechSynthesis ────────────────────────────────────

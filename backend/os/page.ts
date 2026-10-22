@@ -4,6 +4,7 @@ import { ADMIN_PAGES } from "./commands.js";
 import { MIC_BUTTON, MIC_NOTE, MIC_STYLES, micScript } from "./mic.js";
 import { PROPOSAL_REPLY_JS } from "./proposalReply.js";
 import { SPEAKER_JS, STOP_BUTTON, VOICE_PICKER, VOICE_STYLES, voiceScript } from "./voice.js";
+import { WATCH_LINE, WATCH_STYLES, runWatchScript } from "./runWatch.js";
 import { describeError, type Overview, type Tile, type TileSource, type ViewContext } from "./overview.js";
 
 /** The page reloads itself this often while it's visible. */
@@ -70,7 +71,8 @@ const ASK_BOX = `
                             <button id="ask-confirm-yes" type="button">CONFIRM</button>
                             <button id="ask-confirm-no" type="button">CANCEL</button>
                         </div>
-                    </div>${VOICE_PICKER}
+                    </div>
+                    ${WATCH_LINE}${VOICE_PICKER}
                 </form>`;
 
 /**
@@ -110,7 +112,8 @@ const ASK_BOX = `
  *   OS.dismiss()          Cancel: client-side only, the proposal just expires.
  *                         Returns false when nothing was pending.
  *   OS.onConfirm(fn)      fn(run, body) after a confirm queues (or finds) the run,
- *                         before the outcome is spoken (#153 polls the run).
+ *                         before the outcome is spoken. os/runWatch.ts (#153)
+ *                         follows the run from here and says how it went.
  *
  * Answering by voice or text (#151). OS.ask() reads a short reply to a pending
  * proposal itself (os/proposalReply.ts), so the mic's transcript and the text
@@ -394,6 +397,7 @@ export function renderOverviewPage({ token, now, overview, sources, refreshMs = 
         <script>${askScript(token)}</script>
         <script>${micScript()}</script>
         <script>${voiceScript()}</script>
+        <script>${runWatchScript(token)}</script>
         <script>
         // Reload while the page is visible; catch up as soon as a hidden tab comes back.
         // Never while the ask box is in use (typing, waiting, or speaking a reply).
@@ -447,6 +451,7 @@ export function renderOverviewPage({ token, now, overview, sources, refreshMs = 
         .ask-confirm button:disabled { opacity: 0.5; }
         ${MIC_STYLES}
         ${VOICE_STYLES}
+        ${WATCH_STYLES}
         .tile { border: 1px solid #333; background: #1e1e1e; padding: 1rem 1.25rem; min-width: 0; box-sizing: border-box; }
         .tile-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
         .tile-title { color: #0d9488; font-size: 0.75rem; letter-spacing: 2px; font-weight: bold; text-transform: uppercase; text-decoration: none; }

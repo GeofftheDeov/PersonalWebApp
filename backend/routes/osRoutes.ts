@@ -34,6 +34,11 @@ import { BRIEF_DATE } from "../utils/briefs.js";
  *                                 (os/briefSpeech.ts): 200 { date, source: 'say'|'top3'|'none',
  *                                 text, status, generated }; 404 { error: 'no brief', date };
  *                                 400 bad date; 500 file unreadable; 503 no vault configured
+ *   GET  /admin/os/api/runs/:id   one agent run, for the page to poll after a confirm (#153):
+ *                                 200 { id, skill, label, status, trigger, summary, outputPath,
+ *                                 requestedAt, claimedAt, finishedAt }; 404 unknown; 400 bad id.
+ *                                 Any admin can read any run: it's a one-admin app, and
+ *                                 /admin/briefs already lists every run to every admin.
  *
  * Mounted inside adminRoutes after verifyToken + requireAdmin, so every route
  * here is admin-only. Built from a factory so tests inject the clock, the tile

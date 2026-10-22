@@ -338,8 +338,8 @@ export interface UsageSummary {
  * run whose cost was dropped as malformed but whose tokens were kept counts as
  * without usage, and its tokens aren't added.
  *
- * Reads through `db`, so an overview tile runs it on its own budgeted
- * connection. Throws on a missing table or column (an unapplied migration);
+ * Reads through `db`, so an overview tile runs it under the tile's time
+ * budget (os/overview.ts). Throws on a missing table or column (an unapplied migration);
  * the caller decides what that means.
  */
 export async function summariseUsage(

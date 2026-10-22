@@ -27,13 +27,15 @@ import "./use-test-jwt-secret.js";
 import express from "express";
 import type { AddressInfo } from "net";
 import crypto from "crypto";
+import pg from "pg";
+import { performance } from "perf_hooks";
 import pool from "../db/index.js";
 import adminRoutes, { adminGate } from "../routes/adminRoutes.js";
 import dbRoutes from "../routes/dbRoutes.js";
 import runnerRoutes from "../routes/runnerRoutes.js";
 import { createOsRouter } from "../routes/osRoutes.js";
 import { TILES } from "../os/tiles/index.js";
-import { ok, type TileSource } from "../os/overview.js";
+import { OVERVIEW_BUDGET_MS, TILE_BUDGET_MS, TILE_DEADLINE_GRACE_MS, ok, type TileSource } from "../os/overview.js";
 import { signJwt } from "../utils/jwt.js";
 import { createTempVault } from "./temp-vault.js";
 
@@ -872,6 +874,120 @@ async function main() {
                 && tileTag(brokenHtml.body, "thrower")?.status === "unavailable", brokenHtml.status);
         await pool.query(`ALTER TABLE alpaca_snapshots_t139_renamed RENAME TO alpaca_snapshots`);
         renamed = false;
+
+        // ── time budgets (#140) ─────────────────────────────────────────────
+        check(`the budgets are named constants: ${TILE_BUDGET_MS} ms a tile, the page under ${OVERVIEW_BUDGET_MS} ms`,
+            TILE_BUDGET_MS === 400 && TILE_BUDGET_MS + TILE_DEADLINE_GRACE_MS < OVERVIEW_BUDGET_MS && OVERVIEW_BUDGET_MS === 1000);
+
+        /** A request and how long it took, in ms. */
+        const timedGet = async (base: string, path: string) => {
+            const t0 = performance.now();
+            const r = await get(base, path, adminToken);
+            return { ...r, ms: Math.round(performance.now() - t0) };
+        };
+        /** Polls `probe` until it returns true or `withinMs` passes; true if it did. */
+        const t140Eventually = async (probe: () => Promise<boolean>, withinMs = 1_500) => {
+            const until = Date.now() + withinMs;
+            for (;;) {
+                if (await probe()) return true;
+                if (Date.now() > until) return false;
+                await new Promise((r) => setTimeout(r, 50));
+            }
+        };
+        /** Queries from other sessions still waiting on a lock on `table`. */
+        const t140LockWaiters = async (table: string) => (await pool.query(
+            `SELECT count(*)::int AS n FROM pg_locks WHERE relation = $1::regclass AND NOT granted`, [table])).rows[0].n as number;
+
+        // An exclusive lock on alpaca_snapshots, held from a second connection outside the pool.
+        const t140Locker = new pg.Client({ connectionString: process.env.DATABASE_URL });
+        await t140Locker.connect();
+        try {
+            await t140Locker.query(`BEGIN`);
+            await t140Locker.query(`LOCK TABLE alpaca_snapshots IN ACCESS EXCLUSIVE MODE`);
+
+            const locked = await timedGet(H.base, "/admin/os/api/overview");
+            const lt = locked.json?.tiles ?? {};
+            check(`a locked alpaca_snapshots makes only the Alpaca tile unavailable (timed out); the JSON is 200 in under ${OVERVIEW_BUDGET_MS} ms`,
+                locked.status === 200 && locked.ms < OVERVIEW_BUDGET_MS
+                    && lt.alpaca?.status === "unavailable" && /timed out/.test(lt.alpaca.reason)
+                    && ["usage", "tasks", "brief"].every((id) => lt[id]?.status === "ok"),
+                { status: locked.status, ms: locked.ms, lt });
+            const lockedPage = await timedGet(H.base, "/admin/os");
+            check(`the page under the lock is 200 in under ${OVERVIEW_BUDGET_MS} ms, the Alpaca tile unavailable and saying it timed out`,
+                lockedPage.status === 200 && lockedPage.ms < OVERVIEW_BUDGET_MS
+                    && tileTag(lockedPage.body, "alpaca")?.status === "unavailable" && /timed out/.test(tileHtml(lockedPage.body, "alpaca"))
+                    && tileTag(lockedPage.body, "usage")?.status === "ok", { status: lockedPage.status, ms: lockedPage.ms });
+            // The lock is still held: the blocked queries were cancelled in Postgres, not just abandoned by the tile.
+            check("the blocked queries are cancelled while the lock is still held: none is left waiting on it",
+                await t140Eventually(async () => (await t140LockWaiters("alpaca_snapshots")) === 0),
+                { waiting: await t140LockWaiters("alpaca_snapshots") });
+        } finally {
+            await t140Locker.query(`ROLLBACK`).catch(() => {});
+            await t140Locker.end().catch(() => {});
+        }
+
+        const unlocked = await get(H.base, "/admin/os/api/overview", adminToken);
+        check("once the lock goes, the next request succeeds with the Alpaca tile ok",
+            unlocked.status === 200 && unlocked.json?.tiles?.alpaca?.status === "ok", unlocked.json?.tiles?.alpaca);
+        // Every pooled connection is back, idle and without the tile budget's statement_timeout.
+        const t140Settled = await t140Eventually(async () => pool.idleCount === pool.totalCount && pool.waitingCount === 0);
+        const t140Clients = await Promise.all(Array.from({ length: pool.totalCount }, () => pool.connect()));
+        const t140Timeouts: string[] = [];
+        for (const c of t140Clients) {
+            try { t140Timeouts.push((await c.query(`SHOW statement_timeout`)).rows[0].statement_timeout); } finally { c.release(); }
+        }
+        const t140InTxn = (await pool.query(
+            `SELECT count(*)::int AS n FROM pg_stat_activity
+              WHERE datname = current_database() AND state LIKE 'idle in transaction%' AND pid <> pg_backend_pid()`)).rows[0].n;
+        check("the pool is healthy afterwards: every connection back, none carrying a statement_timeout or left in a transaction",
+            t140Settled && t140Timeouts.length > 0 && t140Timeouts.every((v) => v === "0") && t140InTxn === 0,
+            { t140Settled, t140Timeouts, t140InTxn, total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount });
+
+        // agent_runs locked: the usage tile times out; the brief tile stays ok and says its run history timed out.
+        const t140RunsLocker = new pg.Client({ connectionString: process.env.DATABASE_URL });
+        await t140RunsLocker.connect();
+        try {
+            await t140RunsLocker.query(`BEGIN`);
+            await t140RunsLocker.query(`LOCK TABLE agent_runs IN ACCESS EXCLUSIVE MODE`);
+            const runsLocked = await timedGet(H.base, "/admin/os/api/overview");
+            const rt = runsLocked.json?.tiles ?? {};
+            check(`a locked agent_runs times out the usage tile, and the brief tile stays ok with a timed-out run history, in under ${OVERVIEW_BUDGET_MS} ms`,
+                runsLocked.status === 200 && runsLocked.ms < OVERVIEW_BUDGET_MS
+                    && rt.usage?.status === "unavailable" && /timed out/.test(rt.usage.reason)
+                    && rt.brief?.status === "ok" && /run history unavailable: timed out/.test(rt.brief.runsNote ?? "")
+                    && rt.brief.activeRun === null && rt.alpaca?.status === "ok",
+                { ms: runsLocked.ms, usage: rt.usage, runsNote: rt.brief?.runsNote, brief: rt.brief?.status });
+        } finally {
+            await t140RunsLocker.query(`ROLLBACK`).catch(() => {});
+            await t140RunsLocker.end().catch(() => {});
+        }
+
+        // A tile slow outside the database, and one whose query is slow: each gives up within its budget.
+        const t140Sleeper: TileSource<object> = {
+            id: "t140sleeper", title: "Sleeper", href: "/admin",
+            build: () => new Promise((r) => setTimeout(() => r(ok({})), 5_000).unref()),
+            render: () => "",
+        };
+        const t140Napper: TileSource<object> = {
+            id: "t140napper", title: "Napper", href: "/admin",
+            async build({ db }) { await db.query(`SELECT pg_sleep(5) /* t140napper */`); return ok({}); },
+            render: () => "",
+        };
+        const T140 = await harness([...TILES, t140Sleeper, t140Napper]);
+        try {
+            const slow = await timedGet(T140.base, "/admin/os/api/overview");
+            const st = slow.json?.tiles ?? {};
+            check(`a tile slow outside the database and one with a slow query both time out; the rest are ok, in under ${OVERVIEW_BUDGET_MS} ms`,
+                slow.status === 200 && slow.ms < OVERVIEW_BUDGET_MS
+                    && st.t140sleeper?.status === "unavailable" && /timed out/.test(st.t140sleeper.reason)
+                    && st.t140napper?.status === "unavailable" && /timed out/.test(st.t140napper.reason)
+                    && TILES.every((s) => st[s.id]?.status === "ok"),
+                { ms: slow.ms, st });
+            const napping = async () => (await pool.query(
+                `SELECT count(*)::int AS n FROM pg_stat_activity WHERE state = 'active' AND query LIKE '%/* t140napper */%' AND pid <> pg_backend_pid()`)).rows[0].n;
+            check("the slow query is cancelled in Postgres, not left running on a pool connection",
+                await t140Eventually(async () => (await napping()) === 0), { running: await napping() });
+        } finally { T140.server.close(); }
 
         // ── no external calls ───────────────────────────────────────────────
         const realFetch = globalThis.fetch;

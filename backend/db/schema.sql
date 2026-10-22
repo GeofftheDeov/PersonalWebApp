@@ -952,7 +952,7 @@ CREATE TRIGGER trg_admin_list_views_updated BEFORE UPDATE ON admin_list_views
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- ---------- agentic OS: skill-run queue (migrations/2026-09-26-agent-runs.sql) ----------
--- Usage and trigger: migrations/2026-10-12-agent-run-usage.sql. NULL usage means unknown.
+-- Usage and trigger: migrations/0003__agent-run-usage.sql. NULL usage means unknown.
 
 CREATE TABLE agent_runs (
   id            bigserial PRIMARY KEY,
@@ -976,7 +976,7 @@ CREATE TABLE agent_runs (
 CREATE INDEX idx_agent_runs_queued ON agent_runs (requested_at) WHERE status = 'queued';
 CREATE INDEX idx_agent_runs_recent ON agent_runs (requested_at DESC);
 
--- ---------- agentic OS: the ask log (migrations/2026-10-12-os-asks.sql) ----------
+-- ---------- agentic OS: the ask log (migrations/0004__os-asks.sql) ----------
 -- One row per ask to POST /admin/os/ask. Tier-2 columns: model, tokens, cost.
 -- Tier-3 columns: the proposed skill, its expiry, confirmed_at and run_id.
 

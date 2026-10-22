@@ -365,11 +365,11 @@ async function main() {
         const um = unmigrated.json?.tiles ?? {};
         check("a renamed usage column makes the usage tile unavailable and names the migration; the JSON is still 200",
             unmigrated.status === 200 && um.usage?.status === "unavailable" && /cost_usd/.test(um.usage.reason)
-                && um.usage.reason.includes("2026-10-12-agent-run-usage.sql") && um.alpaca?.status === "ok", um);
+                && um.usage.reason.includes("0003__agent-run-usage.sql") && um.alpaca?.status === "ok", um);
         const unmigratedHtml = await get(H.base, "/admin/os", adminToken);
         check("the unmigrated usage tile is unavailable in the HTML, naming the migration",
             unmigratedHtml.status === 200 && tileTag(unmigratedHtml.body, "usage")?.status === "unavailable"
-                && tileHtml(unmigratedHtml.body, "usage").includes("2026-10-12-agent-run-usage.sql"));
+                && tileHtml(unmigratedHtml.body, "usage").includes("0003__agent-run-usage.sql"));
         await pool.query(`ALTER TABLE agent_runs RENAME COLUMN cost_usd_t144_renamed TO cost_usd`);
         usageRenamed = false;
 
@@ -677,10 +677,10 @@ async function main() {
         check("without the trigger column the tile stays ok: next brief and runner intact, no runs, and a note naming the migration",
             noTrigger.status === 200 && nt?.status === "ok" && nt.nextRun === "2026-10-14T11:45:00.000Z" && nt.runner?.name === runnerName && typeof nt.runner.lastSeen === "string"
                 && nt.lastScheduled === null && nt.activeRun === null
-                && /trigger/.test(nt.runsNote ?? "") && (nt.runsNote ?? "").includes("2026-10-12-agent-run-usage.sql"), nt);
+                && /trigger/.test(nt.runsNote ?? "") && (nt.runsNote ?? "").includes("0003__agent-run-usage.sql"), nt);
         const noTriggerHtml = await briefPage();
         check("...and the tile says the run history is unavailable, naming the migration",
-            noTriggerHtml.includes("2026-10-12-agent-run-usage.sql"), noTriggerHtml);
+            noTriggerHtml.includes("0003__agent-run-usage.sql"), noTriggerHtml);
         await pool.query(`ALTER TABLE agent_runs RENAME COLUMN trigger_t143_renamed TO trigger`);
         triggerRenamed = false;
 

@@ -26,7 +26,7 @@ export const USAGE_WINDOW_DAYS = 7;
 /** At most this many per-run points (the newest) for the sparkline. */
 export const USAGE_MAX_POINTS = 30;
 /** The migration that adds the usage columns to agent_runs (#137). */
-export const USAGE_MIGRATION = "db/migrations/2026-10-12-agent-run-usage.sql";
+export const USAGE_MIGRATION = "db/migrations/0003__agent-run-usage.sql";
 const USAGE_COLUMNS = ["cost_usd", "input_tokens", "output_tokens", "duration_ms", "trigger"];
 
 /**

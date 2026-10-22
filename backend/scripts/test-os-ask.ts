@@ -1082,7 +1082,7 @@ async function main() {
             await t147Expect("sub-cent tier-2 spend: \"less than a cent\" aloud, the exact figure on screen", "what's my spend so far", "usage.week", "answer",
                 (say, display) => /Open questions have cost less than a cent today, of the 25 cents daily cap\.$/.test(say)
                     && display.includes("$0.003 of $0.25"));
-            t147Seed.usage = t147Unavailable("column missing (cost_usd): apply db/migrations/2026-10-12-agent-run-usage.sql");
+            t147Seed.usage = t147Unavailable("column missing (cost_usd): apply db/migrations/0003__agent-run-usage.sql");
             await t147Expect("an unavailable usage tile is reported with its reason", "how much has claude cost me", "usage.week", "unavailable",
                 (say) => /^I can't tell you what you've spent right now\. The usage tile is unavailable: column missing/.test(say));
             t147Seed.usage = t147Usage();

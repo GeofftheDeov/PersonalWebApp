@@ -2,7 +2,7 @@ import type { Queryable } from "./overview.js";
 import type { AskReply, AskSource } from "./ask.js";
 
 /**
- * The ask log, os_asks (db/migrations/2026-10-12-os-asks.sql): one row per
+ * The ask log, os_asks (db/migrations/0004__os-asks.sql): one row per
  * POST /admin/os/ask. A tier-3 row is also the run proposal (os/proposals.ts).
  */
 export interface AskLogEntry {

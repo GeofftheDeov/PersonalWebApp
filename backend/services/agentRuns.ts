@@ -82,7 +82,7 @@ export interface AgentRun {
     runner: string | null;
     summary: string | null;
     output_path: string | null;
-    // Usage, from Claude Code's JSON result (db/migrations/2026-10-12-agent-run-usage.sql).
+    // Usage, from Claude Code's JSON result (db/migrations/0003__agent-run-usage.sql).
     // null is unknown, never 0.
     cost_usd: number | null;       // API-equivalent; subscription runs aren't billed
     input_tokens: number | null;   // uncached + cache reads + cache writes

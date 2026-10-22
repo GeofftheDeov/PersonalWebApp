@@ -1,5 +1,6 @@
 import { normaliseAsk, type Command } from "./ask.js";
 import { proposalSay } from "./proposals.js";
+import { CANCEL_PATTERN, CONFIRM_PATTERN } from "./proposalReply.js";
 import { READ_BRIEF_INTENT, readTodaysBrief } from "./briefSpeech.js";
 import { ANSWER_COMMANDS } from "./answers.js";
 import { SKILLS, type SkillId } from "../services/agentRuns.js";
@@ -84,16 +85,17 @@ const readBrief: Command[] = [{
 
 /**
  * "Yes" or "no" that reaches the router: the page answers these itself while a
- * proposal is pending (#151), so here there's nothing pending.
+ * proposal is pending (#151, the same patterns: os/proposalReply.ts), so here
+ * there's nothing pending.
  */
 const nothingPending: Command[] = [
     {
-        pattern: /^(?:yes|yeah|yep|yup|confirm|confirmed|do it|go ahead|go for it)(?: please)?$/,
+        pattern: CONFIRM_PATTERN,
         intent: "confirm.nothing_pending",
         handler: () => ({ kind: "answer", say: "Nothing to confirm." }),
     },
     {
-        pattern: /^(?:no|nope|cancel|never mind|nevermind)$/,
+        pattern: CANCEL_PATTERN,
         intent: "cancel.nothing_pending",
         handler: () => ({ kind: "answer", say: "Nothing to cancel." }),
     },

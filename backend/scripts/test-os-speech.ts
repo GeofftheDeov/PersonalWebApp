@@ -20,6 +20,8 @@
  */
 import vm from "vm";
 import { renderOverviewPage } from "../os/page.js";
+import { PROPOSAL_REPLY_JS as T151_PROPOSAL_REPLY_JS, proposalReply as t151ServerReply } from "../os/proposalReply.js";
+import { normaliseAsk as t151Normalise } from "../os/ask.js";
 import { SPEAKER_JS, SPEECH_CHUNK_CHARS, SPEECH_MIN_WAIT_MS, SPEECH_MS_PER_CHAR, VOICE_POLL_MS, VOICE_STORAGE_KEY } from "../os/voice.js";
 
 let pass = 0, fail = 0;
@@ -665,6 +667,158 @@ async function main() {
             p.say() === "Up 412 dollars." && p.synth.spoken.at(-1).voice === T150_VOICES[1]);
         try { p.els["ask-voice"].choose(""); } catch (e) { threw = e; }
         check(`storage ${storage}: going back to the default doesn't throw either`, threw === null && p.OS.voice() === null);
+    }
+
+    // ── page scripts: confirm or cancel by voice (#151) ─────────────────────
+    {
+        // The page's matcher agrees with the server's (os/commands.ts matches the same patterns after normaliseAsk).
+        const t151PageReply = vm.runInNewContext(`(${T151_PROPOSAL_REPLY_JS})`, {});
+        const t151Phrases: [string, "confirm" | "cancel" | null][] = [
+            ["yes", "confirm"], ["Yes.", "confirm"], ["Yes!", "confirm"], ["  YES  ", "confirm"], ["yeah", "confirm"], ["yep", "confirm"],
+            ["Yes please", "confirm"], ["yes, do it", "confirm"], ["Yeah, go ahead.", "confirm"], ["OK, run it", "confirm"],
+            ["sure", "confirm"], ["confirm", "confirm"], ["Confirmed.", "confirm"], ["do it", "confirm"], ["Do it!", "confirm"],
+            ["go ahead", "confirm"], ["go for it", "confirm"], ["run it", "confirm"],
+            ["no", "cancel"], ["No.", "cancel"], ["nope", "cancel"], ["No thanks", "cancel"], ["no, cancel it", "cancel"],
+            ["cancel", "cancel"], ["Cancel that.", "cancel"], ["stop", "cancel"], ["Stop!", "cancel"], ["never mind", "cancel"],
+            ["Nevermind", "cancel"], ["forget it", "cancel"], ["don't", "cancel"], ["Don't run it.", "cancel"],
+            ["yes and also open alpaca", null], ["what's due today", null], ["run my morning brief", null], ["no way that's my P&L", null],
+            ["yesterday", null], ["notes", null], ["stop the music", null], ["", null],
+        ];
+        const t151Mismatch = t151Phrases.filter(([text, want]) =>
+            t151PageReply(text) !== want || t151ServerReply(t151Normalise(text)) !== want);
+        check("the page and the server read the same short phrasings as confirm, cancel or neither", t151Mismatch.length === 0,
+            t151Mismatch.map(([text, want]) => ({ text, want, page: t151PageReply(text), server: t151ServerReply(t151Normalise(text)) })));
+    }
+
+    const t151Expiry = (ms = 60_000) => new Date(Date.now() + ms).toISOString();
+    /** Answers asks (a proposal for anything starting "run", else an echo) and confirms (`confirmReply`). */
+    const t151Replies = (confirmReply: (body: any) => unknown = () =>
+        ({ status: 201, body: { run: { id: 42, skill: "morning-brief" }, created: true, say: "Queued the morning brief." } })) => {
+        let nextId = 100;
+        return (_n: number, body: any) => {
+            if ("id" in body) return confirmReply(body);
+            if (/^run/.test(body.text)) return { tier: 3, kind: "confirm_run", say: "Run the morning brief?",
+                confirmation: { id: ++nextId, skill: "morning-brief", label: "Morning brief", expiresAt: t151Expiry() } };
+            return { tier: 1, kind: "answer", say: `Router heard: ${body.text}` };
+        };
+    };
+    /** One spoken utterance through the mic: press, a final result, the end of speech. */
+    const t151Say = async (p: ReturnType<typeof t150Boot>, text: string) => {
+        const listening = p.OS.listen();
+        const r = p.recs.at(-1);
+        r.onresult?.({ resultIndex: 0, results: [Object.assign([{ transcript: text, confidence: 0.9 }], { isFinal: true })] });
+        r.onend?.();
+        await flush();
+        return listening;
+    };
+    const t151Confirms = (p: ReturnType<typeof t150Boot>) => p.fetches.filter((f) => f.url.startsWith("/admin/os/ask/confirm?"));
+    const t151Asks = (p: ReturnType<typeof t150Boot>) => p.fetches.filter((f) => f.url.startsWith("/admin/os/ask?"));
+    {
+        const p = t150Boot({ recognition: true, reply: t151Replies() });
+        const ran: any[] = [];
+        p.OS.onConfirm((run: any) => ran.push(run));
+        p.submit("run my morning brief"); await flush();
+        check("(precondition) a proposal is pending", p.OS.proposal()?.id === 101 && !p.els["ask-confirm"].hidden);
+        await t151Say(p, "Yes.");
+        check("a spoken \"yes\" to a pending proposal confirms it: one POST to /admin/os/ask/confirm with its id, nothing asked",
+            t151Confirms(p).length === 1 && t151Confirms(p)[0].body.id === 101 && t151Asks(p).length === 1, p.fetches);
+        check("... the run is queued (onConfirm gets it) and the outcome is shown and spoken",
+            ran.length === 1 && ran[0].id === 42 && p.say() === "Queued the morning brief."
+                && lastSpoken(p.synth) === "Queued the morning brief.", { ran, shown: p.say(), spoken: lastSpoken(p.synth) });
+        check("... the proposal is gone, its buttons hidden, the mic idle and the text box cleared",
+            p.OS.proposal() === null && p.els["ask-confirm"].hidden && p.OS.micState() === "idle" && p.els["ask-text"].value === "");
+        await t151Say(p, "yes");
+        check("a second \"yes\", with nothing pending now, goes to the router as an ask (it answers \"Nothing to confirm\")",
+            t151Confirms(p).length === 1 && t151Asks(p).length === 2 && t151Asks(p)[1].body.text === "yes"
+                && t151Asks(p)[1].body.source === "voice", p.fetches);
+    }
+    for (const said of ["no", "Cancel.", "never mind", "stop"]) {
+        const p = t150Boot({ recognition: true, reply: t151Replies() });
+        p.submit("run my morning brief"); await flush();
+        await t151Say(p, said);
+        check(`a spoken "${said}" dismisses the pending proposal: nothing posted, "Cancelled." shown and spoken`,
+            p.fetches.length === 1 && p.OS.proposal() === null && p.els["ask-confirm"].hidden && p.say() === "Cancelled."
+                && lastSpoken(p.synth) === "Cancelled." && p.OS.micState() === "idle" && p.els["ask-text"].value === "",
+            { fetches: p.fetches.length, shown: p.say(), proposal: p.OS.proposal() });
+    }
+    {
+        const p = t150Boot({ reply: t151Replies() });
+        p.submit("run my morning brief"); await flush();
+        p.submit("Yes, do it.");
+        await flush();
+        check("a typed \"yes\" to a pending proposal confirms it the same way (handled in the page, not the router)",
+            t151Confirms(p).length === 1 && t151Asks(p).length === 1 && p.say() === "Queued the morning brief."
+                && p.els["ask-text"].value === "", p.fetches);
+        p.submit("run my morning brief"); await flush();
+        p.submit("no"); await flush();
+        check("... and a typed \"no\" dismisses it", p.fetches.length === 3 && p.OS.proposal() === null && p.say() === "Cancelled."
+            && p.els["ask-text"].value === "");
+        p.submit("no"); await flush();
+        check("... while a typed \"no\" with nothing pending goes to the router", t151Asks(p).length === 3
+            && t151Asks(p)[2].body.text === "no");
+    }
+    {
+        const p = t150Boot({ recognition: true, reply: t151Replies() });
+        p.submit("run my morning brief"); await flush();
+        await t151Say(p, "what's due today");
+        check("anything else said while a proposal is pending is asked as usual, and the proposal is dropped",
+            t151Asks(p).length === 2 && t151Asks(p)[1].body.text === "what's due today" && t151Confirms(p).length === 0
+                && p.OS.proposal() === null && p.say() === "Router heard: what's due today", p.fetches);
+    }
+    const t151Outcomes: [string, unknown, string, boolean][] = [
+        ["410 (expired)", { status: 410, body: { error: "This proposal has expired" } }, "That proposal expired. Ask again to run it.", false],
+        ["409 (already confirmed)", { status: 409, body: { error: "Already confirmed" } }, "That run was already confirmed.", false],
+        ["404 (unknown)", { status: 404, body: { error: "No such proposal" } }, "Nothing to confirm.", false],
+        ["500", { status: 500, body: { error: "enqueue failed" } }, "Sorry, the run couldn't be queued. Try again.", true],
+    ];
+    for (const [what, confirmReply, expected, keeps] of t151Outcomes) {
+        const p = t150Boot({ recognition: true, reply: t151Replies(() => confirmReply) });
+        p.submit("run my morning brief"); await flush();
+        await t151Say(p, "yes");
+        check(`a voice confirm answered ${what} is shown and spoken: "${expected}"`,
+            t151Confirms(p).length === 1 && p.say() === expected && lastSpoken(p.synth) === expected,
+            { shown: p.say(), spoken: lastSpoken(p.synth) });
+        check(keeps ? "... and the proposal stays, so \"yes\" can try again" : "... and the proposal is gone",
+            keeps ? p.OS.proposal()?.id === 101 && !p.els["ask-confirm"].hidden : p.OS.proposal() === null && p.els["ask-confirm"].hidden);
+        if (keeps) {
+            await t151Say(p, "yes");
+            check("... and a second \"yes\" confirms it again", t151Confirms(p).length === 2 && t151Asks(p).length === 1);
+        }
+    }
+    {
+        const p = t150Boot({ recognition: true, reply: t151Replies(() => ({ status: 410, body: { error: "expired" } })) });
+        p.submit("run my morning brief"); await flush();
+        await t151Say(p, "yes");
+        await t151Say(p, "yes");
+        check("after a 410, saying \"yes\" again still says it expired, without posting",
+            t151Confirms(p).length === 1 && t151Asks(p).length === 1 && p.say() === "That proposal expired. Ask again to run it."
+                && lastSpoken(p.synth) === "That proposal expired. Ask again to run it.", p.fetches);
+    }
+    {
+        const p = t150Boot({ recognition: true, reply: t151Replies() });
+        p.submit("run my morning brief"); await flush();
+        p.timers.advance(61_000);
+        check("(precondition) the proposal lapsed on the page's own timer", p.OS.proposal() === null && p.els["ask-confirm"].hidden
+            && /Expired/.test(p.display()), p.display());
+        await t151Say(p, "Yes");
+        check("a \"yes\" after the proposal lapsed says it expired, and queues nothing",
+            p.fetches.length === 1 && p.say() === "That proposal expired. Ask again to run it."
+                && lastSpoken(p.synth) === "That proposal expired. Ask again to run it.", { fetches: p.fetches, shown: p.say() });
+        await t151Say(p, "what's due");
+        await t151Say(p, "yes");
+        check("... but once something else is asked, \"yes\" goes to the router again",
+            t151Asks(p).length === 3 && t151Asks(p)[2].body.text === "yes" && t151Confirms(p).length === 0, p.fetches);
+    }
+    {
+        const p = t150Boot({ recognition: true, hold: true, reply: t151Replies() });
+        p.submit("run my morning brief"); await p.release();
+        const sayThen = t151Say(p, "yes");
+        await flush();
+        check("(precondition) the spoken confirm is in flight", t151Confirms(p).length === 1 && p.OS.pending());
+        check("stop while a spoken confirm is in flight: stop has something to stop", p.OS.stop() === true);
+        await p.release(); await sayThen;
+        check("... the outcome is shown but not spoken (the run is still queued)",
+            p.say() === "Queued the morning brief." && lastSpoken(p.synth) !== "Queued the morning brief." && !p.OS.pending());
     }
 
     // ── page scripts: no speechSynthesis ────────────────────────────────────

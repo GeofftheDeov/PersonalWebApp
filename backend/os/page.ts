@@ -377,6 +377,26 @@ export function renderOverviewPage({ token, now, overview, sources, refreshMs = 
         .dir { font-size: 0.75rem; margin-right: 0.15rem; }
         .dir-up { color: #0d9488; } .dir-down { color: #f97316; } .dir-flat { color: #666; }
         .stat-meta { color: #888; font-size: 0.75rem; margin-top: 0.6rem; }
+        /* The usage tile's per-run cost sparkline (#145): scales to the tile's width, so it
+           reads in the one-column phone layout; strokes stay 2px/1px at any scale. */
+        .spark { display: block; width: 100%; max-width: 480px; height: auto; margin-top: 0.75rem; }
+        .spark * { vector-effect: non-scaling-stroke; }
+        .spark-base { stroke: #333; stroke-width: 1; }
+        .spark-line { fill: none; stroke: #777; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; pointer-events: none; }
+        .spark-hit { fill: transparent; }
+        .spark-pt:hover .spark-hit { fill: rgba(255, 255, 255, 0.08); }
+        .spark-dot { fill: #aaa; stroke: #1e1e1e; stroke-width: 2; pointer-events: none; }
+        .spark-last .spark-dot { fill: #0d9488; }
+        .spark-failed .spark-dot { fill: #1e1e1e; stroke: #aaa; stroke-width: 1.5; }
+        .spark-last.spark-failed .spark-dot { stroke: #0d9488; }
+        .spark-cap { margin-top: 0.3rem; }
+        .spark-runs { margin-top: 0.3rem; }
+        .spark-runs summary { color: #888; font-size: 0.75rem; cursor: pointer; }
+        .spark-scroll { overflow-x: auto; }
+        .spark-runs table { border-collapse: collapse; font-size: 0.75rem; color: #ccc; margin-top: 0.3rem; }
+        .spark-runs th { color: #888; font-weight: normal; text-align: left; }
+        .spark-runs th, .spark-runs td { padding: 0.1rem 0.75rem 0.1rem 0; white-space: nowrap; }
+        .spark-runs .num { text-align: right; font-variant-numeric: tabular-nums; }
         .task-counts { color: #aaa; font-size: 0.8rem; margin-bottom: 0.5rem; }
         .task-counts b { color: #fff; font-size: 0.95rem; }
         .task-count.warn b { color: #fab219; }

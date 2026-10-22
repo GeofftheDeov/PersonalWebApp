@@ -897,6 +897,101 @@ async function main() {
         check("the layout pins calc(100vh - 60px), lays out at device width and stacks to one column below 800px",
             /calc\(100vh - 60px\)/.test(osPage.body) && /@media \(max-width: 800px\)/.test(osPage.body)
                 && /<meta name="viewport" content="width=device-width/.test(osPage.body));
+
+        // ── Usage tile, part 2: the per-run cost sparkline (#145) ───────────
+        // Reuses #144's March week (3 runs with usage, 1 without); its own extra
+        // rows carry runner t145-<tag> and are removed at the end of the section.
+        // Numbers come from the JSON; the HTML is checked for the plot itself:
+        // one mark per JSON point, each with a <title>, and an aria-label.
+        const t145Runner = `t145-${tag}`;
+        const t145Run = (finishedAt: Date, costUsd: number | null, skill = "morning-brief") => pool.query(
+            `INSERT INTO agent_runs (skill, status, requested_at, claimed_at, finished_at, runner, cost_usd, input_tokens, output_tokens, trigger)
+             VALUES ($1, 'succeeded', $2, $2, $2, $3, $4, 1500, 250, 'button') RETURNING id`,
+            [skill, finishedAt, t145Runner, costUsd]).then((r) => r.rows[0].id as number);
+        /** The usage tile's JSON and its sparkline's pieces from the HTML, at `at`. */
+        const t145SparkAt = async (at: Date) => {
+            clock = at;
+            const json = (await get(H.base, "/admin/os/api/overview", adminToken)).json?.tiles?.usage;
+            const html = tileHtml((await get(H.base, "/admin/os", adminToken)).body, "usage");
+            const svg = html.match(/<svg\b[^>]*class="spark"[\s\S]*?<\/svg>/)?.[0] ?? "";
+            const marks = [...svg.matchAll(/<g class="spark-pt[^"]*" data-run="(\d+)"[^>]*>\s*<title>([^<]*)<\/title>/g)]
+                .map((m) => ({ id: Number(m[1]), title: m[2] }));
+            return { json, html, svg, marks, aria: svg.match(/<svg\b[^>]*aria-label="([^"]*)"/)?.[1] ?? null };
+        };
+        try {
+            const sparkWeek = await t145SparkAt(usageNow);
+            const { rows: [sparkMissing] } = await pool.query(
+                `SELECT id FROM agent_runs WHERE runner = $1 AND cost_usd IS NULL AND finished_at = '2026-03-09T12:00:00Z'`, [usageRunner]);
+            check("the usage tile draws an inline SVG sparkline with one mark per point in the JSON, oldest first",
+                sparkWeek.json?.status === "ok" && sparkWeek.json.points?.length === 3 && sparkWeek.svg !== ""
+                    && JSON.stringify(sparkWeek.marks.map((m) => m.id)) === JSON.stringify(sparkWeek.json.points.map((p: any) => p.id)),
+                { points: sparkWeek.json?.points?.map((p: any) => p.id), marks: sparkWeek.marks });
+            check("a run without usage is counted but not plotted (not drawn as $0)",
+                sparkWeek.json?.runsWithoutUsage === 1 && sparkMissing?.id > 0
+                    && !sparkWeek.marks.some((m) => m.id === sparkMissing.id) && !new RegExp(`data-run="${sparkMissing?.id}"`).test(sparkWeek.html),
+                { missing: sparkMissing?.id, marks: sparkWeek.marks.map((m) => m.id) });
+            check("the sparkline has an aria-label naming what it plots and how many runs",
+                sparkWeek.aria !== null && /cost/i.test(sparkWeek.aria) && /\b3 runs\b/.test(sparkWeek.aria)
+                    && /role="img"/.test(sparkWeek.svg), sparkWeek.aria);
+            // Mar 7 12:00Z is 6:00 AM CST; Mar 4 06:00Z is midnight CST.
+            const [sparkFirst, sparkMid] = sparkWeek.marks;
+            check("each point's <title> gives the Central time, skill, trigger, cost and tokens",
+                sparkWeek.marks.length === 3
+                    && sparkMid.title.includes("Mar 7, 6:00 AM CT") && sparkMid.title.includes("weekly-review")
+                    && sparkMid.title.includes("scheduled") && sparkMid.title.includes("$1.25")
+                    && sparkMid.title.includes("20K in") && sparkMid.title.includes("3K out")
+                    && sparkFirst.title.includes("Mar 4, 12:00 AM CT") && sparkFirst.title.includes("button")
+                    && sparkFirst.title.includes("$0.50") && sparkFirst.title.includes("1K in") && sparkFirst.title.includes("100 out")
+                    && sparkWeek.marks[2].title.includes("manual") && sparkWeek.marks[2].title.includes("&lt;$0.01"),
+                sparkWeek.marks.map((m) => m.title));
+            check("the sparkline is server-built inline SVG with no NaN coordinates and no script",
+                /viewBox="0 0 \d+ \d+"/.test(sparkWeek.svg) && !/NaN|Infinity/.test(sparkWeek.svg) && !/<script/i.test(sparkWeek.svg));
+
+            // 31 more runs with usage: 34 in the week, at most 30 plotted (the newest).
+            const sparkBurst: number[] = [];
+            for (let i = 0; i < 31; i++) sparkBurst.push(await t145Run(new Date(Date.parse("2026-03-08T12:00:00Z") + i * MIN), 0.02));
+            const sparkMany = await t145SparkAt(usageNow);
+            check("at most 30 points are plotted, the same 30 as the JSON, while the totals count all 34 runs",
+                sparkMany.json?.runsWithUsage === 34 && sparkMany.json.points?.length === 30 && sparkMany.marks.length === 30
+                    && JSON.stringify(sparkMany.marks.map((m) => m.id)) === JSON.stringify(sparkMany.json.points.map((p: any) => p.id))
+                    && !sparkMany.marks.some((m) => m.id === sparkBurst[0]) && /\b30 runs\b/.test(sparkMany.aria ?? ""),
+                { marks: sparkMany.marks.length, aria: sparkMany.aria });
+            await pool.query(`DELETE FROM agent_runs WHERE runner = $1`, [t145Runner]);
+
+            // A skill name is data: it's escaped in the <title>, never markup.
+            const sparkOdd = await t145Run(new Date("2026-03-10T12:00:00Z"), 0.3, `<img src=x onerror=alert(1)>&"`);
+            const sparkEsc = await t145SparkAt(usageNow);
+            const sparkOddMark = sparkEsc.marks.find((m) => m.id === sparkOdd);
+            check("a skill name with markup is escaped in its point's <title>",
+                sparkOddMark !== undefined && sparkOddMark.title.includes("&lt;img src=x onerror=alert(1)&gt;&amp;&quot;")
+                    && !sparkEsc.html.includes("<img src=x"), sparkOddMark);
+            await pool.query(`DELETE FROM agent_runs WHERE runner = $1`, [t145Runner]);
+
+            // One run with usage: a single point, still a valid plot.
+            const sparkOnlyId = await t145Run(new Date("2026-02-02T15:00:00Z"), 0.4);
+            const sparkOne = await t145SparkAt(new Date("2026-02-02T18:00:00Z"));
+            check("a week with a single run with usage plots one point, with no NaN",
+                sparkOne.json?.points?.length === 1 && sparkOne.marks.length === 1 && sparkOne.marks[0].id === sparkOnlyId
+                    && /\b1 run\b/.test(sparkOne.aria ?? "") && !/NaN|Infinity/.test(sparkOne.svg), { marks: sparkOne.marks, svg: sparkOne.svg });
+            // Every run free: a flat line on the baseline, not a division by zero.
+            await pool.query(`UPDATE agent_runs SET cost_usd = 0 WHERE id = $1`, [sparkOnlyId]);
+            await t145Run(new Date("2026-02-02T16:00:00Z"), 0);
+            const sparkFree = await t145SparkAt(new Date("2026-02-02T18:00:00Z"));
+            check("runs that all cost $0 plot on the baseline, with no NaN",
+                sparkFree.marks.length === 2 && sparkFree.svg !== "" && !/NaN|Infinity/.test(sparkFree.svg), sparkFree.svg);
+
+            // A week with no runs with usage has nothing to plot: no sparkline at all.
+            const sparkNone = await t145SparkAt(new Date("2026-02-10T18:00:00Z"));
+            check("a week with no runs with usage draws no sparkline",
+                sparkNone.json?.status === "ok" && sparkNone.json.points?.length === 0 && !/<svg/.test(sparkNone.html), sparkNone.html);
+
+            // The one-column phone layout: the SVG scales to the tile's width.
+            const sparkPage = await get(H.base, "/admin/os", adminToken);
+            check("the sparkline scales to the tile's width (readable in the one-column phone layout)",
+                /\.spark\s*\{[^}]*width:\s*100%/.test(sparkPage.body) && !/<svg\b[^>]*class="spark"[^>]*\swidth="/.test(sparkPage.body));
+        } finally {
+            await pool.query(`DELETE FROM agent_runs WHERE runner = $1`, [t145Runner]).catch(() => {});
+        }
     } finally {
         if (renamed) await pool.query(`ALTER TABLE alpaca_snapshots_t139_renamed RENAME TO alpaca_snapshots`).catch(() => {});
         if (usageRenamed) await pool.query(`ALTER TABLE agent_runs RENAME COLUMN cost_usd_t144_renamed TO cost_usd`).catch(() => {});

@@ -59,6 +59,9 @@ export function speakList(items: readonly string[]): string {
     return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
+/** "October 11": an instant's Central calendar day, spoken. */
+export const speakDate = (d: Date) => d.toLocaleDateString("en-US", { timeZone: TIME_ZONE, month: "long", day: "numeric" });
+
 const DAY_MS = 86_400_000;
 /** Whole Central calendar days from `now`'s day to `d`'s (negative in the past). */
 const dayOffset = (d: Date, now: Date) =>
@@ -66,8 +69,9 @@ const dayOffset = (d: Date, now: Date) =>
 
 /**
  * A Central time, spoken relative to now: "6:45 this morning", "9 tonight",
- * "6:45 tomorrow morning", "4:30 yesterday afternoon", "6:45 Monday morning",
- * "6:45 next Monday morning", "noon tomorrow", "6:45 in the morning on October 11".
+ * "6:45 tomorrow morning", "4:30 yesterday afternoon", "6:45 Monday morning"
+ * (coming), "6:45 on Monday morning" (past), "6:45 next Monday morning",
+ * "noon tomorrow", "6:45 in the morning on October 11".
  */
 export function speakTime(d: Date, now: Date): string {
     const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
@@ -76,13 +80,15 @@ export function speakTime(d: Date, now: Date): string {
     const h = Number(parts.hour), m = Number(parts.minute);
     const offset = dayOffset(d, now);
     const weekday = d.toLocaleDateString("en-US", { timeZone: TIME_ZONE, weekday: "long" });
-    const date = d.toLocaleDateString("en-US", { timeZone: TIME_ZONE, month: "long", day: "numeric" });
+    const date = speakDate(d);
+    // A weekday this past week reads "on Monday"; a coming one, plain "Monday".
+    const recent = offset < 0 ? `on ${weekday}` : weekday;
 
     // Noon and midnight have no part of the day.
     if (m === 0 && (h === 12 || h === 0)) {
         const name = h === 12 ? "noon" : "midnight";
         const day = offset === 0 ? "today" : offset === 1 ? "tomorrow" : offset === -1 ? "yesterday"
-            : offset === 7 ? `next ${weekday}` : Math.abs(offset) < 7 ? weekday : `on ${date}`;
+            : offset === 7 ? `next ${weekday}` : Math.abs(offset) < 7 ? recent : `on ${date}`;
         return `${name} ${day}`;
     }
 
@@ -92,7 +98,7 @@ export function speakTime(d: Date, now: Date): string {
     if (offset === 1) return `${clock} tomorrow ${part}`;
     if (offset === -1) return `${clock} ${part === "night" ? "last night" : `yesterday ${part}`}`;
     if (offset === 7) return `${clock} next ${weekday} ${part}`;
-    if (Math.abs(offset) < 7) return `${clock} ${weekday} ${part}`;
+    if (Math.abs(offset) < 7) return `${clock} ${recent} ${part}`;
     return `${clock} ${part === "night" ? "at night" : `in the ${part}`} on ${date}`;
 }
 

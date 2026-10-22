@@ -968,6 +968,11 @@ async function main() {
                 (say) => say === "3 tasks are due tomorrow: Dentist and 2 more.");
             await t147Expect("the overdue tasks", "anything overdue?", "tasks.overdue", "answer",
                 (say) => say === "1 task is overdue: Renew passport.");
+            // Seven overdue fill the tile's list: tomorrow's three have no titles to read.
+            t147Seed.tasks = t147Tasks({ counts: { overdue: 7, today: 0, tomorrow: 3, total: 10 },
+                tasks: Array.from({ length: 7 }, (_, i) => t147Task(`Late ${i + 1}`, "overdue", "2031-04-10")), more: 3 });
+            await t147Expect("a bucket the tile listed none of is just its count", "what's due tomorrow", "tasks.due_tomorrow", "answer",
+                (say) => say === "3 tasks are due tomorrow.");
             t147Seed.tasks = t147Tasks({ counts: { overdue: 0, today: 0, tomorrow: 0, total: 0 }, tasks: [], more: 0,
                 lastSync: t147At(3 * 3_600_000), syncAgeMs: 3 * 3_600_000, stale: true });
             await t147Expect("nothing due, and a stale sync is mentioned", "what's on my plate today", "tasks.due_today", "answer",
@@ -1001,6 +1006,11 @@ async function main() {
                 trigger: "manual", requestedAt: t147At(120_000), claimedAt: t147At(60_000), runner: "GEOFF-PC" }, activeCount: 1 });
             await t147Expect("a running run is named", "is the runner running", "runner.status", "answer",
                 (say) => /It's running the morning brief\.$/.test(say));
+            t147Seed.brief = t147Brief({ runner: { online: false, lastSeen: t147At(10 * 60_000), name: "GEOFF-PC", ageMs: 10 * 60_000 },
+                activeRun: { id: 3, skill: "morning-brief", label: "Morning brief", status: "running",
+                    trigger: "manual", requestedAt: t147At(20 * 60_000), claimedAt: t147At(15 * 60_000), runner: "GEOFF-PC" }, activeCount: 1 });
+            await t147Expect("offline with a run still claimed: the run may have stalled, not \"it's running\"", "is the runner up", "runner.status", "answer",
+                (say) => /^No, the runner is offline\./.test(say) && /may have stalled\.$/.test(say) && !/It's running/.test(say));
 
             // The next brief.
             t147Seed.brief = t147Brief();
@@ -1029,6 +1039,10 @@ async function main() {
                 tier2: { spentUsd: 0, capUsd: 0.25 } });
             await t147Expect("no usage is not zero dollars", "what's my claude usage", "usage.week", "answer",
                 (say) => say === "No runs recorded usage in the last 7 days. 2 runs finished without recording any.");
+            t147Seed.usage = t147Usage({ runsWithoutUsage: 0, tier2: { spentUsd: 0.003, capUsd: 0.25 } });
+            await t147Expect("sub-cent tier-2 spend: \"less than a cent\" aloud, the exact figure on screen", "what's my spend so far", "usage.week", "answer",
+                (say, display) => /Open questions have cost less than a cent today, of the 25 cents daily cap\.$/.test(say)
+                    && display.includes("$0.003 of $0.25"));
             t147Seed.usage = t147Unavailable("column missing (cost_usd): apply db/migrations/2026-10-12-agent-run-usage.sql");
             await t147Expect("an unavailable usage tile is reported with its reason", "how much has claude cost me", "usage.week", "unavailable",
                 (say) => /^I can't tell you what you've spent right now\. The usage tile is unavailable: column missing/.test(say));
@@ -1060,6 +1074,8 @@ async function main() {
                 // Still tier 2.
                 ["what's the weather", null], ["how's the market", null], ["what's due on friday", null],
                 ["how much have I spent today", null], ["is the runner online and what's due", null],
+                ["how are stocks doing today", null], ["how's trading", null], ["what's the cost", null],
+                ["how much has it cost", null], ["what is the bill", null],
             ];
             const t147Wrong = t147Phrasings.map(([text, want]) => ({ text, want, got: t147Intent(text) })).filter((x) => x.got !== x.want);
             check("the shipped table sends each phrasing to its intent, and the answers shadow nothing", t147Wrong.length === 0, t147Wrong);
@@ -1074,6 +1090,8 @@ async function main() {
                 [t147Ago(90_000), "a minute ago"], [t147Ago(3_600_000), "an hour ago"],
                 [t147Time(new Date("2031-04-21T11:45:00Z"), t147Fri), "6:45 Monday morning"],
                 [t147Time(new Date("2031-04-25T11:45:00Z"), t147Fri), "6:45 next Friday morning"],
+                [t147Time(new Date("2031-04-14T11:45:00Z"), t147Fri), "6:45 on Monday morning"],
+                [t147Time(new Date("2031-04-15T17:00:00Z"), t147Fri), "noon on Tuesday"],
                 [t147Time(new Date("2031-04-18T02:30:00Z"), t147Fri), "9:30 last night"],
                 [t147Time(new Date("2031-04-19T17:00:00Z"), t147Fri), "noon tomorrow"],
                 [t147Time(new Date("2031-04-18T23:15:00Z"), t147Fri), "6:15 this evening"],

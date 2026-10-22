@@ -1,7 +1,8 @@
 import type { AskContext, Command, CommandReply } from "./ask.js";
 import type { Ok } from "./overview.js";
-import { centralDay, centralTime, money, signedMoney, signedPct, TIME_ZONE } from "./format.js";
-import { plural, sentence, speakAgo, speakChange, speakList, speakMoney, speakPercent, speakTime } from "./speech.js";
+import { centralDay, centralTime, money, signedMoney, signedPct } from "./format.js";
+import { budgetMoney } from "./budget.js";
+import { plural, sentence, speakAgo, speakChange, speakDate, speakList, speakMoney, speakPercent, speakTime } from "./speech.js";
 import { alpacaTile, type AlpacaTileData } from "./tiles/alpaca.js";
 import { tasksTile, type DueTask, type TaskBucket, type TasksTileData } from "./tiles/tasks.js";
 import { BRIEF_SKILL, briefTile, type BriefTileData } from "./tiles/brief.js";
@@ -61,9 +62,6 @@ async function readTile<T extends object>(ctx: AskContext, id: string, what: str
 }
 const isReply = (v: object): v is CommandReply => "kind" in v && "say" in v && !("status" in v);
 
-/** "October 11" for an instant's Central day. */
-const longDay = (d: Date) => d.toLocaleDateString("en-US", { timeZone: TIME_ZONE, month: "long", day: "numeric" });
-
 // ── alpaca.pnl ──────────────────────────────────────────────────────────────
 
 async function answerPnl(ctx: AskContext): Promise<CommandReply> {
@@ -75,7 +73,7 @@ async function answerPnl(ctx: AskContext): Promise<CommandReply> {
     const pct = change !== "flat" && t.dayPlPct !== null ? `, ${speakPercent(t.dayPlPct)}` : "";
     const day = today
         ? (change === "flat" ? "You're flat today." : `Today you're ${change}${pct}.`)
-        : (change === "flat" ? `On ${longDay(asOf)} you were flat.` : `On ${longDay(asOf)} you were ${change}${pct}.`);
+        : (change === "flat" ? `On ${speakDate(asOf)} you were flat.` : `On ${speakDate(asOf)} you were ${change}${pct}.`);
     const stale = t.stale
         ? ` That's from the latest snapshot, ${speakAgo(t.ageMs)}: new snapshots have stopped coming in.`
         : "";
@@ -92,17 +90,17 @@ async function answerPnl(ctx: AskContext): Promise<CommandReply> {
 /** A title as said aloud: whitespace collapsed, never empty. */
 const spokenTitle = (task: DueTask) => task.title?.replace(/\s+/g, " ").trim() || "an untitled task";
 
-/** "A, B and 2 more": the listed titles in a bucket, then however many the tile didn't list. */
-function bucketList(t: TasksTileData, bucket: TaskBucket): string {
-    const titles = t.tasks.filter((task) => task.bucket === bucket).map(spokenTitle);
-    const rest = t.counts[bucket] - titles.length;
-    return speakList(rest > 0 ? [...titles, `${rest} more`] : titles);
-}
-
-/** "2 tasks are due today: A and B." */
+/**
+ * "2 tasks are due today: A and B.", "5 tasks are due tomorrow: A and 4 more."
+ * The tile lists at most TASKS_MAX_SHOWN, overdue first, so a later bucket
+ * may have none listed: then it's just the count.
+ */
 const bucketSentence = (t: TasksTileData, bucket: TaskBucket, tail: string) => {
     const n = t.counts[bucket];
-    return `${plural(n, "task")} ${n === 1 ? "is" : "are"} ${tail}: ${bucketList(t, bucket)}.`;
+    const titles = t.tasks.filter((task) => task.bucket === bucket).map(spokenTitle);
+    const rest = n - titles.length;
+    const list = titles.length ? `: ${speakList(rest > 0 ? [...titles, `${rest} more`] : titles)}` : "";
+    return `${plural(n, "task")} ${n === 1 ? "is" : "are"} ${tail}${list}.`;
 };
 
 /** A sync that's old or never happened makes the answer uncertain; say so. */
@@ -154,6 +152,8 @@ async function answerRunner(ctx: AskContext): Promise<CommandReply> {
     const a = t.activeRun;
     if (t.runsNote) {
         say += " The run history is unavailable, so I can't tell whether anything is queued.";
+    } else if (a?.status === "running" && !r.online) {
+        say += ` It had claimed ${theSkill(a.label)} before it went quiet, so that run may have stalled.`;
     } else if (a?.status === "running") {
         say += ` It's running ${theSkill(a.label)}${t.activeCount > 1 ? `, with ${plural(t.activeCount - 1, "more run")} waiting` : ""}.`;
     } else if (a) {
@@ -206,15 +206,16 @@ async function answerUsage(ctx: AskContext): Promise<CommandReply> {
 
     const display = (t.costUsd === null ? "No usage recorded" : `${money(t.costUsd)} API-equivalent`)
         + ` · ${t.runsWithUsage} with usage · ${w} without · last ${USAGE_WINDOW_DAYS} days`
-        + (b && b.spentUsd !== null ? ` · open questions today ${money(b.spentUsd)} of ${money(b.capUsd)}` : "");
+        + (b && b.spentUsd !== null ? ` · open questions today ${budgetMoney(b.spentUsd)} of ${budgetMoney(b.capUsd)}` : "");
     return { kind: "answer", say, display };
 }
 
 // ── the patterns ────────────────────────────────────────────────────────────
 
 const PNL_TERMS = any(["p l", "pnl", "p and l", "profit and loss", "profit", "profit or loss"]);
-const HOLDINGS = any(["equity", "portfolio", "account", "paper wallet", "wallet", "alpaca", "alpaca account",
-    "trading account", "trading", "stocks", "positions", "investments"]);
+/** Always "my"/"our": "how are stocks doing" is about the market, not the wallet. */
+const HOLDINGS = `(?:my |our )${any(["equity", "portfolio", "account", "paper wallet", "wallet", "alpaca account",
+    "trading account", "trading", "stocks", "positions", "investments"])}`;
 const WHAT = any(["whats", "what is", "hows", "how is", "how are", "how much is"]);
 const MY = "(?:my |the |our )?";
 const NOW = "(?: today| so far| so far today| right now| now)?";
@@ -233,10 +234,11 @@ const BRIEF = `(?:the |my )?(?:next )?(?:morning )?(?:brief|briefing)`;
 
 const SPEND = any([
     "how much (?:have|did) (?:i|we) (?:spent|spend)",
-    "how much (?:has|did) (?:claude|it|the os|everything) cost(?: me| us)?",
+    "how much (?:has|did) (?:claude|the os) cost(?: me| us)?",
     "how much am i spending",
     "what (?:have|did) (?:i|we) (?:spent|spend)",
-    `(?:whats|what is) ${MY}(?:claude )?(?:spend|spending|usage|cost|costs|bill)`,
+    `(?:whats|what is) (?:my |our )(?:claude )?(?:spend|spending|usage|cost|costs|bill)`,
+    `(?:whats|what is) (?:the )?claude (?:spend|spending|usage|cost|costs|bill)`,
 ]);
 const WEEK = "(?: (?:this|the past|the last|in the last|over the last) (?:week|7 days|seven days)| so far)?";
 
@@ -245,8 +247,8 @@ export const ANSWER_COMMANDS: readonly Command[] = [
     {
         intent: "alpaca.pnl",
         pattern: new RegExp([
-            `^${ASK}(?:(?:${WHAT}|tell me) )?${MY}(?:todays |day |daily )?${PNL_TERMS}${NOW}${PLEASE}$`,
-            `^${ASK}${WHAT} ${MY}${HOLDINGS}(?: doing| looking| worth| at)?${NOW}${PLEASE}$`,
+            `^${ASK}(?:${WHAT} )?${MY}(?:todays |day |daily )?${PNL_TERMS}${NOW}${PLEASE}$`,
+            `^${ASK}${WHAT} ${HOLDINGS}(?: doing| looking| worth| at)?${NOW}${PLEASE}$`,
             `^${ASK}(?:am i|are we|how much am i|how much are we) (?:up|down|up or down)${NOW}${PLEASE}$`,
         ].join("|")),
         handler: answerPnl,

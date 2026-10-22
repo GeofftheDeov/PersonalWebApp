@@ -10,6 +10,7 @@ import {
 } from '../services/alpacaStream.js';
 import { renderPage } from '../utils/adminUi.js';
 import { renderMarkdown } from '../utils/markdown.js';
+import { resolveVaultFile, isHiddenVaultName } from '../utils/vaultPath.js';
 import AlpacaSnapshot from '../models/AlpacaSnapshot.js';
 import { getDecryptedKeys } from './apiKeyRoutes.js';
 import { evaluateLiveApplyGate } from '../utils/liveApplyGate.js';
@@ -168,8 +169,6 @@ router.post('/person-sync/retry/:id', async (req, res) => {
 
 // ── Obsidian vault helpers ────────────────────────────────────────────────────
 
-const VAULT_EXCLUDED = new Set(['.git', 'private', 'node_modules']);
-
 interface VaultNode { name: string; type: 'file' | 'dir'; path: string; children?: VaultNode[]; }
 
 function buildVaultTree(dir: string, base: string = ''): VaultNode[] {
@@ -177,7 +176,7 @@ function buildVaultTree(dir: string, base: string = ''): VaultNode[] {
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; }
     const nodes: VaultNode[] = [];
     for (const e of entries) {
-        if (e.name.startsWith('.') || VAULT_EXCLUDED.has(e.name)) continue;
+        if (isHiddenVaultName(e.name)) continue;
         const full = path.join(dir, e.name);
         const rel = (base ? base + '/' : '') + e.name;
         if (e.isDirectory()) {
@@ -192,11 +191,11 @@ function buildVaultTree(dir: string, base: string = ''): VaultNode[] {
     });
 }
 
-function safeVaultRead(vaultPath: string, relativePath: string): string | null {
-    const full = path.resolve(vaultPath, relativePath);
-    if (!full.startsWith(path.resolve(vaultPath))) return null;
-    try { return fs.readFileSync(full, 'utf-8'); } catch { return null; }
-}
+/** What the vault browser says about a path it won't open (utils/vaultPath.ts says which paths those are). */
+const VAULT_REFUSAL = {
+    invalid: { status: 400, error: 'That path is outside the vault or not shown in the vault browser.' },
+    missing: { status: 404, error: 'No such file in the vault checkout (it may not be pulled yet).' },
+} as const;
 
 router.get('/', (req, res) => {
     const token = req.query.token as string;
@@ -815,18 +814,35 @@ router.post('/obsidian/api/pull', async (_req, res) => {
 router.get('/obsidian/api/file', (req, res) => {
     const vaultPath = process.env.OBSIDIAN_VAULT_PATH;
     if (!vaultPath) return res.status(503).json({ error: 'OBSIDIAN_VAULT_PATH not configured' });
-    const filePath = req.query.path as string;
-    if (!filePath) return res.status(400).json({ error: 'path is required' });
-    const content = safeVaultRead(vaultPath, filePath);
-    if (content === null) return res.status(400).json({ error: 'File not found or access denied' });
-    const html = filePath.endsWith('.md') ? renderMarkdown(content) : '';
-    res.json({ path: filePath, content, html });
+    if (!req.query.path) return res.status(400).json({ error: 'path is required' });
+    const file = resolveVaultFile(vaultPath, req.query.path);
+    if (!file.ok) return res.status(VAULT_REFUSAL[file.reason].status).json({ error: VAULT_REFUSAL[file.reason].error });
+    let content: string;
+    try { content = fs.readFileSync(file.full, 'utf-8'); }
+    catch { return res.status(404).json({ error: VAULT_REFUSAL.missing.error }); }
+    const html = file.rel.endsWith('.md') ? renderMarkdown(content) : '';
+    res.json({ path: file.rel, content, html });
 });
 
 // ── Obsidian vault browser page ───────────────────────────────────────────────
 
 router.get('/obsidian', (req, res) => {
     const token = req.query.token as string;
+
+    // ?path= opens the browser on that file (#158: the briefs page's run history
+    // links here). Resolved as the file API resolves it; a refused path gets the
+    // file API's message and status, and the browser opens on nothing.
+    const vaultPath = process.env.OBSIDIAN_VAULT_PATH;
+    let initialPath: string | null = null;
+    let deepLinkError: string | null = null;
+    let status = 200;
+    if (req.query.path !== undefined) {
+        const file = vaultPath ? resolveVaultFile(vaultPath, req.query.path) : { ok: false as const, reason: 'missing' as const };
+        if (file.ok) initialPath = file.rel;
+        else ({ status, error: deepLinkError } = VAULT_REFUSAL[file.reason]);
+    }
+    // Inside a <script>: JSON, with < escaped so a file name can't close the tag.
+    const initialPathJs = JSON.stringify(initialPath).replace(/</g, '\\u003c');
 
     const content = `
         <div class="vault-layout">
@@ -845,12 +861,13 @@ router.get('/obsidian', (req, res) => {
             </div>
             <div class="vault-content" id="vault-content">
                 <div class="vault-welcome">
-                    <p>Select a note from the sidebar to view it here.</p>
+                    ${deepLinkError ? `<p class="err">${esc(deepLinkError)}</p>` : '<p>Select a note from the sidebar to view it here.</p>'}
                 </div>
             </div>
         </div>
         <script>
         const TOKEN = '${token}';
+        const INITIAL_PATH = ${initialPathJs};
         let fullTree = [];
 
         function treeMessage(text, isError) {
@@ -1010,7 +1027,14 @@ router.get('/obsidian', (req, res) => {
 
         function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
-        loadTree();
+        // A deep link (?path=) opens its file, and marks it in the tree once that loads.
+        if (INITIAL_PATH) openFile(INITIAL_PATH);
+        loadTree().then(function() {
+            if (!INITIAL_PATH) return;
+            document.querySelectorAll('.tree-file').forEach(function(el) {
+                if (el.title === INITIAL_PATH) el.classList.add('active');
+            });
+        });
         loadStatus();
         </script>
     `;
@@ -1236,7 +1260,7 @@ router.get('/obsidian', (req, res) => {
         .markdown-body input[type="checkbox"] { margin-right: 0.4em; }
     `;
 
-    res.send(renderPage({
+    res.status(status).send(renderPage({
         token,
         title: 'Obsidian Vault',
         activePage: 'obsidian',

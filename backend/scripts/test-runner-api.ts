@@ -611,6 +611,92 @@ async function main() {
                 }
             }
         }
+
+        // ── GET /admin/os/api/runs/:id: the page polls a confirmed run (#153) ──
+        {
+            const t153Accounts: string[] = [];
+            const t153Get = async (id: string | number, token: string | null = adminToken) => {
+                const res = await fetch(`${base}/admin/os/api/runs/${id}${token === null ? "" : `?token=${encodeURIComponent(token)}`}`,
+                    { redirect: "manual" });
+                const text = await res.text();
+                let json: any = null;
+                try { json = JSON.parse(text); } catch { /* HTML */ }
+                return { status: res.status, json, text, cacheControl: res.headers.get("cache-control"), type: res.headers.get("content-type") ?? "" };
+            };
+            const t153Account = async (role: "admin" | "user") => {
+                const n = t153Accounts.length + 1;
+                const email = `t153-${role}-${n}-${tag}@example.test`;
+                const { rows: [acct] } = await pool.query(
+                    `INSERT INTO accounts (id, handle, email, app_role, app_role_source) VALUES (gen_random_uuid(), $1, $2, $3, 'manual') RETURNING id`,
+                    [`t153_${role}_${n}_${tag}`, email, role]);
+                t153Accounts.push(acct.id);
+                return { id: acct.id as string, email };
+            };
+            try {
+                const t153Enq = await asAdmin("/briefs/runs", { skill: SKILL });
+                const t153Id = Number(t153Enq.json?.run?.id);
+                const t153Queued = await t153Get(t153Id);
+                check("a queued run reads 200 { id, skill, label, status: 'queued', trigger, outputPath: null, finishedAt: null }",
+                    t153Queued.status === 200 && t153Queued.json?.id === t153Id && t153Queued.json.skill === SKILL
+                        && t153Queued.json.label === "Morning brief" && t153Queued.json.status === "queued"
+                        && t153Queued.json.trigger === "button" && t153Queued.json.outputPath === null
+                        && t153Queued.json.summary === null && t153Queued.json.finishedAt === null
+                        && typeof t153Queued.json.requestedAt === "string" && t153Queued.json.claimedAt === null, t153Queued.json);
+                check("... as JSON that's never cached", /application\/json/.test(t153Queued.type) && t153Queued.cacheControl === "no-store",
+                    { type: t153Queued.type, cache: t153Queued.cacheControl });
+                check("... with only the fields the page needs (no usage, no requester)",
+                    JSON.stringify(Object.keys(t153Queued.json ?? {}).sort())
+                        === JSON.stringify(["claimedAt", "finishedAt", "id", "label", "outputPath", "requestedAt", "skill", "status", "summary", "trigger"]),
+                    Object.keys(t153Queued.json ?? {}));
+
+                const t153Claim = await asRunner("/claim", { runner: `t137-${tag}`, skills: [SKILL] });
+                const t153Running = await t153Get(t153Id);
+                check("once claimed it reads 'running', with claimedAt",
+                    Number(t153Claim.json?.run?.id) === t153Id && t153Running.json?.status === "running"
+                        && typeof t153Running.json.claimedAt === "string" && t153Running.json.finishedAt === null, t153Running.json);
+
+                await complete(t153Id, { ok: true, summary: "brief status: ok", outputPath: "outputs/briefs/2026-10-22.md" });
+                const t153Done = await t153Get(t153Id);
+                check("a finished run reads 'succeeded' with its output path, summary and finishedAt",
+                    t153Done.status === 200 && t153Done.json?.status === "succeeded"
+                        && t153Done.json.outputPath === "outputs/briefs/2026-10-22.md" && t153Done.json.summary === "brief status: ok"
+                        && !Number.isNaN(Date.parse(t153Done.json.finishedAt)), t153Done.json);
+
+                const t153FailedId = await runningRun();
+                await complete(t153FailedId, { ok: false, summary: "morning_brief.ps1 exited 1; see private\\logs\\x.log" });
+                const t153Failed = await t153Get(t153FailedId);
+                check("a failed run reads 'failed' with its summary (the reason) and no output path",
+                    t153Failed.json?.status === "failed" && t153Failed.json.summary === "morning_brief.ps1 exited 1; see private\\logs\\x.log"
+                        && t153Failed.json.outputPath === null, t153Failed.json);
+
+                const { rows: [{ max: t153Max }] } = await pool.query(`SELECT coalesce(max(id), 0)::bigint AS max FROM agent_runs`);
+                const t153Missing = await t153Get(Number(t153Max) + 1000);
+                check("an unknown run id is 404 { error }", t153Missing.status === 404 && typeof t153Missing.json?.error === "string", t153Missing);
+                const t153Bad = await Promise.all(["abc", "0", "-1", "1.5", "1e3", "+7", "007", "99999999999999999999", "%20"].map((s) => t153Get(s)));
+                check("a malformed run id is 400 { error }", t153Bad.every((r) => r.status === 400 && typeof r.json?.error === "string"),
+                    t153Bad.map((r) => r.status));
+
+                // The gate, as for every /admin/os/api route: a redirect to login or the HTML 403, never the run.
+                const t153Anon = await t153Get(t153FailedId, null);
+                const t153Expired = await t153Get(t153FailedId, signJwt({ id: adminId, email: `t137-admin-${tag}@example.test`,
+                    exp: Math.floor(Date.now() / 1000) - 60 }));
+                const t153User = await t153Account("user");
+                const t153NonAdmin = await t153Get(t153FailedId, signJwt({ id: t153User.id, email: t153User.email }, { expiresIn: "1h" }));
+                check("no token is redirected to login", t153Anon.status === 302, t153Anon.status);
+                check("an expired token is redirected to login", t153Expired.status === 302, t153Expired.status);
+                check("a non-admin gets the gate's HTML 403, without the run",
+                    t153NonAdmin.status === 403 && t153NonAdmin.json === null && !t153NonAdmin.text.includes("morning_brief.ps1"),
+                    { status: t153NonAdmin.status, body: t153NonAdmin.text.slice(0, 120) });
+
+                // A single-admin app: any admin may read any run, as /admin/briefs lists every run to every admin.
+                const t153Other = await t153Account("admin");
+                const t153OtherRead = await t153Get(t153Id, signJwt({ id: t153Other.id, email: t153Other.email }, { expiresIn: "1h" }));
+                check("another admin can read the run too (runs aren't per account)",
+                    t153OtherRead.status === 200 && t153OtherRead.json?.id === t153Id, t153OtherRead.status);
+            } finally {
+                for (const id of t153Accounts) await pool.query(`DELETE FROM accounts WHERE id = $1`, [id]);
+            }
+        }
     } finally {
         await pool.query(`DELETE FROM agent_runs WHERE runner = ANY($1) OR summary = ANY($2) OR runner LIKE $3`,
             [[`t137-${tag}`, `t159-${tag}`], [`t137 legacy ${tag}`, `t138 no runner ${tag}`], `t138-${tag}%`]);

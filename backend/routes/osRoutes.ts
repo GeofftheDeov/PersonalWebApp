@@ -16,7 +16,7 @@ import { askModel, type Tier2Log } from "../os/tier2.js";
 import { dailyBudgetFromEnv, noteUnloggedSpend } from "../os/budget.js";
 import { logAsk } from "../os/askLog.js";
 import { confirmProposal, createProposal, type Enqueue } from "../os/proposals.js";
-import { enqueueRun, isSkill, type SkillId } from "../services/agentRuns.js";
+import { SKILLS, enqueueRun, isSkill, type SkillId } from "../services/agentRuns.js";
 import { lookupBriefSpeech } from "../os/briefSpeech.js";
 import { centralDay } from "../os/format.js";
 import { BRIEF_DATE } from "../utils/briefs.js";
@@ -111,6 +111,29 @@ export function createOsRouter({
             case "no_brief": return res.status(404).json({ error: "no brief", date });
             case "unreadable": return res.status(500).json({ error: "brief unreadable", date });
             case "no_vault": return res.status(503).json({ error: "OBSIDIAN_VAULT_PATH is not configured" });
+        }
+    });
+
+    // A run's state as the page needs it to say how it went: no usage, no requester.
+    router.get("/api/runs/:id", async (req, res) => {
+        res.set("Cache-Control", "no-store");
+        const raw = req.params.id;
+        const id = /^[1-9]\d{0,15}$/.test(raw) ? Number(raw) : NaN;
+        if (!Number.isSafeInteger(id)) return res.status(400).json({ error: "id must be a run id" });
+        try {
+            const { rows: [run] } = await db.query(
+                `SELECT id, skill, status, trigger, summary, output_path, requested_at, claimed_at, finished_at
+                   FROM agent_runs WHERE id = $1`, [id]);
+            if (!run) return res.status(404).json({ error: "no such run" });
+            const iso = (v: unknown) => (v == null ? null : new Date(v as string).toISOString());
+            res.json({
+                id: Number(run.id), skill: run.skill, label: SKILLS.find((k) => k.id === run.skill)?.label ?? run.skill,
+                status: run.status, trigger: run.trigger, summary: run.summary ?? null, outputPath: run.output_path ?? null,
+                requestedAt: iso(run.requested_at), claimedAt: iso(run.claimed_at), finishedAt: iso(run.finished_at),
+            });
+        } catch (err: any) {
+            console.error(`[os] reading run ${id} failed:`, err?.message ?? err);
+            res.status(500).json({ error: "could not read the run" });
         }
     });
 

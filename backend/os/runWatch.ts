@@ -7,10 +7,12 @@
  *   1. GET /admin/os/api/runs/:id every RUN_POLL_MS (15 s), for up to
  *      RUN_WATCH_MS (45 minutes, the server's STALE_AFTER) from the confirm.
  *   2. A morning brief that succeeded: GET /admin/os/api/brief/say for the day
- *      in its output path every 15 s, for up to SAY_WATCH_MS (15 minutes; the
- *      vault reaches the server through Obsidian Git, which lags the run), and
- *      a 404 (no brief yet) or a 500 just means "look again". The Say text is
- *      spoken as is: V#11 writes it for speech.
+ *      in its output path at once, then every 15 s for up to SAY_WATCH_MS
+ *      (15 minutes; the vault reaches the server through Obsidian Git, which
+ *      lags the run). A 404 (no brief yet), a 500, or a brief generated before
+ *      the run started (an earlier brief the vault still holds; BRIEF_SLACK_MS
+ *      allows for the PC's clock) all mean "look again". The Say text is spoken
+ *      as is: V#11 writes it for speech.
  *   3. Any other skill that succeeded: "The lint wiki run finished."
  *      A failure: "The morning brief run failed: <the run's summary>."
  *      Running out of time, losing the session or the run: said too, once.
@@ -25,20 +27,26 @@
  * off (STOP, a new ask, the mic), it isn't repeated, and anything else waiting
  * to be said is dropped too (it stays shown).
  *
- * Reloads. The overview reloads itself every 15 s while a run is active, and
- * every 2 minutes otherwise, holding off only while OS.busy(). Rather than hold
- * the page (and its tiles) for up to an hour, a watch is kept in
- * sessionStorage under WATCH_STORAGE_KEY with wall-clock deadlines and the time
- * of its next poll, and picked up again by the reloaded page: the reload never
- * extends a limit or speeds up polling. sessionStorage belongs to the tab, so
- * nothing is ever said in another tab, and closing the tab ends the watch (no
- * push, no background speech). Coming back to /admin/os in the same tab within
- * the limits picks the watch up again. A stored watch whose deadline is more
- * than WATCH_GRACE_MS gone is dropped unspoken, and one claiming a deadline
- * further off than its limit is dropped as bad data, so storage can never pin
- * the page or keep a watch alive. When storage can't be written (blocked, a
- * private window) the watch counts as busy instead, so the reload waits for it;
- * its deadlines bound that too.
+ * Reloads. The overview reloads itself every 15 s while a run is active and
+ * every 2 minutes otherwise, unless OS.busy(). A watch counts as busy, so the
+ * page that confirmed the run stays put until it has said the outcome: Chrome
+ * only lets a page speak after the admin has interacted with it, and a
+ * reloaded page hasn't been, so an outcome found after a reload would be shown
+ * but not heard. The hold is bounded by the watch's own limits (45 minutes,
+ * plus 15 for the Say block); meanwhile the status line, not the tiles, shows
+ * the run's progress.
+ *
+ * A watch is also kept in sessionStorage (WATCH_STORAGE_KEY) with wall-clock
+ * deadlines and the time of its next poll, so a reload the admin makes, or
+ * leaving for another admin page and coming back in the same tab, picks it up
+ * without extending a limit or polling faster. (Such a page can say the outcome
+ * only once the admin has tapped or typed on it; it's always shown.)
+ * sessionStorage belongs to the tab: nothing is ever said in another tab, and
+ * closing the tab ends the watch (no push, no background speech). A stored
+ * watch whose deadline is more than WATCH_GRACE_MS gone is dropped unspoken,
+ * and one claiming a deadline further off than its limit is dropped as bad
+ * data, so storage can never keep a watch, or the hold, alive. Storage that
+ * can't be read or written just means no pick-up.
  *
  * window.OS gains:
  *   OS.watching()     the runs being followed: [{ id, skill, label, phase: 'run'|'say' }]
@@ -51,6 +59,8 @@ export const RUN_POLL_MS = 15_000;
 export const RUN_WATCH_MS = 45 * 60_000;
 /** How long to wait for a finished brief's Say block to reach the server's vault. */
 export const SAY_WATCH_MS = 15 * 60_000;
+/** A brief whose `generated` is this much before the run was claimed is an earlier one. */
+export const BRIEF_SLACK_MS = 2 * 60_000;
 /** A stored watch picked up this soon after its deadline still gets its "stopped waiting"; later ones are dropped unspoken. */
 export const WATCH_GRACE_MS = 60_000;
 /** Runs followed at once (one per skill can be queued or running). */
@@ -80,40 +90,40 @@ export function runWatchScript(token: string): string {
             var LABELS = ${labels};
             var BRIEF = 'morning-brief';
             var POLL = ${RUN_POLL_MS}, RUN_MS = ${RUN_WATCH_MS}, SAY_MS = ${SAY_WATCH_MS}, GRACE = ${WATCH_GRACE_MS};
-            var MAX = ${MAX_WATCHES}, RETRY = ${WATCH_RETRY_MS}, KEY = ${JSON.stringify(WATCH_STORAGE_KEY)};
+            var SLACK = ${BRIEF_SLACK_MS}, MAX = ${MAX_WATCHES}, RETRY = ${WATCH_RETRY_MS}, KEY = ${JSON.stringify(WATCH_STORAGE_KEY)};
             var line = document.getElementById('ask-watch');
 
-            // Each watch: { id, skill, phase: 'run'|'say', runUntil, sayUntil, date, nextAt } (all stored),
-            // plus timer and inFlight (not).
+            // Each watch: { id, skill, phase: 'run'|'say', status, since, runUntil, sayUntil, date, nextAt }
+            // (stored) plus timer and inFlight. since: when the run was claimed (else requested), server time, ms.
             var watches = [];
-            // The last write to sessionStorage worked: a reload will pick the watches up.
-            var stored = true;
-            // Outcomes waiting for the admin to finish, the timer that looks again, and the last thing said.
-            var queue = [], retryTimer = null, note = '';
+            // Outcomes waiting for the admin to finish, the timer that looks again, the last thing said,
+            // and whether one of ours is being spoken (its done() hasn't run yet).
+            var queue = [], retryTimer = null, note = '', talking = false;
 
             function now() { return Date.now(); }
             function withToken(path) { return path + (path.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(token); }
             function label(w) { return LABELS[w.skill]; }
+            function num(v) { return typeof v === 'number' && isFinite(v); }
+            function find(id) { for (var i = 0; i < watches.length; i++) if (watches[i].id === id) return watches[i]; return null; }
 
             // ── storage ──
             function session() { try { return window.sessionStorage || null; } catch (e) { return null; } }
             function save() {
-                var s = session();
                 try {
-                    if (!s) throw new Error('no sessionStorage');
+                    var s = session();
+                    if (!s) return;
                     if (watches.length) {
                         s.setItem(KEY, JSON.stringify(watches.map(function (w) {
-                            return { id: w.id, skill: w.skill, phase: w.phase, runUntil: w.runUntil, sayUntil: w.sayUntil, date: w.date, nextAt: w.nextAt };
+                            return { id: w.id, skill: w.skill, phase: w.phase, status: w.status, since: w.since,
+                                runUntil: w.runUntil, sayUntil: w.sayUntil, date: w.date, nextAt: w.nextAt };
                         })));
                     } else s.removeItem(KEY);
-                    stored = true;
-                } catch (e) { stored = false; }
+                } catch (e) { /* storage blocked: this page still follows the run, a reload won't */ }
             }
-            function num(v) { return typeof v === 'number' && isFinite(v); }
-            // Watches a previous load of this tab left, if they're sound and still within their limits.
+            // Watches a previous page in this tab left, if they're sound and still within their limits.
             function restore() {
-                var s = session(), list = null;
-                try { list = s ? JSON.parse(s.getItem(KEY) || 'null') : null; } catch (e) { list = null; }
+                var list = null;
+                try { var s = session(); list = s ? JSON.parse(s.getItem(KEY) || 'null') : null; } catch (e) { list = null; }
                 if (!Array.isArray(list)) return;
                 var t = now();
                 list.forEach(function (w) {
@@ -122,18 +132,16 @@ export function runWatchScript(token: string): string {
                     if (!num(w.runUntil) || w.runUntil > t + RUN_MS) return;
                     if (w.phase === 'say' && (!num(w.sayUntil) || w.sayUntil > t + SAY_MS)) return;
                     if (t >= (w.phase === 'say' ? w.sayUntil : w.runUntil) + GRACE) return;
-                    if (w.date !== null && !/^\\d{4}-\\d{2}-\\d{2}$/.test(String(w.date))) return;
+                    if (w.date !== null && w.date !== undefined && !/^\\d{4}-\\d{2}-\\d{2}$/.test(String(w.date))) return;
                     if (watches.length >= MAX || find(w.id)) return;
-                    var nextAt = num(w.nextAt) ? Math.min(Math.max(w.nextAt, t), t + POLL) : t;
-                    watches.push({ id: w.id, skill: w.skill, phase: w.phase, runUntil: w.runUntil,
-                        sayUntil: w.phase === 'say' ? w.sayUntil : null, date: w.date || null, nextAt: nextAt, timer: null, inFlight: false });
+                    watches.push({ id: w.id, skill: w.skill, phase: w.phase, status: w.status === 'running' ? 'running' : w.status === 'queued' ? 'queued' : null,
+                        since: num(w.since) ? w.since : null, runUntil: w.runUntil, sayUntil: w.phase === 'say' ? w.sayUntil : null,
+                        date: w.date || null, nextAt: num(w.nextAt) ? Math.min(Math.max(w.nextAt, t), t + POLL) : t, timer: null, inFlight: false });
                 });
                 save();
                 watches.forEach(schedule);
                 render();
             }
-
-            function find(id) { for (var i = 0; i < watches.length; i++) if (watches[i].id === id) return watches[i]; return null; }
 
             // ── the status line ──
             function describe(w) {
@@ -163,7 +171,8 @@ export function runWatchScript(token: string): string {
                 save(); render(); schedule(w);
             }
 
-            // GET behind the admin gate: { status, body } or { status, gone: 'session'|'admin' } or null (no answer).
+            // GET behind the admin gate: { status, body } (body null unless JSON), { status, gone: 'session'|'admin' },
+            // or null when there was no answer.
             function getJson(path) {
                 return fetch(withToken(path), { method: 'GET', redirect: 'manual', credentials: 'same-origin' }).then(function (res) {
                     if (res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400)) return { status: res.status, gone: 'session' };
@@ -173,14 +182,10 @@ export function runWatchScript(token: string): string {
                 }).catch(function () { return null; });
             }
 
+            // A run's summary as the end of a sentence.
             function sentence(s) {
                 s = String(s == null ? '' : s).replace(/\\s+/g, ' ').trim().slice(0, 300).replace(/[\\s.,;:!?]+$/, '');
                 return s ? s + '.' : '';
-            }
-
-            function gone(w, why) {
-                finish(w, 'I stopped following the ' + label(w) + ' run: ' +
-                    (why === 'admin' ? 'this account is not an administrator.' : 'your session has expired.'));
             }
 
             function poll(w) {
@@ -198,15 +203,26 @@ export function runWatchScript(token: string): string {
                 getJson(path).then(function (r) {
                     w.inFlight = false;
                     if (find(w.id) !== w) return;
-                    if (r && r.gone) return gone(w, r.gone);
+                    if (r && r.gone) {
+                        return finish(w, 'I stopped following the ' + label(w) + ' run: ' +
+                            (r.gone === 'admin' ? 'this account is not an administrator.' : 'your session has expired.'));
+                    }
                     if (w.phase === 'run') ranOn(w, r); else saidOn(w, r);
                 });
             }
 
+            // A server error (5xx, 408, 429) or no answer is worth another look; any other refusal isn't.
+            function lookAgain(r) { return !r || r.status >= 500 || r.status === 408 || r.status === 429; }
+
             function ranOn(w, r) {
                 var run = r && r.status === 200 && r.body && typeof r.body === 'object' ? r.body : null;
-                if (r && r.status === 404) return finish(w, "I can't find the " + label(w) + ' run any more.');
-                if (!run) return again(w);   // a server error or no answer: look again
+                if (!run) {
+                    if (lookAgain(r)) return again(w);
+                    if (r.status === 404) return finish(w, "I can't find the " + label(w) + ' run any more.');
+                    return finish(w, "I couldn't check on the " + label(w) + " run, so I've stopped following it.");
+                }
+                var since = Date.parse(run.claimedAt || run.requestedAt || '');
+                if (isFinite(since)) w.since = since;
                 if (run.status === 'failed') {
                     var why = sentence(run.summary);
                     return finish(w, 'The ' + label(w) + ' run failed' + (why ? ': ' + why : '.'));
@@ -224,15 +240,18 @@ export function runWatchScript(token: string): string {
             }
 
             function saidOn(w, r) {
-                if (r && r.status === 200 && r.body && typeof r.body === 'object') {
-                    var text = String(r.body.text || '').trim();
+                var brief = r && r.status === 200 && r.body && typeof r.body === 'object' ? r.body : null;
+                if (brief) {
+                    // An earlier brief for the day, still in the vault until this run's reaches it: look again.
+                    var made = Date.parse(brief.generated || '');
+                    if (isFinite(made) && num(w.since) && made < w.since - SLACK) return again(w);
+                    var text = String(brief.text || '').trim();
                     return finish(w, text || 'The ' + label(w) + ' run finished, but the brief has nothing to read aloud.');
                 }
-                // 404: no brief yet (the vault hasn't caught up). 500, other errors, no answer: look again.
-                if (r && (r.status === 400 || r.status === 503)) {
-                    return finish(w, 'The ' + label(w) + " run finished, but I can't read the brief here.");
-                }
-                again(w);
+                // 404: no brief yet (the vault hasn't caught up). 500, other server errors, no answer: look again.
+                // But the server's own 503 (no vault configured) won't change.
+                if ((lookAgain(r) && !(r && r.status === 503 && r.body)) || r.status === 404) return again(w);
+                finish(w, 'The ' + label(w) + " run finished, but I can't read the brief here.");
             }
 
             // ── saying it, never over the admin ──
@@ -247,7 +266,8 @@ export function runWatchScript(token: string): string {
                 drain();
             }
             function drain() {
-                if (!queue.length) return;
+                // While one of ours is being spoken, its done() decides what comes next.
+                if (!queue.length || talking) return;
                 if (adminBusy()) {
                     if (!retryTimer) retryTimer = setTimeout(function () { retryTimer = null; drain(); }, RETRY);
                     return;
@@ -255,7 +275,9 @@ export function runWatchScript(token: string): string {
                 var text = queue.shift();
                 note = text;
                 render();
+                talking = true;
                 OS.speak(text, function (cut) {
+                    talking = false;
                     // Cut off by the admin (stop, a new ask, the mic): don't carry on talking.
                     if (cut) { queue = []; return; }
                     drain();
@@ -270,21 +292,22 @@ export function runWatchScript(token: string): string {
                 // One per skill can be in flight: past that, the oldest gives way.
                 while (watches.length >= MAX) drop(watches[0]);
                 var t = now();
-                var w = { id: id, skill: run.skill, phase: 'run', runUntil: t + RUN_MS, sayUntil: null, date: null,
-                    nextAt: t + POLL, timer: null, inFlight: false, status: run.status === 'running' ? 'running' : 'queued' };
+                var w = { id: id, skill: run.skill, phase: 'run', status: run.status === 'running' ? 'running' : 'queued', since: null,
+                    runUntil: t + RUN_MS, sayUntil: null, date: null, nextAt: t + POLL, timer: null, inFlight: false };
                 watches.push(w);
                 note = '';
                 save(); render(); schedule(w);
             });
 
-            // An outcome waiting to be said, or a watch a reload would lose, holds the reload off.
+            // A run being followed, or an outcome still to be said, holds the reload off (see the top of os/runWatch.ts).
             var busy = OS.busy;
-            OS.busy = function () { return queue.length > 0 || (watches.length > 0 && !stored) || busy(); };
+            OS.busy = function () { return watches.length > 0 || queue.length > 0 || talking || busy(); };
             OS.watching = function () {
                 return watches.map(function (w) { return { id: w.id, skill: w.skill, label: label(w), phase: w.phase }; });
             };
             OS.unwatch = function (id) {
-                watches.slice().forEach(function (w) { if (id === undefined || id === null || w.id === id) drop(w); });
+                var all = id === undefined || id === null;
+                watches.slice().forEach(function (w) { if (all || w.id === Number(id)) drop(w); });
                 render();
             };
 

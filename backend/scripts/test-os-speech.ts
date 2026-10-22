@@ -1025,6 +1025,31 @@ async function main() {
         await t153Pass(p, 15_000);
         check("a brief with no dated output path asks for the server's today", p.gets[1] === "/admin/os/api/brief/say?token=tok", p.gets);
     }
+    {
+        // A re-run (claimed 11:46Z, 6:46 Central): the vault still has the day's earlier brief until this run's arrives.
+        const { p, srv } = await t153Confirmed();
+        const claimed = new Date(T153_START + 60_000).toISOString();
+        Object.assign(srv.s.run, { status: "succeeded", outputPath: "outputs/briefs/2026-10-22.md", claimedAt: claimed });
+        srv.s.say = { status: 200, body: { date: "2026-10-22", source: "say", text: "The old brief, from earlier.", status: "ok",
+            generated: "2026-10-22T06:30-05:00" } };
+        await t153Pass(p, 30_000);
+        check("a brief generated before the run was claimed is an earlier one: not read, and asked for again",
+            !/old brief/.test(t153Spoken(p)) && p.OS.watching()[0]?.phase === "say"
+                && p.gets.filter((u) => u.startsWith("/admin/os/api/brief/say")).length === 2, t153Spoken(p));
+        // The new one is stamped to the minute and the PC's clock may lag: a minute "before" the claim still counts as this run's.
+        srv.s.say = { status: 200, body: { date: "2026-10-22", source: "say", text: T153_SAY, status: "ok",
+            generated: new Date(T153_START).toISOString().slice(0, 16) + "Z" } };
+        await t153Pass(p, 15_000);
+        check("... and this run's brief is read once it's there", lastSpoken(p.synth) !== undefined && t153Spoken(p).endsWith(T153_SAY), t153Spoken(p));
+    }
+    {
+        const { p, srv } = await t153Confirmed();
+        srv.s.runReply = { status: 400, body: { error: "id must be a run id" } };
+        await t153Pass(p, 15_000);
+        await t153Pass(p, 60_000);
+        check("a refusal that won't change (a 400) ends the watch at once, said",
+            p.gets.length === 1 && lastSpoken(p.synth) === "I couldn't check on the morning brief run, so I've stopped following it.", lastSpoken(p.synth));
+    }
     for (const [what, reply, said] of [
         ["an expired session (redirect)", { redirect: true }, "I stopped following the morning brief run: your session has expired."],
         ["a non-admin (403)", { status: 403, json: false }, "I stopped following the morning brief run: this account is not an administrator."],
@@ -1091,6 +1116,43 @@ async function main() {
         check("STOP cuts the brief off, and it isn't read again", !p.OS.speaking() && p.synth.spoken.length === n
             && t153Line(p) === T153_SAY && p.OS.watching().length === 0);
     }
+    {
+        // Two runs land together: the second waits for the first, and STOP during the first silences both.
+        const lint = t153Server(81, "lint-wiki"), review = t153Server(82, "weekly-review");
+        const get = (url: string) => (url.startsWith("/admin/os/api/runs/81?") ? lint.get(url) : review.get(url));
+        let confirms = 0;
+        const p = t150Boot({ startAt: T153_START, get, reply: (_n, body) => "id" in body
+            ? (++confirms === 1 ? { status: 201, body: { run: { id: 81, skill: "lint-wiki", status: "queued" }, created: true, say: "Queued the lint wiki." } }
+                : { status: 201, body: { run: { id: 82, skill: "weekly-review", status: "queued" }, created: true, say: "Queued the weekly review." } })
+            : { tier: 3, kind: "confirm_run", say: "Run it?", confirmation: { id: 900 + confirms, skill: "lint-wiki", label: "Lint wiki",
+                expiresAt: new Date(Date.now() + 60_000).toISOString() } } });
+        for (let i = 0; i < 2; i++) { p.submit("run it"); await flush(); p.els["ask-confirm-yes"].fire("click"); await flush(); p.synth.endAll(); }
+        check("(precondition) both runs are followed", p.OS.watching().length === 2);
+        lint.s.run.status = "succeeded"; review.s.run.status = "succeeded";
+        await t153Pass(p, 15_000);
+        check("two outcomes at once: the first is said, the second waits for it", lastSpoken(p.synth) === "The lint wiki run finished."
+            && t153Line(p) === "The weekly review run finished." && p.OS.busy(), { spoken: lastSpoken(p.synth), line: t153Line(p) });
+        p.els["ask-stop"].fire("click");
+        await t153Pass(p, 60_000);
+        check("... STOP during the first silences the second too (it stays shown)", lastSpoken(p.synth) === "The lint wiki run finished."
+            && !p.OS.speaking() && !p.OS.busy() && t153Line(p) === "The weekly review run finished.", t153Spoken(p));
+    }
+    {
+        const lint = t153Server(83, "lint-wiki"), review = t153Server(84, "weekly-review");
+        const get = (url: string) => (url.startsWith("/admin/os/api/runs/83?") ? lint.get(url) : review.get(url));
+        let confirms = 0;
+        const p = t150Boot({ startAt: T153_START, get, reply: (_n, body) => "id" in body
+            ? { status: 201, body: { run: ++confirms === 1 ? { id: 83, skill: "lint-wiki" } : { id: 84, skill: "weekly-review" }, created: true, say: "Queued." } }
+            : { tier: 3, kind: "confirm_run", say: "Run it?", confirmation: { id: 950 + confirms, skill: "lint-wiki", label: "Lint wiki",
+                expiresAt: new Date(Date.now() + 60_000).toISOString() } } });
+        for (let i = 0; i < 2; i++) { p.submit("run it"); await flush(); p.els["ask-confirm-yes"].fire("click"); await flush(); p.synth.endAll(); }
+        lint.s.run.status = "succeeded"; review.s.run.status = "failed";
+        await t153Pass(p, 15_000);
+        p.synth.end(); await flush();
+        check("... left alone, the second is said after the first, each once",
+            t153Spoken(p).endsWith("The lint wiki run finished. The weekly review run failed.") && t153Spoken(p).split("The lint wiki run finished.").length === 2,
+            t153Spoken(p));
+    }
 
     // Typed and spoken confirms start a watch too; a confirm that finds the same run doesn't start a second.
     {
@@ -1120,10 +1182,12 @@ async function main() {
                 return w?.id === 41 && w.phase === "run" && w.runUntil === T153_START + 45 * 60_000 && w.nextAt === T153_START + 30_000; })(),
             session.get("pwa.os.watch"));
         await t153Pass(p, 2 * 60_000);
-        check("... so it doesn't hold off the overview's reload", !p.OS.busy() && p.reloadTick() === 1);
+        check("... and the page that's following it holds the overview's reload off (a reloaded page can't speak unprompted)",
+            p.OS.busy() && p.reloadTick() === 0);
+        // The admin reloads by hand (or leaves for another admin page and comes back in this tab).
         const reloaded = t150Boot({ startAt: p.win.Date.now(), session, get: srv.get });
-        check("after the reload the run is still followed", reloaded.OS.watching().length === 1 && reloaded.OS.watching()[0].id === 41
-            && t153Line(reloaded) === "Waiting for the morning brief run…", t153Line(reloaded));
+        check("after a reload the run is still followed, its status kept", reloaded.OS.watching().length === 1 && reloaded.OS.watching()[0].id === 41
+            && t153Line(reloaded) === "Waiting for the morning brief run (running)…", t153Line(reloaded));
         await t153Pass(reloaded, 4_000);
         check("... on the same 15 s beat: not polled again at once", reloaded.gets.length === 0, reloaded.gets);
         Object.assign(srv.s.run, { status: "succeeded", outputPath: "outputs/briefs/2026-10-22.md" });
@@ -1158,22 +1222,31 @@ async function main() {
             && lastSpoken(reloaded.synth) === "The morning brief run finished, but the brief isn't in the vault yet, so I've stopped waiting for it.",
             lastSpoken(reloaded.synth));
     }
-    {
-        const { p, srv } = await t153Confirmed({ session: "methods-throw" });
+    for (const session of ["methods-throw", "none"] as const) {
+        const { p, srv } = await t153Confirmed({ session });
         srv.s.run.status = "running";
         await t153Pass(p, 2 * 60_000);
-        check("with sessionStorage blocked, the watch holds the reload off instead (it would be lost)", p.OS.busy() && p.reloadTick() === 0);
+        check(`sessionStorage ${session}: the run is still followed, and the reload held`, p.OS.watching().length === 1 && p.OS.busy() && p.reloadTick() === 0);
         Object.assign(srv.s.run, { status: "failed", summary: "boom" });
         await t153Pass(p, 15_000);
-        p.synth.endAll();
-        check("... until the run's outcome is said", lastSpoken(p.synth) === "The morning brief run failed: boom." && !p.OS.busy() && p.reloadTick() === 1);
+        check(`sessionStorage ${session}: the outcome is said, and only then may the page reload`,
+            lastSpoken(p.synth) === "The morning brief run failed: boom." && p.OS.busy() && (p.synth.endAll(), !p.OS.busy()) && p.reloadTick() === 1);
     }
     {
-        const { p, srv } = await t153Confirmed({ session: "methods-throw" });
-        srv.s.run.status = "running";
+        const { p, srv } = await t153Confirmed();
+        srv.s.run.status = "queued";   // a runner that never comes (#170)
         await t153Pass(p, 45 * 60_000);
         p.synth.endAll();
-        check("... and never for longer than the 45 minutes", p.OS.watching().length === 0 && !p.OS.busy() && p.reloadTick() === 1);
+        check("the hold on the reload never outlasts the 45 minutes", p.OS.watching().length === 0 && !p.OS.busy() && p.reloadTick() === 1);
+    }
+    {
+        const { p, srv } = await t153Confirmed();
+        Object.assign(srv.s.run, { status: "succeeded", outputPath: "outputs/briefs/2026-10-22.md" });   // the Say endpoint keeps saying 404
+        await t153Pass(p, 15_000 + 15 * 60_000 - 1_000);
+        const heldAtTheEnd = p.OS.busy() && p.reloadTick() === 0;
+        await t153Pass(p, 1_000);
+        p.synth.endAll();
+        check("... nor the 15 for the Say block", heldAtTheEnd && p.OS.watching().length === 0 && !p.OS.busy() && p.reloadTick() === 1);
     }
     for (const [what, stored] of [
         ["a deadline further off than 45 minutes (a skewed or tampered entry)",
@@ -1222,10 +1295,10 @@ async function main() {
             newTab.gets.length === 0 && newTab.synth.spoken.length === 0 && newTab.els["ask-watch"].hidden);
         check("... and the page has no push, notification or background channel to speak through",
             !/serviceWorker|Notification|sendBeacon|EventSource|WebSocket|BroadcastChannel/.test(p.html));
-        p.OS.unwatch();
+        p.OS.unwatch("61");
         await t153Pass(p, 60 * 60_000);
-        check("OS.unwatch() stops following, silently", p.OS.watching().length === 0 && p.gets.length === 1 && !p.store.has("pwa.os.watch")
-            && lastSpoken(p.synth) === "Queued the morning brief.");
+        check("OS.unwatch(id) stops following, silently, and frees the page", p.OS.watching().length === 0 && p.gets.length === 1
+            && lastSpoken(p.synth) === "Queued the morning brief." && !p.OS.busy());
     }
     {
         const p = t150Boot({ startAt: T153_START, synth: null, reply: t153Replies(71, "lint-wiki"),

@@ -3,7 +3,7 @@ import { describeError, ok, type Overview, type Queryable, type TileSource } fro
 import { ago, centralDay, centralTime, esc, TIME_ZONE } from "../format.js";
 import { nextScheduledRun, scheduledOn, type SkillSchedule } from "../schedule.js";
 import {
-    RUNNER_ONLINE_WITHIN_MS, SKILLS, STALE_AFTER, runnerLastSeen, skillSchedule,
+    RUNNER_ONLINE_WITHIN_MS, SKILLS, STALE_AFTER, runnerLastSeen, skillLabel, skillSchedule,
     type AgentRun, type RunTrigger, type SkillId,
 } from "../../services/agentRuns.js";
 import { listBriefs, type BriefMeta } from "../../utils/briefs.js";
@@ -135,7 +135,6 @@ function readRunner(now: Date): RunnerStatus {
 }
 
 const iso = (v: unknown) => (v == null ? null : new Date(v as string).toISOString());
-const skillLabel = (id: string) => SKILLS.find((k) => k.id === id)?.label ?? id;
 
 /** The active runs and the brief's last scheduled run, in one round trip. Throws on a missing table or column. */
 async function readRuns(db: Queryable, now: Date): Promise<Pick<BriefTileData, "activeRun" | "activeCount" | "lastScheduled">> {

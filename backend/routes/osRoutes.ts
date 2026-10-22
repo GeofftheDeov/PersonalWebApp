@@ -16,7 +16,7 @@ import { askModel, type Tier2Log } from "../os/tier2.js";
 import { dailyBudgetFromEnv, noteUnloggedSpend } from "../os/budget.js";
 import { logAsk } from "../os/askLog.js";
 import { confirmProposal, createProposal, type Enqueue } from "../os/proposals.js";
-import { SKILLS, enqueueRun, isSkill, type SkillId } from "../services/agentRuns.js";
+import { enqueueRun, isSkill, skillLabel, type SkillId } from "../services/agentRuns.js";
 import { lookupBriefSpeech } from "../os/briefSpeech.js";
 import { centralDay } from "../os/format.js";
 import { BRIEF_DATE } from "../utils/briefs.js";
@@ -132,7 +132,7 @@ export function createOsRouter({
             if (!run) return res.status(404).json({ error: "no such run" });
             const iso = (v: unknown) => (v == null ? null : new Date(v as string).toISOString());
             res.json({
-                id: Number(run.id), skill: run.skill, label: SKILLS.find((k) => k.id === run.skill)?.label ?? run.skill,
+                id: Number(run.id), skill: run.skill, label: skillLabel(run.skill),
                 status: run.status, trigger: run.trigger, summary: run.summary ?? null, outputPath: run.output_path ?? null,
                 requestedAt: iso(run.requested_at), claimedAt: iso(run.claimed_at), finishedAt: iso(run.finished_at),
             });

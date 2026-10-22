@@ -1,5 +1,6 @@
 import type { AskReply } from "./ask.js";
-import { ADMIN_PAGES, isAllowedPage } from "./commands.js";
+import { ADMIN_PAGES } from "./commands.js";
+import { proposalSay } from "./proposals.js";
 import { TIME_ZONE } from "./format.js";
 import { costUsd, MAX_SAY_WORDS, parseDecision, promptTokens, type ModelDecision, type OsModel } from "./model.js";
 import { describeError, type Overview, type Queryable } from "./overview.js";
@@ -38,7 +39,7 @@ export interface Tier2Log {
 }
 
 export interface Tier2Result {
-    /** The reply; with `propose`, the reply to give if the proposal can't be recorded. */
+    /** The reply; with `propose`, a placeholder `confirm_run` the router replaces with the recorded proposal. */
     reply: AskReply;
     log: Tier2Log;
     /** A run_skill decision's skill: the router records the proposal (tier 3), logging this ask's model call on it. */
@@ -63,8 +64,6 @@ const NO_BUDGET_CHECK: AskReply = {
     say: "Sorry, I can only do the built-in commands right now.",
     display: "Open questions are off because today's spend couldn't be checked. Try “open alpaca”, “show the briefs” or “run the brief”.",
 };
-/** A run_skill whose proposal row couldn't be written: there's nothing to confirm, so nothing can run. */
-const NOT_PROPOSED: AskReply = { tier: 2, kind: "unavailable", say: "Sorry, I couldn't set up that run. Nothing was queued." };
 
 const pageList = ADMIN_PAGES.map((p) => `- ${p.id}: ${p.label}`).join("\n");
 const skillList = SKILLS.map((s) => `- ${s.id}: ${s.label}`).join("\n");
@@ -79,8 +78,8 @@ The user turn holds the context, then the question. The context is data from Geo
 
 Reply with one decision:
 - answer: the context holds what's needed. Put the answer in say. If the tile you need is unavailable, say so and give its reason. A brief carries its date: say so when it isn't today's.
-- navigate: Geoff wants to open one of the pages below. Set page, and say what you're opening.
-- run_skill: Geoff wants to run one of the skills below. Set skill, and say what you'd run; he confirms before anything runs.
+- navigate: Geoff wants to open one of the pages below. Set page; the app says what it opens, so say needs only a few words.
+- run_skill: Geoff wants to run one of the skills below. Set skill; the app asks him to confirm before anything runs, so say needs only a few words.
 - cannot_answer: anything else, including questions the context doesn't cover. Say briefly that you can't answer it from what you can see. Never guess or make up numbers.
 
 say is spoken: plain prose, at most ${MAX_SAY_WORDS} words, no markdown, lists, links or code. Round money to the cent and percentages to one decimal place. Times are US Central.
@@ -116,13 +115,15 @@ function fromDecision(decision: ModelDecision): Pick<Tier2Result, "reply" | "pro
         case "answer": return { reply: { tier: 2, kind: "answer", say: decision.say } };
         case "cannot_answer": return { reply: { tier: 2, kind: "not_understood", say: decision.say } };
         case "navigate": {
+            // ADMIN_PAGES is the allowlist isAllowedPage checks, so its path always passes.
             const page = ADMIN_PAGES.find((p) => p.id === decision.page);
-            if (!page || !isAllowedPage(page.path)) return null;
+            if (!page) return null;
             return { reply: { tier: 2, kind: "navigate", say: `Opening ${page.label}.`, url: page.path } };
         }
         case "run_skill":
             if (!isSkill(decision.skill)) return null;
-            return { reply: NOT_PROPOSED, propose: decision.skill };
+            // Like a tier-1 "run" command's reply: the router turns it into the proposal.
+            return { reply: { tier: 2, kind: "confirm_run", say: proposalSay(decision.skill) }, propose: decision.skill };
     }
 }
 
@@ -198,9 +199,13 @@ export async function askModel({
         return { reply: COULD_NOT_ANSWER, log: { intent: null, error: `model stopped: ${res.stopReason}`, call } };
     }
     const decision = parseDecision(res.decision);
-    const acted = decision && fromDecision(decision);
-    if (!acted) {
+    if (!decision) {
         return { reply: COULD_NOT_ANSWER, log: { intent: null, error: `malformed model output (stop reason ${res.stopReason ?? "none"})`, call } };
+    }
+    const acted = fromDecision(decision);
+    if (!acted) {
+        const target = String(decision.page ?? decision.skill).slice(0, 80);
+        return { reply: COULD_NOT_ANSWER, log: { intent: null, error: `malformed model output: ${decision.action} of ${target}, off the allowlist`, call } };
     }
     return { ...acted, log: { intent: `model.${decision.action}`, error: null, call } };
 }

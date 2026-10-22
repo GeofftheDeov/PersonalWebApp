@@ -175,8 +175,7 @@ export function createOsRouter({
             } catch (err) {
                 console.error(`[os] could not record a proposal of ${propose}:`, (err as any)?.message ?? err);
                 entry.error = describeError(err);
-                // Tier 2's reply is already its own tier-2 fallback (os/tier2.ts).
-                if (hit) reply = NOT_PROPOSED;
+                reply = { ...NOT_PROPOSED, tier: reply.tier };
             }
         }
         const logged = await logAsk(db, { ...entry, tier: reply.tier, kind: reply.kind, latencyMs: Math.round(performance.now() - started) });

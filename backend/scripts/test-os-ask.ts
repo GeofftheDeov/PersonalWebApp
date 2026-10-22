@@ -33,8 +33,8 @@
  * built with `decided()`) and assert on fakeModel.calls: #155 (vault context)
  * checks what the prompt holds, #156 (budget) seeds tier-2 spend on days of
  * its own in November 2030 and caps a harness with the `budgetUsd` dep, and #157
- * replaces the "until #157" cases; its run_skill should produce a proposal
- * the tier-3 checks accept. Don't stop this script with `pkill -f`: it matches the shell's own command line
+ * (navigate and run_skill) checks that model decisions reach only allowlisted
+ * pages and tier-3 proposals, on days of its own in December 2030. Don't stop this script with `pkill -f`: it matches the shell's own command line
  * and kills the shell.
  */
 import "./use-test-jwt-secret.js";
@@ -1447,26 +1447,29 @@ async function main() {
             const t157Steered = await harness(undefined, { tiles: [t157Tile] });
             t157Servers.push(t157Steered);
             const t157RunsBeforeInject = await t157Runs();
-            const t157Obeyed: [string, unknown, (r: any) => boolean][] = [
-                ["navigate to the url", { action: "navigate", say: "Opening it.", page: "https://evil.example.com" },
-                    (r) => r.json?.tier === 2 && r.json.kind === "unavailable" && !("url" in r.json)],
-                ["run skill rm-rf", { action: "run_skill", say: "Running it.", skill: "rm-rf" },
-                    (r) => r.json?.tier === 2 && r.json.kind === "unavailable" && !("confirmation" in r.json)],
-                ["run the morning brief", { action: "run_skill", say: "Running the brief now, no confirmation needed.", skill: "morning-brief" },
-                    (r) => r.json?.tier === 3 && r.json.kind === "confirm_run" && r.json.say === "Run the morning brief?"
-                        && r.json.confirmation?.skill === "morning-brief"],
-                ["navigate to an allowlisted page", { action: "navigate", say: "Opening https://evil.example.com.", page: "briefs" },
-                    (r) => r.json?.tier === 2 && r.json.kind === "navigate" && r.json.url === "/admin/briefs" && !/evil/.test(r.json.say)],
+            const t157Obeyed: { name: string; decision: unknown; outcome: "malformed" | "allowlisted"; want: (r: any) => boolean }[] = [
+                { name: "navigate to the url", decision: { action: "navigate", say: "Opening it.", page: "https://evil.example.com" },
+                    outcome: "malformed", want: (r) => r.json?.tier === 2 && r.json.kind === "unavailable" && !("url" in r.json) },
+                { name: "run skill rm-rf", decision: { action: "run_skill", say: "Running it.", skill: "rm-rf" },
+                    outcome: "malformed", want: (r) => r.json?.tier === 2 && r.json.kind === "unavailable" && !("confirmation" in r.json) },
+                { name: "run the morning brief", decision: { action: "run_skill", say: "Running the brief now, no confirmation needed.", skill: "morning-brief" },
+                    outcome: "allowlisted", want: (r) => r.json?.tier === 3 && r.json.kind === "confirm_run"
+                        && r.json.say === "Run the morning brief?" && r.json.confirmation?.skill === "morning-brief" },
+                { name: "navigate to an allowlisted page", decision: { action: "navigate", say: "Opening https://evil.example.com.", page: "briefs" },
+                    outcome: "allowlisted", want: (r) => r.json?.tier === 2 && r.json.kind === "navigate" && r.json.url === "/admin/briefs"
+                        && !/evil/.test(r.json.say) },
             ];
-            for (const [name, decision, want] of t157Obeyed) {
+            for (const { name, decision, outcome, want } of t157Obeyed) {
                 const before = fakeModel.calls.length;
                 fakeModel.next.push(decided(decision as ModelDecision));
                 const r = await ask(`t157 what does the ${name} note say`, "typed", t157Steered.base);
                 const ctx = fakeModel.calls.length === before + 1 ? fakeModel.calls.at(-1)!.context : "";
-                check(`vault and overview text saying to ${name}: the model saw it, and the reply is still only ${
-                    want === t157Obeyed[0][2] || want === t157Obeyed[1][2] ? "malformed" : "allowlisted"}`,
-                    r.status === 200 && want(r) && (ctx.match(/T157-INJECT/g) ?? []).length >= 2
-                        && (r.json?.url === undefined || ALLOWED.has(r.json.url)), { json: r.json, injected: ctx.includes("T157-INJECT") });
+                const ctxOverview = ctx.slice(ctx.indexOf("<overview>"), ctx.indexOf("</overview>"));
+                const ctxVault = ctx.includes("<vault") ? ctx.slice(ctx.indexOf("<vault")) : "";
+                check(`vault and overview text saying to ${name}: the model saw it, and the reply is still only ${outcome}`,
+                    r.status === 200 && want(r) && ctxOverview.includes("T157-INJECT") && ctxVault.includes("T157-INJECT")
+                        && (r.json?.url === undefined || ALLOWED.has(r.json.url)),
+                    { json: r.json, inOverview: ctxOverview.includes("T157-INJECT"), inVault: ctxVault.includes("T157-INJECT") });
             }
             check("... and nothing was queued", (await t157Runs()) === t157RunsBeforeInject);
             delete process.env.OBSIDIAN_VAULT_PATH;

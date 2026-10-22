@@ -27,6 +27,12 @@ import { USAGE_MIGRATION } from "./usage.js";
  * The tile stays ok when the vault or the run history can't be read: the next
  * run doesn't depend on either, and `latestNote` / `runsNote` say what's
  * missing. Only a throw anywhere else makes it unavailable.
+ *
+ * Time budget (#140): a run-history query cancelled by the tile's statement
+ * timeout is one more unreadable history: the tile stays ok with
+ * `runsNote` "run history unavailable: timed out". Only when the whole build
+ * overruns the deadline (os/overview.ts, e.g. a slow vault read plus a slow
+ * query) does the tile go unavailable as timed out.
  */
 
 /** The skill whose schedule and output this tile reports. */

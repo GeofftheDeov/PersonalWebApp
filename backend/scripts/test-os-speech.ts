@@ -778,8 +778,12 @@ async function main() {
         check(`a voice confirm answered ${what} is shown and spoken: "${expected}"`,
             t151Confirms(p).length === 1 && p.say() === expected && lastSpoken(p.synth) === expected,
             { shown: p.say(), spoken: lastSpoken(p.synth) });
-        check(keeps ? "... and the proposal stays, so \"yes\" can try again" : "... and the proposal is gone",
-            keeps ? p.OS.proposal()?.id === 101 && !p.els["ask-confirm"].hidden : p.OS.proposal() === null && p.els["ask-confirm"].hidden);
+        p.synth.endAll();
+        check(keeps ? "... and the proposal stays, so \"yes\" can try again (left in the text box)"
+            : "... and the proposal is gone, the text box cleared (so the page isn't held busy)",
+            keeps ? p.OS.proposal()?.id === 101 && !p.els["ask-confirm"].hidden && p.els["ask-text"].value === "yes"
+                : p.OS.proposal() === null && p.els["ask-confirm"].hidden && p.els["ask-text"].value === "" && !p.OS.busy(),
+            { proposal: p.OS.proposal(), box: p.els["ask-text"].value });
         if (keeps) {
             await t151Say(p, "yes");
             check("... and a second \"yes\" confirms it again", t151Confirms(p).length === 2 && t151Asks(p).length === 1);

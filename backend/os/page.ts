@@ -116,7 +116,10 @@ const ASK_BOX = `
  * proposal itself (os/proposalReply.ts), so the mic's transcript and the text
  * box take the same path, and neither reaches the router while one is pending:
  *
- *   yes / confirm / do it / go ahead …   OS.confirm(); resolves to its result.
+ *   yes / confirm / do it / go ahead …   OS.confirm(); resolves to its body, or
+ *                                        after a 404, 409 or 410 to { kind: 'error',
+ *                                        say }, or null when the proposal is
+ *                                        still up to try again (a 500).
  *   no / cancel / stop / never mind …    OS.dismiss(); resolves to
  *                                        { kind: 'cancelled', say: 'Cancelled.' }.
  *   anything else                        asked as usual; the new ask abandons
@@ -262,7 +265,13 @@ function askScript(token: string): string {
                 if (!text || pending) return Promise.resolve(null);
                 // A short yes or no to a pending (or just lapsed) proposal is answered here, not by the router.
                 var answer = proposalReply(text);
-                if (proposal && answer === 'confirm') return confirm();
+                if (proposal && answer === 'confirm') {
+                    return confirm().then(function (body) {
+                        // A final refusal (404, 409, 410) is an answer too, so the box clears;
+                        // anything that leaves the proposal up (a 500) keeps the "yes" to try again.
+                        return body || (proposal ? null : { kind: 'error', say: sayEl.textContent });
+                    });
+                }
                 if (proposal && answer === 'cancel') {
                     dismiss();
                     return Promise.resolve({ kind: 'cancelled', say: 'Cancelled.' });

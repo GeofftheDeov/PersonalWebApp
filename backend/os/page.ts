@@ -2,6 +2,7 @@ import { renderPage } from "../utils/adminUi.js";
 import { centralTime, esc } from "./format.js";
 import { ADMIN_PAGES } from "./commands.js";
 import { MIC_BUTTON, MIC_NOTE, MIC_STYLES, micScript } from "./mic.js";
+import { PROPOSAL_REPLY_JS } from "./proposalReply.js";
 import { SPEAKER_JS, STOP_BUTTON, VOICE_PICKER, VOICE_STYLES, voiceScript } from "./voice.js";
 import { describeError, type Overview, type Tile, type TileSource, type ViewContext } from "./overview.js";
 
@@ -102,7 +103,7 @@ const ASK_BOX = `
  * server has the last word with a 410):
  *
  *   OS.proposal()         the pending confirmation { id, skill, label, expiresAt },
- *                         or null. #151's voice "yes"/"no" checks this first.
+ *                         or null.
  *   OS.confirm()          POST /admin/os/ask/confirm for the pending proposal;
  *                         shows and speaks the outcome. Resolves to the response
  *                         body { run, created, say }, or null.
@@ -110,6 +111,24 @@ const ASK_BOX = `
  *                         Returns false when nothing was pending.
  *   OS.onConfirm(fn)      fn(run, body) after a confirm queues (or finds) the run,
  *                         before the outcome is spoken (#153 polls the run).
+ *
+ * Answering by voice or text (#151). OS.ask() reads a short reply to a pending
+ * proposal itself (os/proposalReply.ts), so the mic's transcript and the text
+ * box take the same path, and neither reaches the router while one is pending:
+ *
+ *   yes / confirm / do it / go ahead …   OS.confirm(); resolves to its body, or
+ *                                        after a 404, 409 or 410 to { kind: 'error',
+ *                                        say }, or null when the proposal is
+ *                                        still up to try again (a 500).
+ *   no / cancel / stop / never mind …    OS.dismiss(); resolves to
+ *                                        { kind: 'cancelled', say: 'Cancelled.' }.
+ *   anything else                        asked as usual; the new ask abandons
+ *                                        the proposal (it expires on the server).
+ *
+ * After a proposal lapses (the page's timer, or a 410), a "yes" before any
+ * other ask says it expired instead of reaching the router, and resolves to
+ * { kind: 'expired', say }. With nothing pending at all, "yes" and "no" go to
+ * the router, which answers "Nothing to confirm." / "Nothing to cancel." at tier 1.
  *
  * The JSON API sits behind the HTML gate: an expired token comes back as a
  * redirect to login and a non-admin as an HTML 403, never a JSON error.
@@ -133,6 +152,11 @@ function askScript(token: string): string {
             var yesBtn = document.getElementById('ask-confirm-yes'), noBtn = document.getElementById('ask-confirm-no');
             // The run proposal waiting for Confirm or Cancel, and its expiry timer.
             var proposal = null, proposalTimer = null;
+            // A proposal lapsed (its timer ran out, or the server said 410) and nothing has been asked since.
+            var lapsed = false;
+            var EXPIRED = 'That proposal expired. Ask again to run it.';
+            // 'confirm', 'cancel' or null for a short reply to a proposal (#151, os/proposalReply.ts).
+            var proposalReply = ${PROPOSAL_REPLY_JS};
             // The navigation waiting for its "Opening …" to finish; a new ask or a stop drops it.
             var leaving = null;
 
@@ -181,6 +205,7 @@ function askScript(token: string): string {
             function setProposal(c) {
                 if (proposalTimer) { clearTimeout(proposalTimer); proposalTimer = null; }
                 proposal = c || null;
+                if (proposal) lapsed = false;
                 confirmBox.hidden = !proposal;
                 yesBtn.disabled = noBtn.disabled = false;
                 if (!proposal) return;
@@ -190,6 +215,7 @@ function askScript(token: string): string {
                 proposalTimer = setTimeout(function () {
                     if (proposal !== c) return;
                     setProposal(null);
+                    lapsed = true;
                     show(sayEl.textContent, 'Expired. Ask again to run it.', 'expired');
                 }, ms);
             }
@@ -237,6 +263,27 @@ function askScript(token: string): string {
                 // 500 characters as the server counts them (code points; never half an emoji).
                 text = Array.from(String(text || '').trim()).slice(0, 500).join('');
                 if (!text || pending) return Promise.resolve(null);
+                // A short yes or no to a pending (or just lapsed) proposal is answered here, not by the router.
+                var answer = proposalReply(text);
+                if (proposal && answer === 'confirm') {
+                    return confirm().then(function (body) {
+                        // A final refusal (404, 409, 410) is an answer too, so the box clears;
+                        // anything that leaves the proposal up (a 500) keeps the "yes" to try again.
+                        return body || (proposal ? null : { kind: 'error', say: sayEl.textContent });
+                    });
+                }
+                if (proposal && answer === 'cancel') {
+                    dismiss();
+                    return Promise.resolve({ kind: 'cancelled', say: 'Cancelled.' });
+                }
+                if (lapsed && answer === 'confirm') {
+                    cancelSpeech();
+                    hushed = false;
+                    show(EXPIRED, '', 'expired');
+                    say(EXPIRED);
+                    return Promise.resolve({ kind: 'expired', say: EXPIRED });
+                }
+                lapsed = false;
                 cancelSpeech();
                 hushed = false;
                 // A new ask abandons a pending proposal; it just expires on the server.
@@ -267,8 +314,9 @@ function askScript(token: string): string {
                     // 404, 409 and 410 are final; anything else (a 500) leaves the proposal to try again.
                     var final = r.ok || r.status === 404 || r.status === 409 || r.status === 410;
                     if (final && proposal === p) setProposal(null);
+                    if (r.status === 410 && !proposal) lapsed = true;
                     if (!r.ok) {
-                        fail(r.status === 410 ? 'That has expired. Ask again to run it.'
+                        fail(r.status === 410 ? EXPIRED
                             : r.status === 409 ? 'That run was already confirmed.'
                             : r.status === 404 ? 'Nothing to confirm.'
                             : "Sorry, the run couldn't be queued. Try again.");

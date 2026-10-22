@@ -1515,6 +1515,33 @@ async function main() {
             for (const s of t157Servers) s.server.close();
         }
 
+        // ── tier 1: "yes" and "no" with nothing pending (#151) ──────────────
+        // The page answers a yes or no to a pending proposal itself; one that
+        // reaches the router has nothing pending, whatever os_asks holds.
+        {
+            const t151CallsBefore = fakeModel.calls.length;
+            const t151RunsBefore = (await createdRuns()).length;
+            // A live, unconfirmed proposal: still "Nothing to confirm", the router never confirms anything.
+            const t151Live = (await ask("run the weekly review", "voice")).json?.confirmation;
+            for (const [text, say, intent] of [
+                ["yes", "Nothing to confirm.", "confirm.nothing_pending"], ["Yes, do it.", "Nothing to confirm.", "confirm.nothing_pending"],
+                ["Yeah go ahead", "Nothing to confirm.", "confirm.nothing_pending"], ["OK", "Nothing to confirm.", "confirm.nothing_pending"],
+                ["no", "Nothing to cancel.", "cancel.nothing_pending"], ["Never mind.", "Nothing to cancel.", "cancel.nothing_pending"],
+                ["stop", "Nothing to cancel.", "cancel.nothing_pending"],
+            ] as const) {
+                const r = await ask(text, "voice");
+                const row = (await asks()).at(-1);
+                check(`with nothing pending in the page, "${text}" is answered "${say}" at tier 1`,
+                    r.status === 200 && r.json?.tier === 1 && r.json.kind === "answer" && r.json.say === say
+                        && !("confirmation" in r.json) && !("url" in r.json), r.json);
+                check(`... logged as ${intent}`, row?.tier === 1 && row.intent === intent && row.text === text.trim(), row);
+            }
+            check("... none of them called the model", fakeModel.calls.length === t151CallsBefore, fakeModel.calls.length - t151CallsBefore);
+            check("... and nothing was queued: the live proposal is still unconfirmed",
+                (await createdRuns()).length === t151RunsBefore && Number.isInteger(t151Live?.id)
+                    && (await askRow(t151Live.id))?.confirmed_at === null, await createdRuns());
+        }
+
         check("every canned model reply was used", fakeModel.next.length === 0, fakeModel.next.length);
     } finally {
         if (renamed) {

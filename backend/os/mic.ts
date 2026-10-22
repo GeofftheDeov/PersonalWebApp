@@ -21,7 +21,8 @@
  *   OS.onTranscript(fn)   fn(text) with each final transcript before it's asked.
  *                         Returning something truthy takes the utterance (it isn't
  *                         asked); a promise holds the mic busy until it settles.
- *                         #151 checks OS.proposal() here for a spoken yes or no.
+ *                         (A spoken yes or no to a pending proposal needs no
+ *                         hook: OS.ask answers it in the page, #151.)
  *   OS.busy()             now also true while listening or submitting, so the
  *                         page's reloads can't cut off speech capture.
  *

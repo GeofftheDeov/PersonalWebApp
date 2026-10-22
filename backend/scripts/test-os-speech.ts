@@ -52,20 +52,25 @@ const T150_VOICES: T150Voice[] = [
  * the utterance at its head. cancel() fires 'interrupted' on everything queued,
  * asynchronously like Chrome (or at once with syncCancelEvents).
  */
-function t150Synth(opts: { voices?: T150Voice[]; listeners?: "add" | "prop"; syncCancelEvents?: boolean; paused?: boolean } = {}) {
+function t150Synth(opts: {
+    voices?: T150Voice[]; listeners?: "add" | "prop"; syncCancelEvents?: boolean; cancelFiresEnd?: boolean; paused?: boolean;
+    /** A stuck engine: never ends anything, and never reports speaking either. */
+    silent?: boolean;
+} = {}) {
     const listeners: (() => void)[] = [];
     const synth: any = {
         voices: opts.voices ?? [],
         spoken: [] as T150Utterance[], queue: [] as T150Utterance[],
         cancels: 0, resumes: 0, paused: !!opts.paused,
-        get speaking() { return this.queue.length > 0; },
+        get speaking() { return !opts.silent && this.queue.length > 0; },
         get pending() { return this.queue.length > 1; },
         speak(u: T150Utterance) { this.spoken.push(u); this.queue.push(u); },
         cancel() {
             this.cancels++;
             const dropped: T150Utterance[] = this.queue;
             this.queue = [];
-            const fire = () => dropped.forEach((u) => u.onerror?.({ error: "interrupted" }));
+            // WebKit and some Firefox builds fire end, not error, for a cancelled utterance.
+            const fire = () => dropped.forEach((u) => (opts.cancelFiresEnd ? u.onend?.({}) : u.onerror?.({ error: "interrupted" })));
             if (opts.syncCancelEvents) fire(); else setImmediate(fire);
         },
         resume() { this.resumes++; this.paused = false; },
@@ -301,13 +306,16 @@ async function main() {
             done.join() === "false" && !s.speaker.speaking() && s.changes.join() === "true,false", { done, changes: s.changes });
         check("... and leaves no timer behind", s.timers.count === 0);
     }
-    for (const sync of [false, true]) {
-        const s = speakerWith({ synthOpts: { syncCancelEvents: sync } });
+    for (const [how, synthOpts] of [
+        ["(cancel events later)", {}],
+        ["(cancel events at once)", { syncCancelEvents: true }],
+        ["(cancel fires end at once, like WebKit)", { syncCancelEvents: true, cancelFiresEnd: true }],
+    ] as const) {
+        const s = speakerWith({ synthOpts });
         const first: boolean[] = [], second: boolean[] = [];
         s.speaker.speak("Opening Alpaca.", (cut: boolean) => first.push(cut));
         s.speaker.speak("Something else.", (cut: boolean) => second.push(cut));
         await flush();
-        const how = sync ? "(cancel events at once)" : "(cancel events later)";
         check(`speaking over speech cuts it off: done(true), the browser's queue cancelled ${how}`,
             first.join() === "true" && s.synth.cancels >= 1 && s.synth.queue.length === 1 && s.synth.queue[0].text === "Something else.",
             { first, cancels: s.synth.cancels, queue: s.synth.queue.map((u: T150Utterance) => u.text) });
@@ -344,7 +352,7 @@ async function main() {
         check("empty text: done(false) at once, nothing queued", done.join() === "false,false" && s.synth.spoken.length === 0);
     }
     {
-        const s = speakerWith();
+        const s = speakerWith({ synthOpts: { silent: true } });
         const done: boolean[] = [];
         s.speaker.speak("Opening Alpaca.", (cut: boolean) => done.push(cut));
         s.timers.advance(SPEECH_MIN_WAIT_MS - 1);
@@ -357,6 +365,42 @@ async function main() {
         const before = done.length;
         s.timers.advance(1);
         check(`... a longer text waits ${SPEECH_MS_PER_CHAR} ms a character`, before === 1 && done.join() === "false,false", done);
+    }
+    {
+        const s = speakerWith();
+        const done: boolean[] = [];
+        s.speaker.speak("Opening Alpaca.", (cut: boolean) => done.push(cut));
+        s.timers.advance(SPEECH_MIN_WAIT_MS);
+        check("a voice slower than the wait: while the browser still reports speaking, it waits on", done.length === 0 && s.speaker.speaking());
+        s.synth.end();
+        check("... and the real end finishes it", done.join() === "false" && s.timers.count === 0);
+        s.speaker.speak("Opening Alpaca.", (cut: boolean) => done.push(cut));
+        s.timers.advance(2 * SPEECH_MIN_WAIT_MS - 1);
+        const stillWaiting = done.length === 1;
+        s.timers.advance(1);
+        check("... but an engine stuck 'speaking' is given up on at twice the wait", stillWaiting && done.join() === "false,false"
+            && !s.speaker.speaking(), done);
+    }
+    {
+        const s = speakerWith();
+        const run = "\u{1F600}".repeat(120);   // 240 UTF-16 units, no spaces
+        const pieces: string[] = s.speaker.chunks(run);
+        check("a long run with no spaces is never split inside an emoji",
+            pieces.length > 1 && pieces.join("") === run && pieces.every((p) => !/[\uD800-\uDBFF]$/.test(p) && !/^[\uDC00-\uDFFF]/.test(p)),
+            pieces.map((p) => p.length));
+    }
+    {
+        let made = 0;
+        class Flaky extends T150Utterance { constructor(t: string) { if (++made === 3) throw new Error("bad voice"); super(t); } }
+        const s = speakerWith({ Utterance: Flaky });
+        const done: boolean[] = [];
+        const errors: unknown[] = [];
+        const realError = console.error; console.error = (e: unknown) => errors.push(e);
+        s.speaker.speak(Array.from({ length: 6 }, (_, i) => `Sentence ${i} is long enough that the reply needs several pieces to say.`).join(" "),
+            (cut: boolean) => done.push(cut));
+        console.error = realError;
+        check("a failure while queuing drops the pieces already queued: nothing plays untracked",
+            done.join() === "false" && !s.speaker.speaking() && s.synth.queue.length === 0 && errors.length === 1, { q: s.synth.queue.length, done });
     }
     {
         const s = speakerWith();
@@ -529,7 +573,7 @@ async function main() {
         check("stop while an ask is in flight also silences its error", p.say() === "Couldn't reach the server." && p.synth.spoken.length === 0);
     }
     {
-        const p = t150Boot();
+        const p = t150Boot({ synth: t150Synth({ silent: true }) });
         p.submit("anything"); await flush();
         p.timers.advance(60_000);
         check("a browser that never ends speech doesn't hold the page busy (or the stop button up) forever",
@@ -575,8 +619,12 @@ async function main() {
         const p = t150Boot({ synth: t150Synth({ voices: T150_VOICES, listeners: "prop" }), store });
         check("voices already loaded at boot (and onvoiceschanged as a property): the saved voice is selected",
             !p.els["ask-voice-row"].hidden && p.els["ask-voice"].value === "com.apple.voice.Thomas" && p.OS.voice() === T150_VOICES[0]);
+        const before = p.els["ask-voice"].kids[1];
         p.synth.setVoices([...T150_VOICES]);
-        check("... and a later voiceschanged keeps it", p.els["ask-voice"].value === "com.apple.voice.Thomas" && p.els["ask-voice"].kids.length === 4);
+        check("... and a later voiceschanged keeps it, without rebuilding an unchanged list",
+            p.els["ask-voice"].value === "com.apple.voice.Thomas" && p.els["ask-voice"].kids.length === 4 && p.els["ask-voice"].kids[1] === before);
+        p.synth.setVoices(T150_VOICES.slice(0, 2));
+        check("... a changed list is rebuilt", p.els["ask-voice"].kids.length === 3 && p.els["ask-voice"].value === "com.apple.voice.Thomas");
     }
     {
         const store = new Map([[VOICE_STORAGE_KEY, "Google UK English Female"]]);

@@ -85,8 +85,10 @@ const ASK_BOX = `
  *                         "Opening …" drops that navigation.
  *   OS.cancelSpeech()     stops speech in progress, drops a navigation still
  *                         waiting on its "Opening …", and silences the reply to an
- *                         ask or confirm in flight: it's shown, not spoken or
- *                         acted on (a new ask cancels speech too).
+ *                         ask or confirm in flight: it's shown, not spoken, and a
+ *                         navigation in it isn't followed (the request isn't
+ *                         aborted: a confirm already sent still queues its run).
+ *                         A new ask cancels speech too.
  *   OS.speaking()         true while the OS is speaking (#150).
  *   OS.pending()          true while an ask or confirm is in flight (#150).
  *   OS.onActivity(fn)     fn() whenever speaking() or pending() changes (#150).

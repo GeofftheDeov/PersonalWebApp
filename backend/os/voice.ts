@@ -16,7 +16,10 @@
  *   OS.stop()             what the stop button does: stops listening (sends
  *                         nothing), cuts off speech, drops a navigation waiting
  *                         on its "Opening …", and silences the reply to an ask
- *                         still in flight (it's shown, not spoken or acted on).
+ *                         or confirm still in flight: it's shown but not spoken,
+ *                         and a navigation in it isn't followed. The request
+ *                         itself isn't aborted: a confirm already sent still
+ *                         queues its run, and a proposal still shows its buttons.
  *                         true when there was something to stop.
  *   OS.voices()           the voices on offer, [{ id, name, lang }]; [] until
  *                         the browser has loaded them.
@@ -91,7 +94,12 @@ export const SPEAKER_JS = String.raw`function createSpeaker(opts) {
             cur += s;
             while (cur.length > MAX) {
                 var at = cur.lastIndexOf(' ', MAX);
-                if (at <= 0) at = MAX;
+                if (at <= 0) {
+                    at = MAX;
+                    // Never between the halves of a surrogate pair (an emoji).
+                    var c = cur.charCodeAt(at - 1);
+                    if (c >= 0xD800 && c <= 0xDBFF) at--;
+                }
                 push(cur.slice(0, at)); cur = cur.slice(at);
             }
         }
@@ -133,9 +141,9 @@ export const SPEAKER_JS = String.raw`function createSpeaker(opts) {
             pieces.forEach(function (piece, i) {
                 var u = new Utt(piece);
                 if (voice) { u.voice = voice; if (voice.lang) u.lang = voice.lang; }
-                u.onend = function () { if (i === pieces.length - 1) finish(false); };
-                // A failure (not our own cancel, which has already finished it)
-                // ends the whole reply: drop the rest of the queue.
+                // Our own cancel has already finished it, whichever event the browser fires.
+                u.onend = function () { if (!me.cutting && i === pieces.length - 1) finish(false); };
+                // A failure ends the whole reply: drop the rest of the queue.
                 u.onerror = function () {
                     if (ended || me.cutting) return;
                     if (current === me) { current = null; try { synth.cancel(); } catch (e) { /* gone */ } }
@@ -144,11 +152,22 @@ export const SPEAKER_JS = String.raw`function createSpeaker(opts) {
                 me.utterances.push(u);
                 synth.speak(u);
             });
-            timer = setT(function () { timer = null; finish(false); }, Math.max(MIN_WAIT, PER_CHAR * text.length));
+            // The wait for an end event that may never come. Still audibly speaking
+            // when it runs out: wait on, a second at a time, up to twice as long.
+            var wait = Math.max(MIN_WAIT, PER_CHAR * text.length), extra = Math.ceil(wait / 1000);
+            var expire = function () {
+                timer = null;
+                var still = false;
+                try { still = !!synth.speaking; } catch (e) { /* gone */ }
+                if (still && extra-- > 0) { timer = setT(expire, 1000); return; }
+                finish(false);
+            };
+            timer = setT(expire, wait);
             changed();
         } catch (e) {
             console.error(e);
-            if (current === me) current = null;
+            // Drop any pieces already queued, so nothing plays that we don't track.
+            if (current === me) { current = null; try { synth.cancel(); } catch (e2) { /* gone */ } }
             finish(false);
         }
     }
@@ -179,17 +198,16 @@ export function voiceScript(): string {
             try { synth = window.speechSynthesis || null; } catch (e) { synth = null; }
 
             // ── stop ──
-            function listening() {
-                var s = OS.micState ? OS.micState() : 'unsupported';
-                return s === 'listening' || s === 'submitting';
-            }
+            // Submitting is covered by pending(): only listening is the mic's own to stop.
+            function listening() { return !!OS.micState && OS.micState() === 'listening'; }
+            function active() { return OS.speaking() || OS.pending() || listening(); }
             function stop() {
-                var any = OS.speaking() || OS.pending() || listening();
+                var any = active();
                 if (OS.cancelListening) OS.cancelListening();
                 OS.cancelSpeech();
                 return any;
             }
-            function syncStop() { if (stopBtn) stopBtn.hidden = !(OS.speaking() || OS.pending() || listening()); }
+            function syncStop() { if (stopBtn) stopBtn.hidden = !active(); }
             if (stopBtn) stopBtn.addEventListener('click', function () { stop(); syncStop(); });
             OS.onActivity(syncStop);
             if (OS.onMicState) OS.onMicState(syncStop);
@@ -206,7 +224,7 @@ export function voiceScript(): string {
             }
             function idOf(v) { return v.voiceURI || v.name || ''; }
 
-            var voices = [], wanted = stored(), chosen = null;
+            var voices = [], shown = null, wanted = stored(), chosen = null;
             function find(id) {
                 if (!id) return null;
                 for (var i = 0; i < voices.length; i++) if (voices[i].voiceURI === id) return voices[i];
@@ -225,6 +243,11 @@ export function voiceScript(): string {
                 if (!select || !row) return;
                 // Nothing to offer (yet): the rendered "Default voice" option stays, hidden.
                 if (!voices.length) { row.hidden = true; return; }
+                // voiceschanged fires repeatedly as voices arrive: rebuild only when the list changed,
+                // so an open dropdown isn't rebuilt under the admin's finger.
+                var ids = JSON.stringify(voices.map(idOf));
+                if (ids === shown) return;
+                shown = ids;
                 while (select.firstChild) select.removeChild(select.firstChild);
                 var def = document.createElement('option');
                 def.value = ''; def.textContent = 'Default voice';

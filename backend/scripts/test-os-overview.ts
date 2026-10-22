@@ -936,9 +936,12 @@ async function main() {
         for (const c of t140Clients) {
             try { t140Timeouts.push((await c.query(`SHOW statement_timeout`)).rows[0].statement_timeout); } finally { c.release(); }
         }
-        check("the pool is healthy afterwards: every connection back, none carrying a statement_timeout",
-            t140Settled && t140Timeouts.length > 0 && t140Timeouts.every((v) => v === "0"),
-            { t140Settled, t140Timeouts, total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount });
+        const t140InTxn = (await pool.query(
+            `SELECT count(*)::int AS n FROM pg_stat_activity
+              WHERE datname = current_database() AND state LIKE 'idle in transaction%' AND pid <> pg_backend_pid()`)).rows[0].n;
+        check("the pool is healthy afterwards: every connection back, none carrying a statement_timeout or left in a transaction",
+            t140Settled && t140Timeouts.length > 0 && t140Timeouts.every((v) => v === "0") && t140InTxn === 0,
+            { t140Settled, t140Timeouts, t140InTxn, total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount });
 
         // agent_runs locked: the usage tile times out; the brief tile stays ok and says its run history timed out.
         const t140RunsLocker = new pg.Client({ connectionString: process.env.DATABASE_URL });

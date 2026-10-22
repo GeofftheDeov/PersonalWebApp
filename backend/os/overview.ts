@@ -20,28 +20,35 @@ import type pg from "pg";
 /**
  * Time budgets (#140): one slow source can't hold up the overview.
  *
- * Each tile reads the database through its own pooled connection carrying
- * `statement_timeout = TILE_BUDGET_MS`, so Postgres cancels a blocked or slow
- * query (57014) and the connection goes back to the pool, healthy. The whole
- * build is also raced against TILE_BUDGET_MS + TILE_DEADLINE_GRACE_MS, which
- * bounds non-database waits too; the grace lets a tile that catches its own
- * cancelled query (the brief tile's run history) finish in its degraded state.
- * Either way the tile is unavailable with TIMED_OUT_REASON. Synchronous work
- * (the brief tile's vault read) can't be interrupted; it counts against the
- * deadline but runs to the end.
+ * Every query a tile sends through `ctx.db` runs in a short transaction of its
+ * own on a pooled client, `BEGIN; SET LOCAL statement_timeout = TILE_BUDGET_MS`,
+ * so Postgres cancels a blocked or slow query (57014), the transaction rolls
+ * back and the client goes back to the pool clean. SET LOCAL, not a session
+ * SET: DATABASE_URL is a PgBouncer pooler in transaction mode, where a session
+ * setting can land on another server connection and leak to other clients.
+ * A client is held only for its one query, so a tile's queries still run in
+ * parallel, and one failed query doesn't abort the tile's others.
+ *
+ * The whole build is also raced against TILE_BUDGET_MS + TILE_DEADLINE_GRACE_MS,
+ * which bounds non-database waits (and the wait for a pool client) too; the
+ * grace lets a tile that catches its own cancelled query (the brief tile's run
+ * history) finish in its degraded state. Either way the tile is unavailable
+ * with TIMED_OUT_REASON, and once the deadline passes the tile can't start
+ * another query. Synchronous work (the brief tile's vault read) can't be
+ * interrupted; it counts against the deadline but runs to the end.
  *
  * A new tile inherits all of this from buildOverview: it reads `ctx.db`.
  */
-/** How long one tile's statement may run before Postgres cancels it. */
+/** How long one tile query may run before Postgres cancels it. */
 export const TILE_BUDGET_MS = 400;
 /** How long past TILE_BUDGET_MS a tile's build may run before the overview stops waiting for it. */
-export const TILE_DEADLINE_GRACE_MS = 100;
+export const TILE_DEADLINE_GRACE_MS = 150;
 /** The whole overview's target response time; the tile deadline leaves room for rendering under it. */
 export const OVERVIEW_BUDGET_MS = 1_000;
 /** A timed-out tile's reason. */
 export const TIMED_OUT_REASON = `timed out (over its ${TILE_BUDGET_MS} ms budget)`;
 
-export type Unavailable ={ status: "unavailable"; reason: string };
+export type Unavailable = { status: "unavailable"; reason: string };
 export type Ok<T extends object> = { status: "ok" } & T;
 export type Tile<T extends object = object> = Ok<T> | Unavailable;
 
@@ -58,8 +65,8 @@ export interface Queryable {
 export interface TileContext {
     now: Date;
     /**
-     * The database. Inside a tile's build this is the tile's own budgeted
-     * connection (see TILE_BUDGET_MS), never the pool itself.
+     * The database. Given to buildOverview, it's the pool; inside a tile's
+     * build it's that pool behind the tile's time budget (see TILE_BUDGET_MS).
      */
     db: Queryable;
 }
@@ -98,15 +105,17 @@ export function describeError(err: any): string {
     // 42P01 undefined_table, 42703 undefined_column: a migration hasn't been applied.
     if (err?.code === "42P01") return `table missing (${msg.match(/relation "([^"]+)"/)?.[1] ?? msg})`;
     if (err?.code === "42703") return `column missing (${msg.match(/column "?([^" ]+)"? does not exist/)?.[1] ?? msg})`;
-    // 57014 query_canceled: a statement timeout (#140's per-tile budget), or a manual/shutdown cancel.
-    if (err?.code === "57014") return /statement timeout/i.test(msg) ? "timed out" : "query cancelled";
+    if (err?.code === "57014") return isStatementTimeout(err) ? "timed out" : "query cancelled";
     return msg.length > MAX_REASON ? msg.slice(0, MAX_REASON - 1) + "…" : msg;
 }
 
-/** A pg.Pool (or anything shaped like one): it can hand out a client of its own. */
+/** 57014 query_canceled from a statement timeout (the tile budget), as opposed to a manual or shutdown cancel. */
+export const isStatementTimeout = (err: any): boolean =>
+    err?.code === "57014" && /statement timeout/i.test(String(err?.message ?? ""));
+
+/** A pg.Pool (or anything shaped like one): it hands out clients of its own. */
 interface PoolLike extends Queryable {
     connect(): Promise<pg.PoolClient>;
-    totalCount: number;
 }
 const isPool = (db: Queryable): db is PoolLike =>
     typeof (db as any).connect === "function" && typeof (db as any).totalCount === "number";
@@ -116,59 +125,55 @@ class TileDeadlinePassed extends Error {
     constructor() { super("the tile's time budget is spent"); }
 }
 
-/** A statement timeout (57014 with Postgres's message), as opposed to another cancel. */
-const isStatementTimeout = (err: any) => err?.code === "57014" && /statement timeout/i.test(String(err?.message ?? ""));
-
 /**
- * One tile's view of the database: a pooled client of its own, taken on its
- * first query, with `statement_timeout` set to `statementMs`. Queries issued
- * concurrently within the tile run one after another on that client.
- *
- * `close()` stops new queries and returns the client once whatever is in
- * flight has finished (a blocked one is cancelled by the timeout), after
- * resetting the timeout; a client that can't be reset is destroyed rather
- * than pooled.
- *
- * Over a Queryable that isn't a pool (a single client, a test fake) there's no
- * connection to set a timeout on: queries pass straight through, and only the
- * deadline race bounds the tile.
+ * Runs one query on its own pooled client, in a transaction whose
+ * statement_timeout is `ms`. A cancelled or failed query is rolled back and its
+ * client returned clean; a client that can't be rolled back is destroyed
+ * rather than pooled.
  */
-function tileDb(db: Queryable, statementMs: number): { db: Queryable; close(): Promise<void> } {
-    if (!isPool(db)) return { db, close: async () => {} };
-    let closed = false;
-    let client: Promise<pg.PoolClient> | null = null;
-    const acquire = () => (client ??= (async () => {
-        const c = await db.connect();
+async function queryWithTimeout(pool: PoolLike, ms: number, text: string, params?: unknown[]) {
+    const c = await pool.connect();
+    /** Set when the client's state is unknown: release(err) destroys it instead of pooling it. */
+    let destroy: Error | undefined;
+    try {
         try {
-            await c.query(`SET statement_timeout = ${Math.round(statementMs)}`);
+            // One round trip. SET LOCAL ends with the transaction, on whichever server connection PgBouncer picked.
+            await c.query(`BEGIN; SET LOCAL statement_timeout = ${Math.round(ms)}`);
         } catch (err) {
-            c.release(err as Error);
+            destroy = err as Error;
             throw err;
         }
-        return c;
-    })());
+        try {
+            const result = await c.query(text, params as any[]);
+            await c.query("COMMIT");
+            return result;
+        } catch (err) {
+            await c.query("ROLLBACK").catch((e: Error) => { destroy = e; });
+            throw err;
+        }
+    } finally {
+        c.release(destroy);
+    }
+}
+
+/**
+ * One tile's view of the database. Over a pool every query gets the tile
+ * budget (queryWithTimeout). Over a Queryable that isn't a pool (a single
+ * client, a test fake) there's nothing to set a timeout on: queries pass
+ * through, and only the deadline race bounds the tile. `close()` stops new
+ * queries: a tile the overview gave up on can't start another.
+ */
+function tileDb(db: Queryable, statementMs: number): { db: Queryable; close(): void } {
+    let closed = false;
+    const pool = isPool(db) ? db : null;
     return {
         db: {
             async query(text: string, params?: unknown[]) {
                 if (closed) throw new TileDeadlinePassed();
-                const c = await acquire();
-                if (closed) throw new TileDeadlinePassed();
-                return c.query(text, params as any[]);
+                return pool ? queryWithTimeout(pool, statementMs, text, params) : db.query(text, params);
             },
         },
-        async close() {
-            closed = true;
-            if (!client) return;
-            let c: pg.PoolClient;
-            try { c = await client; } catch { return; } // never connected, or released already
-            try {
-                // Queued behind any statement still in flight on this client.
-                await c.query(`RESET statement_timeout`);
-                c.release();
-            } catch (err) {
-                c.release(err as Error);
-            }
-        },
+        close() { closed = true; },
     };
 }
 
@@ -187,30 +192,29 @@ async function runTile(source: TileSource<any>, ctx: TileContext): Promise<Tile>
     }
 }
 
-/** One tile, on its own budgeted connection, raced against its deadline. Never rejects. */
+/** One tile, its queries under the budget, raced against its deadline. Never rejects. */
 async function buildTile(source: TileSource<any>, ctx: TileContext): Promise<Tile> {
     const conn = tileDb(ctx.db, TILE_BUDGET_MS);
     let timer: NodeJS.Timeout | undefined;
     const deadline = new Promise<"deadline">((resolve) => {
         timer = setTimeout(() => resolve("deadline"), TILE_BUDGET_MS + TILE_DEADLINE_GRACE_MS);
     });
-    const built = runTile(source, { ...ctx, db: conn.db });
-    const outcome = await Promise.race([built, deadline]);
+    // runTile never rejects, so the abandoned build can't raise an unhandled rejection.
+    const outcome = await Promise.race([runTile(source, { ...ctx, db: conn.db }), deadline]);
     clearTimeout(timer);
+    conn.close();
     if (outcome === "deadline") {
+        // A query still in flight is cancelled by its statement_timeout and its client returned then.
         console.error(`[os] tile ${source.id} timed out after ${TILE_BUDGET_MS + TILE_DEADLINE_GRACE_MS} ms`);
-        // Don't hold the response for it: the client goes back once its statement is cancelled.
-        conn.close().catch(() => {});
         return unavailable(TIMED_OUT_REASON);
     }
-    await conn.close();
     return outcome;
 }
 
 /**
  * Builds every tile in parallel, each within its time budget. Never rejects
- * because of a tile. With a pool as `ctx.db`, each tile holds one pooled
- * connection while it builds.
+ * because of a tile. Over a pool, each query holds a pooled client only while
+ * it runs.
  */
 export async function buildOverview(sources: readonly TileSource<any>[], ctx: TileContext): Promise<Overview> {
     const built = await Promise.all(sources.map((s) => buildTile(s, ctx)));

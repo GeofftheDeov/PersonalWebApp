@@ -59,6 +59,8 @@ export const SKILLS = [
 ] as const satisfies readonly Skill[];
 export type SkillId = typeof SKILLS[number]['id'];
 export const isSkill = (s: unknown): s is SkillId => SKILLS.some(k => k.id === s);
+/** A skill's label ("Morning brief"), or the id itself for a skill that's no longer runnable. */
+export const skillLabel = (id: string): string => SKILLS.find(k => k.id === id)?.label ?? id;
 /** A skill's Task Scheduler schedule, or null when it's on demand only. */
 export const skillSchedule = (id: SkillId): SkillSchedule | null =>
     (SKILLS as readonly Skill[]).find(k => k.id === id)?.schedule ?? null;

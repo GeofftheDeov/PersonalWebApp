@@ -970,6 +970,7 @@ CREATE TRIGGER trg_admin_list_views_updated BEFORE UPDATE ON admin_list_views
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- ---------- agentic OS: skill-run queue (migrations/2026-09-26-agent-runs.sql) ----------
+-- Usage and trigger: migrations/0003__agent-run-usage.sql. NULL usage means unknown.
 
 CREATE TABLE agent_runs (
   id            bigserial PRIMARY KEY,
@@ -982,9 +983,43 @@ CREATE TABLE agent_runs (
   finished_at   timestamptz,
   runner        text,
   summary       text,
-  output_path   text
+  output_path   text,
+  cost_usd      numeric CHECK (cost_usd >= 0),
+  input_tokens  bigint  CHECK (input_tokens >= 0),
+  output_tokens bigint  CHECK (output_tokens >= 0),
+  duration_ms   integer CHECK (duration_ms >= 0),
+  trigger       text NOT NULL DEFAULT 'button'
+                  CHECK (trigger IN ('button','scheduled','manual'))
 );
 CREATE INDEX idx_agent_runs_queued ON agent_runs (requested_at) WHERE status = 'queued';
 CREATE INDEX idx_agent_runs_recent ON agent_runs (requested_at DESC);
+
+-- ---------- agentic OS: the ask log (migrations/0004__os-asks.sql) ----------
+-- One row per ask to POST /admin/os/ask. Tier-2 columns: model, tokens, cost.
+-- Tier-3 columns: the proposed skill, its expiry, confirmed_at and run_id.
+
+CREATE TABLE os_asks (
+  id             bigserial PRIMARY KEY,
+  account_id     uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  asked_at       timestamptz NOT NULL DEFAULT now(),
+  text           text NOT NULL CHECK (length(text) BETWEEN 1 AND 500),
+  source         text NOT NULL CHECK (source IN ('voice','typed')),
+  tier           smallint NOT NULL CHECK (tier IN (1,2,3)),
+  kind           text NOT NULL
+                   CHECK (kind IN ('answer','navigate','confirm_run','not_understood','unavailable')),
+  intent         text,
+  latency_ms     integer NOT NULL CHECK (latency_ms >= 0),
+  error          text,
+  model          text,
+  input_tokens   bigint  CHECK (input_tokens >= 0),
+  output_tokens  bigint  CHECK (output_tokens >= 0),
+  cost_usd       numeric CHECK (cost_usd >= 0),
+  skill          text,
+  expires_at     timestamptz,
+  confirmed_at   timestamptz,
+  run_id         bigint REFERENCES agent_runs(id) ON DELETE SET NULL
+);
+CREATE INDEX idx_os_asks_recent ON os_asks (asked_at DESC);
+CREATE INDEX idx_os_asks_tier2 ON os_asks (asked_at) WHERE tier = 2;
 -- At most one queued-or-running run per skill; enqueueRun relies on it (#172).
 CREATE UNIQUE INDEX idx_agent_runs_one_active ON agent_runs (skill) WHERE status IN ('queued','running');

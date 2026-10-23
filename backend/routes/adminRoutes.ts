@@ -14,6 +14,7 @@ import { resolveVaultFile, isServableVaultName } from '../utils/vaultPath.js';
 import AlpacaSnapshot from '../models/AlpacaSnapshot.js';
 import { getDecryptedKeys } from './apiKeyRoutes.js';
 import { evaluateLiveApplyGate } from '../utils/liveApplyGate.js';
+import { buildAlpacaSnapshot } from '../utils/alpacaSnapshot.js';
 import { pcFetch, paperclipConfigured, PAPERCLIP_COMPANY_ID } from '../services/paperclipClient.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { runPersonSync, personSyncStatus, retryFailedOutboxRow } from '../jobs/personSync.js';
@@ -1467,23 +1468,13 @@ export async function snapshotAlpacaNow(): Promise<void> {
             alpacaRest(creds, '/account'),
             alpacaRest(creds, '/positions') as Promise<any[]>,
         ]);
-        const equity      = parseFloat(acct.equity);
-        const last_equity = parseFloat(acct.last_equity);
-        await AlpacaSnapshot.create({
-            ts: new Date(),
-            equity,
-            last_equity,
-            cash:         parseFloat(acct.cash),
-            buying_power: parseFloat(acct.buying_power),
-            day_pl:       isFinite(equity) && isFinite(last_equity) ? equity - last_equity : 0,
-            positions: (Array.isArray(positions) ? positions : []).map((p: any) => ({
-                symbol:        p.symbol,
-                qty:           parseFloat(p.qty),
-                market_value:  parseFloat(p.market_value),
-                unrealized_pl: parseFloat(p.unrealized_pl),
-                current_price: parseFloat(p.current_price),
-            })),
-        });
+        // A malformed response is skipped, not stored as NaN (#169); the next tick retries.
+        const snap = buildAlpacaSnapshot(acct, positions);
+        if (!snap.ok) {
+            console.warn('[ALPACA SNAPSHOT] skipped malformed response:', snap.reason);
+            return;
+        }
+        await AlpacaSnapshot.create({ ts: new Date(), ...snap.row });
     } catch (err: any) {
         console.error('[ALPACA SNAPSHOT] failed:', err.message);
     }

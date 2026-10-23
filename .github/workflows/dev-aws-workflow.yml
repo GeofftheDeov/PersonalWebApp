@@ -41,6 +41,29 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      # Schema migrations (backend/db/migrations, scripts/apply-migration.ts).
+      # Dry-run now, so a migration that fails on dev's data stops the deploy
+      # before the image builds; apply just before the deploy step, so the new
+      # code never starts against the old schema. The URL comes from the same
+      # Secrets Manager secret the task definition injects.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci --no-audit --no-fund
+
+      - name: Dry-run pending migrations against the dev database
+        working-directory: backend
+        run: |
+          DATABASE_URL=$(aws secretsmanager get-secret-value --secret-id personal-web-app/dev/DATABASE_URL --query SecretString --output text)
+          echo "::add-mask::$DATABASE_URL"
+          DATABASE_URL="$DATABASE_URL" npx tsx scripts/apply-migration.ts --dry-run
+
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
@@ -101,6 +124,9 @@ jobs:
             GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
             GITHUB_VAULT_REPO=GeofftheDeov/obsidian-vault
             OBSIDIAN_VAULT_PATH=/obsidian-vault
+            SESSION_COOKIE_NAME=gtd_session_deov
+            SESSION_COOKIE_DOMAIN=.geoffthedeov.net
+            SESSION_COOKIE_ORIGINS=https://deov.geoffthedeov.net,https://deov.hearthside.geoffthedeov.net
 
       - name: Fill in the new frontend image ID in the Amazon ECS task definition
         id: frontend-task-def
@@ -109,6 +135,13 @@ jobs:
           task-definition: ${{ steps.backend-task-def.outputs.task-definition }}
           container-name: ${{ env.CONTAINER_FRONTEND }}
           image: ${{ steps.build-frontend-image.outputs.image }}
+
+      - name: Apply pending migrations to the dev database
+        working-directory: backend
+        run: |
+          DATABASE_URL=$(aws secretsmanager get-secret-value --secret-id personal-web-app/dev/DATABASE_URL --query SecretString --output text)
+          echo "::add-mask::$DATABASE_URL"
+          DATABASE_URL="$DATABASE_URL" npx tsx scripts/apply-migration.ts --apply
 
       - name: Deploy Amazon ECS task definition
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2

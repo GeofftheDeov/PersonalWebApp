@@ -154,16 +154,27 @@ export function runnerOnline(now: Date = new Date()): boolean {
  * button twice should not run the brief twice. Returns the run either way.
  * A `running` row past STALE_AFTER is expired first, so a dead run doesn't
  * block the RUN button or a voice/tap confirm with "already running".
+ *
+ *
+ * The unique partial index idx_agent_runs_one_active (migration 0002) decides
+ * races: of two concurrent requests, one inserts and the other conflicts and
+ * gets that run back (#172). The active run can finish between the conflict
+ * and the SELECT, so that case just tries the insert again.
  */
 export async function enqueueRun(skill: SkillId, requestedBy: string | null): Promise<{ run: AgentRun; created: boolean }> {
-    await expireStale();
-    const existing = await query<AgentRun>(
-        `SELECT * FROM agent_runs WHERE skill = $1 AND status IN ('queued','running')
-          ORDER BY requested_at DESC LIMIT 1`, [skill]);
-    if (existing.rows[0]) return { run: existing.rows[0], created: false };
-    const { rows } = await query<AgentRun>(
-        `INSERT INTO agent_runs (skill, requested_by) VALUES ($1, $2) RETURNING *`, [skill, requestedBy]);
-    return { run: rows[0], created: true };
+    for (let attempt = 0; ; attempt++) {
+        await expireStale();
+        const existing = await query<AgentRun>(
+            `SELECT * FROM agent_runs WHERE skill = $1 AND status IN ('queued','running') ORDER BY requested_at DESC LIMIT 1`, [skill]);
+        if (existing.rows[0]) return { run: existing.rows[0], created: false };
+        const inserted = await query<AgentRun>(
+            `INSERT INTO agent_runs (skill, requested_by) VALUES ($1, $2) 
+             ON CONFLICT (skill) WHERE status IN ('queued','running') DO NOTHING
+             RETURNING *`, [skill, requestedBy]);
+        if (inserted.rows[0]) return { run: inserted.rows[0], created: true };
+        if (attempt >= 2) throw new Error(`enqueueRun(${skill}): active run kept appearing and finishing`);
+    }
+
 }
 
 async function expireStale(): Promise<void> {

@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { verifyJwt } from '../utils/jwt.js';
 import Account from '../models/Account.js';
 import { resolveAccountId } from '../utils/accountRefs.js';
+import { passesCsrfCheck, readSessionCookie } from '../utils/sessionCookie.js';
 
 interface AuthRequest extends Request {
     user?: {
@@ -25,14 +26,24 @@ interface AuthRequest extends Request {
  * after the deploy; the resolve stays because bookmarked ids outlive tokens.
  */
 export const auth = async (req: AuthRequest, res: Response, next: NextFunction) => {
+    // Bearer first (#69): the current frontend sends it, and so do the
+    // Electron and React Native clients and the scripts. A bearer request is
+    // exempt from the CSRF check, since another page can't make the browser
+    // attach it. Only without one does the environment's session cookie count.
     const authHeader = req.headers.authorization;
+    let token: string | null = null;
+    let viaCookie = false;
+    if (authHeader?.startsWith('Bearer ')) {
+        token = authHeader.split(' ')[1];
+    } else {
+        token = readSessionCookie(req);
+        viaCookie = token !== null;
+    }
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    if (!token) {
         console.log(`[AUTH] 401: No token provided for ${req.originalUrl}`);
         return res.status(401).json({ error: 'Unauthorized: No token provided' });
     }
-
-    const token = authHeader.split(' ')[1];
 
     try {
         const decoded = verifyJwt(token);
@@ -40,6 +51,12 @@ export const auth = async (req: AuthRequest, res: Response, next: NextFunction) 
         if (!id) {
             console.log(`[AUTH] 401: token subject ${decoded.id} resolves to no account`);
             return res.status(401).json({ error: 'Unauthorized: Invalid token' });
+        }
+        // After verification, so a stale cookie still reads as "log in again"
+        // (401) rather than as a refused write.
+        if (viaCookie && !passesCsrfCheck(req)) {
+            console.log(`[AUTH] 403: cookie-authenticated ${req.method} without the CSRF header (${req.originalUrl})`);
+            return res.status(403).json({ error: 'Forbidden: missing CSRF header' });
         }
         req.user = { id, email: decoded.email };
         next();

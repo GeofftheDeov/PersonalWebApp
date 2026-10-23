@@ -6,9 +6,8 @@
 -- vault). Each row now says which wallet it is, and for the vault wallets whose
 -- keys it was taken with.
 --
--- Additive: existing rows are all Cloud-Claw snapshots and take the default.
--- Apply BEFORE deploying the code that writes these columns; until then the
--- loop's inserts fail (logged, not fatal) and the chart's query errors.
+-- Additive: existing rows are all Cloud-Claw snapshots and take the default,
+-- and the code running before this release never reads the new columns.
 
 BEGIN;
 

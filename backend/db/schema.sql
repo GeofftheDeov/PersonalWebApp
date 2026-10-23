@@ -908,6 +908,10 @@ CREATE TRIGGER trg_api_key_vault_updated BEFORE UPDATE ON api_key_vault
 CREATE TABLE alpaca_snapshots (
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   ts           timestamptz NOT NULL DEFAULT now(),
+  -- cloudclaw (server env keys) | paper | live (an admin's Profile vault keys)
+  wallet       text NOT NULL DEFAULT 'cloudclaw' CHECK (wallet IN ('cloudclaw', 'paper', 'live')),
+  -- Owner of the vault keys; NULL for cloudclaw.
+  user_id      uuid REFERENCES accounts(id) ON DELETE CASCADE,
   equity       numeric(14,2) NOT NULL DEFAULT 0,
   last_equity  numeric(14,2) NOT NULL DEFAULT 0,
   cash         numeric(14,2) NOT NULL DEFAULT 0,
@@ -917,6 +921,7 @@ CREATE TABLE alpaca_snapshots (
   positions    jsonb NOT NULL DEFAULT '[]'
 );
 CREATE INDEX idx_alpaca_snapshots_ts ON alpaca_snapshots (ts);
+CREATE INDEX idx_alpaca_snapshots_wallet_ts ON alpaca_snapshots (wallet, user_id, ts);
 
 CREATE TABLE cloud_claw_sessions (
   id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -1,10 +1,9 @@
 import express, { Response } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
-import fs from 'fs';
-import path from 'path';
 import { auth } from '../middleware/auth.js';
 import CloudClawSession from '../models/CloudClawSession.js';
 import { renderMarkdown } from '../utils/markdown.js';
+import { readVaultNote as readVaultNoteIn, searchVaultNotes as searchVaultNotesIn } from '../utils/vaultNotes.js';
 
 const router = express.Router();
 
@@ -22,54 +21,15 @@ const SYSTEM_PROMPT =
 // ── Obsidian vault helpers ────────────────────────────────────────────────────
 
 const VAULT_PATH = process.env.OBSIDIAN_VAULT_PATH || '';
-const VAULT_EXCLUDED = new Set(['.git', 'private', 'node_modules']);
 
-function safeVaultPath(relativePath: string): string | null {
-  if (!VAULT_PATH) return null;
-  const full = path.resolve(VAULT_PATH, relativePath);
-  return full.startsWith(path.resolve(VAULT_PATH)) ? full : null;
-}
-
-function readVaultNote(relativePath: string): unknown {
+function readVaultNote(relativePath: unknown): unknown {
   if (!VAULT_PATH) return { error: 'OBSIDIAN_VAULT_PATH not configured' };
-  const full = safeVaultPath(relativePath);
-  if (!full) return { error: 'Invalid path' };
-  try {
-    return { path: relativePath, content: fs.readFileSync(full, 'utf-8') };
-  } catch (err: any) {
-    return { error: err.message };
-  }
+  return readVaultNoteIn(VAULT_PATH, relativePath);
 }
 
 function searchVaultNotes(query: string): unknown {
   if (!VAULT_PATH) return { error: 'OBSIDIAN_VAULT_PATH not configured' };
-  const q = query.toLowerCase();
-  const results: { path: string; excerpt: string }[] = [];
-
-  function walk(dir: string, base: string) {
-    let entries: fs.Dirent[];
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-    for (const e of entries) {
-      if (e.name.startsWith('.') || VAULT_EXCLUDED.has(e.name)) continue;
-      const full = path.join(dir, e.name);
-      const rel = path.join(base, e.name).replace(/\\/g, '/');
-      if (e.isDirectory()) { walk(full, rel); }
-      else if (e.name.endsWith('.md')) {
-        try {
-          const text = fs.readFileSync(full, 'utf-8');
-          if (text.toLowerCase().includes(q) || e.name.toLowerCase().includes(q)) {
-            const idx = text.toLowerCase().indexOf(q);
-            const excerpt = idx >= 0 ? text.slice(Math.max(0, idx - 50), idx + 150) : text.slice(0, 200);
-            results.push({ path: rel, excerpt: '...' + excerpt.trim() + '...' });
-            if (results.length >= 10) return;
-          }
-        } catch { /* skip */ }
-      }
-    }
-  }
-
-  walk(VAULT_PATH, '');
-  return { results };
+  return searchVaultNotesIn(VAULT_PATH, String(query ?? ''));
 }
 
 // ── Alpaca helpers ────────────────────────────────────────────────────────────

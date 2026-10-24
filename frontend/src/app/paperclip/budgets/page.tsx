@@ -352,7 +352,7 @@ export default function BudgetsPage() {
     // The type-based pre-check that used to live here read `user.type` from
     // localStorage, which after the account merge is "Account" for everybody --
     // it would have bounced every visitor, including the one who has access.
-    // The server's paperclipOnly gate decides, and the 403 below acts on it.
+    // The server's requirePaperclipAccess gate decides, and the 403 below acts on it.
     setLoading(true);
     setError(null);
     try {

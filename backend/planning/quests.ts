@@ -192,7 +192,7 @@ async function cleanAssignee(db: Db, raw: unknown, kind: QuestKind, campaignId: 
     }
     if (!isUuid(raw)) throw new QuestError(400, "Choose someone in the party to own this quest.");
     const { rowCount } = await db.query(
-        `SELECT 1 FROM campaign_members WHERE campaign_id = $1 AND person_id = $2 LIMIT 1`, [campaignId, raw]);
+        `SELECT 1 FROM campaign_members WHERE campaign_id = $1 AND person_id = $2 AND is_active LIMIT 1`, [campaignId, raw]);
     if (!rowCount) throw new QuestError(400, "Quests can only go to someone in the party.");
     return raw as string;
 }
@@ -466,7 +466,7 @@ export function createQuests(deps: QuestDeps = { now: () => new Date() }) {
                    FROM game_sessions s JOIN campaigns c ON c.id = s.campaign_id
                   WHERE s.date >= $2 AND s.date < $3 AND s.status <> 'cancelled'
                     AND (s.gm_override_id = $1 OR EXISTS (
-                          SELECT 1 FROM campaign_members m WHERE m.campaign_id = s.campaign_id AND m.person_id = $1))
+                          SELECT 1 FROM campaign_members m WHERE m.campaign_id = s.campaign_id AND m.person_id = $1 AND m.is_active))
                   ORDER BY s.date, s.id`, [actor.id, start, end]);
             const { rows: quests } = sessions.length ? await pool.query(
                 `${QUEST_SQL} WHERE t.session_id = ANY($1) AND t.assignee_id = $2 AND t.status <> 'cancelled' ${QUEST_ORDER}`,

@@ -193,8 +193,9 @@ live.ready.then((channel) => {
 });
 
 // Alpaca snapshots: capture account + positions every 5 minutes so the dashboard
-// can chart per-symbol position values over time. Only runs when keys are set.
-if (process.env.ALPACA_API_KEY && process.env.ALPACA_SECRET_KEY) {
+// can chart per-symbol position values over time. Covers the Cloud-Claw wallet
+// (when its env keys are set) and admins' Profile page wallets, so it always runs.
+{
     const FIVE_MIN = 5 * 60 * 1000;
     setTimeout(() => snapshotAlpacaNow(), 30_000); // first one shortly after boot
     setInterval(() => snapshotAlpacaNow(), FIVE_MIN);

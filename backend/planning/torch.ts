@@ -33,11 +33,14 @@ export interface TorchPassed {
     owner: string | null;
 }
 
-/** The party who can hold the torch, locked so passes and claims can't interleave. */
+/**
+ * The active party, who can hold the torch (an inactive player can't, #37),
+ * locked so passes and claims can't interleave.
+ */
 async function lockParty(db: pg.PoolClient, campaignId: string) {
     const { rows } = await db.query(
         `SELECT id, person_id, status FROM campaign_members
-          WHERE campaign_id = $1 AND person_id IS NOT NULL
+          WHERE campaign_id = $1 AND person_id IS NOT NULL AND is_active
           ORDER BY joined_at NULLS LAST, created_at FOR UPDATE`, [campaignId]);
     return rows;
 }

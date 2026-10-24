@@ -6,29 +6,66 @@ import { startSession } from "../db/model.js";
 import { notify, resolveNotifications } from "../utils/notify.js";
 import { publishFriendshipChanged } from "../services/accessEvents.js";
 import Account from "../models/Account.js";
-import { findPersonById, findPersonByHandle, personDisplayName, toPublicPerson } from "../utils/personUtils.js";
+import { query } from "../db/index.js";
+import { findPersonById, personDisplayName, toPublicPerson } from "../utils/personUtils.js";
 
-// Search for players by handle#number across Users, Leads, Contacts, and Accounts
+/** Shortest query the typeahead answers: one letter matches half the site. */
+export const SEARCH_MIN_CHARS = 2;
+export const SEARCH_LIMIT = 10;
+
+/**
+ * Typeahead for adding friends (#36, plan §4.1): up to ten people whose handle
+ * starts with the query, then the closest trigram matches. `handle#1234` is an
+ * exact lookup, as it always was. Never yourself, anyone you're already
+ * friends with, or a deactivated account, and only people with a handle: a
+ * CRM record that never signed up has nobody to accept the request.
+ *
+ * Always an array. It used to be one person or a 404, and anything without a
+ * `#` was a 400, which is why the box only worked for people who already knew
+ * each other's number.
+ */
 router.get("/search", auth, async (req: any, res) => {
     try {
-        const { query } = req.query;
-        if (!query) return res.status(400).json({ error: "Search query is required" });
-
-        const [handle, userNumber] = (query as string).replace("@", "").split("#");
-
-        if (!handle || !userNumber) {
-            return res.status(400).json({ error: "Invalid format. Use handle#number" });
+        const raw = String(req.query.query ?? "").trim().replace(/^@/, "");
+        const [handle, userNumber] = raw.split("#").map((s) => s.trim());
+        if (handle.length < SEARCH_MIN_CHARS) {
+            return res.status(400).json({ error: `Type at least ${SEARCH_MIN_CHARS} characters` });
         }
 
-        const person = await findPersonByHandle(handle, userNumber);
-        if (!person) return res.status(404).json({ error: "User not found" });
+        // Everyone this person mustn't be offered, in one array parameter.
+        const me = await findPersonById(req.user.id, "friends");
+        const exclude = [req.user.id, ...(me?.doc.friends ?? []).map(String)];
 
-        res.json(toPublicPerson(person));
+        let rows: any[];
+        if (userNumber !== undefined) {
+            ({ rows } = await query(
+                `SELECT ${PUBLIC_COLUMNS} FROM accounts
+                  WHERE lower(handle) = lower($1) AND user_number = $2
+                    AND is_active AND id <> ALL($3::uuid[])`,
+                [handle, userNumber, exclude]));
+        } else {
+            // idx_accounts_handle_trgm serves both the LIKE and the % operator.
+            ({ rows } = await query(
+                `SELECT ${PUBLIC_COLUMNS}, lower(handle) LIKE $2 AS prefix
+                   FROM accounts
+                  WHERE handle IS NOT NULL AND is_active AND id <> ALL($3::uuid[])
+                    AND (lower(handle) LIKE $2 OR lower(handle) % lower($1))
+                  ORDER BY prefix DESC, similarity(lower(handle), lower($1)) DESC, lower(handle), user_number
+                  LIMIT ${SEARCH_LIMIT}`,
+                [handle, `${escapeLike(handle.toLowerCase())}%`, exclude]));
+        }
+
+        res.json(rows.map((row) => toPublicPerson({ doc: row })));
     } catch (error) {
         console.error("Search error:", error);
         res.status(500).json({ error: "Failed to search for user" });
     }
 });
+
+/** What toPublicPerson reads, under the model's field names. */
+const PUBLIC_COLUMNS = `id AS "_id", sf_object AS "sfObject", name, first_name AS "firstName", last_name AS "lastName", handle, user_number AS "userNumber", profile_picture AS "profilePicture", favorite_games AS "favoriteGames", discord_id AS "discordId", discord_handle AS "discordHandle", created_at AS "createdAt"`;
+
+const escapeLike = (s: string) => s.replace(/[\\%_]/g, "\\$&");
 
 // Send friend request
 router.post("/request", auth, async (req: any, res) => {
@@ -51,7 +88,7 @@ router.post("/request", auth, async (req: any, res) => {
 
         // The recipient must exist somewhere
         const toPerson = await findPersonById(toUserId);
-        if (!toPerson) return res.status(404).json({ error: "User not found" });
+        if (!toPerson || toPerson.doc.isActive === false) return res.status(404).json({ error: "User not found" });
 
         // Check if request already exists
         const existingRequest = await FriendRequest.findOne({
@@ -184,8 +221,10 @@ router.get("/list", auth, async (req: any, res) => {
 
         const friendIds: any[] = me.doc.friends || [];
         const friends = (await Promise.all(friendIds.map(async (id) => {
-            const person = await findPersonById(id, "name firstName lastName handle userNumber discordId discordHandle profilePicture");
-            return person ? toPublicPerson(person) : null;
+            const person = await findPersonById(id, "name firstName lastName handle userNumber discordId discordHandle profilePicture isActive");
+            // A deactivated account drops out of its friends' lists (#31) but
+            // stays in the arrays, so reactivating it brings them all back.
+            return person && person.doc.isActive !== false ? toPublicPerson(person) : null;
         }))).filter(Boolean);
 
         res.json(friends);

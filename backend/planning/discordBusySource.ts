@@ -156,7 +156,7 @@ export const discordBusySource: BusySourceAdapter = {
         const { rows: links } = await query(
             `SELECT DISTINCT c.id AS campaign_id, c.discord_guild_id AS guild_id
                FROM campaign_members m JOIN campaigns c ON c.id = m.campaign_id
-              WHERE m.person_id = $1 AND coalesce(c.discord_guild_id, '') <> ''
+              WHERE m.person_id = $1 AND m.is_active AND coalesce(c.discord_guild_id, '') <> ''
               ORDER BY c.discord_guild_id, c.id`, [personId]);
 
         // One token per server: the first of its campaigns whose GM has one.

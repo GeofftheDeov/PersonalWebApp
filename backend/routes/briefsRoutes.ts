@@ -2,7 +2,9 @@ import express from 'express';
 import { renderPage } from '../utils/adminUi.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import { listBriefs, readBrief, BRIEF_DATE, type BriefMeta } from '../utils/briefs.js';
+import { vaultWikiLinkHref } from '../utils/vaultLinks.js';
 import { pullVault, vaultSyncStatus } from '../services/vaultSync.js';
+import { resolveVaultFile, vaultBrowserHref } from '../utils/vaultPath.js';
 import { SKILLS, isSkill, enqueueRun, listRuns, runnerOnline, runnerLastSeen, type AgentRun } from '../services/agentRuns.js';
 
 /**
@@ -40,7 +42,22 @@ const runPill = (s: AgentRun['status']) => {
     return `<span class="pill ${cls}">${esc(s)}</span>`;
 };
 
-function runsPanel(runs: AgentRun[] | null, runsError: string | null): string {
+/**
+ * A run's output path (#158). It is whatever the runner sent, so it links to the
+ * vault browser only when it resolves to a file inside the vault checkout;
+ * anything else (outside the vault, hidden, or not pulled yet) is plain text.
+ */
+function runOutput(outputPath: string | null, vaultPath: string | undefined, token: string): string {
+    if (!outputPath) return '';
+    const file = vaultPath ? resolveVaultFile(vaultPath, outputPath) : null;
+    if (!file?.ok) {
+        const why = file?.reason === 'missing' ? 'not in the vault checkout (yet)' : 'not a file in the vault';
+        return `<span class="run-output muted" title="${why}">${esc(outputPath)}</span>`;
+    }
+    return `<a class="run-output" href="${esc(vaultBrowserHref(file.rel, token))}">${esc(file.rel)}</a>`;
+}
+
+function runsPanel(runs: AgentRun[] | null, runsError: string | null, vaultPath: string | undefined, token: string): string {
     const seen = runnerLastSeen();
     const status = runnerOnline()
         ? `<div><span class="dot dot-on"></span>runner online <span class="muted">(${esc(seen?.runner)})</span></div>`
@@ -53,6 +70,7 @@ function runsPanel(runs: AgentRun[] | null, runsError: string | null): string {
             <div class="run-item" title="${esc(r.summary ?? '')}">
                 <div class="run-row"><span>${esc(r.skill)}</span>${runPill(r.status)}</div>
                 <div class="muted">${fmtTime(r.finished_at ?? r.claimed_at ?? r.requested_at)}${r.summary ? ' · ' + esc(r.summary) : ''}</div>
+                ${runOutput(r.output_path, vaultPath, token)}
             </div>`).join('') || '<div class="muted">no runs yet</div>';
     return `
         <div class="side-header">RUN</div>
@@ -101,13 +119,13 @@ router.get('/', async (req, res) => {
                 <div class="brief-meta">generated ${fmtTime(brief.generated)} · ${esc(brief.run ?? 'unknown')} run</div>
                 ${failed}
             </div>
-            <div class="markdown-body">${renderMarkdown(brief.body)}</div>`;
+            <div class="markdown-body">${renderMarkdown(brief.body, { wikiLinkHref: vaultWikiLinkHref(vaultPath, token) })}</div>`;
     }
 
     const content = `
         <div class="briefs-layout">
             <aside class="briefs-side">
-                ${runsPanel(runs, runsError)}
+                ${runsPanel(runs, runsError, vaultPath, token)}
                 <div class="side-header">HISTORY</div>
                 <div class="history">${history.map(b => historyItem(b, date, token)).join('') || '<div class="muted">none</div>'}</div>
                 <div class="side-header">VAULT SYNC</div>
@@ -173,6 +191,8 @@ router.get('/', async (req, res) => {
         .run-list { display: flex; flex-direction: column; gap: 0.35rem; margin-top: 0.25rem; }
         .run-item { border-left: 2px solid #333; padding-left: 0.4rem; }
         .run-row { display: flex; justify-content: space-between; align-items: center; }
+        .run-output { display: block; font-size: 0.7rem; word-break: break-all; }
+        a.run-output { color: #0d9488; }
         .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 0.4rem; }
         .dot-on { background: #0d9488; } .dot-off { background: #555; }
         .err { color: #f97316; font-size: 0.75rem; word-break: break-word; }
@@ -192,6 +212,7 @@ router.get('/', async (req, res) => {
         .markdown-body { line-height: 1.6; color: #ddd; overflow-wrap: anywhere; }
         .markdown-body h1, .markdown-body h2, .markdown-body h3 { color: #0d9488; margin: 1.2em 0 0.4em; }
         .markdown-body a { color: #f97316; }
+        .markdown-body .wikilink-missing { color: #888; text-decoration: underline dotted; }
         .markdown-body code { background: #2b2b2b; padding: 0.1em 0.3em; }
         .markdown-body blockquote { border-left: 3px solid #f97316; margin: 0.5em 0; padding: 0.2em 0.8em; color: #bbb; background: #262626; }
         .markdown-body table { border-collapse: collapse; width: 100%; display: block; overflow-x: auto; }

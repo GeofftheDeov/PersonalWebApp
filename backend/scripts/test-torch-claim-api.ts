@@ -94,6 +94,8 @@ async function main() {
         const cid = await campaign(null);
         check("someone outside the party can't claim it (403)", (await claim("outsider", cid)).status === 403);
         check("an unknown campaign is a 404", (await claim("p1", crypto.randomUUID())).status === 404);
+        await pool.query(`UPDATE campaign_members SET is_active = false WHERE campaign_id = $1 AND person_id = $2`, [cid, who.p3.id]);
+        check("nor can an inactive player (403)", (await claim("p3", cid)).status === 403);
         await settle();
         check("refused claims change nothing and publish nothing",
             Object.values(await statuses(cid)).every((s) => s === "Player") && passes.length === 0, { passes });

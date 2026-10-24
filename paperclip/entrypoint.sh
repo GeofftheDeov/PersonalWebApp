@@ -15,6 +15,10 @@ else
   echo "[paperclip] Existing config found at $INSTANCE_DIR/config.json"
 fi
 
+# Claude Code config dir lives on the EFS volume (see CLAUDE_CONFIG_DIR in the
+# Dockerfile); create it on first boot.
+mkdir -p "${CLAUDE_CONFIG_DIR:-/paperclip-data/claude}"
+
 # Clean up a stale embedded-Postgres pidfile left by an unclean stop (EFS data
 # survives container replacement, the old postmaster does not).
 rm -f "$INSTANCE_DIR"/db/postmaster.pid 2>/dev/null || true

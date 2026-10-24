@@ -456,6 +456,14 @@ export interface ReadUrlInput {
     key: string;
     /** How long a presigned GET works. Default 3600 seconds. Ignored behind CloudFront. */
     expiresInSeconds?: number;
+    /**
+     * Always a presigned GET, even when a CloudFront origin is configured: for
+     * objects only some people may read (Letters attachments, #104), whose URL
+     * must stop working. Banners leave it off.
+     */
+    private?: boolean;
+    /** Presigned GETs only: the Content-Disposition S3 answers with, e.g. to name a PDF. */
+    contentDisposition?: string;
 }
 
 export interface ReadUrl {
@@ -515,9 +523,13 @@ async function presignS3Put(input: PresignPutInput): Promise<PresignedPut> {
 
 async function s3ReadUrl(input: ReadUrlInput): Promise<ReadUrl> {
     const { bucket, region, cdn } = uploadsConfig();
-    if (cdn) return { url: `${cdn}/${input.key.split('/').map(encodeURIComponent).join('/')}`, expiresAt: null };
+    if (cdn && !input.private) return { url: `${cdn}/${input.key.split('/').map(encodeURIComponent).join('/')}`, expiresAt: null };
     const expiresIn = input.expiresInSeconds ?? 3600;
-    const url = await getSignedUrl(s3(region), new GetObjectCommand({ Bucket: bucket, Key: input.key }), { expiresIn });
+    const url = await getSignedUrl(
+        s3(region),
+        new GetObjectCommand({ Bucket: bucket, Key: input.key, ResponseContentDisposition: input.contentDisposition }),
+        { expiresIn },
+    );
     return { url, expiresAt: new Date(Date.now() + expiresIn * 1000) };
 }
 
@@ -551,7 +563,7 @@ export interface Integrations {
     uploads: {
         /** A URL the browser PUTs one object to directly. The caller checks type and size first. */
         presignPut(input: PresignPutInput): Promise<PresignedPut>;
-        /** A URL that reads one object: through CloudFront when configured, else a presigned GET. */
+        /** A URL that reads one object: through CloudFront when configured (unless `private`), else a presigned GET. */
         readUrl(input: ReadUrlInput): Promise<ReadUrl>;
         /** Remove an object (e.g. the banner a new one replaced). Missing objects are not an error. */
         deleteObject(key: string): Promise<void>;

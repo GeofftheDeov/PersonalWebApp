@@ -5,12 +5,13 @@ import CampaignMember from "../models/CampaignMember.js";
 import Session from "../models/Session.js";
 import Account from "../models/Account.js";
 import { auth } from "../middleware/auth.js";
-import { getAuthorizedCampaignIds } from "../utils/gameNightPlannerUtils.js";
+import { getAuthorizedCampaignIds, isCampaignGameMaster } from "../utils/gameNightPlannerUtils.js";
 import { personDisplayName } from "../utils/personUtils.js";
 import { publishMembershipChanged } from "../services/accessEvents.js";
 import { SettingsError, cleanGmTitle, updateCampaignSettings } from "../planning/campaignSettings.js";
 import { clearBanner, requestBannerUpload, setBanner, withBannerUrl } from "../planning/campaignBanner.js";
 import { bus } from "../events/index.js";
+import { query } from "../db/index.js";
 import { TorchError, passTorchPermanently } from "../planning/torch.js";
 
 /**
@@ -188,7 +189,13 @@ router.get("/:id/sessions", auth, async (req: any, res) => {
             return res.status(403).json({ error: "Unauthorized" });
         }
         const sessions = await Session.find({ campaign: req.params.id }).sort({ date: -1 });
-        res.json(sessions);
+        // How many came (#37), for the campaign's session list.
+        const { rows } = await query<{ session_id: string; n: number }>(
+            `SELECT p.session_id, count(*)::int AS n
+               FROM player_sessions p JOIN game_sessions s ON s.id = p.session_id
+              WHERE s.campaign_id = $1 GROUP BY p.session_id`, [req.params.id]);
+        const counts = new Map(rows.map((r) => [String(r.session_id), r.n]));
+        res.json(sessions.map((s: any) => ({ ...s.toJSON(), attendeeCount: counts.get(String(s._id)) ?? 0 })));
     } catch (error: any) {
         console.error("Error fetching campaign sessions:", error);
         res.status(500).json({ error: "Failed to fetch sessions", details: error.message });
@@ -204,6 +211,8 @@ router.post("/:id/join", auth, async (req: any, res) => {
         // Membership is keyed on the person, not their email. Matching on email
         // let the same person join twice under two different records.
         const existing = await CampaignMember.findOne({ campaign: req.params.id, person: req.user.id });
+        // An inactive player can't rejoin by link (#37): only a GM brings them back.
+        if (existing?.isActive === false) return res.status(403).json({ error: "You're inactive in this campaign. Ask its Game Master to bring you back." });
         if (existing) return res.status(409).json({ error: "Already a member of this campaign" });
 
         const memberFields = await memberFieldsFor(req.user, req.params.id, "Player");
@@ -226,7 +235,10 @@ router.get("/:id/members", auth, async (req: any, res) => {
         // Every member sees this for every other member, so `person` carries
         // what the pages name them by and nothing else. Populated whole, it
         // handed out each account's password hash and reset token.
-        const members = await CampaignMember.find({ campaign: req.params.id })
+        // Inactive players (#37) are shown to the GMs and admins, who can bring
+        // them back, and to nobody else.
+        const seesInactive = await isCampaignGameMaster(req.user, req.params.id);
+        const members = await CampaignMember.find({ campaign: req.params.id, ...(seesInactive ? {} : { isActive: true }) })
             .populate({ path: "person", select: "handle name firstName lastName" })
             .sort({ joinedAt: 1 });
 

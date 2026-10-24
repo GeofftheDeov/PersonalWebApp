@@ -114,7 +114,23 @@ export type ServerFrame =
     | ThreadListFrame
     | { type: "ping" }
     | TypingFrame
-    | NoticeBoardFrame;
+    | NoticeBoardFrame
+    | PresenceFrame;
+
+/**
+ * Who has this campaign's Table Talk open right now (#37), the viewer
+ * included. The whole list every time, so a client just replaces what it has.
+ */
+export interface PresenceFrame {
+    type: "presence";
+    thread: ThreadKey;
+    people: Array<{ id: string; name: string }>;
+}
+
+/** How often a task repeats its presence while someone is here (#37). */
+export const PRESENCE_REFRESH_MS = 20_000;
+/** A task not heard from in this long has nobody here any more. */
+export const PRESENCE_TTL_MS = 60_000;
 
 /**
  * A campaign's Notice Board changed (#57): a planning step, a vote, a quest,
@@ -151,6 +167,8 @@ interface Connection {
     /** True once this socket has been sent its first `ready`. */
     ready: boolean;
     threads: Set<ThreadKey>;
+    /** Campaign threads whose Table Talk this socket has open (#37); a subset of `threads`. */
+    here: Set<ThreadKey>;
     alive: boolean;
     /** Closes the socket when its token expires (#105). */
     expiry?: ReturnType<typeof setTimeout>;
@@ -337,6 +355,119 @@ export async function attachLiveChannel(
     );
     /* ---------------- end the Notice Board ---------------- */
 
+    /* ---------------- presence (#37) ---------------- */
+    // A client says when it opens and closes a campaign's Table Talk
+    // (`presence` frames). This task keeps who that is from its own sockets,
+    // publishes the set on the bus when it changes and every
+    // PRESENCE_REFRESH_MS while it isn't empty, and hears every other task's
+    // set the same way. What a thread's sockets see is the union, with any
+    // task not heard from in PRESENCE_TTL_MS left out: a task that dies
+    // takes its people with it a minute later.
+    //
+    // At desiredCount 1 (#30) the bus only ever carries this task's own sets,
+    // but going through it is what keeps a second task (or a deploy's
+    // overlap) a configuration change rather than a redesign.
+
+    /** thread → task → its people there, and when it last said so. Other tasks only. */
+    const remotePresence = new Map<ThreadKey, Map<string, { people: Array<{ id: string; name: string }>; at: number }>>();
+    /** thread → the people list last sent to its sockets, as a signature, so unchanged unions aren't resent. */
+    const presenceSent = new Map<ThreadKey, string>();
+    /** Display-name lookups in flight, one per socket. */
+    const presenceNames = new WeakMap<Connection, Promise<string>>();
+    /** Resolved display names by person id, for people with a socket on this task. */
+    const names = new Map<string, string>();
+
+    function localPresence(thread: ThreadKey): Array<{ id: string; name: string }> {
+        const people = new Map<string, string>();
+        for (const conn of byThread.get(thread) ?? []) {
+            if (conn.personId && conn.here.has(thread)) people.set(conn.personId, names.get(conn.personId) ?? "");
+        }
+        return [...people].map(([id, name]) => ({ id, name }));
+    }
+
+    function presenceOf(thread: ThreadKey, now = Date.now()): Array<{ id: string; name: string }> {
+        const people = new Map(localPresence(thread).map((p) => [p.id, p.name]));
+        for (const [task, entry] of remotePresence.get(thread) ?? []) {
+            if (now - entry.at > PRESENCE_TTL_MS) { remotePresence.get(thread)!.delete(task); continue; }
+            for (const p of entry.people) if (!people.has(p.id)) people.set(p.id, p.name);
+        }
+        if (remotePresence.get(thread)?.size === 0) remotePresence.delete(thread);
+        return [...people].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+    }
+
+    /** Sends the thread's sockets its presence if it changed since last time (or to one socket, always). */
+    function deliverPresence(thread: ThreadKey, only?: Connection) {
+        const people = presenceOf(thread);
+        const signature = people.map((p) => `${p.id}:${p.name}`).join("|");
+        const frame: PresenceFrame = { type: "presence", thread, people };
+        if (only) {
+            if (only.ws.readyState === WebSocket.OPEN) only.ws.send(JSON.stringify(frame));
+            return;
+        }
+        // Nobody was told about anyone and there's still nobody: nothing to say.
+        if ((presenceSent.get(thread) ?? "") === signature) return;
+        if (signature) presenceSent.set(thread, signature); else presenceSent.delete(thread);
+        deliver(thread, frame);
+    }
+
+    function publishPresence(thread: ThreadKey) {
+        bus.publishEphemeral("presence.changed", {
+            task: TASK, threadKey: thread, people: localPresence(thread), at: new Date().toISOString(),
+        }).catch((err) => console.error("[live] presence publish failed:", err?.message));
+    }
+
+    /** This task's set for a thread may have changed: tell the other tasks and the thread's sockets. */
+    function localPresenceChanged(thread: ThreadKey) {
+        publishPresence(thread);
+        deliverPresence(thread);
+    }
+
+    unsubscribes.push(await bus.subscribeBroadcast("presence.changed", (payload) => {
+        if (payload.task === TASK || typeof payload.threadKey !== "string") return;
+        if (!remotePresence.has(payload.threadKey)) remotePresence.set(payload.threadKey, new Map());
+        const tasks = remotePresence.get(payload.threadKey)!;
+        if (payload.people?.length) tasks.set(payload.task, { people: payload.people, at: Date.parse(payload.at) || Date.now() });
+        else tasks.delete(payload.task);
+        deliverPresence(payload.threadKey);
+    }));
+
+    async function onPresence(conn: Connection, thread: unknown, here: unknown) {
+        const personId = conn.personId;
+        // Campaign threads this socket holds only: a DM has no Table Talk to be in.
+        if (!personId || typeof thread !== "string" || !thread.startsWith("campaign:") || !conn.threads.has(thread)) return;
+        if (here !== true) {
+            if (conn.here.delete(thread)) localPresenceChanged(thread);
+            return;
+        }
+        if (!names.has(personId)) {
+            let lookup = presenceNames.get(conn);
+            if (!lookup) {
+                lookup = findPersonById(personId, "name firstName lastName handle email").then((p) => personDisplayName(p?.doc));
+                presenceNames.set(conn, lookup);
+            }
+            names.set(personId, await lookup.catch(() => "Unknown Player"));
+        }
+        // The thread may have gone while the name was looked up.
+        if (!conn.threads.has(thread)) return;
+        const added = !conn.here.has(thread);
+        conn.here.add(thread);
+        if (added) localPresenceChanged(thread);
+        deliverPresence(thread, conn);   // whoever just arrived needs the list as it stands
+    }
+
+    // Repeat this task's sets so the other tasks don't expire them, and drop
+    // other tasks that have gone quiet.
+    const presenceTimer = setInterval(() => {
+        const threads = new Set<ThreadKey>();
+        for (const conn of connections) for (const t of conn.here) threads.add(t);
+        for (const t of threads) publishPresence(t);
+        for (const t of [...remotePresence.keys()]) deliverPresence(t);
+        // Names of people with no socket left on this task.
+        for (const id of [...names.keys()]) if (!byPerson.has(id)) names.delete(id);
+    }, PRESENCE_REFRESH_MS);
+    presenceTimer.unref?.();
+    /* ---------------- end presence ---------------- */
+
     /* ---------------------------------------------------------------- */
     /* The thread list (#102): thread.updated and thread.read            */
     /* ---------------------------------------------------------------- */
@@ -408,6 +539,8 @@ export async function attachLiveChannel(
         const set = byThread.get(key);
         set?.delete(conn);
         if (set && set.size === 0) byThread.delete(key);
+        // Losing a thread (leaving, being deactivated, disconnecting) leaves its Table Talk too.
+        if (conn.here.delete(key)) localPresenceChanged(key);
     }
 
     function forget(conn: Connection) {
@@ -604,7 +737,7 @@ export async function attachLiveChannel(
     }
 
     wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
-        const conn: Connection = { ws, personId: null, ready: false, threads: new Set(), alive: true };
+        const conn: Connection = { ws, personId: null, ready: false, threads: new Set(), here: new Set(), alive: true };
         connections.add(conn);
         let authStarted = false;
 
@@ -671,6 +804,9 @@ export async function attachLiveChannel(
         if (frame?.type === "typing") {
             onTyping(conn, frame.thread).catch((err) => console.error("[live] typing failed:", err?.message));
         }
+        if (frame?.type === "presence") {
+            onPresence(conn, frame.thread, frame.here).catch((err) => console.error("[live] presence failed:", err?.message));
+        }
     }
 
     const heartbeat = setInterval(() => {
@@ -707,6 +843,7 @@ export async function attachLiveChannel(
     return {
         async close() {
             clearInterval(heartbeat);
+            clearInterval(presenceTimer);
             for (const s of serverList) s.off("upgrade", onUpgrade);
             for (const unsubscribe of unsubscribes) unsubscribe();
             for (const conn of connections) conn.ws.close(1001, "server shutting down");

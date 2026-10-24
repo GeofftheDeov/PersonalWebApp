@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
-import { Map, ArrowLeft, Calendar, Book, Users, Shield, ChevronRight, Crown, Save, X, Pencil, UserPlus, Check, Copy, Link2, Plus, Wifi, Flame, ImagePlus, Sword, UserCheck, UserMinus, LogOut } from 'lucide-react';
+import { Map, ArrowLeft, Calendar, Book, Users, Shield, ChevronRight, Crown, Save, X, Pencil, UserPlus, Check, Copy, Link2, Plus, Wifi, Flame, ImagePlus, Sword, UserCheck, UserMinus, LogOut, Moon } from 'lucide-react';
 import CampaignChat from '@/components/CampaignChat';
 import CampaignCharacters from '@/components/CampaignCharacters';
 import { memberName, type MemberPerson } from '@/lib/memberName';
@@ -657,32 +657,37 @@ export default function CampaignDetailPage() {
                                             </div>
                                         </>
                                     );
-                                    const cls = "flex items-center gap-3 p-3 border-4 border-black bg-white dark:bg-slate-800 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]";
-                                    const card = m.playerId ? (
-                                        <Link href={`/players/${m.playerId}`} className={`${cls} flex-grow min-w-0 hover:-translate-y-0.5 transition-transform`} title="View profile">
-                                            {row}
-                                        </Link>
-                                    ) : (
-                                        <div className={`${cls} flex-grow min-w-0`}>{row}</div>
-                                    );
+                                    // The GM's actions on this player live inside their card, beside
+                                    // the profile link (a button can't sit inside the link itself).
+                                    // A GM can't be made inactive: pass the torch first (#37).
+                                    const canDeactivate = isGM && m.status !== 'Game Master';
+                                    const actionCls = "p-1 border-2 border-black bg-white dark:bg-slate-700 disabled:opacity-40 transition-colors";
                                     return (
-                                        <div key={m._id}>
-                                            <div className="flex items-stretch gap-2">
-                                                {card}
-                                                {canRemove(m) && (
-                                                    <button type="button" onClick={() => handleRemoveMember(m, false)} disabled={removingId !== null}
-                                                        aria-label={`Remove ${memberName(m)}`} title="Remove from campaign"
-                                                        className="px-2 border-4 border-black bg-white dark:bg-slate-800 text-red-600 hover:bg-red-600 hover:text-white disabled:opacity-40 transition-colors shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] shrink-0">
-                                                        <UserMinus className="w-4 h-4" />
-                                                    </button>
-                                                )}
-                                            </div>
-                                            {/* A GM can't be made inactive: pass the torch first (#37). */}
-                                            {isGM && m.status !== 'Game Master' && (
-                                                <button type="button" onClick={() => setMemberActive(m, false)} disabled={activityBusy === m._id}
-                                                    className="mt-1 font-permanent text-[10px] uppercase text-zinc-500 hover:text-red-600 hover:underline disabled:opacity-50">
-                                                    Make inactive
-                                                </button>
+                                        <div key={m._id} className="flex items-center gap-2 p-3 border-4 border-black bg-white dark:bg-slate-800 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] transition-transform has-[a:hover]:-translate-y-0.5">
+                                            {m.playerId ? (
+                                                <Link href={`/players/${m.playerId}`} className="flex items-center gap-3 flex-grow min-w-0" title="View profile">
+                                                    {row}
+                                                </Link>
+                                            ) : (
+                                                <div className="flex items-center gap-3 flex-grow min-w-0">{row}</div>
+                                            )}
+                                            {(canDeactivate || canRemove(m)) && (
+                                                <div className="flex items-center gap-1 shrink-0">
+                                                    {canDeactivate && (
+                                                        <button type="button" onClick={() => setMemberActive(m, false)} disabled={activityBusy === m._id}
+                                                            aria-label={`Make ${memberName(m)} inactive`} title="Make inactive"
+                                                            className={`${actionCls} text-zinc-600 dark:text-zinc-200 hover:bg-zinc-600 hover:text-white`}>
+                                                            <Moon className="w-3.5 h-3.5" />
+                                                        </button>
+                                                    )}
+                                                    {canRemove(m) && (
+                                                        <button type="button" onClick={() => handleRemoveMember(m, false)} disabled={removingId !== null}
+                                                            aria-label={`Remove ${memberName(m)}`} title="Remove from campaign"
+                                                            className={`${actionCls} text-red-600 hover:bg-red-600 hover:text-white`}>
+                                                            <UserMinus className="w-3.5 h-3.5" />
+                                                        </button>
+                                                    )}
+                                                </div>
                                             )}
                                         </div>
                                     );

@@ -2,7 +2,9 @@
  * Passing the torch permanently (#57, #89): another party member becomes the
  * campaign's Game Master and the one passing it becomes a Player. Their
  * "Game Master" membership statuses swap; ownership doesn't move, so the
- * owner keeps the campaign's settings.
+ * owner keeps the campaign's settings. The exception is an admin-managed
+ * campaign (no owner): its new Game Master becomes its owner, as the first
+ * owners were backfilled from each campaign's earliest Game Master.
  *
  * The one-session pass (a session's GM override) lives with the planner,
  * which owns per-session Game Master control.
@@ -49,8 +51,8 @@ export async function passTorchPermanently(actorId: string, campaignId: string, 
     if (!isUuid(campaignId)) throw new TorchError(404, "Campaign not found.");
 
     const result = await withTransaction(async (db) => {
-        // Lock the campaign's memberships so two passes can't interleave.
-        const { rows: [c] } = await db.query(`SELECT id, title, gm_title, owner_id FROM campaigns WHERE id = $1`, [campaignId]);
+        // Lock the campaign and its memberships so two passes can't interleave.
+        const { rows: [c] } = await db.query(`SELECT id, title, gm_title, owner_id FROM campaigns WHERE id = $1 FOR UPDATE`, [campaignId]);
         if (!c) throw new TorchError(404, "Campaign not found.");
         const members = await lockParty(db, campaignId);
         const { rows: [acct] } = await db.query(`SELECT app_role FROM accounts WHERE id = $1`, [actorId]);
@@ -80,11 +82,14 @@ export async function passTorchPermanently(actorId: string, campaignId: string, 
         if (from) {
             await db.query(`UPDATE campaign_members SET status = 'Player' WHERE campaign_id = $1 AND person_id = $2`, [campaignId, from]);
         }
+        // An admin-managed campaign is owned by whoever first holds the torch.
+        const owner: string = c.owner_id ?? to;
+        if (!c.owner_id) await db.query(`UPDATE campaigns SET owner_id = $2 WHERE id = $1`, [campaignId, owner]);
         const gameMasterIds = [...gms.filter((id) => id !== from), to];
-        return { campaign: c, from, to: to as string, gameMasterIds };
+        return { campaign: c, from, to: to as string, gameMasterIds, owner };
     });
 
-    const { campaign: c, from, to } = result;
+    const { campaign: c, from, to, owner } = result;
     // After the commit, never inside it: a failing side effect can't undo the pass.
     await bus.publish("campaign.torch_passed", {
         campaignId, scope: "campaign", sessionId: null, byId: actorId, fromId: from, toId: to,
@@ -94,7 +99,8 @@ export async function passTorchPermanently(actorId: string, campaignId: string, 
         const name = (id: string | null) => party.find((p) => p.id === id)?.name ?? "someone";
         await notify(to, {
             type: "system", title: `You're the ${c.gm_title} of ${c.title} now`,
-            body: from ? `${name(from)} passed you the torch.` : "The torch has been passed to you.",
+            body: (from ? `${name(from)} passed you the torch.` : "The torch has been passed to you.") +
+                (c.owner_id ? "" : " You own the campaign now, too."),
             link: `/game-night/campaigns/${campaignId}`, meta: { campaignId },
         });
         await postTableTalk(campaignId, `**The torch has passed.** ${name(to)} is the ${c.gm_title} now` +
@@ -102,13 +108,14 @@ export async function passTorchPermanently(actorId: string, campaignId: string, 
     } catch (err: any) {
         console.error("[torch] side effect failed:", err.message);
     }
-    return { campaignId, gameMasterIds: result.gameMasterIds, owner: c.owner_id };
+    return { campaignId, gameMasterIds: result.gameMasterIds, owner };
 }
 
 /**
  * Claiming the torch: in an admin-managed campaign (no owner) that has no Game
- * Master, an active party member takes the role themselves. Nobody steps down,
- * since nobody held it. Once someone does, it moves only by a pass.
+ * Master, an active party member takes the role themselves, and the campaign
+ * with it: they become its owner. Nobody steps down, since nobody held it.
+ * Once someone does, it moves only by a pass.
  */
 export async function claimTorch(actorId: string, campaignId: string): Promise<TorchPassed> {
     if (!isUuid(campaignId)) throw new TorchError(404, "Campaign not found.");
@@ -116,19 +123,22 @@ export async function claimTorch(actorId: string, campaignId: string): Promise<T
     const c = await withTransaction(async (db) => {
         // Locked as for a pass, so two players claiming at once can't both win:
         // the second waits, then sees the first's Game Master row.
-        const { rows: [c] } = await db.query(`SELECT id, title, gm_title, owner_id FROM campaigns WHERE id = $1`, [campaignId]);
+        const { rows: [c] } = await db.query(`SELECT id, title, gm_title, owner_id FROM campaigns WHERE id = $1 FOR UPDATE`, [campaignId]);
         if (!c) throw new TorchError(404, "Campaign not found.");
         const members = await lockParty(db, campaignId);
 
-        if (c.owner_id) throw new TorchError(403, `Only an admin-managed campaign's torch can be claimed. Ask the ${c.gm_title} to pass it.`);
         if (!members.some((m) => m.person_id === actorId)) throw new TorchError(403, "Join the party to claim the torch.");
+        // Before the owner check: a claimed campaign has an owner too, and the
+        // useful answer to a second claim is who holds the torch.
         if (members.some((m) => m.status === "Game Master")) {
             throw new TorchError(409, members.some((m) => m.person_id === actorId && m.status === "Game Master")
                 ? `You're already the ${c.gm_title}.`
                 : `This campaign already has a ${c.gm_title}. Only they or an admin can pass the torch.`);
         }
+        if (c.owner_id) throw new TorchError(403, `Only an admin-managed campaign's torch can be claimed. Ask an admin to pass it.`);
 
         await db.query(`UPDATE campaign_members SET status = 'Game Master' WHERE campaign_id = $1 AND person_id = $2`, [campaignId, actorId]);
+        await db.query(`UPDATE campaigns SET owner_id = $2 WHERE id = $1`, [campaignId, actorId]);
         return c;
     });
 
@@ -143,5 +153,5 @@ export async function claimTorch(actorId: string, campaignId: string): Promise<T
     } catch (err: any) {
         console.error("[torch] side effect failed:", err.message);
     }
-    return { campaignId, gameMasterIds: [actorId], owner: null };
+    return { campaignId, gameMasterIds: [actorId], owner: actorId };
 }

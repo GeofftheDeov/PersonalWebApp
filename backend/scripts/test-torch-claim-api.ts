@@ -1,7 +1,8 @@
 /**
  * Claiming the torch, and an admin assigning it, in an admin-managed campaign
- * (no owner) that has no Game Master. The HTTP API, driven with real JWTs
- * against a throwaway database loaded from db/schema.sql.
+ * (no owner) that has no Game Master: either way the new Game Master becomes
+ * its owner. The HTTP API, driven with real JWTs against a throwaway database
+ * loaded from db/schema.sql, then migration 0007's backfill of the same rule.
  *
  *   POST /api/campaigns/:id/torch/claim    a party member, when nobody holds it
  *   POST /api/campaigns/:id/torch { to }   an admin, with nobody stepping down
@@ -11,6 +12,9 @@
 import express from "express";
 import type { AddressInfo } from "net";
 import crypto from "crypto";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import jwt from "jsonwebtoken";
 import pool from "../db/index.js";
 import { bus } from "../events/index.js";
@@ -66,6 +70,7 @@ async function main() {
     };
     const talk = async (cid: string) => (await pool.query(
         `SELECT body FROM messages WHERE campaign_id = $1 AND sender_id = 'system' ORDER BY created_at`, [cid])).rows.map((r) => r.body);
+    const owner = async (cid: string) => (await pool.query(`SELECT owner_id FROM campaigns WHERE id = $1`, [cid])).rows[0].owner_id;
     // A campaign with p1..p3 as players and no GM; owned by `owner`, or admin-managed when null.
     const campaign = async (owner: string | null) => {
         const { rows: [c] } = await pool.query(
@@ -104,8 +109,9 @@ async function main() {
         const after = await statuses(cid);
         check("a player claims it: they're the GM, and nobody else changes",
             claimed.status === 200 && after.p1 === "Game Master" && after.p2 === "Player", { claimed, after });
-        check("the response names them and no owner",
-            JSON.stringify(claimed.json?.gameMasterIds) === JSON.stringify([who.p1.id]) && claimed.json?.owner === null, claimed);
+        check("they own the campaign now, and the response says so",
+            JSON.stringify(claimed.json?.gameMasterIds) === JSON.stringify([who.p1.id]) && claimed.json?.owner === who.p1.id &&
+                (await owner(cid)) === who.p1.id, claimed);
         await settle();
         check("the claim publishes campaign.torch_passed from nobody",
             passes.length === 1 && passes[0].scope === "campaign" && passes[0].byId === who.p1.id &&
@@ -120,6 +126,7 @@ async function main() {
         check("the holder can now pass it on as usual",
             (await call("POST", `/api/campaigns/${cid}/torch`, "p1", { to: who.p2.id })).status === 200 &&
                 (await statuses(cid)).p2 === "Game Master");
+        check("...and, the campaign being theirs now, they stay its owner", (await owner(cid)) === who.p1.id);
 
         const racing = await campaign(null);
         const [a, b] = await Promise.all([claim("p1", racing), claim("p2", racing)]);
@@ -140,7 +147,26 @@ async function main() {
         check("an admin outside the party passes it to a player, with nobody stepping down",
             byAdmin.status === 200 && afterAdmin.p2 === "Game Master" && afterAdmin.p1 === "Player" && afterAdmin.p3 === "Player",
             { byAdmin, afterAdmin });
+        check("...who becomes its owner", byAdmin.json?.owner === who.p2.id && (await owner(assigned)) === who.p2.id, byAdmin);
         check("...after which it can't be claimed (409)", (await claim("p1", assigned)).status === 409);
+
+        console.log("\nbackfilling owners (0007)\n");
+
+        // Ownerless campaigns that already have a Game Master, from before this release.
+        const legacy = await campaign(null);
+        await pool.query(`UPDATE campaign_members SET status = 'Game Master', joined_at = $3 WHERE campaign_id = $1 AND person_id = $2`,
+            [legacy, who.p3.id, new Date(Date.UTC(2026, 0, 2))]);
+        await pool.query(`UPDATE campaign_members SET status = 'Game Master', joined_at = $3 WHERE campaign_id = $1 AND person_id = $2`,
+            [legacy, who.p2.id, new Date(Date.UTC(2026, 0, 1))]);
+        const unled = await campaign(null);
+        const keeps = await campaign("p1");
+        await pool.query(`UPDATE campaign_members SET status = 'Game Master' WHERE campaign_id = $1 AND person_id = $2`, [keeps, who.p3.id]);
+        const migration = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)),
+            "../db/migrations/0007__owner-for-admin-managed-gms.sql"), "utf8");
+        await pool.query(migration);
+        check("an ownerless campaign with a GM is owned by its earliest GM", (await owner(legacy)) === who.p2.id);
+        check("one with no GM stays admin-managed", (await owner(unled)) === null);
+        check("one that has an owner keeps them", (await owner(keeps)) === who.p1.id);
     } finally {
         const ids = Object.values(who).map((p) => p.id);
         if (cids.length) await pool.query(`DELETE FROM campaigns WHERE id = ANY($1)`, [cids]);

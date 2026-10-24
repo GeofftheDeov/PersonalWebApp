@@ -166,6 +166,14 @@ export default function CampaignDetailPage() {
     const boardKey = campaign ? `${gmTitleOf(campaign)}|${gmIds}` : '';
     const board = useNoticeBoard(campaign ? id : null, { onSessionsChanged: reloadSessions, refreshKey: boardKey });
 
+    // A pass or claim can give an admin-managed campaign its owner: show it, and
+    // the owner's settings if that's the viewer.
+    const setOwner = (owner: string | null) => {
+        setCampaign((c: any) => ({ ...c, owner }));
+        const meId = JSON.parse(localStorage.getItem('user') || 'null')?.id;
+        if (owner && owner === meId) setIsOwner(true);
+    };
+
     const handlePassTorch = async (e: React.FormEvent) => {
         e.preventDefault();
         const target = members.find(m => m.playerId === torchTo);
@@ -178,7 +186,9 @@ export default function CampaignDetailPage() {
         const from = iAmGm ? null : gms.length === 1 ? gms[0] : gms.find(m => m.playerId === torchFrom);
         if (!iAmGm && gms.length > 1 && !from) { setTorchError(`Choose which ${title} steps down.`); return; }
         const stepsDown = iAmGm ? 'you become a player' : from ? `${memberName(from)} becomes a player` : 'no one steps down';
-        if (!window.confirm(`Pass the torch to ${memberName(target)}? They become the ${title} and ${stepsDown}. Ownership doesn't change.`)) return;
+        // An admin-managed campaign is owned by whoever first holds the torch.
+        const ownership = campaign.owner ? "Ownership doesn't change." : 'They become its owner, too.';
+        if (!window.confirm(`Pass the torch to ${memberName(target)}? They become the ${title} and ${stepsDown}. ${ownership}`)) return;
         setTorchBusy(true);
         setTorchError(null);
         try {
@@ -189,6 +199,7 @@ export default function CampaignDetailPage() {
             });
             if (!res.ok) { setTorchError((await res.json().catch(() => ({}))).error || 'Could not pass the torch.'); return; }
             setTorchTo(null);
+            setOwner((await res.json()).owner);
             await reloadMembers();
         } catch {
             setTorchError('Could not reach the server.');
@@ -200,7 +211,7 @@ export default function CampaignDetailPage() {
     // Claiming the torch: an admin-managed campaign with no GM lets a player take it.
     const handleClaimTorch = async () => {
         const title = gmTitleOf(campaign);
-        if (!window.confirm(`Claim the torch? You become the ${title} of ${campaign.title}, and plan its sessions.`)) return;
+        if (!window.confirm(`Claim the torch? You become the ${title} and owner of ${campaign.title}, and plan its sessions.`)) return;
         setTorchBusy(true);
         setTorchError(null);
         try {
@@ -209,6 +220,7 @@ export default function CampaignDetailPage() {
                 headers: { Authorization: `Bearer ${token()}` },
             });
             if (!res.ok) { setTorchError((await res.json().catch(() => ({}))).error || 'Could not claim the torch.'); return; }
+            setOwner((await res.json()).owner);
             await reloadMembers();
         } catch {
             setTorchError('Could not reach the server.');

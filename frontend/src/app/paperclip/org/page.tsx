@@ -22,7 +22,7 @@ interface Agent {
 }
 
 // GET /api/paperclip/org returns Paperclip's lean NESTED tree (verified against
-// paperclipai 2026.707.0): [{ id, name, role, status, reports: [...] }], with
+// paperclipai 2026.707.0, unchanged in 2026.1005.0): [{ id, name, role, status, reports: [...] }], with
 // terminated agents already excluded. Titles, budgets and capabilities only
 // come from /agents, so the two responses are merged by id.
 interface OrgApiNode {
@@ -312,7 +312,7 @@ export default function OrgChartPage() {
     // The type-based pre-check that used to live here read `user.type` from
     // localStorage, which after the account merge is "Account" for everybody --
     // it would have bounced every visitor, including the one who has access.
-    // The server's paperclipOnly gate decides, and the 403 below acts on it.
+    // The server's requirePaperclipAccess gate decides, and the 403 below acts on it.
 
     try {
       const headers = { Authorization: `Bearer ${t}` };

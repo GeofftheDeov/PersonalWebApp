@@ -17,6 +17,9 @@ const Session = defineModel({
     status: "status", planningStage: "planning_stage", foodMode: "food_mode",
     foodOwner: { col: "food_owner_id", type: "uuid" }, host: { col: "host_id", type: "uuid" },
     venue: { col: "venue_id", type: "uuid" }, gmOverride: { col: "gm_override_id", type: "uuid" },
+    // Attendance (#37): written only by planning/attendance.ts.
+    attendanceConfirmedAt: { col: "attendance_confirmed_at", type: "date" },
+    attendanceConfirmedBy: { col: "attendance_confirmed_by", type: "uuid" },
   },
   refs: { campaign: () => Campaign },
 });

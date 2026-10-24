@@ -128,7 +128,7 @@ async function campaignEntries(me: string, campaignIds: string[]): Promise<Threa
     const { rows } = await query<{ id: string; title: string; party: number; last_at: Date | null; unread: number }>(
         `SELECT c.id, c.title,
                 (SELECT count(DISTINCT m.person_id) FROM campaign_members m
-                  WHERE m.campaign_id = c.id AND m.person_id IS NOT NULL)::int AS party,
+                  WHERE m.campaign_id = c.id AND m.person_id IS NOT NULL AND m.is_active)::int AS party,
                 last.at AS last_at,
                 (SELECT count(*) FROM messages msg
                   WHERE msg.campaign_id = c.id AND msg.sender_id <> $2

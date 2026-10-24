@@ -41,6 +41,8 @@ const Account = defineModel({
     discordId: "discord_id", discordHandle: "discord_handle",
     friends: { col: "friends", type: "uuid[]" },
     isActive: "is_active",
+    // Paperclip identity (#36, plan §4.6): services/paperclipIdentity.ts.
+    paperclipUserId: "paperclip_user_id", paperclipRole: "paperclip_role",
 
     phone: "phone", company: "company", industry: "industry",
     website: "website", address: "address", leadStatus: "lead_status",

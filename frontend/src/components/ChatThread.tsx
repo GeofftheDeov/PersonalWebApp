@@ -6,6 +6,7 @@ import { threadKeyFor } from '../lib/useThreads';
 import { myAccountId, useThread } from '../lib/useThread';
 import { useThreadScroll } from '../lib/useThreadScroll';
 import { useTyping } from '../lib/realtime/useTyping';
+import { AttachButton, DraftAttachments, MessageAttachments, useAttachmentDraft } from './MessageAttachments';
 
 export interface ChatChannel {
     kind: 'campaign' | 'dm';
@@ -31,6 +32,7 @@ export default function ChatThread({ channel, placeholder, onLatestMessage }: {
     onLatestMessage?: (messageId: string) => void;
 }) {
     const [draft, setDraft] = useState('');
+    const files = useAttachmentDraft();
     const scrollRef = useRef<HTMLDivElement>(null);
     const myId = myAccountId();
 
@@ -49,7 +51,10 @@ export default function ChatThread({ channel, placeholder, onLatestMessage }: {
     const handleSend = (e: React.FormEvent) => {
         e.preventDefault();
         // The message stays in the log (sending, then sent or failed), so the box clears at once.
-        if (thread.send(draft)) setDraft('');
+        if (thread.send(draft, files.files)) {
+            setDraft('');
+            files.clear();
+        }
     };
 
     const fmtTime = (iso: string) =>
@@ -87,7 +92,8 @@ export default function ChatThread({ channel, placeholder, onLatestMessage }: {
                                         {m.state === 'sending' ? 'SENDING…' : fmtTime(m.createdAt)}
                                     </span>
                                 </div>
-                                <p className="text-sm whitespace-pre-wrap break-words">{m.body}</p>
+                                {m.body && <p className="text-sm whitespace-pre-wrap break-words">{m.body}</p>}
+                                <MessageAttachments attachments={m.attachments} files={m.state === 'sent' ? undefined : m.files} tone="dark" />
                                 {failed && (
                                     <div className="mt-1 flex items-center gap-2 text-[10px] font-black uppercase">
                                         <span className="text-red-400">{m.error || 'Not sent'}</span>
@@ -101,7 +107,13 @@ export default function ChatThread({ channel, placeholder, onLatestMessage }: {
                 })}
             </div>
 
+            {(files.files.length > 0 || files.error) && (
+                <div className="border-4 border-t-0 border-black bg-zinc-800">
+                    <DraftAttachments draft={files} tone="dark" />
+                </div>
+            )}
             <form onSubmit={handleSend} className="flex border-4 border-t-0 border-black">
+                <AttachButton draft={files} className="px-3 bg-zinc-700 text-white border-r-4 border-black hover:bg-yellow-400 hover:text-black transition-colors" />
                 <input
                     value={draft}
                     onChange={e => { setDraft(e.target.value); if (e.target.value.trim()) typing(); }}
@@ -111,7 +123,7 @@ export default function ChatThread({ channel, placeholder, onLatestMessage }: {
                 />
                 <button
                     type="submit"
-                    disabled={!draft.trim()}
+                    disabled={!draft.trim() && !files.files.length}
                     className="px-4 bg-yellow-400 text-black border-l-4 border-black font-black uppercase text-xs flex items-center gap-1.5 hover:bg-white transition-colors disabled:opacity-50 disabled:hover:bg-yellow-400"
                 >
                     <Send className="w-4 h-4" /> SEND

@@ -7,8 +7,10 @@ import CampaignInvite from "../models/CampaignInvite.js";
 import Campaign from "../models/Campaign.js";
 import { getAuthorizedCampaignIds } from "../utils/gameNightPlannerUtils.js";
 import { findPersonById, toPublicPerson } from "../utils/personUtils.js";
+import { resolvePaperclipIdentity } from "../services/paperclipIdentity.js";
 import bcrypt from "bcryptjs";
 import { signJwt } from "../utils/jwt.js";
+import { clearSessionCookie, setSessionCookie } from "../utils/sessionCookie.js";
 import crypto from "crypto";
 import multer from "multer";
 import path from "path";
@@ -63,6 +65,16 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
  */
 const signToken = (person: any) =>
     signJwt({ id: person._id, email: person.email }, { expiresIn: "1h" });
+
+/**
+ * Sign a token, put it in this environment's session cookie (#69), and return
+ * it for the response body, which bearer clients keep reading.
+ */
+const issueSession = (res: express.Response, person: any) => {
+    const token = signToken(person);
+    setSessionCookie(res, token);
+    return token;
+};
 
 /** The user object the client stores. Capability comes from explicit columns. */
 const publicUser = (person: any) => ({
@@ -199,7 +211,7 @@ router.post("/login", async (req, res) => {
 
         await bindPendingInvites(user);
 
-        res.json({ token: signToken(user), user: publicUser(user) });
+        res.json({ token: issueSession(res, user), user: publicUser(user) });
     } catch (error: any) {
         console.error("Login error:", error);
         res.status(500).json({ error: "Login failed" });
@@ -258,11 +270,21 @@ router.post("/google-login", async (req, res) => {
 
         await bindPendingInvites(user);
 
-        res.json({ token: signToken(user), user: publicUser(user) });
+        res.json({ token: issueSession(res, user), user: publicUser(user) });
     } catch (error: any) {
         console.error("Google login error:", error);
         res.status(500).json({ error: "Google login failed" });
     }
+});
+
+/**
+ * Log out (#69): clear the session cookie on the parent domain, so both sites
+ * are logged out. No auth required, so an expired session can still clear it,
+ * and nothing here writes as the user, so it needs no CSRF header either.
+ */
+router.post("/logout", (_req, res) => {
+    clearSessionCookie(res);
+    res.status(204).end();
 });
 
 router.get("/profile", auth, async (req: any, res) => {
@@ -295,6 +317,9 @@ router.get("/me/capabilities", auth, async (req: any, res) => {
             recordType: user.sfObject ?? null,
             handle: user.handle ?? null,
             profilePicture: user.profilePicture ?? null,
+            // The same test as requirePaperclipAccess (#36), so the nav hides
+            // the Paperclip menu rather than offering pages that 403.
+            paperclip: user.appRole === "admin" || Boolean(await resolvePaperclipIdentity(String(req.user.id))),
         });
     } catch (err) {
         res.status(500).json({ error: "Failed to fetch capabilities" });
@@ -318,6 +343,10 @@ router.put("/profile", auth, async (req: any, res) => {
         delete updateData.isVerified;
         delete updateData.sfObject;
         delete updateData.sfID;
+        // Paperclip access follows these (#36): linked by email or by an admin, never by yourself.
+        delete updateData.paperclipUserId;
+        delete updateData.paperclipRole;
+        delete updateData.isActive;
 
         // Leads used to keep firstName/lastName while the other three kept
         // `name`, so a rename had to know which table it was in. accounts has
@@ -365,7 +394,8 @@ router.get("/players/:id", auth, async (req: any, res) => {
 
         // Campaign-mate check: any campaign both can see. null = admin (sees all).
         const viewerCampaigns = await getAuthorizedCampaignIds(req.user);
-        const targetMemberships = await CampaignMember.find({ person: targetId })
+        // A player deactivated in a campaign is no longer a campaign-mate there (#31).
+        const targetMemberships = await CampaignMember.find({ person: targetId, isActive: true })
             .select("campaign status");
         const targetCampaignIds = [...new Set(targetMemberships.map((m: any) => String(m.campaign)))];
         const sharedIds = viewerCampaigns === null

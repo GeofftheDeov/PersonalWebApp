@@ -188,7 +188,7 @@ function cleanNightOptions(raw: unknown, now: Date) {
 }
 
 const isPartyMember = async (db: Db, campaignId: string, personId: unknown) => isUuid(personId) && Boolean((await db.query(
-    `SELECT 1 FROM campaign_members WHERE campaign_id = $1 AND person_id = $2 LIMIT 1`, [campaignId, personId])).rowCount);
+    `SELECT 1 FROM campaign_members WHERE campaign_id = $1 AND person_id = $2 AND is_active LIMIT 1`, [campaignId, personId])).rowCount);
 
 /** A venue re-shortlist: 1 to MAX_VENUE_SHORTLIST of the campaign's saved venues. */
 async function cleanVenueIds(db: Db, campaignId: string, raw: unknown): Promise<string[]> {
@@ -953,7 +953,7 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
                 }
                 const to = body?.to;
                 const { rows: seats } = isUuid(String(to)) ? await db.query(
-                    `SELECT status FROM campaign_members WHERE campaign_id = $1 AND person_id = $2`, [s.campaign_id, to]) : { rows: [] };
+                    `SELECT status FROM campaign_members WHERE campaign_id = $1 AND person_id = $2 AND is_active`, [s.campaign_id, to]) : { rows: [] };
                 if (!seats.length) throw new PlanningError(400, "Pass the torch to someone in the party.");
                 if (seats.some((m) => m.status === "Game Master")) throw new PlanningError(400, `They're already the ${s.gm_title}.`);
                 if (s.gm_override_id === to) return;

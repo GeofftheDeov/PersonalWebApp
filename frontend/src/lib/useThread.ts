@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveThread, type LiveMessage, type ThreadStatus } from './realtime/useLiveThread';
+import type { MessageAttachment } from './realtime/liveClient';
+import { uploadAttachment } from './attachments';
 
 /**
  * One open thread (#101, spec #58), headless: history paging, the live
@@ -10,7 +12,7 @@ import { useLiveThread, type LiveMessage, type ThreadStatus } from './realtime/u
  *
  *   const t = useThread(threadKey, { markRead });
  *   t.messages   // oldest first; your unsent messages last, `sending` or `failed`
- *   t.loadOlder()  t.send(body)  t.resend(key)  t.discard(key)
+ *   t.loadOlder()  t.send(body, files?)  t.resend(key)  t.discard(key)
  *
  * - History is GET /api/threads/:threadKey/messages, newest first, paged with
  *   `before` = the oldest message id held. The latest page loads on open and
@@ -23,6 +25,12 @@ import { useLiveThread, type LiveMessage, type ThreadStatus } from './realtime/u
  *   arrives while the thread is open. Pass `markRead` (e.g. useThreads'
  *   markRead, which also clears the list's count at once); without it the hook
  *   posts the read position itself.
+ * - Attachments (#104): `send(body, files)` uploads each file straight to S3
+ *   (lib/attachments.ts), then sends the message naming their keys. A message
+ *   can be files alone. While uploading the entry shows the files by name; a
+ *   failed upload fails the send like any other error, and a resend only
+ *   uploads what hasn't gone up yet. Check files with attachmentProblem when
+ *   they're picked, so a bad one never gets this far.
  * - `onSent` runs once per send the server confirms, after `send` or `resend`;
  *   never for a failed one.
  */
@@ -36,6 +44,12 @@ export interface ThreadEntry {
     body: string;
     createdAt: string;
     eventId?: string;
+    /** Stored attachments, each with a read URL (#104). */
+    attachments?: MessageAttachment[];
+    /** Your unsent files, in order (#104). */
+    files?: File[];
+    /** Keys of `files` already uploaded, by index, so a resend doesn't upload them again. */
+    uploadedKeys?: (string | undefined)[];
     state: 'sent' | 'sending' | 'failed';
     /** Why a failed send failed. */
     error?: string;
@@ -75,6 +89,7 @@ const messagesUrl =(threadKey: string) => `/api/threads/${encodeURIComponent(thr
 const fromServer = (m: LiveMessage, key = m.id): ThreadEntry => ({
     key, id: m.id, sender: m.sender, body: m.body, createdAt: m.createdAt,
     ...(m.eventId ? { eventId: m.eventId } : {}),
+    ...(m.attachments?.length ? { attachments: m.attachments } : {}),
     state: 'sent',
 });
 
@@ -126,7 +141,8 @@ export function useThread(threadKey: string | null, { pageSize = 50, markRead, o
             const waiting = pendingRef.current.filter((p) => p.state === 'sending');
             for (const m of msgs) {
                 if (m.sender?.id !== me || sentRef.current.has(m.id)) continue;
-                const i = waiting.findIndex((p) => p.body === m.body);
+                const i = waiting.findIndex((p) =>
+                    p.body === m.body && (p.files?.length ?? 0) === (m.attachments?.length ?? 0));
                 if (i >= 0) absorbed.set(m.id, waiting.splice(i, 1)[0].key);
             }
         }
@@ -258,11 +274,32 @@ export function useThread(threadKey: string | null, { pageSize = 50, markRead, o
                 ? prev.filter((p) => p.key !== entry.key)
                 : prev.map((p) => (p.key === entry.key ? { ...p, ...patch } : p))));
         };
+        // Upload what hasn't gone up yet (#104). A failure here fails the send.
+        const files = entry.files ?? [];
+        const keys = [...(entry.uploadedKeys ?? [])];
+        try {
+            for (let i = 0; i < files.length; i++) {
+                if (keys[i]) continue;
+                keys[i] = await uploadAttachment(threadKey, files[i], token());
+                if (gen === generation.current) {
+                    const done = [...keys];
+                    setPending((prev) => prev.map((p) => (p.key === entry.key ? { ...p, uploadedKeys: done } : p)));
+                }
+            }
+        } catch (err: any) {
+            const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+            settle({ state: 'failed', error: offline ? "Not sent: you're offline" : (err?.message || 'Not sent: the upload failed') });
+            return;
+        }
         try {
             const res = await fetch(messagesUrl(threadKey), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-                body: JSON.stringify({ body: entry.body, clientId: entry.key }),
+                body: JSON.stringify({
+                    body: entry.body,
+                    clientId: entry.key,
+                    ...(files.length ? { attachments: keys } : {}),
+                }),
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok || !data?.message) {
@@ -287,14 +324,15 @@ export function useThread(threadKey: string | null, { pageSize = 50, markRead, o
         }
     }, [threadKey]);
 
-    /** Sends a message. It shows at once; false only when there's nothing to send. */
-    const send = useCallback((text: string): boolean => {
+    /** Sends a message, with any files attached. It shows at once; false only when there's nothing to send. */
+    const send = useCallback((text: string, files: File[] = []): boolean => {
         const body = text.trim();
-        if (!body || !threadKey) return false;
+        if ((!body && !files.length) || !threadKey) return false;
         const me = myAccountId();
         const entry: ThreadEntry = {
             key: newClientId(), id: null, sender: { id: me ?? '', name: 'You' }, body,
             createdAt: new Date().toISOString(), state: 'sending',
+            ...(files.length ? { files: [...files], uploadedKeys: [] } : {}),
         };
         setPending((prev) => [...prev, entry]);
         post(entry);
@@ -305,6 +343,7 @@ export function useThread(threadKey: string | null, { pageSize = 50, markRead, o
     const resend = useCallback((key: string) => {
         const entry = pendingRef.current.find((p) => p.key === key && p.state === 'failed');
         if (!entry) return;
+        // Carries the keys of files that already went up, so they aren't uploaded again.
         setPending((prev) => prev.map((p) => (p.key === key ? { ...p, state: 'sending', error: undefined } : p)));
         post(entry);
     }, [post]);

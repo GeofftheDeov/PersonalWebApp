@@ -22,7 +22,7 @@ export async function roleIn(db: Db, actorId: string, campaignId: string, gmOver
     // Sequential: `db` may be a transaction's single client.
     const { rows: [acct] } = await db.query(`SELECT app_role FROM accounts WHERE id = $1`, [actorId]);
     const { rows: memberships } = await db.query(
-        `SELECT status FROM campaign_members WHERE campaign_id = $1 AND person_id = $2`, [campaignId, actorId]);
+        `SELECT status FROM campaign_members WHERE campaign_id = $1 AND person_id = $2 AND is_active`, [campaignId, actorId]);
     const admin = acct?.app_role === "admin";
     const campaignGm = admin || memberships.some((m) => m.status === "Game Master");
     const seated = memberships.length > 0;

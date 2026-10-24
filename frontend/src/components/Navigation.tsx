@@ -72,6 +72,9 @@ export default function Navigation() {
   }, []);
 
   const handleLogout = () => {
+    // Clears the parent-domain session cookie too (#69), so the other site is
+    // logged out as well. Fire and forget: local state goes either way.
+    fetch('/api/users/logout', { method: 'POST' }).catch(() => {});
     localStorage.clear();
     setIsLoggedIn(false);
     setIsMenuOpen(false);
@@ -112,7 +115,7 @@ export default function Navigation() {
                 <div className={`${decorationCls} -rotate-1`} />
               </Link>
 
-              {/* Paperclip — admins, or people who came from a Salesforce User */}
+              {/* Paperclip — admins, or people linked to a Paperclip account (#36) */}
               {canPaperclip(caps) && (
                 <div className="relative" ref={paperclipRef}>
                   <button

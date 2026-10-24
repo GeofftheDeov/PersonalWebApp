@@ -193,6 +193,13 @@ CREATE TABLE accounts (
   friends                   uuid[] NOT NULL DEFAULT '{}',
   is_active                 boolean NOT NULL DEFAULT true,
 
+  -- ---- Paperclip identity (#36, plan §4.6) ----
+  -- The Paperclip user (member principalId) this person is: matched by email
+  -- against the company's member list, or set by an admin. /api/paperclip
+  -- needs it.
+  paperclip_user_id         text,
+  paperclip_role            text,
+
   -- ---- CRM (Salesforce-owned) ----
   phone                     text,
   company                   text,
@@ -219,6 +226,7 @@ CREATE TRIGGER trg_accounts_updated BEFORE UPDATE ON accounts
 CREATE UNIQUE INDEX ux_accounts_email  ON accounts (email)                      WHERE email IS NOT NULL;
 CREATE UNIQUE INDEX ux_accounts_sf     ON accounts (sf_object, sf_id)           WHERE sf_id IS NOT NULL;
 CREATE UNIQUE INDEX ux_accounts_handle ON accounts (lower(handle), user_number) WHERE handle IS NOT NULL;
+CREATE UNIQUE INDEX ux_accounts_paperclip_user ON accounts (paperclip_user_id) WHERE paperclip_user_id IS NOT NULL;
 
 -- typeahead: prefix + fuzzy on handle, and on name for the friend search
 CREATE INDEX idx_accounts_handle_trgm ON accounts USING gin (lower(handle) gin_trgm_ops);
@@ -475,7 +483,12 @@ CREATE TABLE campaign_members (
   status      text,
   joined_at   timestamptz DEFAULT now(),
   sf_id       text,
-  created_at  timestamptz NOT NULL DEFAULT now()
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  -- Per-campaign deactivation (#37, plan §4.5). Hides the campaign from them
+  -- and them from the party; deletes nothing, so reactivating restores it all.
+  is_active      boolean NOT NULL DEFAULT true,
+  deactivated_at timestamptz,
+  deactivated_by uuid REFERENCES accounts(id) ON DELETE SET NULL
 );
 CREATE INDEX idx_campaign_members_campaign ON campaign_members (campaign_id);
 CREATE INDEX idx_campaign_members_person ON campaign_members (person_id);
@@ -578,6 +591,10 @@ CREATE TABLE game_sessions (
   venue_id             uuid REFERENCES venues(id) ON DELETE SET NULL,
   -- One-session torch pass. A permanent pass swaps campaign_members.status.
   gm_override_id       uuid REFERENCES accounts(id) ON DELETE SET NULL,
+  -- Attendance (#37, plan §4.4): set when the GM confirms who came, so an
+  -- empty list reads as "nobody came" rather than "not taken yet".
+  attendance_confirmed_at timestamptz,
+  attendance_confirmed_by uuid REFERENCES accounts(id) ON DELETE SET NULL,
   CONSTRAINT game_sessions_stage_matches_status
     CHECK ((status = 'planning') = (planning_stage IS NOT NULL)),
   CONSTRAINT game_sessions_date_required
@@ -589,13 +606,15 @@ CREATE TABLE player_sessions (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name        text NOT NULL,
   session_id  uuid NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,
-  -- Polymorphic person ref: User | Lead | Contact | Account (see personUtils.ts).
-  -- No FK is possible; existence is enforced in the data layer. GitHub #42.
-  player_id   uuid NOT NULL,
+  -- An account since Phase 3; #37 added the FK (NOT VALID on existing data).
+  player_id   uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
   sf_id       text,
   created_at  timestamptz NOT NULL DEFAULT now()
 );
+-- A person attends a session once (the GM's confirmation upserts).
+CREATE UNIQUE INDEX ux_player_sessions_session_player ON player_sessions (session_id, player_id);
+CREATE INDEX idx_player_sessions_player ON player_sessions (player_id);
 
 CREATE TABLE encounters (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -843,11 +862,29 @@ CREATE TABLE messages (
   created_at   timestamptz NOT NULL DEFAULT now(),
   -- The sender's own id for this message, so a resend is stored once (#101).
   client_id    text CHECK (client_id IS NULL OR char_length(client_id) <= 64),
+  -- [{ key, name, size, contentType, width?, height? }], in the order sent (#104).
+  -- A message with only attachments has body ''.
+  attachments  jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(attachments) = 'array'),
   CHECK (campaign_id IS NOT NULL OR dm_key IS NOT NULL)
 );
 CREATE INDEX idx_messages_campaign_created ON messages (campaign_id, created_at DESC);
 CREATE INDEX idx_messages_dm_created       ON messages (dm_key, created_at DESC);
 CREATE UNIQUE INDEX idx_messages_sender_client ON messages (sender_id, client_id) WHERE client_id IS NOT NULL;
+
+-- Letters attachments (#104): each presigned upload URL handed out, so a send
+-- can attach only keys issued to its sender for its thread. The name, type and
+-- size are what the server checked and signed; messages.attachments copies them.
+CREATE TABLE message_attachment_uploads (
+  key          text PRIMARY KEY,
+  thread_key   text NOT NULL,
+  sender_id    text NOT NULL,
+  name         text NOT NULL CHECK (char_length(name) BETWEEN 1 AND 200),
+  content_type text NOT NULL,
+  size         integer NOT NULL CHECK (size > 0),
+  width        integer CHECK (width IS NULL OR width > 0),
+  height       integer CHECK (height IS NULL OR height > 0),
+  issued_at    timestamptz NOT NULL DEFAULT now()
+);
 
 CREATE TABLE notifications (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -908,6 +945,10 @@ CREATE TRIGGER trg_api_key_vault_updated BEFORE UPDATE ON api_key_vault
 CREATE TABLE alpaca_snapshots (
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   ts           timestamptz NOT NULL DEFAULT now(),
+  -- cloudclaw (server env keys) | paper | live (an admin's Profile vault keys)
+  wallet       text NOT NULL DEFAULT 'cloudclaw' CHECK (wallet IN ('cloudclaw', 'paper', 'live')),
+  -- Owner of the vault keys; NULL for cloudclaw.
+  user_id      uuid REFERENCES accounts(id) ON DELETE CASCADE,
   equity       numeric(14,2) NOT NULL DEFAULT 0,
   last_equity  numeric(14,2) NOT NULL DEFAULT 0,
   cash         numeric(14,2) NOT NULL DEFAULT 0,
@@ -917,6 +958,7 @@ CREATE TABLE alpaca_snapshots (
   positions    jsonb NOT NULL DEFAULT '[]'
 );
 CREATE INDEX idx_alpaca_snapshots_ts ON alpaca_snapshots (ts);
+CREATE INDEX idx_alpaca_snapshots_wallet_ts ON alpaca_snapshots (wallet, user_id, ts);
 
 CREATE TABLE cloud_claw_sessions (
   id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -952,6 +994,7 @@ CREATE TRIGGER trg_admin_list_views_updated BEFORE UPDATE ON admin_list_views
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- ---------- agentic OS: skill-run queue (migrations/2026-09-26-agent-runs.sql) ----------
+-- Usage and trigger: migrations/0003__agent-run-usage.sql. NULL usage means unknown.
 
 CREATE TABLE agent_runs (
   id            bigserial PRIMARY KEY,
@@ -964,7 +1007,43 @@ CREATE TABLE agent_runs (
   finished_at   timestamptz,
   runner        text,
   summary       text,
-  output_path   text
+  output_path   text,
+  cost_usd      numeric CHECK (cost_usd >= 0),
+  input_tokens  bigint  CHECK (input_tokens >= 0),
+  output_tokens bigint  CHECK (output_tokens >= 0),
+  duration_ms   integer CHECK (duration_ms >= 0),
+  trigger       text NOT NULL DEFAULT 'button'
+                  CHECK (trigger IN ('button','scheduled','manual'))
 );
 CREATE INDEX idx_agent_runs_queued ON agent_runs (requested_at) WHERE status = 'queued';
 CREATE INDEX idx_agent_runs_recent ON agent_runs (requested_at DESC);
+
+-- ---------- agentic OS: the ask log (migrations/0004__os-asks.sql) ----------
+-- One row per ask to POST /admin/os/ask. Tier-2 columns: model, tokens, cost.
+-- Tier-3 columns: the proposed skill, its expiry, confirmed_at and run_id.
+
+CREATE TABLE os_asks (
+  id             bigserial PRIMARY KEY,
+  account_id     uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  asked_at       timestamptz NOT NULL DEFAULT now(),
+  text           text NOT NULL CHECK (length(text) BETWEEN 1 AND 500),
+  source         text NOT NULL CHECK (source IN ('voice','typed')),
+  tier           smallint NOT NULL CHECK (tier IN (1,2,3)),
+  kind           text NOT NULL
+                   CHECK (kind IN ('answer','navigate','confirm_run','not_understood','unavailable')),
+  intent         text,
+  latency_ms     integer NOT NULL CHECK (latency_ms >= 0),
+  error          text,
+  model          text,
+  input_tokens   bigint  CHECK (input_tokens >= 0),
+  output_tokens  bigint  CHECK (output_tokens >= 0),
+  cost_usd       numeric CHECK (cost_usd >= 0),
+  skill          text,
+  expires_at     timestamptz,
+  confirmed_at   timestamptz,
+  run_id         bigint REFERENCES agent_runs(id) ON DELETE SET NULL
+);
+CREATE INDEX idx_os_asks_recent ON os_asks (asked_at DESC);
+CREATE INDEX idx_os_asks_tier2 ON os_asks (asked_at) WHERE tier = 2;
+-- At most one queued-or-running run per skill; enqueueRun relies on it (#172).
+CREATE UNIQUE INDEX idx_agent_runs_one_active ON agent_runs (skill) WHERE status IN ('queued','running');

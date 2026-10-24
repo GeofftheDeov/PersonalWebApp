@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
-import { Map, ArrowLeft, Calendar, Book, Users, Shield, ChevronRight, Crown, Save, X, Pencil, UserPlus, Check, Copy, Link2, Plus, Wifi, Flame, ImagePlus } from 'lucide-react';
+import { Map, ArrowLeft, Calendar, Book, Users, Shield, ChevronRight, Crown, Save, X, Pencil, UserPlus, Check, Copy, Link2, Plus, Wifi, Flame, ImagePlus, UserMinus, LogOut } from 'lucide-react';
 import CampaignChat from '@/components/CampaignChat';
 import { memberName, type MemberPerson } from '@/lib/memberName';
 import CampaignBanner from '@/components/CampaignBanner';
@@ -87,6 +87,10 @@ export default function CampaignDetailPage() {
     const [inviteStatus, setInviteStatus] = useState<Record<string, string>>({});
     const [isGM, setIsGM] = useState(false);
     const [isOwner, setIsOwner] = useState(false);
+    const [isAdmin, setIsAdmin] = useState(false);
+    // Leaving, or a GM removing someone: the member row in flight, and any refusal.
+    const [removingId, setRemovingId] = useState<string | null>(null);
+    const [membershipError, setMembershipError] = useState<string | null>(null);
     const [settingsError, setSettingsError] = useState<string | null>(null);
     // Passing the torch permanently (#89): the chosen player while the GM is choosing, else null.
     const [torchTo, setTorchTo] = useState<string | null>(null);
@@ -124,6 +128,7 @@ export default function CampaignDetailPage() {
             const me = JSON.parse(localStorage.getItem('user') || 'null');
             const caps = await fetchCapabilities(t);
             setIsOwner(Boolean((me?.id && c.owner === me.id) || canAdmin(caps)));
+            setIsAdmin(canAdmin(caps));
             if (sessRes.ok) setSessions(await sessRes.json());
             if (membRes.ok) {
                 const memberRows = await membRes.json();
@@ -181,6 +186,33 @@ export default function CampaignDetailPage() {
             setTorchError('Could not reach the server.');
         } finally {
             setTorchBusy(false);
+        }
+    };
+
+    // Leave the campaign (your own row) or remove someone from it (GM). The
+    // server refuses the last GM leaving while anyone else is in the party.
+    const handleRemoveMember = async (member: Member, self: boolean) => {
+        const question = self
+            ? `Leave ${campaign.title}? You'll need the invite link to rejoin.`
+            : `Remove ${memberName(member)} from ${campaign.title}?`;
+        if (!window.confirm(question)) return;
+        setRemovingId(member._id);
+        setMembershipError(null);
+        try {
+            const res = await fetch(`/api/campaign-members/${member._id}`, {
+                method: 'DELETE',
+                headers: { Authorization: `Bearer ${token()}` },
+            });
+            if (!res.ok) {
+                setMembershipError((await res.json().catch(() => ({}))).error || (self ? 'Could not leave the campaign.' : 'Could not remove them.'));
+                return;
+            }
+            if (self) { router.push('/game-night'); return; }
+            await reloadMembers();
+        } catch {
+            setMembershipError('Could not reach the server.');
+        } finally {
+            setRemovingId(null);
         }
     };
 
@@ -306,6 +338,14 @@ export default function CampaignDetailPage() {
     const gmMembers = members.filter(m => m.status === 'Game Master' && m.playerId);
     const viewerId = JSON.parse(localStorage.getItem('user') || 'null')?.id;
     const torchNeedsFrom = gmMembers.length > 1 && !gmMembers.some(m => m.playerId === viewerId);
+    // Leaving and removing (display only: the server enforces both). A GM
+    // removes players; another GM is an admin's call. The last GM passes the
+    // torch before leaving anyone behind.
+    const myMembership = viewerId ? members.find(m => m.playerId === viewerId) : undefined;
+    const isLastGm = myMembership?.status === 'Game Master'
+        && !members.some(m => m.status === 'Game Master' && m.playerId !== viewerId)
+        && members.some(m => m.playerId !== viewerId);
+    const canRemove = (m: Member) => m.playerId !== viewerId && (isAdmin || (isGM && m.status !== 'Game Master'));
     // Scheduled sessions still to come show under Coming up, and ones being
     // planned on the Notice Board, so this list is the campaign's past.
     const upcomingIds = new Set((board.board?.upcoming ?? []).map(u => u.id));
@@ -584,16 +624,43 @@ export default function CampaignDetailPage() {
                                         </>
                                     );
                                     const cls = "flex items-center gap-3 p-3 border-4 border-black bg-white dark:bg-slate-800 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]";
-                                    return m.playerId ? (
-                                        <Link key={m._id} href={`/players/${m.playerId}`} className={`${cls} hover:-translate-y-0.5 transition-transform`} title="View profile">
+                                    const card = m.playerId ? (
+                                        <Link href={`/players/${m.playerId}`} className={`${cls} flex-grow min-w-0 hover:-translate-y-0.5 transition-transform`} title="View profile">
                                             {row}
                                         </Link>
                                     ) : (
-                                        <div key={m._id} className={cls}>{row}</div>
+                                        <div className={`${cls} flex-grow min-w-0`}>{row}</div>
+                                    );
+                                    return (
+                                        <div key={m._id} className="flex items-stretch gap-2">
+                                            {card}
+                                            {canRemove(m) && (
+                                                <button type="button" onClick={() => handleRemoveMember(m, false)} disabled={removingId !== null}
+                                                    aria-label={`Remove ${memberName(m)}`} title="Remove from campaign"
+                                                    className="px-2 border-4 border-black bg-white dark:bg-slate-800 text-red-600 hover:bg-red-600 hover:text-white disabled:opacity-40 transition-colors shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] shrink-0">
+                                                    <UserMinus className="w-4 h-4" />
+                                                </button>
+                                            )}
+                                        </div>
                                     );
                                 })}
                             </div>
                         )}
+                        {myMembership && (
+                            <div className="mt-4">
+                                {isLastGm ? (
+                                    <p className="font-permanent text-[10px] text-zinc-400 uppercase">
+                                        You&apos;re the only {gmTitleOf(campaign)}: pass the torch before you leave.
+                                    </p>
+                                ) : (
+                                    <button type="button" onClick={() => handleRemoveMember(myMembership, true)} disabled={removingId !== null}
+                                        className="flex items-center gap-2 px-3 py-1.5 border-2 border-black bg-white dark:bg-slate-800 text-red-600 font-permanent uppercase text-xs hover:bg-red-600 hover:text-white disabled:opacity-40 transition-colors shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
+                                        <LogOut className="w-3 h-3" /> Leave campaign
+                                    </button>
+                                )}
+                            </div>
+                        )}
+                        {membershipError && <p role="alert" className="mt-2 font-permanent text-[10px] text-red-600 uppercase">{membershipError}</p>}
                     </div>
 
                     {/* Live campaign chat (event bus → SSE) */}

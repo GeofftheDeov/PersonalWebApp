@@ -22,6 +22,8 @@ export interface TempVault {
     writeBrief(date: string, fields?: Record<string, string>, body?: string): string;
     /** Writes any file under the vault, creating its folders. */
     writeFile(relPath: string, content: string): string;
+    /** Deletes one file under the vault, if it's there. */
+    removeFile(relPath: string): void;
     /** Deletes every brief, leaving an empty outputs/briefs/. */
     clearBriefs(): void;
     /** Deletes the whole vault directory. */
@@ -47,6 +49,9 @@ export function createTempVault(prefix: string): TempVault {
             return writeFile(path.join(BRIEFS_DIR, `${date}.md`), `---\n${front}\n---\n\n${body}`);
         },
         writeFile,
+        removeFile(relPath) {
+            fs.rmSync(path.join(dir, relPath), { force: true });
+        },
         clearBriefs() {
             for (const name of fs.readdirSync(briefs)) fs.rmSync(path.join(briefs, name), { force: true });
         },

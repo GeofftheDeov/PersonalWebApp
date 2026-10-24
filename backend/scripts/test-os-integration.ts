@@ -9,7 +9,8 @@
  *      tile says so), vault canaries never reach the prompt, and the proposal
  *      confirms like a tier-1 one (#148).
  *   B. tile time budgets (#140) over every current tile (usage with tier-2
- *      spend, alpaca, tasks, brief with its run history), and the lazy
+ *      spend, alpaca, brief with its run history; tasks reads only the
+ *      vault, so it stays up), and the lazy
  *      overview() the ask router hands tier-1 answers (#147) and tier 2: a
  *      timed-out tile gives the "unavailable … timed out" answer, and tier 2
  *      sees the reason in its context, both within the budget.
@@ -219,7 +220,7 @@ async function main() {
             // Everything the tiles read except os_asks (tier 2's budget gate reads it outside the tile budget).
             const lockTiles = async () => {
                 await locker.query(`BEGIN`);
-                await locker.query(`LOCK TABLE agent_runs, tasks, alpaca_snapshots IN ACCESS EXCLUSIVE MODE`);
+                await locker.query(`LOCK TABLE agent_runs, alpaca_snapshots IN ACCESS EXCLUSIVE MODE`);
             };
             /**
              * An ask while the tile tables are locked. Its os_asks insert also waits on the
@@ -245,17 +246,19 @@ async function main() {
                 const took = Date.now() - t0;
                 const tiles = ov?.tiles ?? {};
                 const reason = (id: string) => tiles[id]?.status === "unavailable" ? tiles[id].reason : null;
-                check("every DB-backed tile times out with the budget's reason (usage, alpaca, tasks)",
-                    ["usage", "alpaca", "tasks"].every((id) => reason(id) === TIMED_OUT_REASON),
+                check("every DB-backed tile times out with the budget's reason (usage, alpaca)",
+                    ["usage", "alpaca"].every((id) => reason(id) === TIMED_OUT_REASON),
                     Object.fromEntries(Object.entries(tiles).map(([id, t]: [string, any]) => [id, t.status === "ok" ? "ok" : t.reason])));
                 check("... the brief tile stays up from the vault, its run history marked timed out",
                     tiles.brief?.status === "ok" && tiles.brief.runsNote === "run history unavailable: timed out" && tiles.brief.activeRun === null,
                     tiles.brief && { status: tiles.brief.status, runsNote: tiles.brief.runsNote });
+                check("... and the tasks tile, which reads only the vault's Notion sync, stays up",
+                    tiles.tasks?.status === "ok", tiles.tasks);
                 check(`... and the whole overview came back within its ${OVERVIEW_BUDGET_MS} ms budget (plus HTTP slack)`,
                     took < OVERVIEW_BUDGET_MS + 500, `${took} ms`);
 
                 const t1Cases: [string, string][] = [
-                    ["what's my p&l", "alpaca"], ["What's due today?", "tasks"], ["How much have I spent this week?", "usage"],
+                    ["what's my p&l", "alpaca"], ["How much have I spent this week?", "usage"],
                 ];
                 for (const [text, tile] of t1Cases) {
                     const r = await askLocked(text);
@@ -265,6 +268,10 @@ async function main() {
                             && r.ms !== undefined && r.ms < OVERVIEW_BUDGET_MS,
                         { reply: r.json, latencyMs: r.ms });
                 }
+                const due = await askLocked("What's due today?");
+                check(`tier 1 "What's due today?" still answers from the vault, within the budget`,
+                    due.json?.tier === 1 && due.json.kind === "answer" && due.ms !== undefined && due.ms < OVERVIEW_BUDGET_MS,
+                    { reply: due.json, latencyMs: due.ms });
                 const runner = await askLocked("is the runner online");
                 check("tier 1 runner status says the run history is unavailable rather than 'nothing queued'",
                     runner.json?.tier === 1 && runner.json.kind === "answer" && /run history is unavailable/.test(runner.json.say), runner.json);
@@ -278,8 +285,9 @@ async function main() {
                     open.json?.tier === 2 && open.json.kind === "answer" && int135Model.calls.length === before + 1
                         && open.ms !== undefined && open.ms < OVERVIEW_BUDGET_MS,
                     { reply: open.json, latencyMs: open.ms });
-                check("... and its context carries each timed-out tile with the budget's reason",
-                    ["usage", "alpaca", "tasks"].every((id) => seen?.tiles?.[id]?.status === "unavailable" && seen.tiles[id].reason === TIMED_OUT_REASON),
+                check("... and its context carries each timed-out tile with the budget's reason, and the tasks tile ok",
+                    ["usage", "alpaca"].every((id) => seen?.tiles?.[id]?.status === "unavailable" && seen.tiles[id].reason === TIMED_OUT_REASON)
+                        && seen?.tiles?.tasks?.status === "ok",
                     seen?.tiles && Object.keys(seen.tiles));
                 const page = await call(H.base, "GET", q("/admin/os"));
                 check("the page itself renders with the timed-out tiles", page.status === 200 && page.text.includes(TIMED_OUT_REASON));

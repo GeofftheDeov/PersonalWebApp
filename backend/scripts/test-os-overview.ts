@@ -38,6 +38,7 @@ import { TILES } from "../os/tiles/index.js";
 import { OVERVIEW_BUDGET_MS, TILE_BUDGET_MS, TILE_DEADLINE_GRACE_MS, ok, type TileSource } from "../os/overview.js";
 import { signJwt } from "../utils/jwt.js";
 import { createTempVault } from "./temp-vault.js";
+import { VAULT_TASKS_FILE } from "../utils/vaultTasks.js";
 
 if (!/(\/\/|@)(127\.0\.0\.1|localhost)[:/]/.test(process.env.DATABASE_URL ?? "")) {
     console.error("\n  Refusing to run: DATABASE_URL must be a local throwaway database.\n");
@@ -78,6 +79,25 @@ async function main() {
     // The brief tile reads the local vault checkout: a throwaway one, set before any tile builds.
     const vault = createTempVault("t142");
     process.env.OBSIDIAN_VAULT_PATH = vault.dir;
+
+    // The tasks tile reads the vault's Notion sync (#141): raw/notion/tasks.md,
+    // written as the vault's scripts/notion_sync.py writes it, with a summary
+    // table the tile ignores and one section per page. The tasks cases set these.
+    const notionTasks: { id: string; title: string; due: string | null; status: string; link: string }[] = [];
+    const lastNight = new Date("2026-10-13T04:50:00Z");
+    let taskSync: Date | null = lastNight;
+    const writeNotionTasks = (extra = "") => {
+        const synced = taskSync ? `synced: ${taskSync.toISOString().slice(0, 16).replace("T", " ")} UTC\n` : "";
+        const rows = notionTasks.map((t) => `| ${t.title} | ${t.due ?? ""} | ${t.status} | Medium |`).join("\n");
+        const pages = notionTasks.map((t) => [`### ${t.title}`, "",
+            `[Open in Notion](${t.link}) · Created: 2026-10-01 · Edited: 2026-10-12`, "",
+            ...(t.due ? [`**Due date:** ${t.due}  `] : []), `**Status:** ${t.status}  `, "**Priority:** Medium  ", "",
+            "Some notes about it.", "", "---", ""].join("\n")).join("\n");
+        vault.writeFile(VAULT_TASKS_FILE, `---\nnotion_db: tasks\nnotion_id: 3497cb8daee18001be02f5c478a12321\n${synced}`
+            + `entries: ${notionTasks.length}\n---\n\n# Tasks\n\n| Title | Due date | Status | Priority |\n| --- | --- | --- | --- |\n`
+            + `${rows}\n\n---\n\n## Pages\n\n${pages}${extra}`);
+    };
+    writeNotionTasks();
 
     // The clock the harness router reads; each case sets it.
     let clock = new Date();
@@ -617,12 +637,13 @@ async function main() {
         await pool.query(`UPDATE agent_runs SET status = 'succeeded', finished_at = now() WHERE id = ANY($1)`, [t143Runs]);
 
         // A run claimed more than 45 minutes ago (by the tile's clock) is presumed dead; just under isn't.
-        const runningSince = async (minutes: number) => (await pool.query(
-            `INSERT INTO agent_runs (skill, status, claimed_at, runner) VALUES ('weekly-review', 'running', $1, $2) RETURNING id`,
-            [new Date(clock.getTime() - minutes * MIN), runnerName])).rows[0].id;
+        // Two skills: idx_agent_runs_one_active (#172) allows one queued or running run per skill.
+        const runningSince = async (skill: string, minutes: number) => (await pool.query(
+            `INSERT INTO agent_runs (skill, status, claimed_at, runner) VALUES ($1, 'running', $2, $3) RETURNING id`,
+            [skill, new Date(clock.getTime() - minutes * MIN), runnerName])).rows[0].id;
         clock = new Date("2026-10-12T15:00:00Z");
-        const dead = await runningSince(46);
-        const alive = await runningSince(44);
+        const dead = await runningSince("weekly-review", 46);
+        const alive = await runningSince("ingest-debrief", 44);
         const mixed = await briefAt(clock);
         check("a run claimed over 45 minutes ago isn't active; one claimed 44 minutes ago is",
             mixed?.activeRun?.id === alive && mixed.activeCount === 1, { activeRun: mixed?.activeRun, dead, alive });
@@ -685,9 +706,10 @@ async function main() {
         triggerRenamed = false;
 
         // ── Tasks tile (#141) ───────────────────────────────────────────────
-        // Mid-October is CDT (UTC-5): Central midnight starting Tue Oct 13 is
-        // 05:00Z. Notion date-only due dates arrive as UTC midnight of that
-        // date, and count on that date, not on the Central evening before.
+        // The tile reads the vault's Notion sync, raw/notion/tasks.md, written
+        // here the way the vault's scripts/notion_sync.py writes it. Mid-October
+        // is CDT (UTC-5): Central midnight starting Tue Oct 13 is 05:00Z. A
+        // Notion date with no time ("2026-10-13") counts on that date.
         const tasksAt = async (at: Date) => {
             clock = at;
             return (await get(H.base, "/admin/os/api/overview", adminToken)).json?.tiles?.tasks;
@@ -696,25 +718,20 @@ async function main() {
             const page = await get(H.base, "/admin/os", adminToken);
             return { tag: tileTag(page.body, "tasks"), html: tileHtml(page.body, "tasks") };
         };
-        const notionId = () => crypto.randomUUID();
-        const task = async (title: string, due: string | null,
-            opts: { status?: string; notion?: string | null; synced?: Date | null } = {}) => {
-            const notion = opts.notion === undefined ? notionId() : opts.notion;
-            const { rows: [r] } = await pool.query(
-                `INSERT INTO tasks (title, status, due_date, notion_page_id, notion_last_synced)
-                 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-                [`t141 ${title}`, opts.status ?? "Not Started", due, notion,
-                    opts.synced === undefined ? (notion ? taskSync : null) : opts.synced]);
-            return { id: r.id as string, notion };
-        };
         const ids = (list: any[] | undefined) => (list ?? []).map((t) => t.id);
-        // The tests own this throwaway table.
-        await pool.query(`DELETE FROM tasks`);
+        const notionLink = (title: string, id: string) =>
+            `https://app.notion.com/p/${title.replace(/[^A-Za-z0-9]+/g, "-")}-${id}`;
+        const task = (title: string, due: string | null, status = "Not started") => {
+            const id = crypto.randomBytes(16).toString("hex");
+            notionTasks.push({ id, title: `t141 ${title}`, due, status, link: notionLink(title, id) });
+            writeNotionTasks();
+            return { id, link: notionTasks[notionTasks.length - 1].link };
+        };
 
-        // Empty: a fresh sync with nothing due (only a completed task) is a good state.
-        const lastNight = new Date("2026-10-13T04:50:00Z");
-        let taskSync: Date | null = lastNight;
-        await task("done today", "2026-10-13T15:00:00Z", { status: "Completed" });
+        // Empty: a fresh sync with nothing due (only a done task) is a good state.
+        notionTasks.length = 0;
+        taskSync = lastNight;
+        task("done today", "2026-10-13", "Done");
         const emptyTasks = await tasksAt(new Date("2026-10-13T05:00:00Z"));
         check("with nothing due the tasks tile is ok, with zero counts, no rows and a fresh sync",
             emptyTasks?.status === "ok" && emptyTasks.counts?.overdue === 0 && emptyTasks.counts.today === 0
@@ -722,26 +739,26 @@ async function main() {
                 && emptyTasks.more === 0 && emptyTasks.stale === false && emptyTasks.lastSync === lastNight.toISOString(),
             emptyTasks);
         const emptyTasksHtml = await tasksPage();
-        check("...and the tile shows 'Nothing due' as a good state, linking to the tasks table",
+        check("...and the tile shows 'Nothing due' as a good state, linking to the synced file in the vault browser",
             emptyTasksHtml.tag?.status === "ok" && emptyTasksHtml.tag.stale === "false"
                 && /data-tasks-state="clear"/.test(emptyTasksHtml.html) && /Nothing due/.test(emptyTasksHtml.html)
-                && /href="\/db\/tasks\?token=/.test(emptyTasksHtml.html), emptyTasksHtml);
+                && /href="\/admin\/obsidian\?path=raw%2Fnotion%2Ftasks\.md&amp;token=/.test(emptyTasksHtml.html), emptyTasksHtml);
 
         // The buckets, either side of Central midnight.
-        const overdueOld = await task("overdue Sat", "2026-10-10T15:00:00Z");     // Sat 10:00 CDT
-        const monLateTask = await task("Mon 23:30", "2026-10-13T04:30:00Z");      // Mon 23:30 CDT
-        const tueEarly = await task("Tue 00:30", "2026-10-13T05:30:00Z");         // Tue 00:30 CDT
-        const tueDateOnly = await task("Tue (date only)", "2026-10-13T00:00:00Z"); // Notion "2026-10-13"
-        const tueLate = await task("Tue 23:59", "2026-10-14T04:59:00Z");          // Tue 23:59 CDT
-        const wedEarly = await task("Wed 00:00", "2026-10-14T05:00:00Z", { status: "In Progress" });
-        const wedLate = await task("Wed 23:59", "2026-10-15T04:59:00Z");
-        const thu = await task("Thu 00:00", "2026-10-15T05:00:00Z");
-        const thuDateOnly = await task("Thu (date only)", "2026-10-15T00:00:00Z");
-        // Excluded: completed, not from Notion (null or blank page id), no due date.
-        const completed = await task("completed Tue", "2026-10-13T15:00:00Z", { status: "Completed" });
-        const local = await task("local Tue", "2026-10-13T15:00:00Z", { notion: null, synced: new Date("2026-10-13T05:30:00Z") });
-        const blank = await task("blank notion Tue", "2026-10-13T15:00:00Z", { notion: "  " });
-        const undated = await task("no due date", null);
+        const overdueOld = task("overdue Sat", "2026-10-10T10:00:00.000-05:00");
+        const monLateTask = task("Mon 23:30", "2026-10-12T23:30:00.000-05:00");
+        const tueEarly = task("Tue 00:30", "2026-10-13T00:30:00.000-05:00");
+        const tueDateOnly = task("Tue (date only)", "2026-10-13");
+        const tueLate = task("Tue 23:59", "2026-10-13T23:59:00.000-05:00");
+        const wedEarly = task("Wed 00:00", "2026-10-14T00:00:00.000-05:00", "In progress");
+        // A range is due at its end: this one starts Monday and ends Wednesday night.
+        const wedLate = task("Wed 23:59", "2026-10-12T09:00:00.000-05:00 → 2026-10-14T23:59:00.000-05:00");
+        const thu = task("Thu 00:00", "2026-10-15T00:00:00.000-05:00");
+        const thuDateOnly = task("Thu (date only)", "2026-10-15");
+        // Excluded: done (any spelling, any case) and undated.
+        const completed = task("completed Tue", "2026-10-13", "Completed");
+        const doneLower = task("done Tue", "2026-10-13T10:00:00.000-05:00", "done");
+        const undated = task("no due date", null);
 
         const mon = await tasksAt(new Date("2026-10-13T04:59:00Z")); // Mon 23:59 CDT
         check("just before Central midnight: today is Monday and tomorrow Tuesday",
@@ -752,6 +769,7 @@ async function main() {
             { counts: mon?.counts, tasks: mon?.tasks?.map((t: any) => `${t.bucket} ${t.title}`) });
         check("...and each row carries its bucket, Central due day and date-only flag",
             mon?.tasks?.[0]?.bucket === "overdue" && mon.tasks[0].dueDay === "2026-10-10" && mon.tasks[0].dateOnly === false
+                && mon.tasks[0].due === "2026-10-10T15:00:00.000Z"
                 && mon.tasks[2].bucket === "tomorrow" && mon.tasks[2].dueDay === "2026-10-13" && mon.tasks[2].dateOnly === true
                 && mon.tasks[2].due === "2026-10-13T00:00:00.000Z", mon?.tasks);
 
@@ -765,12 +783,11 @@ async function main() {
                     ["overdue", "overdue", "today", "today", "today", "tomorrow", "tomorrow"]),
             { counts: tue?.counts, tasks: tue?.tasks?.map((t: any) => `${t.bucket} ${t.title}`) });
         const shownIds = ids(tue?.tasks);
-        check("completed, non-Notion, blank-id and undated tasks are excluded",
-            ![completed, local, blank, undated, thu, thuDateOnly].some((t) => shownIds.includes(t.id)), tue?.tasks);
-        check("each row has its title, status and a link to its Notion page",
-            tue?.tasks?.[5]?.title === "t141 Wed 00:00" && tue.tasks[5].status === "In Progress"
-                && tue.tasks[5].notionPageId === wedEarly.notion
-                && tue.tasks[5].url === `https://www.notion.so/${wedEarly.notion!.replace(/-/g, "")}`, tue?.tasks?.[5]);
+        check("done ('Completed', 'done') and undated tasks are excluded, and so is anything due after tomorrow",
+            ![completed, doneLower, undated, thu, thuDateOnly].some((t) => shownIds.includes(t.id)), tue?.tasks);
+        check("each row has its title, Notion status and its page link from the vault",
+            tue?.tasks?.[5]?.title === "t141 Wed 00:00" && tue.tasks[5].status === "In progress"
+                && tue.tasks[5].notionPageId === wedEarly.id && tue.tasks[5].url === wedEarly.link, tue?.tasks?.[5]);
         check("seven due is exactly the cap: nothing more", tue?.tasks?.length === 7 && tue.more === 0, tue?.more);
         const tueHtml = await tasksPage();
         const counts = tueHtml.html.match(/<div[^>]*data-tasks-counts[^>]*>[\s\S]*?<\/div>/)?.[0] ?? "";
@@ -779,9 +796,9 @@ async function main() {
                 && /2[^<]*<\/[a-z]+>\s*tomorrow/.test(counts)
                 && (tueHtml.html.match(/data-bucket="overdue"/g) ?? []).length === 2 && /OVERDUE/.test(tueHtml.html)
                 && !/data-tasks-state="clear"/.test(tueHtml.html), counts || tueHtml.html);
-        check("each title links to its Notion page in a new tab",
-            tueHtml.html.includes(`href="https://www.notion.so/${wedEarly.notion!.replace(/-/g, "")}"`)
-                && /target="_blank" rel="noopener noreferrer"/.test(tueHtml.html), tueHtml.html);
+        check("each title links to its Notion page in a new tab, and an in-progress task says so",
+            tueHtml.html.includes(`href="${wedEarly.link}"`) && /target="_blank" rel="noopener noreferrer"/.test(tueHtml.html)
+                && /· in progress/.test(tueHtml.html), tueHtml.html);
 
         // The tail of the week: by Wednesday the two Thursday tasks (timed and date-only) are
         // tomorrow, and everything due Monday and Tuesday is overdue.
@@ -791,9 +808,9 @@ async function main() {
             wed?.counts);
 
         // Over the cap: three more overdue tasks lead; the list stops at 7 with "+3 more".
-        const lateA = await task("overdue Fri A", "2026-10-09T14:00:00Z");
-        const lateB = await task("overdue Fri B", "2026-10-09T15:00:00Z");
-        const lateC = await task("<b>overdue</b> Sun", "2026-10-11T00:00:00Z"); // date-only Sun Oct 11
+        const lateA = task("overdue Fri A", "2026-10-09T09:00:00.000-05:00");
+        const lateB = task("overdue Fri B", "2026-10-09T10:00:00.000-05:00");
+        const lateC = task("<b>overdue</b> Sun", "2026-10-11");
         const capped = await tasksAt(new Date("2026-10-13T05:00:00Z"));
         check("over the cap: 7 shown, overdue first, '+3 more', and the counts cover all 10",
             capped?.tasks?.length === 7 && capped.more === 3
@@ -807,51 +824,68 @@ async function main() {
                 && cappedHtml.html.includes("&lt;b&gt;overdue&lt;/b&gt;") && !cappedHtml.html.includes("<b>overdue</b>"),
             cappedHtml.html);
 
-        // A page id that isn't a Notion id gets no link, rather than a broken one.
-        await pool.query(`UPDATE tasks SET notion_page_id = 'javascript:alert(1)' WHERE id = $1`, [lateA.id]);
+        // A page link that isn't https is still listed, with no link rather than a dangerous one.
+        notionTasks.find((t) => t.id === lateA.id)!.link = `javascript:alert%281%29//${lateA.id}`;
+        writeNotionTasks();
         const oddId = await tasksAt(new Date("2026-10-13T05:00:00Z"));
         const oddHtml = await tasksPage();
-        check("a page id that isn't a Notion id is still listed, with no link",
+        check("a page link that isn't https is still listed, with no link",
             oddId?.tasks?.[0]?.id === lateA.id && oddId.tasks[0].url === null && !/javascript:/.test(oddHtml.html), oddId?.tasks?.[0]);
 
-        // Sync staleness: the newest notion_last_synced of the Notion tasks, stale after an hour.
-        // The non-Notion row's newer notion_last_synced (05:30Z) doesn't count.
-        const syncedAt = await tasksAt(new Date(lastNight.getTime() + 60 * MIN));
-        const syncedLate = await tasksAt(new Date(lastNight.getTime() + 60 * MIN + 1000));
-        check("the last sync is the newest Notion task's; exactly an hour old is not stale, a second later it is",
-            syncedAt?.lastSync === lastNight.toISOString() && syncedAt.stale === false && syncedAt.syncAgeMs === 60 * MIN
+        // Only page sections count: a heading in a page body, or one with no page link, isn't a task.
+        writeNotionTasks(`### t141 body heading\n\nJust notes, due 2026-10-13.\n\n**Due date:** 2026-10-13  \n\n---\n\n`
+            + `### t141 no page id\n\n[Open in Notion](https://app.notion.com/p/not-a-page) · Created: 2026-10-01\n\n**Due date:** 2026-10-13  \n\n---\n\n`);
+        const bodies = await tasksAt(new Date("2026-10-13T05:00:00Z"));
+        check("a body heading or a section without a page id isn't a task (the counts don't move)",
+            bodies?.counts?.total === 10 && !(bodies.tasks ?? []).some((t: any) => /body heading|no page id/.test(t.title)), bodies?.counts);
+
+        // Sync staleness: the file's `synced:` time, stale after 26 hours (a nightly sync plus slack).
+        const syncedAt = await tasksAt(new Date(lastNight.getTime() + 26 * 60 * MIN));
+        const syncedLate = await tasksAt(new Date(lastNight.getTime() + 26 * 60 * MIN + 1000));
+        check("the last sync is the file's synced time; exactly 26 hours old is not stale, a second later it is",
+            syncedAt?.lastSync === lastNight.toISOString() && syncedAt.stale === false && syncedAt.syncAgeMs === 26 * 60 * MIN
                 && syncedLate?.stale === true, { at: syncedAt?.stale, late: syncedLate?.stale, lastSync: syncedAt?.lastSync });
         const staleTasksHtml = await tasksPage();
         check("the stale tasks tile is flagged in the HTML, with the last sync time in Central",
             staleTasksHtml.tag?.status === "ok" && staleTasksHtml.tag.stale === "true" && /STALE/.test(staleTasksHtml.html)
-                && /synced[^<]*11:50 PM CT/.test(staleTasksHtml.html), staleTasksHtml.tag);
-        const newer = new Date("2026-10-13T05:55:00Z");
-        await pool.query(`UPDATE tasks SET notion_last_synced = $1 WHERE id = $2`, [newer, thu.id]);
-        const resynced = await tasksAt(new Date("2026-10-13T06:00:00Z"));
-        check("a newer sync on any Notion task (even one not shown) clears the flag",
-            resynced?.lastSync === newer.toISOString() && resynced.stale === false, resynced);
+                && /synced[^<]*Oct 12, 11:50 PM CT/.test(staleTasksHtml.html) && /no sync for over 26 h/.test(staleTasksHtml.html),
+            staleTasksHtml.html);
 
-        // Never synced: no Notion task has a sync time.
-        await pool.query(`UPDATE tasks SET notion_last_synced = NULL`);
+        // Never synced: the file has no synced time.
+        taskSync = null;
+        writeNotionTasks();
         const never = await tasksAt(new Date("2026-10-13T06:00:00Z"));
         const neverHtml = await tasksPage();
         check("with no sync time at all the tile is ok but stale, and says it has never synced",
             never?.status === "ok" && never.lastSync === null && never.syncAgeMs === null && never.stale === true
                 && neverHtml.tag?.stale === "true" && /never synced/i.test(neverHtml.html), never);
 
+        // No file, or no vault: unavailable, saying which.
+        vault.removeFile(VAULT_TASKS_FILE);
+        const noFile = await tasksAt(new Date("2026-10-13T06:00:00Z"));
+        check("with no synced file the tile is unavailable, naming the file",
+            noFile?.status === "unavailable" && noFile.reason.includes(VAULT_TASKS_FILE), noFile);
+        delete process.env.OBSIDIAN_VAULT_PATH;
+        const noVault = await tasksAt(new Date("2026-10-13T06:00:00Z"));
+        process.env.OBSIDIAN_VAULT_PATH = vault.dir;
+        check("with OBSIDIAN_VAULT_PATH unset the tile is unavailable, naming the variable",
+            noVault?.status === "unavailable" && /OBSIDIAN_VAULT_PATH/.test(noVault.reason), noVault);
+
         // DST: tomorrow ends at Central midnight, not 48 hours after today began. On
         // Sat Oct 31, tomorrow (Sun Nov 1) is 25 hours long and ends at Nov 2 06:00Z.
-        await pool.query(`DELETE FROM tasks`);
+        notionTasks.length = 0;
         taskSync = new Date("2026-11-01T04:30:00Z");
-        const sunLate = await task("Sun 23:30 CST", "2026-11-02T05:30:00Z");
-        const monFirst = await task("Mon 00:00 CST", "2026-11-02T06:00:00Z");
+        const sunLate = task("Sun 23:30 CST", "2026-11-01T23:30:00.000-06:00");
+        const monFirst = task("Mon 00:00 CST", "2026-11-02T00:00:00.000-06:00");
         const dst = await tasksAt(new Date("2026-11-01T04:59:00Z")); // Sat Oct 31 23:59 CDT
         check("across the fall-back weekend, Sunday 23:30 CST is tomorrow and Monday 00:00 CST is not",
             dst?.today === "2026-10-31" && dst.tomorrow === "2026-11-01" && dst.counts?.tomorrow === 1
                 && ids(dst.tasks).includes(sunLate.id) && !ids(dst.tasks).includes(monFirst.id), dst);
 
         // Leave nothing due and a fresh sync, so the no-external-calls case sees every tile ok.
-        await pool.query(`DELETE FROM tasks`);
+        notionTasks.length = 0;
+        taskSync = new Date();
+        writeNotionTasks();
 
         // ── degradation ─────────────────────────────────────────────────────
         clock = new Date(latest.getTime() + 5 * MIN);
@@ -1120,7 +1154,6 @@ async function main() {
         if (asksRenamed) await pool.query(`ALTER TABLE os_asks_t156_renamed RENAME TO os_asks`).catch(() => {});
         delete process.env.OS_ASK_DAILY_BUDGET_USD;
         await pool.query(`DELETE FROM alpaca_snapshots`).catch(() => {});
-        await pool.query(`DELETE FROM tasks`).catch(() => {});
         await pool.query(`DELETE FROM agent_runs WHERE runner = ANY($1) OR id = ANY($2)`, [[`t144-${tag}`, `t143-${tag}`], t143Runs]).catch(() => {});
         for (const id of created) await pool.query(`DELETE FROM accounts WHERE id = $1`, [id]);
         P.server.close(); H.server.close(); D.server.close(); R.server.close();

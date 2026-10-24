@@ -2,6 +2,7 @@ import express from 'express';
 import { renderPage } from '../utils/adminUi.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import { listBriefs, readBrief, BRIEF_DATE, type BriefMeta } from '../utils/briefs.js';
+import { vaultWikiLinkHref } from '../utils/vaultLinks.js';
 import { pullVault, vaultSyncStatus } from '../services/vaultSync.js';
 import { SKILLS, isSkill, enqueueRun, listRuns, runnerOnline, runnerLastSeen, type AgentRun } from '../services/agentRuns.js';
 
@@ -101,7 +102,7 @@ router.get('/', async (req, res) => {
                 <div class="brief-meta">generated ${fmtTime(brief.generated)} · ${esc(brief.run ?? 'unknown')} run</div>
                 ${failed}
             </div>
-            <div class="markdown-body">${renderMarkdown(brief.body)}</div>`;
+            <div class="markdown-body">${renderMarkdown(brief.body, { wikiLinkHref: vaultWikiLinkHref(vaultPath, token) })}</div>`;
     }
 
     const content = `
@@ -192,6 +193,7 @@ router.get('/', async (req, res) => {
         .markdown-body { line-height: 1.6; color: #ddd; overflow-wrap: anywhere; }
         .markdown-body h1, .markdown-body h2, .markdown-body h3 { color: #0d9488; margin: 1.2em 0 0.4em; }
         .markdown-body a { color: #f97316; }
+        .markdown-body .wikilink-missing { color: #888; text-decoration: underline dotted; }
         .markdown-body code { background: #2b2b2b; padding: 0.1em 0.3em; }
         .markdown-body blockquote { border-left: 3px solid #f97316; margin: 0.5em 0; padding: 0.2em 0.8em; color: #bbb; background: #262626; }
         .markdown-body table { border-collapse: collapse; width: 100%; display: block; overflow-x: auto; }

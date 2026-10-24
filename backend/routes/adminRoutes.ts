@@ -10,6 +10,7 @@ import {
 } from '../services/alpacaStream.js';
 import { renderPage } from '../utils/adminUi.js';
 import { renderMarkdown } from '../utils/markdown.js';
+import { VAULT_EXCLUDED, vaultWikiLinkHref } from '../utils/vaultLinks.js';
 import AlpacaSnapshot from '../models/AlpacaSnapshot.js';
 import { getDecryptedKeys } from './apiKeyRoutes.js';
 import { evaluateLiveApplyGate } from '../utils/liveApplyGate.js';
@@ -160,8 +161,6 @@ router.post('/person-sync/retry/:id', async (req, res) => {
 });
 
 // ── Obsidian vault helpers ────────────────────────────────────────────────────
-
-const VAULT_EXCLUDED = new Set(['.git', 'private', 'node_modules']);
 
 interface VaultNode { name: string; type: 'file' | 'dir'; path: string; children?: VaultNode[]; }
 
@@ -809,7 +808,9 @@ router.get('/obsidian/api/file', (req, res) => {
     if (!filePath) return res.status(400).json({ error: 'path is required' });
     const content = safeVaultRead(vaultPath, filePath);
     if (content === null) return res.status(400).json({ error: 'File not found or access denied' });
-    const html = filePath.endsWith('.md') ? renderMarkdown(content) : '';
+    const html = filePath.endsWith('.md')
+        ? renderMarkdown(content, { wikiLinkHref: vaultWikiLinkHref(vaultPath, String(req.query.token ?? '')) })
+        : '';
     res.json({ path: filePath, content, html });
 });
 
@@ -1000,8 +1001,25 @@ router.get('/obsidian', (req, res) => {
 
         function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
+        // ?path= opens a note directly: briefs and other notes link here via
+        // [[wikilinks]]. Following one inside the browser stays on this page.
+        function notePathOf(href) { return new URL(href, location.href).searchParams.get('path'); }
+        document.getElementById('vault-content').addEventListener('click', function(e) {
+            const a = e.target.closest('a.wikilink');
+            const p = a && notePathOf(a.href);
+            if (!p || e.ctrlKey || e.metaKey || e.shiftKey) return;
+            e.preventDefault();
+            history.pushState(null, '', a.href);
+            openFile(p);
+        });
+        window.addEventListener('popstate', function() {
+            const p = notePathOf(location.href);
+            if (p) openFile(p);
+        });
+
         loadTree();
         loadStatus();
+        if (notePathOf(location.href)) openFile(notePathOf(location.href));
         </script>
     `;
 
@@ -1178,6 +1196,7 @@ router.get('/obsidian', (req, res) => {
         .markdown-body p { margin: 0.6em 0; }
         .markdown-body a { color: #7c6fe0; text-decoration: none; }
         .markdown-body a:hover { color: #a78bfa; text-decoration: underline; }
+        .markdown-body .wikilink-missing { color: #888; text-decoration: underline dotted; }
         .markdown-body strong { color: #f4f4f4; }
         .markdown-body em { color: #ddd; }
         .markdown-body ul, .markdown-body ol { margin: 0.5em 0 0.8em; padding-left: 1.5em; }

@@ -11,6 +11,7 @@ import {
 import { renderPage } from '../utils/adminUi.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import { resolveVaultFile, isServableVaultName } from '../utils/vaultPath.js';
+import { vaultWikiLinkHref } from '../utils/vaultLinks.js';
 import AlpacaSnapshot from '../models/AlpacaSnapshot.js';
 import ApiKeyVault from '../models/ApiKeyVault.js';
 import Account from '../models/Account.js';
@@ -823,7 +824,9 @@ router.get('/obsidian/api/file', (req, res) => {
     let content: string;
     try { content = fs.readFileSync(file.full, 'utf-8'); }
     catch { return res.status(404).json({ error: VAULT_REFUSAL.missing.error }); }
-    const html = file.rel.endsWith('.md') ? renderMarkdown(content) : '';
+    const html = file.rel.endsWith('.md')
+        ? renderMarkdown(content, { wikiLinkHref: vaultWikiLinkHref(vaultPath, String(req.query.token ?? '')) })
+        : '';
     res.json({ path: file.rel, content, html });
 });
 
@@ -1033,6 +1036,22 @@ router.get('/obsidian', (req, res) => {
 
         function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
+        // ?path= opens a note directly: briefs and other notes link here via
+        // [[wikilinks]]. Following one inside the browser stays on this page.
+        function notePathOf(href) { return new URL(href, location.href).searchParams.get('path'); }
+        document.getElementById('vault-content').addEventListener('click', function(e) {
+            const a = e.target.closest('a.wikilink');
+            const p = a && notePathOf(a.href);
+            if (!p || e.ctrlKey || e.metaKey || e.shiftKey) return;
+            e.preventDefault();
+            history.pushState(null, '', a.href);
+            openFile(p);
+        });
+        window.addEventListener('popstate', function() {
+            const p = notePathOf(location.href);
+            if (p) openFile(p);
+        });
+
         // A deep link (?path=) opens its file, then marks it in the tree once that
         // loads, opening the folders above it (renderTree builds them collapsed).
         function revealInTree(p) {
@@ -1228,6 +1247,7 @@ router.get('/obsidian', (req, res) => {
         .markdown-body p { margin: 0.6em 0; }
         .markdown-body a { color: #7c6fe0; text-decoration: none; }
         .markdown-body a:hover { color: #a78bfa; text-decoration: underline; }
+        .markdown-body .wikilink-missing { color: #888; text-decoration: underline dotted; }
         .markdown-body strong { color: #f4f4f4; }
         .markdown-body em { color: #ddd; }
         .markdown-body ul, .markdown-body ol { margin: 0.5em 0 0.8em; padding-left: 1.5em; }

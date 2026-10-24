@@ -399,17 +399,23 @@ async function main() {
             return [ok, `promoted to patron -> app_role=${stillNotAdmin?.appRole}, sees all=${scope === null}`];
         });
 
-        await check("the Paperclip gate admits admins and Salesforce users, nobody else", async () => {
-            // Mirrors paperclipOnly: app_role = 'admin' OR sf_object = 'User'.
+        await check("the Paperclip gate admits admins and linked Paperclip members, nobody else", async () => {
+            // Mirrors requirePaperclipAccess (#36): app_role = 'admin' OR a
+            // linked Paperclip identity. No Paperclip here, so a link is only
+            // what's stored. test-paperclip-identity.ts covers the linking.
+            const { resolvePaperclipIdentity, setPaperclipIdentity } = await import("../services/paperclipIdentity.js");
             const allowed = async (id: string) => {
-                const p = await Account.findById(id).select("appRole sfObject");
-                return Boolean(p && (p.appRole === "admin" || p.sfObject === "User"));
+                const p = await Account.findById(id).select("appRole");
+                return Boolean(p && (p.appRole === "admin" || await resolvePaperclipIdentity(id)));
             };
-            const admin = await allowed(IDS.acctA);        // admin AND User-sourced
+            const admin = await allowed(IDS.acctA);        // admin
             const lead = await allowed(IDS.acctB);         // neither
             const patron = await allowed(IDS.acctC);       // patron tier, not admin
-            const ok = admin === true && lead === false && patron === false;
-            return [ok, `admin=${admin}, lead=${lead}, patron(tier only)=${patron}`];
+            await setPaperclipIdentity(IDS.acctB, "pc-user-b");
+            const linked = await allowed(IDS.acctB);
+            await setPaperclipIdentity(IDS.acctB, null);
+            const ok = admin === true && lead === false && patron === false && linked === true;
+            return [ok, `admin=${admin}, lead=${lead}, patron(tier only)=${patron}, linked lead=${linked}`];
         });
 
         await check("requireAdmin closes /admin and /db (#43)", async () => {

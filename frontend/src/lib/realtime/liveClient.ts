@@ -4,13 +4,17 @@
  * #69's shared package can lift it as is and a backend test can drive it with
  * the `ws` package. The wire protocol is in backend/live/PROTOCOL.md.
  *
- * - Authenticates with the JWT in the first frame (`{ type: "auth", v, token }`).
+ * - Authenticates with the JWT in the first frame (`{ type: "auth", v, token }`),
+ *   or, with `cookieAuth` and no token, sends no auth frame and lets the
+ *   browser's session cookie authenticate the upgrade (#107).
  * - Answers `ping` with `pong`, and treats a silent socket as dead.
  * - Reconnects with exponential backoff and full jitter, except after an auth
  *   or protocol-version refusal: retrying with the same token can't help.
  * - Dispatches `message.created` to the handlers subscribed to its thread.
  * - Sends `typing` (`sendTyping`) and dispatches others' `typing` to `onTyping` (#103).
  * - Dispatches `noticeboard.changed` to its campaign thread's `onNoticeBoard` (#57).
+ * - Sends `presence` for the campaign threads held open (`holdPresence`), again
+ *   after every reconnect, and dispatches the server's list to `onPresence` (#37).
  * - Dispatches frames about the person rather than one thread
  *   (`thread.updated`, `thread.read`) to person-level subscribers
  *   (`subscribePerson`), which the thread list uses (#102).
@@ -40,6 +44,20 @@ export interface LiveMessage {
     body: string;
     createdAt: string;
     eventId?: string;
+    /** Only when there are some (#104). `url` is a presigned GET that stops working at `expiresAt`. */
+    attachments?: MessageAttachment[];
+}
+
+/** An image or PDF on a message (#104; backend/live/PROTOCOL.md). */
+export interface MessageAttachment {
+    key: string;
+    name: string;
+    size: number;
+    contentType: string;
+    width?: number;
+    height?: number;
+    url: string | null;
+    expiresAt: string | null;
 }
 
 /** Someone else is typing in a thread (#103); the server never sends you your own. */
@@ -57,6 +75,14 @@ export interface ThreadHandlers {
     onTyping?: (typing: LiveTyping, thread: string) => void;
     /** A campaign thread's Notice Board changed (#57): refetch it. */
     onNoticeBoard?: (thread: string) => void;
+    /** Who has this campaign's Table Talk open, you included (#37). The whole list each time. */
+    onPresence?: (people: LivePresence[], thread: string) => void;
+}
+
+/** Someone with a campaign's Table Talk open (#37). */
+export interface LivePresence {
+    id: string;
+    name: string;
 }
 
 /** `thread.updated`: a thread's last activity, and this person's unread count in it, changed. */
@@ -101,8 +127,15 @@ type SocketCtor = new (url: string) => SocketLike;
 
 export interface LiveClientOptions {
     url: string | (() => string);
-    /** The current JWT, or null when signed out (then nothing connects). */
+    /** The current JWT, or null when signed out (then nothing connects, unless `cookieAuth`). */
     getToken: () => string | null;
+    /**
+     * Connect even with no token, relying on the HttpOnly session cookie the
+     * browser sends on the upgrade (#69, #107). Without a valid cookie the
+     * server refuses with 4001, so this is for pages that know the person is
+     * signed in.
+     */
+    cookieAuth?: boolean;
     WebSocket?: SocketCtor;
     backoff?: { baseMs?: number; maxMs?: number };
     /** No frame for this long means the socket is dead (the server pings every 25 s). */
@@ -128,6 +161,8 @@ export class LiveClient {
     private people = new Set<PersonHandlers>();
     /** The thread keys the server's last `ready` subscribed this socket to. */
     private serverThreads = new Set<string>();
+    /** Threads whose Table Talk is open here, with how many views hold it (#37). */
+    private present = new Map<string, number>();
     private statusListeners = new Set<(status: LiveStatus) => void>();
     private threadsListeners = new Set<(threads: string[]) => void>();
     private attempt = 0;
@@ -143,6 +178,7 @@ export class LiveClient {
         this.opts = {
             url: options.url,
             getToken: options.getToken,
+            cookieAuth: options.cookieAuth ?? false,
             WebSocket: options.WebSocket,
             baseMs: options.backoff?.baseMs ?? 500,
             maxMs: options.backoff?.maxMs ?? 30_000,
@@ -228,6 +264,34 @@ export class LiveClient {
         return true;
     }
 
+    /**
+     * Say you have a campaign's Table Talk open (#37), until the returned
+     * function is called. Several views may hold the same thread; the server
+     * hears `here: true` when the first opens and `here: false` when the last
+     * closes, and again after every reconnect or regained access, since a new
+     * socket starts out nowhere. Presence arrives through `onPresence`.
+     */
+    holdPresence(thread: string): () => void {
+        const count = (this.present.get(thread) ?? 0) + 1;
+        this.present.set(thread, count);
+        if (count === 1) this.sendPresence(thread, true);
+        let released = false;
+        return () => {
+            if (released) return;
+            released = true;
+            const left = (this.present.get(thread) ?? 1) - 1;
+            if (left > 0) return void this.present.set(thread, left);
+            this.present.delete(thread);
+            this.sendPresence(thread, false);
+        };
+    }
+
+    private sendPresence(thread: string, here: boolean) {
+        const socket = this.socket;
+        if (this.status !== "open" || !socket || socket.readyState !== OPEN || !this.serverThreads.has(thread)) return;
+        socket.send(JSON.stringify({ type: "presence", thread, here }));
+    }
+
     onStatus(listener: (status: LiveStatus) => void): () => void {
         this.statusListeners.add(listener);
         return () => this.statusListeners.delete(listener);
@@ -251,7 +315,7 @@ export class LiveClient {
         if (this.socket) return;
         this.clearReconnect();
         const token = this.opts.getToken();
-        if (!token) return this.setStatus("idle");
+        if (!token && !this.opts.cookieAuth) return this.setStatus("idle");
         const Ctor = this.opts.WebSocket ?? (globalThis as any).WebSocket;
         if (!Ctor) return this.setStatus("idle");
 
@@ -263,7 +327,7 @@ export class LiveClient {
         this.watchOnline();
 
         socket.onopen = () => {
-            socket.send(JSON.stringify({ type: "auth", v: PROTOCOL_VERSION, token }));
+            if (token) socket.send(JSON.stringify({ type: "auth", v: PROTOCOL_VERSION, token }));
             this.touch();
         };
         socket.onmessage = (ev) => {
@@ -319,6 +383,9 @@ export class LiveClient {
                         for (const h of [...set]) safely(() => h.onReconnect?.());
                     }
                     for (const h of [...this.people]) safely(() => h.onReconnect?.());
+                    for (const thread of this.present.keys()) {
+                        if (!previous.has(thread) && next.has(thread)) this.sendPresence(thread, true);
+                    }
                     return;
                 }
                 const reconnected = this.everReady;
@@ -326,6 +393,8 @@ export class LiveClient {
                 this.everReady = true;
                 this.attempt = 0;
                 this.setStatus("open");
+                // A new socket is in nobody's Table Talk until it says so.
+                for (const thread of this.present.keys()) this.sendPresence(thread, true);
                 for (const l of [...this.threadsListeners]) safely(() => l([...next]));
                 if (reconnected) {
                     for (const set of [...this.threads.values()]) {
@@ -353,6 +422,14 @@ export class LiveClient {
                     expiresInMs: Number(frame.expiresInMs),
                 };
                 for (const h of [...handlers]) safely(() => h.onTyping?.(typing, frame.thread));
+                return;
+            }
+            case "presence": { // #37
+                const handlers = this.threads.get(frame.thread);
+                if (!handlers) return;
+                const people: LivePresence[] = (Array.isArray(frame.people) ? frame.people : [])
+                    .map((p: any) => ({ id: String(p?.id), name: String(p?.name ?? "") }));
+                for (const h of [...handlers]) safely(() => h.onPresence?.(people, frame.thread));
                 return;
             }
             case "noticeboard.changed": { // #57

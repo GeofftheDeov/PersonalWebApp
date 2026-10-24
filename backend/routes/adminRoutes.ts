@@ -10,14 +10,19 @@ import {
 } from '../services/alpacaStream.js';
 import { renderPage } from '../utils/adminUi.js';
 import { renderMarkdown } from '../utils/markdown.js';
+import { resolveVaultFile, isServableVaultName } from '../utils/vaultPath.js';
 import AlpacaSnapshot from '../models/AlpacaSnapshot.js';
+import ApiKeyVault from '../models/ApiKeyVault.js';
+import Account from '../models/Account.js';
 import { getDecryptedKeys } from './apiKeyRoutes.js';
 import { evaluateLiveApplyGate } from '../utils/liveApplyGate.js';
+import { buildAlpacaSnapshot } from '../utils/alpacaSnapshot.js';
 import { pcFetch, paperclipConfigured, PAPERCLIP_COMPANY_ID } from '../services/paperclipClient.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { runPersonSync, personSyncStatus, retryFailedOutboxRow } from '../jobs/personSync.js';
 import { resolveAccountId } from '../utils/accountRefs.js';
 import briefsRoutes from './briefsRoutes.js';
+import osRoutes from './osRoutes.js';
 
 const router = express.Router();
 
@@ -56,10 +61,16 @@ const verifyToken = async (req: any, res: express.Response, next: express.NextFu
     }
 };
 
-router.use(verifyToken, requireAdmin(true));
+/** The admin gate every route below sits behind; exported for test harnesses that mount a router factory. */
+export const adminGate = [verifyToken, requireAdmin(true)] as const;
+
+router.use(...adminGate);
 
 // Morning briefs from the vault (outputs/briefs/); inherits the admin gate above.
 router.use('/briefs', briefsRoutes);
+
+// The agentic OS home screen (spec #135); inherits the admin gate above.
+router.use('/os', osRoutes);
 
 // ── Person sync (#35, plan §2.7–2.8) ──────────────────────────────────────────
 //
@@ -161,8 +172,6 @@ router.post('/person-sync/retry/:id', async (req, res) => {
 
 // ── Obsidian vault helpers ────────────────────────────────────────────────────
 
-const VAULT_EXCLUDED = new Set(['.git', 'private', 'node_modules']);
-
 interface VaultNode { name: string; type: 'file' | 'dir'; path: string; children?: VaultNode[]; }
 
 function buildVaultTree(dir: string, base: string = ''): VaultNode[] {
@@ -170,7 +179,7 @@ function buildVaultTree(dir: string, base: string = ''): VaultNode[] {
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; }
     const nodes: VaultNode[] = [];
     for (const e of entries) {
-        if (e.name.startsWith('.') || VAULT_EXCLUDED.has(e.name)) continue;
+        if (!isServableVaultName(e.name)) continue;  // hidden (private/, dot entries), or a name the file API refuses
         const full = path.join(dir, e.name);
         const rel = (base ? base + '/' : '') + e.name;
         if (e.isDirectory()) {
@@ -185,11 +194,11 @@ function buildVaultTree(dir: string, base: string = ''): VaultNode[] {
     });
 }
 
-function safeVaultRead(vaultPath: string, relativePath: string): string | null {
-    const full = path.resolve(vaultPath, relativePath);
-    if (!full.startsWith(path.resolve(vaultPath))) return null;
-    try { return fs.readFileSync(full, 'utf-8'); } catch { return null; }
-}
+/** What the vault browser says about a path it won't open (utils/vaultPath.ts says which paths those are). */
+const VAULT_REFUSAL = {
+    invalid: { status: 400, error: 'That path is outside the vault or not shown in the vault browser.' },
+    missing: { status: 404, error: 'No such file in the vault checkout (it may not be pulled yet).' },
+} as const;
 
 router.get('/', (req, res) => {
     const token = req.query.token as string;
@@ -198,6 +207,9 @@ router.get('/', (req, res) => {
         <div class="admin-panel">
             <h1>Admin Command</h1>
             <div class="nav-grid">
+                <a href="/admin/os?token=${token}" class="nav-btn">
+                    Agentic OS
+                </a>
                 <a href="/db?token=${token}" class="nav-btn">
                     Manage Database
                 </a>
@@ -805,18 +817,38 @@ router.post('/obsidian/api/pull', async (_req, res) => {
 router.get('/obsidian/api/file', (req, res) => {
     const vaultPath = process.env.OBSIDIAN_VAULT_PATH;
     if (!vaultPath) return res.status(503).json({ error: 'OBSIDIAN_VAULT_PATH not configured' });
-    const filePath = req.query.path as string;
-    if (!filePath) return res.status(400).json({ error: 'path is required' });
-    const content = safeVaultRead(vaultPath, filePath);
-    if (content === null) return res.status(400).json({ error: 'File not found or access denied' });
-    const html = filePath.endsWith('.md') ? renderMarkdown(content) : '';
-    res.json({ path: filePath, content, html });
+    if (!req.query.path) return res.status(400).json({ error: 'path is required' });
+    const file = resolveVaultFile(vaultPath, req.query.path);
+    if (!file.ok) return res.status(VAULT_REFUSAL[file.reason].status).json({ error: VAULT_REFUSAL[file.reason].error });
+    let content: string;
+    try { content = fs.readFileSync(file.full, 'utf-8'); }
+    catch { return res.status(404).json({ error: VAULT_REFUSAL.missing.error }); }
+    const html = file.rel.endsWith('.md') ? renderMarkdown(content) : '';
+    res.json({ path: file.rel, content, html });
 });
 
 // ── Obsidian vault browser page ───────────────────────────────────────────────
 
 router.get('/obsidian', (req, res) => {
     const token = req.query.token as string;
+
+    // ?path= opens the browser on that file (#158: the briefs page's run history
+    // links here). Resolved as the file API resolves it; a refused path gets the
+    // file API's message and status, and the browser opens on nothing.
+    const vaultPath = process.env.OBSIDIAN_VAULT_PATH;
+    let initialPath: string | null = null;
+    let deepLinkError: string | null = null;
+    let status = 200;
+    if (req.query.path !== undefined && !vaultPath) {
+        status = 503;
+        deepLinkError = 'OBSIDIAN_VAULT_PATH is not set on this server.';
+    } else if (req.query.path !== undefined && vaultPath) {
+        const file = resolveVaultFile(vaultPath, req.query.path);
+        if (file.ok) initialPath = file.rel;
+        else ({ status, error: deepLinkError } = VAULT_REFUSAL[file.reason]);
+    }
+    // Inside a <script>: JSON, with < escaped so a value can't close the tag.
+    const scriptJson = (v: unknown) => JSON.stringify(v).replace(/</g, '\\u003c');
 
     const content = `
         <div class="vault-layout">
@@ -835,12 +867,13 @@ router.get('/obsidian', (req, res) => {
             </div>
             <div class="vault-content" id="vault-content">
                 <div class="vault-welcome">
-                    <p>Select a note from the sidebar to view it here.</p>
+                    ${deepLinkError ? `<p class="err">${esc(deepLinkError)}</p>` : '<p>Select a note from the sidebar to view it here.</p>'}
                 </div>
             </div>
         </div>
         <script>
-        const TOKEN = '${token}';
+        const TOKEN = encodeURIComponent(${scriptJson(token ?? '')});
+        const INITIAL_PATH = ${scriptJson(initialPath)};
         let fullTree = [];
 
         function treeMessage(text, isError) {
@@ -1000,7 +1033,24 @@ router.get('/obsidian', (req, res) => {
 
         function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
-        loadTree();
+        // A deep link (?path=) opens its file, then marks it in the tree once that
+        // loads, opening the folders above it (renderTree builds them collapsed).
+        function revealInTree(p) {
+            if (document.querySelector('.tree-file.active')) return;  // the admin already picked another note
+            const label = Array.prototype.find.call(document.querySelectorAll('.tree-file'), function(el) { return el.title === p; });
+            if (!label) return;
+            label.classList.add('active');
+            for (let el = label.parentElement; el && el.id !== 'vault-tree'; el = el.parentElement) {
+                if (el.tagName === 'DIV' && el.style.display === 'none') {
+                    el.style.display = 'block';
+                    const dir = el.previousElementSibling;
+                    if (dir && dir.classList.contains('tree-dir')) dir.textContent = dir.textContent.replace('▶', '▼');
+                }
+            }
+            label.scrollIntoView({ block: 'nearest' });
+        }
+        if (INITIAL_PATH) openFile(INITIAL_PATH);
+        loadTree().then(function() { if (INITIAL_PATH) revealInTree(INITIAL_PATH); });
         loadStatus();
         </script>
     `;
@@ -1226,7 +1276,7 @@ router.get('/obsidian', (req, res) => {
         .markdown-body input[type="checkbox"] { margin-right: 0.4em; }
     `;
 
-    res.send(renderPage({
+    res.status(status).send(renderPage({
         token,
         title: 'Obsidian Vault',
         activePage: 'obsidian',
@@ -1320,10 +1370,13 @@ router.get('/alpaca/api/w/:wallet/:resource', async (req: any, res) => {
     catch (err: any) { res.status(err instanceof AlpacaError ? err.status : 500).json({ error: err.message }); }
 });
 
-// Per-position value timeseries from our own snapshot table (Cloud-Claw paper
-// wallet only — that is what snapshotAlpacaNow records).
+// Per-position value timeseries from our own snapshot table (snapshotAlpacaNow
+// records every wallet). ?wallet= defaults to cloudclaw; paper and live are the
+// requesting admin's own.
 // period accepted as 1D / 1W / 1M / 3M / ALL.
-router.get('/alpaca/api/snapshots', async (req, res) => {
+router.get('/alpaca/api/snapshots', async (req: any, res) => {
+    const wallet = String(req.query.wallet || 'cloudclaw') as WalletId;
+    if (!WALLET_IDS.includes(wallet)) return res.status(400).json({ error: `Unknown wallet "${wallet}"` });
     try {
         const period = ((req.query.period as string) || '1D').toUpperCase();
         const since = new Date();
@@ -1336,7 +1389,11 @@ router.get('/alpaca/api/snapshots', async (req, res) => {
             default: since.setUTCDate(since.getUTCDate() - 1);
         }
         const docs = await AlpacaSnapshot
-            .find({ ts: { $gte: since } })
+            .find({
+                wallet,
+                userId: wallet === 'cloudclaw' ? null : String(req.adminUser.id),
+                ts: { $gte: since },
+            })
             .sort({ ts: 1 })
             .lean();
         res.json(docs);
@@ -1409,36 +1466,50 @@ router.post('/alpaca/api/apply-to-personal', async (req: any, res) => {
     }
 });
 
-// Capture a single snapshot of the Cloud-Claw paper account + positions.
-// Exported so server.ts can call it on an interval. Errors are swallowed
-// (Alpaca outages / API key issues shouldn't crash the snapshot loop).
+// Capture one snapshot of each wallet's account + positions: Cloud-Claw's
+// (server env keys) and every admin's own paper and live wallets (Profile page
+// vault keys). Exported so server.ts can call it on an interval. Errors are
+// logged per wallet (an Alpaca outage or one rejected key shouldn't stop the
+// other wallets or crash the snapshot loop).
 export async function snapshotAlpacaNow(): Promise<void> {
-    const creds = envPaperCreds();
-    if (!creds) return;
+    const targets: { wallet: WalletId; userId: string | null; creds: AlpacaCreds }[] = [];
+    const envCreds = envPaperCreds();
+    if (envCreds) targets.push({ wallet: 'cloudclaw', userId: null, creds: envCreds });
+    try {
+        const vaultWallets = WALLET_IDS.filter((w) => WALLET_META[w].provider);
+        const entries = await ApiKeyVault
+            .find({ provider: { $in: vaultWallets.map((w) => WALLET_META[w].provider!) } })
+            .lean();
+        for (const e of entries as any[]) {
+            const userId = String(e.userId);
+            // Only admins can open the dashboard that charts these.
+            const person = await Account.findById(userId).select('appRole');
+            if (person?.appRole !== 'admin') continue;
+            const wallet = vaultWallets.find((w) => WALLET_META[w].provider === e.provider)!;
+            const keys = await getDecryptedKeys(userId, e.provider);
+            if (keys) targets.push({ wallet, userId, creds: { ...keys, live: WALLET_META[wallet].live } });
+        }
+    } catch (err: any) {
+        console.error('[ALPACA SNAPSHOT] reading Profile keys failed:', err.message);
+    }
+    await Promise.all(targets.map((t) => snapshotWallet(t.wallet, t.userId, t.creds)));
+}
+
+async function snapshotWallet(wallet: WalletId, userId: string | null, creds: AlpacaCreds): Promise<void> {
     try {
         const [acct, positions] = await Promise.all([
             alpacaRest(creds, '/account'),
             alpacaRest(creds, '/positions') as Promise<any[]>,
         ]);
-        const equity      = parseFloat(acct.equity);
-        const last_equity = parseFloat(acct.last_equity);
-        await AlpacaSnapshot.create({
-            ts: new Date(),
-            equity,
-            last_equity,
-            cash:         parseFloat(acct.cash),
-            buying_power: parseFloat(acct.buying_power),
-            day_pl:       isFinite(equity) && isFinite(last_equity) ? equity - last_equity : 0,
-            positions: (Array.isArray(positions) ? positions : []).map((p: any) => ({
-                symbol:        p.symbol,
-                qty:           parseFloat(p.qty),
-                market_value:  parseFloat(p.market_value),
-                unrealized_pl: parseFloat(p.unrealized_pl),
-                current_price: parseFloat(p.current_price),
-            })),
-        });
+        // A malformed response is skipped, not stored as NaN (#169); the next tick retries.
+        const snap = buildAlpacaSnapshot(acct, positions);
+        if (!snap.ok) {
+            console.warn(`[ALPACA SNAPSHOT] ${wallet}${userId ? ` (${userId})` : ''} skipped malformed response:`, snap.reason);
+            return;
+        }
+        await AlpacaSnapshot.create({ ts: new Date(), wallet, userId, ...snap.row });
     } catch (err: any) {
-        console.error('[ALPACA SNAPSHOT] failed:', err.message);
+        console.error(`[ALPACA SNAPSHOT] ${wallet}${userId ? ` (${userId})` : ''} failed:`, err.message);
     }
 }
 
@@ -2112,13 +2183,10 @@ router.get('/alpaca', (req, res) => {
         const POSITION_COLORS = ['#0d9488','#f97316','#fbbf24','#10b981','#3b82f6','#a855f7','#ec4899','#06b6d4','#eab308','#f43f5e'];
 
         async function loadPositionsChart() {
-            if (currentWallet !== 'cloudclaw') {
-                chartMessage('chart-positions', 'positions', 'Position snapshots are recorded for the Cloud-Claw paper wallet only.');
-                return;
-            }
-            const r = await fetch('/admin/alpaca/api/snapshots?period=' + currentRange + '&token=' + TOKEN);
+            const wallet = currentWallet;
+            const r = await fetch('/admin/alpaca/api/snapshots?period=' + currentRange + '&wallet=' + encodeURIComponent(wallet) + '&token=' + TOKEN);
             const snaps = await r.json();
-            if (currentWallet !== 'cloudclaw') return;
+            if (wallet !== currentWallet) return;
             if (!Array.isArray(snaps) || snaps.length === 0) {
                 chartMessage('chart-positions', 'positions', 'No snapshots yet — the server records one every 5 min.');
                 return;
@@ -2866,6 +2934,7 @@ router.get('/profile', (req: any, res) => {
                     <div class="form-row">
                         <label>KEY ID / CLIENT ID</label>
                         <input id="key-id" type="text" placeholder="Paste your key ID here" autocomplete="off" />
+                        <div class="form-hint">Alpaca: the "API Key" from that account's dashboard (paper keys start with PK). Google / Discord: the OAuth client ID.</div>
                     </div>
                     <div class="form-row">
                         <label>SECRET KEY / CLIENT SECRET</label>
@@ -2919,7 +2988,10 @@ router.get('/profile', (req: any, res) => {
                 headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + TOKEN },
                 body: JSON.stringify({ keyId: keyId, secret: secret, label: label }),
             });
-            if (r.ok) {
+            if (r.status === 401) {
+                status.textContent = 'Not saved: your login expired. Log in again from the banner above, then save.';
+                status.className = 'save-status err';
+            } else if (r.ok) {
                 status.textContent = 'Saved.'; status.className = 'save-status ok';
                 document.getElementById('key-id').value = '';
                 document.getElementById('key-secret').value = '';
@@ -2981,6 +3053,7 @@ router.get('/profile', (req: any, res) => {
         }
         .form-row input:focus, .form-row select:focus { border-color: #0d9488; }
         .form-row select option { background: #2b2b2b; }
+        .form-hint { font-size: 0.7rem; color: #666; }
         .form-actions { display: flex; align-items: center; gap: 1rem; margin-top: 0.25rem; }
         .form-actions button {
             background: #0d9488; border: none; color: #000; padding: 0.6rem 1.5rem;

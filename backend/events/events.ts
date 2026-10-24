@@ -7,6 +7,17 @@
  *    (`<namespace>:events:<domain>` when EVENT_BUS_NAMESPACE is set; see NAMESPACES.md)
  *  - Payloads must be JSON-serializable
  */
+
+/** An attachment on a message event (#104): metadata only, never a URL. */
+export interface MessageAttachment {
+    key: string;
+    name: string;
+    size: number;
+    contentType: string;
+    width?: number;
+    height?: number;
+}
+
 export interface EventMap {
     /** A task changed in Mongo (from web, SF sync, or Notion sync). */
     "task.updated": {
@@ -75,6 +86,8 @@ export interface EventMap {
         eventId?: string;
         sender: { id: string; name: string; email: string };
         body: string;
+        /** Attachment metadata (#104); the live channel adds read URLs per frame. */
+        attachments?: MessageAttachment[];
         createdAt: string; // ISO timestamp
     };
 
@@ -85,6 +98,7 @@ export interface EventMap {
         recipientId: string;
         sender: { id: string; name: string; email: string };
         body: string;
+        attachments?: MessageAttachment[];
         createdAt: string; // ISO timestamp
     };
 
@@ -93,6 +107,21 @@ export interface EventMap {
      * `publishEphemeral`, never `publish`, so it is never XADDed to a stream
      * or stored. The live channel fans it out to the thread's other members.
      */
+    /**
+     * Who has a campaign's Table Talk open on one backend task (#37, plan
+     * §4.2). Ephemeral only, like typing. Each task publishes its whole set
+     * for a thread whenever it changes, and every PRESENCE_REFRESH_MS while
+     * it isn't empty; the live channel unions the tasks and forgets one it
+     * hasn't heard from in PRESENCE_TTL_MS, so presence survives a second
+     * task and a task that dies without saying goodbye.
+     */
+    "presence.changed": {
+        task: string;
+        threadKey: string;
+        people: Array<{ id: string; name: string }>; // display names, never email addresses
+        at: string; // ISO timestamp
+    };
+
     "letters.typing": {
         threadKey: string; // "campaign:<id>" or "dm:<a>:<b>"
         personId: string;

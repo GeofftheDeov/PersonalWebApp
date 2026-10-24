@@ -113,10 +113,15 @@ router.put("/:id", auth, async (req: any, res) => {
         }
 
         // Moving a membership to a different person or campaign is not an edit.
+        // Nor is (de)activating it: PATCH /:id/active does that and tells the
+        // live channel, which a plain field write wouldn't.
         const update = { ...req.body };
         delete update.person;
         delete update.campaign;
         delete update._id;
+        delete update.isActive;
+        delete update.deactivatedAt;
+        delete update.deactivatedBy;
 
         const updatedMember = await CampaignMember.findByIdAndUpdate(
             req.params.id,
@@ -127,6 +132,55 @@ router.put("/:id", auth, async (req: any, res) => {
     } catch (error: any) {
         console.error("Error updating campaign member:", error);
         res.status(500).json({ error: "Failed to update campaign member", details: error.message });
+    }
+});
+
+/**
+ * Mark a player active or inactive in this one campaign (#37, plan §4.5).
+ * Body: { active: boolean }. GM (or admin) only.
+ *
+ * Deactivation hides and never deletes (#31): their characters, attendance
+ * and messages stay, and reactivating is this same call with `active: true`.
+ * While inactive, getMemberCampaignIds leaves the campaign out, which takes it
+ * off their list and closes every route and thread that authorizes from it;
+ * the membership event below takes the thread off any socket they already
+ * have open.
+ *
+ * A Game Master can't be deactivated, by themselves or anyone: a campaign
+ * left with no active GM has nobody who can reactivate anyone. Pass the torch
+ * first, then deactivate the former GM as a player.
+ */
+router.patch("/:id/active", auth, async (req: any, res) => {
+    try {
+        const { active } = req.body ?? {};
+        if (typeof active !== "boolean") return res.status(400).json({ error: "active (boolean) is required" });
+
+        const member = await CampaignMember.findById(req.params.id);
+        if (!member) return res.status(404).json({ error: "Campaign member not found" });
+        const campaignId = String(member.campaign);
+        if (!(await isCampaignGameMaster(req.user, campaignId))) {
+            return res.status(403).json({ error: `Only the ${await gmTitleOf(campaignId)} can change who is active` });
+        }
+        if (!active && member.status === "Game Master") {
+            return res.status(409).json({ error: `The ${await gmTitleOf(campaignId)} can't be made inactive. Pass the torch first.` });
+        }
+
+        const wasActive = member.isActive !== false;
+        if (wasActive !== active) {
+            await CampaignMember.findByIdAndUpdate(req.params.id, {
+                $set: active
+                    ? { isActive: true, deactivatedAt: null, deactivatedBy: null }
+                    : { isActive: false, deactivatedAt: new Date(), deactivatedBy: req.user.id },
+            });
+            if (member.person) {
+                await publishMembershipChanged(campaignId, active ? "member-added" : "member-removed", String(member.person));
+            }
+        }
+        const updated = await CampaignMember.findById(req.params.id).populate(PERSON_PUBLIC);
+        res.json({ message: active ? "Player reactivated" : "Player made inactive", member: updated });
+    } catch (error: any) {
+        console.error("Error changing campaign member activity:", error);
+        res.status(500).json({ error: "Failed to change whether the player is active", details: error.message });
     }
 });
 

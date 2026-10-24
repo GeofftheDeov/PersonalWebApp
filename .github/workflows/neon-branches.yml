@@ -42,6 +42,27 @@ jobs:
           branch_name: preview/pr-${{ github.event.number }}-${{ needs.setup.outputs.branch }}
           api_key: ${{ secrets.NEON_API_KEY }}
           expires_at: ${{ env.EXPIRES_AT }}
+      # The preview branch is a copy of production, so this is the PR's
+      # migrations (and any already on dev but not yet promoted) run against
+      # prod's real data, then rolled back. A failure here is a promotion that
+      # would have failed. The checkout is the PR merged into its base, so two
+      # branches that took the same migration number fail here too.
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci --no-audit --no-fund
+      - name: Dry-run pending migrations against a copy of prod
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ steps.create_neon_branch.outputs.db_url }}
+        run: npx tsx scripts/apply-migration.ts --dry-run
 # The step above creates a new Neon branch.
 # You may want to do something with the new branch, such as run migrations, run tests
 # on it, or send the connection details to a hosting platform environment.

@@ -15,7 +15,10 @@ import { findPersonById, personDisplayName } from "../utils/personUtils.js";
 import { getDecryptedKeys } from "./apiKeyRoutes.js";
 import { buildGoogleCalendarLink, integrations } from "../utils/integrations.js";
 import pool from "../db/index.js";
+import { isUuid } from "../db/model.js";
+import CampaignMember from "../models/CampaignMember.js";
 import { followSessionStarts } from "../planning/questReminders.js";
+import { AttendanceError, confirmAttendance, getAttendance } from "../planning/attendance.js";
 
 // --- Sessions ---
 router.get("/sessions", auth, async (req: any, res) => {
@@ -224,6 +227,22 @@ router.post("/sessions/:id/ready", auth, async (req: any, res) => {
     }
 });
 
+// --- Attendance (#37) ---------------------------------------------------------
+// GET: who was there (the GM also gets the party checklist, pre-filled from the
+// ready check). PUT { playerIds }: the GM confirms exactly who came.
+const attendanceRoute = (fn: (actor: any, sessionId: string, body: any) => Promise<unknown>) =>
+    async (req: any, res: any) => {
+        try {
+            res.json(await fn(req.user, req.params.id, req.body));
+        } catch (error: any) {
+            if (error instanceof AttendanceError) return res.status(error.status).json({ error: error.message });
+            console.error("[tabletop] attendance failed:", error);
+            res.status(500).json({ error: "Failed to load or save attendance" });
+        }
+    };
+router.get("/sessions/:id/attendance", auth, attendanceRoute((actor, id) => getAttendance(actor, id)));
+router.put("/sessions/:id/attendance", auth, attendanceRoute((actor, id, body) => confirmAttendance(actor, id, body?.playerIds)));
+
 // --- Tabletop Lifecycle: Prepare Session ---
 router.post("/prepare-session", auth, async (req: any, res) => {
     try {
@@ -286,8 +305,34 @@ router.post("/prepare-session", auth, async (req: any, res) => {
 router.get("/characters", auth, async (req: any, res) => {
     try {
         const campaignIds = await getAuthorizedCampaignIds(req.user);
-        const query = campaignIds ? { campaign: { $in: campaignIds } } : {};
+        const campaign = req.query.campaign === undefined ? undefined : String(req.query.campaign);
 
+        // ?campaign=<id> (#36): one party's characters for the campaign's
+        // Characters tab, each with who plays it and whether they're still in
+        // the party. A deactivated player's character stays on the roster as
+        // history (#31), flagged so the page can set it apart.
+        if (campaign !== undefined) {
+            if (!isUuid(campaign)) return res.status(400).json({ error: "campaign must be a campaign id" });
+            if (campaignIds && !campaignIds.includes(campaign)) return res.status(403).json({ error: "Unauthorized" });
+            const [characters, members] = await Promise.all([
+                Character.find({ campaign })
+                    .populate({ path: "player", select: "handle name firstName lastName" })
+                    .sort({ name: 1 }),
+                CampaignMember.find({ campaign }).select("person isActive"),
+            ]);
+            const active = new Map(members.map((m: any) => [String(m.person), m.isActive !== false]));
+            return res.json(characters.map((c: any) => {
+                const obj = c.toObject();
+                const playerId = String(c.player?._id ?? c.player ?? "");
+                obj.player = c.player?._id
+                    ? { _id: playerId, name: personDisplayName(c.player), handle: c.player.handle ?? null }
+                    : null;
+                obj.playerActive = active.get(playerId) ?? false;
+                return obj;
+            }));
+        }
+
+        const query = campaignIds ? { campaign: { $in: campaignIds } } : {};
         const characters = await Character.find(query).populate("campaign dungeon");
         res.json(characters);
     } catch (error: any) {

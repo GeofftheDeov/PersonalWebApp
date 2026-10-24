@@ -226,7 +226,7 @@ export async function campaignParty(campaignId: string): Promise<PartyMember[]> 
     const { rows } = await query(
         `SELECT a.id, a.handle, a.name, a.first_name, a.last_name, a.email
            FROM campaign_members m JOIN accounts a ON a.id = m.person_id
-          WHERE m.campaign_id = $1
+          WHERE m.campaign_id = $1 AND m.is_active
           ORDER BY m.joined_at NULLS LAST, m.created_at, a.id`, [campaignId]);
     const party = new Map<string, PartyMember>();
     for (const r of rows) {

@@ -8,6 +8,7 @@ import remarkGfm from 'remark-gfm';
 import { MessageSquare, Send, WifiOff, Bold, Italic, Code, List, ListOrdered } from 'lucide-react';
 import { campaignThreadKey } from '@/lib/realtime/threadKeys';
 import { useTyping } from '@/lib/realtime/useTyping';
+import { usePresence } from '@/lib/realtime/usePresence';
 import { myAccountId, useThread } from '@/lib/useThread';
 import { useThreadScroll } from '@/lib/useThreadScroll';
 
@@ -16,6 +17,10 @@ const senderLabel = (s: { name?: string }) => {
     const n = s?.name || 'UNKNOWN';
     return n.includes('@') ? n.split('@')[0] : n;
 };
+
+/** Up to two initials for a presence avatar. (No \p{L}: the frontend's Babel can't compile Unicode property escapes.) */
+const initialsOf = (name: string) =>
+    name.split(/[\s._\-@#]+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?';
 
 /** Convert Tiptap's JSON doc to a markdown string. */
 function docToMarkdown(doc: any): string {
@@ -87,6 +92,8 @@ export default function CampaignChat({ campaignId }: { campaignId: string }) {
     const { label: typingText, typing, sent: typingSent } = useTyping(threadKey);
     // A confirmed send (or resend) ends the typing burst, so the next keystroke announces at once.
     const thread = useThread(threadKey, { onSent: typingSent });
+    // Being on this page puts you in the room (#37); everyone here shows above the composer.
+    const present = usePresence(threadKey);
     const { messages } = thread;
     const connected = thread.status === 'open';
     const onScroll = useThreadScroll(scrollRef, messages, { onNearTop: thread.loadOlder, canLoadMore: thread.hasMore });
@@ -193,6 +200,22 @@ export default function CampaignChat({ campaignId }: { campaignId: string }) {
                         );
                     })}
                 </div>
+
+                {/* Who has Table Talk open right now (#37) */}
+                {present.length > 0 && (
+                    <div className="flex items-center gap-2 px-4 pt-2 border-t-2 border-black/10 dark:border-white/10" aria-label="Here now">
+                        <span className="font-permanent text-[10px] uppercase text-zinc-400 shrink-0">Here now</span>
+                        <ul className="flex flex-wrap gap-1 min-w-0">
+                            {present.map(p => (
+                                <li key={p.id} title={p.id === myId ? `${p.name} (you)` : p.name}
+                                    className={`w-7 h-7 flex items-center justify-center border-2 border-black font-permanent text-[10px] uppercase ${p.id === myId ? 'bg-teal-500 text-white' : 'bg-yellow-400 text-black'}`}>
+                                    <span aria-hidden="true">{initialsOf(p.name)}</span>
+                                    <span className="sr-only">{p.id === myId ? `${p.name} (you)` : p.name}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
 
                 {/* Who else is writing (#103); fixed height so the layout doesn't jump */}
                 <p aria-live="polite" className="h-6 px-4 font-permanent text-[11px] italic text-zinc-500 dark:text-zinc-400 truncate">

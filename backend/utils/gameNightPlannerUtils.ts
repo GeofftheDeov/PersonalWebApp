@@ -39,7 +39,9 @@ export async function getMemberCampaignIds(user: any): Promise<string[]> {
     if (!user?.id) return [];
     // Membership was a four-way OR across { email, lead, contact, account },
     // including an unindexed email match. One person column, one indexed lookup.
-    const memberships = await CampaignMember.find({ person: user.id }).select("campaign");
+    // A deactivated membership (#37) grants nothing: the campaign leaves their
+    // list, its chat, and every route that authorizes from these ids.
+    const memberships = await CampaignMember.find({ person: user.id, isActive: true }).select("campaign");
     return memberships.map((m: any) => String(m.campaign));
 }
 
@@ -55,6 +57,7 @@ export async function isCampaignGameMaster(user: any, campaignId: string): Promi
         campaign: campaignId,
         status: "Game Master",
         person: user.id,
+        isActive: true,
     }).select("_id");
 
     return Boolean(gm);
@@ -70,5 +73,5 @@ export async function isSessionGameMaster(user: any, session: { campaign?: unkno
     if (await isCampaignGameMaster(user, campaignId)) return true;
     if (!campaignId || !session.gmOverride || String(session.gmOverride) !== String(user?.id)) return false;
     // A stand-in counts only while they're still in the party.
-    return Boolean(await CampaignMember.findOne({ campaign: campaignId, person: user.id }).select("_id"));
+    return Boolean(await CampaignMember.findOne({ campaign: campaignId, person: user.id, isActive: true }).select("_id"));
 }

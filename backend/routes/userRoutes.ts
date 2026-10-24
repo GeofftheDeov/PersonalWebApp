@@ -7,6 +7,7 @@ import CampaignInvite from "../models/CampaignInvite.js";
 import Campaign from "../models/Campaign.js";
 import { getAuthorizedCampaignIds } from "../utils/gameNightPlannerUtils.js";
 import { findPersonById, toPublicPerson } from "../utils/personUtils.js";
+import { resolvePaperclipIdentity } from "../services/paperclipIdentity.js";
 import bcrypt from "bcryptjs";
 import { signJwt } from "../utils/jwt.js";
 import crypto from "crypto";
@@ -295,6 +296,9 @@ router.get("/me/capabilities", auth, async (req: any, res) => {
             recordType: user.sfObject ?? null,
             handle: user.handle ?? null,
             profilePicture: user.profilePicture ?? null,
+            // The same test as requirePaperclipAccess (#36), so the nav hides
+            // the Paperclip menu rather than offering pages that 403.
+            paperclip: user.appRole === "admin" || Boolean(await resolvePaperclipIdentity(String(req.user.id))),
         });
     } catch (err) {
         res.status(500).json({ error: "Failed to fetch capabilities" });
@@ -318,6 +322,10 @@ router.put("/profile", auth, async (req: any, res) => {
         delete updateData.isVerified;
         delete updateData.sfObject;
         delete updateData.sfID;
+        // Paperclip access follows these (#36): linked by email or by an admin, never by yourself.
+        delete updateData.paperclipUserId;
+        delete updateData.paperclipRole;
+        delete updateData.isActive;
 
         // Leads used to keep firstName/lastName while the other three kept
         // `name`, so a rename had to know which table it was in. accounts has
@@ -365,7 +373,8 @@ router.get("/players/:id", auth, async (req: any, res) => {
 
         // Campaign-mate check: any campaign both can see. null = admin (sees all).
         const viewerCampaigns = await getAuthorizedCampaignIds(req.user);
-        const targetMemberships = await CampaignMember.find({ person: targetId })
+        // A player deactivated in a campaign is no longer a campaign-mate there (#31).
+        const targetMemberships = await CampaignMember.find({ person: targetId, isActive: true })
             .select("campaign status");
         const targetCampaignIds = [...new Set(targetMemberships.map((m: any) => String(m.campaign)))];
         const sharedIds = viewerCampaigns === null

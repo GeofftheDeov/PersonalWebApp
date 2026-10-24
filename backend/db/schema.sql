@@ -193,6 +193,13 @@ CREATE TABLE accounts (
   friends                   uuid[] NOT NULL DEFAULT '{}',
   is_active                 boolean NOT NULL DEFAULT true,
 
+  -- ---- Paperclip identity (#36, plan §4.6) ----
+  -- The Paperclip user (member principalId) this person is: matched by email
+  -- against the company's member list, or set by an admin. /api/paperclip
+  -- needs it.
+  paperclip_user_id         text,
+  paperclip_role            text,
+
   -- ---- CRM (Salesforce-owned) ----
   phone                     text,
   company                   text,
@@ -219,6 +226,7 @@ CREATE TRIGGER trg_accounts_updated BEFORE UPDATE ON accounts
 CREATE UNIQUE INDEX ux_accounts_email  ON accounts (email)                      WHERE email IS NOT NULL;
 CREATE UNIQUE INDEX ux_accounts_sf     ON accounts (sf_object, sf_id)           WHERE sf_id IS NOT NULL;
 CREATE UNIQUE INDEX ux_accounts_handle ON accounts (lower(handle), user_number) WHERE handle IS NOT NULL;
+CREATE UNIQUE INDEX ux_accounts_paperclip_user ON accounts (paperclip_user_id) WHERE paperclip_user_id IS NOT NULL;
 
 -- typeahead: prefix + fuzzy on handle, and on name for the friend search
 CREATE INDEX idx_accounts_handle_trgm ON accounts USING gin (lower(handle) gin_trgm_ops);
@@ -475,7 +483,12 @@ CREATE TABLE campaign_members (
   status      text,
   joined_at   timestamptz DEFAULT now(),
   sf_id       text,
-  created_at  timestamptz NOT NULL DEFAULT now()
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  -- Per-campaign deactivation (#37, plan §4.5). Hides the campaign from them
+  -- and them from the party; deletes nothing, so reactivating restores it all.
+  is_active      boolean NOT NULL DEFAULT true,
+  deactivated_at timestamptz,
+  deactivated_by uuid REFERENCES accounts(id) ON DELETE SET NULL
 );
 CREATE INDEX idx_campaign_members_campaign ON campaign_members (campaign_id);
 CREATE INDEX idx_campaign_members_person ON campaign_members (person_id);
@@ -578,6 +591,10 @@ CREATE TABLE game_sessions (
   venue_id             uuid REFERENCES venues(id) ON DELETE SET NULL,
   -- One-session torch pass. A permanent pass swaps campaign_members.status.
   gm_override_id       uuid REFERENCES accounts(id) ON DELETE SET NULL,
+  -- Attendance (#37, plan §4.4): set when the GM confirms who came, so an
+  -- empty list reads as "nobody came" rather than "not taken yet".
+  attendance_confirmed_at timestamptz,
+  attendance_confirmed_by uuid REFERENCES accounts(id) ON DELETE SET NULL,
   CONSTRAINT game_sessions_stage_matches_status
     CHECK ((status = 'planning') = (planning_stage IS NOT NULL)),
   CONSTRAINT game_sessions_date_required
@@ -589,13 +606,15 @@ CREATE TABLE player_sessions (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name        text NOT NULL,
   session_id  uuid NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,
-  -- Polymorphic person ref: User | Lead | Contact | Account (see personUtils.ts).
-  -- No FK is possible; existence is enforced in the data layer. GitHub #42.
-  player_id   uuid NOT NULL,
+  -- An account since Phase 3; #37 added the FK (NOT VALID on existing data).
+  player_id   uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
   sf_id       text,
   created_at  timestamptz NOT NULL DEFAULT now()
 );
+-- A person attends a session once (the GM's confirmation upserts).
+CREATE UNIQUE INDEX ux_player_sessions_session_player ON player_sessions (session_id, player_id);
+CREATE INDEX idx_player_sessions_player ON player_sessions (player_id);
 
 CREATE TABLE encounters (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),

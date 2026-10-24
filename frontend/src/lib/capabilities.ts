@@ -29,23 +29,24 @@ export interface Capabilities {
     recordType: string | null;
     handle: string | null;
     profilePicture: string | null;
+    /** Admin, or linked to a Paperclip account (#36). */
+    paperclip: boolean;
 }
 
 const EMPTY: Capabilities = {
-    appRole: null, accountTier: null, recordType: null, handle: null, profilePicture: null,
+    appRole: null, accountTier: null, recordType: null, handle: null, profilePicture: null, paperclip: false,
 };
 
 /** Admin portal, /db, and campaign-wide visibility. */
 export const canAdmin = (c: Capabilities | null) => c?.appRole === "admin";
 
 /**
- * Paperclip. Geoff's ruling: an admin of Paperclip may hold that access through
- * either Salesforce or the web app, and both get in — so this is the union of
- * the two, matching `paperclipOnly` on the server. Never the tier: what somebody
+ * Paperclip: admins, and anyone linked to a member of the Paperclip company
+ * (#36), however they sign in. The server works it out (`requirePaperclipAccess`
+ * and the `paperclip` capability share one test). Never the tier: what somebody
  * has paid for must not move their access.
  */
-export const canPaperclip = (c: Capabilities | null) =>
-    c?.appRole === "admin" || c?.recordType === "User";
+export const canPaperclip = (c: Capabilities | null) => c?.paperclip === true;
 
 export async function fetchCapabilities(token: string): Promise<Capabilities | null> {
     try {

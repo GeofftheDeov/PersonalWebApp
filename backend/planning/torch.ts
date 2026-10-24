@@ -38,7 +38,7 @@ export async function passTorchPermanently(actorId: string, campaignId: string, 
         if (!c) throw new TorchError(404, "Campaign not found.");
         const { rows: members } = await db.query(
             `SELECT id, person_id, status FROM campaign_members
-              WHERE campaign_id = $1 AND person_id IS NOT NULL
+              WHERE campaign_id = $1 AND person_id IS NOT NULL AND is_active
               ORDER BY joined_at NULLS LAST, created_at FOR UPDATE`, [campaignId]);
         const { rows: [acct] } = await db.query(`SELECT app_role FROM accounts WHERE id = $1`, [actorId]);
         const isGm = (id: string) => members.some((m) => m.person_id === id && m.status === "Game Master");

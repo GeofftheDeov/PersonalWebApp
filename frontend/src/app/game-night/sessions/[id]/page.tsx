@@ -55,7 +55,7 @@ export default function SessionDetailPage() {
                                 const memberRows = await mRes.json();
                                 setMembers(memberRows);
                                 const me = JSON.parse(localStorage.getItem('user') || 'null');
-                                setIsCampaignGM(Boolean(me && (me.role === 'admin' || memberRows.some((m: any) =>
+                                setIsCampaignGM(Boolean(me && (me.appRole === 'admin' || memberRows.some((m: any) =>
                                     m.status === 'Game Master' &&
                                     ((m.email && me.email && m.email.toLowerCase() === me.email.toLowerCase()) || (m.playerId && m.playerId === me.id))
                                 ))));

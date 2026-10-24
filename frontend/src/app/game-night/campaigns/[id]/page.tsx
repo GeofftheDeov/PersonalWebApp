@@ -50,7 +50,7 @@ const computeIsGM = (members: Member[]) => {
     try {
         const me = JSON.parse(localStorage.getItem('user') || 'null');
         if (!me) return false;
-        if (me.role === 'admin') return true;
+        if (me.appRole === 'admin') return true;
         return members.some(m =>
             m.status === 'Game Master' &&
             ((m.email && me.email && m.email.toLowerCase() === me.email.toLowerCase()) || (m.playerId && m.playerId === me.id))
@@ -184,6 +184,26 @@ export default function CampaignDetailPage() {
         }
     };
 
+    // Claiming the torch: an admin-managed campaign with no GM lets a player take it.
+    const handleClaimTorch = async () => {
+        const title = gmTitleOf(campaign);
+        if (!window.confirm(`Claim the torch? You become the ${title} of ${campaign.title}, and plan its sessions.`)) return;
+        setTorchBusy(true);
+        setTorchError(null);
+        try {
+            const res = await fetch(`/api/campaigns/${id}/torch/claim`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${token()}` },
+            });
+            if (!res.ok) { setTorchError((await res.json().catch(() => ({}))).error || 'Could not claim the torch.'); return; }
+            await reloadMembers();
+        } catch {
+            setTorchError('Could not reach the server.');
+        } finally {
+            setTorchBusy(false);
+        }
+    };
+
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
         setSaving(true);
@@ -306,6 +326,9 @@ export default function CampaignDetailPage() {
     const gmMembers = members.filter(m => m.status === 'Game Master' && m.playerId);
     const viewerId = JSON.parse(localStorage.getItem('user') || 'null')?.id;
     const torchNeedsFrom = gmMembers.length > 1 && !gmMembers.some(m => m.playerId === viewerId);
+    // An admin-managed campaign with nobody holding the torch: a player may claim it
+    // (an admin passes it instead).
+    const canClaimTorch = !campaign.owner && gmMembers.length === 0 && !isGM && members.some(m => m.playerId === viewerId);
     // Scheduled sessions still to come show under Coming up, and ones being
     // planned on the Notice Board, so this list is the campaign's past.
     const upcomingIds = new Set((board.board?.upcoming ?? []).map(u => u.id));
@@ -482,6 +505,12 @@ export default function CampaignDetailPage() {
                                     <button type="button" onClick={() => { setTorchTo(''); setTorchError(null); }}
                                         className="mt-1 flex items-center gap-1 font-permanent text-[10px] uppercase text-orange-600 dark:text-orange-400 hover:underline">
                                         <Flame className="w-3 h-3" /> Pass the torch
+                                    </button>
+                                )}
+                                {canClaimTorch && (
+                                    <button type="button" onClick={handleClaimTorch} disabled={torchBusy}
+                                        className="mt-2 flex items-center gap-1 px-2 py-1 border-2 border-black bg-orange-500 text-black font-permanent uppercase text-[10px] hover:bg-white disabled:opacity-40 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
+                                        <Flame className="w-3 h-3" /> Claim the torch
                                     </button>
                                 )}
                                 {torchTo !== null && (

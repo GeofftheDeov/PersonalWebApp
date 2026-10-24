@@ -114,9 +114,11 @@ class El {
     getAttribute(k: string) { return k in this.attrs ? this.attrs[k] : null; }
     removeAttribute(k: string) { delete this.attrs[k]; }
     querySelector(sel: string) { return (this.children[sel] ??= new El(sel)); }
-    fire(type: string) {
+    captured: number[] = [];
+    setPointerCapture(id: number) { this.captured.push(id); }
+    fire(type: string, extra: Record<string, unknown> = {}) {
         let prevented = false;
-        for (const fn of this.listeners[type] ?? []) fn({ type, preventDefault() { prevented = true; } });
+        for (const fn of this.listeners[type] ?? []) fn({ type, ...extra, preventDefault() { prevented = true; } });
         return prevented;
     }
 }
@@ -193,30 +195,108 @@ async function main() {
         check("supported: the mic starts idle with no message", c.mic.state() === "idle" && c.mic.snapshot().message === "");
         check("a press starts listening", c.mic.start() === true && c.mic.state() === "listening" && c.mic.busy());
         const r = c.instances[0];
-        check("... one recognition, started, for one utterance with interim results in the page's language",
-            c.instances.length === 1 && r.started && r.continuous === false && r.interimResults === true
+        check("... one recognition, started, continuous, with interim results in the page's language",
+            c.instances.length === 1 && r.started && r.continuous === true && r.interimResults === true
                 && r.maxAlternatives === 1 && r.lang === "en-GB", r);
-        check("a second start while listening is refused (one utterance per press)",
+        check("a second start while listening is refused (one press at a time)",
             c.mic.start() === false && c.instances.length === 1);
         r.results(["what's", false]);
         r.results(["what's my", false]);
         check("interim results are reported as they arrive, nothing asked yet",
             c.snaps.at(-1)?.state === "listening" && c.snaps.at(-1)?.text === "what's my" && c.asked.length === 0, c.snaps.at(-1));
         r.results(["what's my P&L", true]);
-        check("a final result alone doesn't submit; the end of the utterance does", c.asked.length === 0);
+        check("a final result alone doesn't submit", c.asked.length === 0);
         r.end();
-        check("at the end the transcript is asked, once", c.asked.length === 1 && c.asked[0] === "what's my P&L", c.asked);
+        check("nor does the browser ending the recognition by itself (a pause): a fresh one carries on",
+            c.asked.length === 0 && c.mic.state() === "listening" && c.instances.length === 2 && c.instances[1].started
+                && c.mic.snapshot().text === "what's my P&L", { asked: c.asked, snap: c.mic.snapshot(), n: c.instances.length });
+        const r2 = c.instances[1];
+        r.results(["stale", true]);
+        check("... the ended recognition's late results are ignored", c.mic.snapshot().text === "what's my P&L", c.mic.snapshot());
+        r2.results(["and what's", false]);
+        check("... and the next one's speech follows on from what was heard",
+            c.snaps.at(-1)?.text === "what's my P&L and what's", c.snaps.at(-1));
+        r2.results(["and what's due", true]);
+        check("pressing again stops the recognition", c.mic.stop() === true && r2.stopped && c.asked.length === 0);
+        r2.end();
+        check("... and when it ends the whole transcript is asked, once",
+            c.asked.length === 1 && c.asked[0] === "what's my P&L and what's due", c.asked);
         check("... and the mic stays busy while the ask is in flight",
             c.mic.state() === "submitting" && c.mic.busy());
-        check("... and can't start again until it's answered", c.mic.start() === false && c.instances.length === 1);
+        check("... and can't start again until it's answered", c.mic.start() === false && c.instances.length === 2);
         c.answer({ say: "ok" });
         await flush();
         check("once answered, the mic is idle and not busy", c.mic.state() === "idle" && !c.mic.busy());
-        check("... and onSent got the text and the reply", c.sent.length === 1 && c.sent[0][0] === "what's my P&L"
+        check("... and onSent got the text and the reply", c.sent.length === 1 && c.sent[0][0] === "what's my P&L and what's due"
             && (c.sent[0][1] as any)?.say === "ok", c.sent);
-        r.results(["late", true]); r.end();
+        r2.results(["late", true]); r2.end();
         check("late events from a finished recognition are ignored", c.asked.length === 1 && c.mic.state() === "idle");
-        check("the next press makes a fresh recognition", c.mic.start() && c.instances.length === 2);
+        check("the next press makes a fresh recognition", c.mic.start() && c.instances.length === 3);
+    }
+    {
+        const c = controller();
+        c.mic.start(true);
+        const r = c.instances[0];
+        check("a held press (touch) listens without continuous mode, and the note says to let go",
+            r.started && r.continuous === false && c.mic.snapshot().message === MIC_MESSAGES.listeningHold, { r, snap: c.mic.snapshot() });
+        r.results(["open", true]); r.end();
+        const r2 = c.instances[1];
+        check("... the browser ending it after a pause carries on, still not continuous",
+            c.mic.state() === "listening" && r2?.started && r2.continuous === false && c.asked.length === 0);
+        r2.results(["alpaca", true]);
+        c.mic.stop(); r2.end();
+        check("... and letting go sends everything heard", c.asked[0] === "open alpaca", c.asked);
+    }
+    {
+        const c = controller();
+        c.mic.start(true); c.mic.stop(); c.instances[0].end();
+        check("a held press let go before anything was heard says to hold MIC while speaking",
+            c.mic.state() === "idle" && c.mic.snapshot().message === MIC_MESSAGES.noSpeechHold && c.asked.length === 0, c.mic.snapshot());
+        c.mic.start(); c.mic.stop(); c.instances[1].end();
+        check("... a clicked one says press MIC again", c.mic.snapshot().message === MIC_MESSAGES.noSpeech, c.mic.snapshot());
+    }
+    {
+        const c = controller();
+        c.mic.start();
+        c.instances[0].results(["half a sent", false]);
+        c.instances[0].error("no-speech"); c.instances[0].end();
+        check("a \"no-speech\" error (silence) doesn't end the press: a fresh recognition carries on with what was heard",
+            c.mic.state() === "listening" && c.instances.length === 2 && c.mic.snapshot().text === "half a sent" && c.asked.length === 0,
+            c.mic.snapshot());
+        c.instances[1].results(["sentence", true]);
+        c.mic.stop(); c.instances[1].error("no-speech"); c.instances[1].end();
+        check("... and a stop then sends it all, even if that recognition heard nothing more", c.asked[0] === "half a sent sentence", c.asked);
+    }
+    {
+        const c = controller({ maxQuiet: 4 });
+        c.mic.start();
+        c.instances[0].results(["hello", true]);
+        for (let i = 0; i < 3; i++) c.instances.at(-1)!.end();
+        check("recognitions that end hearing nothing keep restarting, up to the limit",
+            c.mic.state() === "listening" && c.instances.length === 4 && c.asked.length === 0, c.instances.length);
+        c.instances.at(-1)!.results(["there", true]);
+        for (let i = 0; i < 4; i++) c.instances.at(-1)!.end();
+        check("... speech resets the count", c.mic.state() === "listening" && c.instances.length === 8, c.instances.length);
+        c.instances.at(-1)!.end();
+        check("... and at the limit the press ends and sends what was heard",
+            c.instances.length === 8 && c.asked[0] === "hello there" && c.timers.count === 0, { n: c.instances.length, asked: c.asked });
+    }
+    {
+        const c = controller({ maxQuiet: 3 });
+        c.mic.start();
+        for (let i = 0; i < 3; i++) c.instances.at(-1)!.end();
+        check("a press that hears nothing at all gives up at the limit, saying so",
+            c.mic.state() === "idle" && c.mic.snapshot().message === MIC_MESSAGES.noSpeech && c.instances.length === 3 && c.asked.length === 0);
+    }
+    {
+        const { FakeRec, instances } = fakeRecognitionClass();
+        class Flaky extends FakeRec { start() { if (instances.length > 1) throw new Error("InvalidStateError"); super.start(); } }
+        const c = controller({ Recognition: Flaky });
+        const realError = console.error; console.error = () => {};
+        c.mic.start(); instances[0].results(["open the briefs", true]); instances[0].end();
+        console.error = realError;
+        check("a recognition that can't restart after a pause sends what was heard",
+            c.asked[0] === "open the briefs" && c.mic.state() === "submitting" && c.timers.count === 0, { asked: c.asked, n: c.timers.count });
     }
     {
         const c = controller();
@@ -257,7 +337,7 @@ async function main() {
         c.mic.clearMessage();
         check("... but never the listening one", c.mic.state() === "listening" && c.mic.snapshot().message === MIC_MESSAGES.listening);
     }
-    for (const [code, msg] of [["no-speech", MIC_MESSAGES.noSpeech], ["audio-capture", MIC_MESSAGES.noMic],
+    for (const [code, msg] of [["audio-capture", MIC_MESSAGES.noMic],
         ["network", MIC_MESSAGES.network], ["language-not-supported", MIC_MESSAGES.failed],
         ["aborted", MIC_MESSAGES.failed]] as const) {
         const c = controller();
@@ -269,8 +349,8 @@ async function main() {
     }
     {
         const c = controller();
-        c.mic.start(); c.instances[0].end();
-        check("an utterance that ends with nothing heard says so and asks nothing",
+        c.mic.start(); c.mic.stop(); c.instances[0].end();
+        check("a press stopped with nothing heard says so and asks nothing",
             c.mic.state() === "idle" && c.mic.snapshot().message === MIC_MESSAGES.noSpeech && c.asked.length === 0);
     }
     {
@@ -288,19 +368,19 @@ async function main() {
         const c = controller();
         const seen: string[] = [];
         c.mic.onTranscript((t: string) => { seen.push(t); return t === "yes"; });
-        c.mic.start(); c.instances[0].results(["yes", true]); c.instances[0].end();
+        c.mic.start(); c.instances[0].results(["yes", true]); c.mic.stop(); c.instances[0].end();
         await flush();
         check("a transcript hook that returns true takes the utterance: no ask", seen[0] === "yes" && c.asked.length === 0
             && c.mic.state() === "idle", { seen, asked: c.asked });
         check("... and onSent still reports it as handled", c.sent.length === 1 && c.sent[0][0] === "yes" && c.sent[0][1] === true, c.sent);
-        c.mic.start(); c.instances[1].results(["what's due", true]); c.instances[1].end();
+        c.mic.start(); c.instances[1].results(["what's due", true]); c.mic.stop(); c.instances[1].end();
         check("a hook that returns false lets it through to ask", seen[1] === "what's due" && c.asked[0] === "what's due");
     }
     {
         const c = controller();
         let resolveHook: (v: unknown) => void = () => {};
         c.mic.onTranscript(() => new Promise((r) => { resolveHook = r; }));
-        c.mic.start(); c.instances[0].results(["no", true]); c.instances[0].end();
+        c.mic.start(); c.instances[0].results(["no", true]); c.mic.stop(); c.instances[0].end();
         check("a hook returning a promise holds the mic busy until it settles",
             c.mic.state() === "submitting" && c.mic.busy() && c.asked.length === 0);
         resolveHook({ confirmed: true }); await flush();
@@ -311,7 +391,7 @@ async function main() {
         c.mic.onTranscript(() => { throw new Error("hook bug"); });
         const errors: unknown[] = [];
         const realError = console.error; console.error = (e: unknown) => errors.push(e);
-        c.mic.start(); c.instances[0].results(["open alpaca", true]); c.instances[0].end();
+        c.mic.start(); c.instances[0].results(["open alpaca", true]); c.mic.stop(); c.instances[0].end();
         console.error = realError;
         check("a throwing hook is logged and the transcript is still asked", errors.length === 1 && c.asked[0] === "open alpaca");
     }
@@ -333,7 +413,7 @@ async function main() {
     }
     {
         const c = controller();
-        c.mic.start(); c.instances[0].results(["hi", true]); c.instances[0].end();
+        c.mic.start(); c.instances[0].results(["hi", true]); c.mic.stop(); c.instances[0].end();
         check("no timer outlives the utterance", c.timers.count === 0, c.timers.count);
     }
     {
@@ -352,7 +432,7 @@ async function main() {
         const c = controller();
         const states: string[] = [];
         c.mic.onState((s: any) => states.push(s.state));
-        c.mic.start(); c.instances[0].results(["hi", true]); c.instances[0].end();
+        c.mic.start(); c.instances[0].results(["hi", true]); c.mic.stop(); c.instances[0].end();
         c.answer(null); await flush();
         check("onState hooks see listening, submitting, idle", states.join(",") === "listening,listening,submitting,idle", states);
         const failed = c.sent.at(-1);
@@ -402,9 +482,12 @@ async function main() {
         r.results(["show the", false]);
         check("the interim transcript shows in the text box", input.value === "show the", input.value);
         check("... and the note says it's listening", !note.hidden && note.textContent === MIC_MESSAGES.listening, note.textContent);
-        r.results(["show the briefs", true]); r.end();
+        r.results(["show the briefs", true]);
+        mic.fire("click");
+        check("clicking the mic again stops the recognition", r.stopped && p.fetches.length === 0);
+        r.end();
         await flush(); await flush();
-        check("at the end of the utterance the page posts it to /admin/os/ask with source 'voice'",
+        check("when it ends the page posts it to /admin/os/ask with source 'voice'",
             p.fetches.length === 1 && p.fetches[0].url.startsWith("/admin/os/ask?token=")
                 && p.fetches[0].body.text === "show the briefs" && p.fetches[0].body.source === "voice", p.fetches);
         await flush(); await flush();
@@ -462,14 +545,58 @@ async function main() {
         const heard: string[] = [];
         p.OS.onTranscript((t: string) => { heard.push(t); return true; });
         p.OS.listen();
-        p.instances[0].results(["yes", true]); p.instances[0].end();
+        p.instances[0].results(["yes", true]); p.OS.stopListening(); p.instances[0].end();
         await flush(); await flush();
         check("OS.onTranscript can take an utterance (#151's yes/no): it isn't posted", heard[0] === "yes" && p.fetches.length === 0);
         check("... and the text box is cleared", p.els["ask-text"].value === "", p.els["ask-text"].value);
     }
     {
         const p = bootPage();
+        const mic = p.els["ask-mic"], note = p.els["ask-mic-note"];
+        const touch = { pointerType: "touch", pointerId: 7 };
+        const prevented = mic.fire("pointerdown", touch);
+        const r = p.instances[0];
+        check("a touch on the mic starts listening at once, holding the finger's events, the note saying let go",
+            r?.started && r.continuous === false && p.OS.micState() === "listening" && prevented && mic.captured[0] === 7
+                && note.textContent === MIC_MESSAGES.listeningHold, { captured: mic.captured, note: note.textContent });
+        r.results(["what's", true]); r.end();
+        check("... a pause while holding keeps listening", p.OS.micState() === "listening" && p.instances.length === 2);
+        p.instances[1].results(["due today", true]);
+        mic.fire("pointerup", touch);
+        check("letting go stops the recognition", p.instances[1].stopped && p.fetches.length === 0);
+        mic.fire("click", touch);
+        check("... and the click the browser sends after the touch is ignored", p.instances.length === 2 && p.OS.micState() === "listening");
+        p.instances[1].end();
+        await flush();
+        check("... then everything heard is posted as voice", p.fetches.length === 1 && p.fetches[0].body.source === "voice"
+            && p.fetches[0].body.text === "what's due today", p.fetches);
+        check("a long press doesn't open the browser's menu", mic.fire("contextmenu") === true);
+    }
+    {
+        const p = bootPage();
+        const mic = p.els["ask-mic"];
+        mic.fire("pointerdown", { pointerType: "touch", pointerId: 1 });
+        mic.fire("pointercancel", { pointerType: "touch", pointerId: 1 });
+        check("a touch the browser cancels stops listening too", p.instances[0].stopped);
+        p.instances[0].end();
+        check("... and a tap that heard nothing says to hold the mic", p.els["ask-mic-note"].textContent === MIC_MESSAGES.noSpeechHold);
+        mic.fire("click");
+        mic.fire("pointerdown", { pointerType: "mouse", pointerId: 2 });
+        check("a mouse press doesn't start anything by itself", p.instances.length === 1);
+        mic.fire("click");
+        check("... its click starts listening, continuously", p.instances.length === 2 && p.instances[1].continuous === true
+            && p.OS.micState() === "listening");
+        p.instances[1].results(["hello", true]); p.instances[1].end();
+        mic.fire("pointerup", { pointerType: "mouse", pointerId: 2 });
+        check("... letting go of the mouse button doesn't stop it, nor does a pause", p.OS.micState() === "listening"
+            && p.instances.length === 3 && !p.instances[2].stopped);
+        mic.fire("pointerdown", { pointerType: "mouse", pointerId: 2 }); mic.fire("click");
+        check("... the next click does", p.instances[2].stopped);
+    }
+    {
+        const p = bootPage();
         p.els["ask-text"].value = "half-typed";
+        p.els["ask-mic"].fire("click");
         p.els["ask-mic"].fire("click");
         p.instances[0].end();
         check("a press that hears nothing leaves typed text alone", p.els["ask-text"].value === "half-typed");

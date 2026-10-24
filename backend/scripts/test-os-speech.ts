@@ -726,11 +726,12 @@ async function main() {
             return { tier: 1, kind: "answer", say: `Router heard: ${body.text}` };
         };
     };
-    /** One spoken utterance through the mic: press, a final result, the end of speech. */
+    /** One spoken utterance through the mic: press, a final result, press again, the recognition ends. */
     const t151Say = async (p: ReturnType<typeof t150Boot>, text: string) => {
         const listening = p.OS.listen();
         const r = p.recs.at(-1);
         r.onresult?.({ resultIndex: 0, results: [Object.assign([{ transcript: text, confidence: 0.9 }], { isFinal: true })] });
+        p.OS.stopListening();
         r.onend?.();
         await flush();
         return listening;
@@ -1093,7 +1094,7 @@ async function main() {
     {
         const { p, srv } = await t153Confirmed({ recognition: true });
         await t153Pass(p, 10_000);
-        p.OS.listen();   // the mic gives up by itself after 15 s: the poll lands at 15 s, 5 s in
+        p.OS.listen();   // the mic listens until stopped: the poll lands at 15 s, 5 s in
         Object.assign(srv.s.run, { status: "failed", summary: "boom" });
         await t153Pass(p, 10_000);
         check("an outcome landing while the mic listens waits (and isn't heard by it)",

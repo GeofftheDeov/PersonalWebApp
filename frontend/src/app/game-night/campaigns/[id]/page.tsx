@@ -57,7 +57,7 @@ const computeIsGM = (members: Member[]) => {
     try {
         const me = JSON.parse(localStorage.getItem('user') || 'null');
         if (!me) return false;
-        if (me.role === 'admin') return true;
+        if (me.appRole === 'admin') return true;
         return members.some(m =>
             m.status === 'Game Master' &&
             ((m.email && me.email && m.email.toLowerCase() === me.email.toLowerCase()) || (m.playerId && m.playerId === me.id))
@@ -166,6 +166,14 @@ export default function CampaignDetailPage() {
     const boardKey = campaign ? `${gmTitleOf(campaign)}|${gmIds}` : '';
     const board = useNoticeBoard(campaign ? id : null, { onSessionsChanged: reloadSessions, refreshKey: boardKey });
 
+    // A pass or claim can give an admin-managed campaign its owner: show it, and
+    // the owner's settings if that's the viewer.
+    const setOwner = (owner: string | null) => {
+        setCampaign((c: any) => ({ ...c, owner }));
+        const meId = JSON.parse(localStorage.getItem('user') || 'null')?.id;
+        if (owner && owner === meId) setIsOwner(true);
+    };
+
     const handlePassTorch = async (e: React.FormEvent) => {
         e.preventDefault();
         const target = members.find(m => m.playerId === torchTo);
@@ -178,7 +186,9 @@ export default function CampaignDetailPage() {
         const from = iAmGm ? null : gms.length === 1 ? gms[0] : gms.find(m => m.playerId === torchFrom);
         if (!iAmGm && gms.length > 1 && !from) { setTorchError(`Choose which ${title} steps down.`); return; }
         const stepsDown = iAmGm ? 'you become a player' : from ? `${memberName(from)} becomes a player` : 'no one steps down';
-        if (!window.confirm(`Pass the torch to ${memberName(target)}? They become the ${title} and ${stepsDown}. Ownership doesn't change.`)) return;
+        // An admin-managed campaign is owned by whoever first holds the torch.
+        const ownership = campaign.owner ? "Ownership doesn't change." : 'They become its owner, too.';
+        if (!window.confirm(`Pass the torch to ${memberName(target)}? They become the ${title} and ${stepsDown}. ${ownership}`)) return;
         setTorchBusy(true);
         setTorchError(null);
         try {
@@ -189,6 +199,28 @@ export default function CampaignDetailPage() {
             });
             if (!res.ok) { setTorchError((await res.json().catch(() => ({}))).error || 'Could not pass the torch.'); return; }
             setTorchTo(null);
+            setOwner((await res.json()).owner);
+            await reloadMembers();
+        } catch {
+            setTorchError('Could not reach the server.');
+        } finally {
+            setTorchBusy(false);
+        }
+    };
+
+    // Claiming the torch: an admin-managed campaign with no GM lets a player take it.
+    const handleClaimTorch = async () => {
+        const title = gmTitleOf(campaign);
+        if (!window.confirm(`Claim the torch? You become the ${title} and owner of ${campaign.title}, and plan its sessions.`)) return;
+        setTorchBusy(true);
+        setTorchError(null);
+        try {
+            const res = await fetch(`/api/campaigns/${id}/torch/claim`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${token()}` },
+            });
+            if (!res.ok) { setTorchError((await res.json().catch(() => ({}))).error || 'Could not claim the torch.'); return; }
+            setOwner((await res.json()).owner);
             await reloadMembers();
         } catch {
             setTorchError('Could not reach the server.');
@@ -371,6 +403,9 @@ export default function CampaignDetailPage() {
     const gmMembers = members.filter(m => m.status === 'Game Master' && m.playerId);
     const viewerId = JSON.parse(localStorage.getItem('user') || 'null')?.id;
     const torchNeedsFrom = gmMembers.length > 1 && !gmMembers.some(m => m.playerId === viewerId);
+    // An admin-managed campaign with nobody holding the torch: a player may claim it
+    // (an admin passes it instead).
+    const canClaimTorch = !campaign.owner && gmMembers.length === 0 && !isGM && members.some(m => m.playerId === viewerId);
     // Leaving and removing (display only: the server enforces both). A GM
     // removes players; another GM is an admin's call. The last GM passes the
     // torch before leaving anyone behind.
@@ -555,6 +590,12 @@ export default function CampaignDetailPage() {
                                     <button type="button" onClick={() => { setTorchTo(''); setTorchError(null); }}
                                         className="mt-1 flex items-center gap-1 font-permanent text-[10px] uppercase text-orange-600 dark:text-orange-400 hover:underline">
                                         <Flame className="w-3 h-3" /> Pass the torch
+                                    </button>
+                                )}
+                                {canClaimTorch && (
+                                    <button type="button" onClick={handleClaimTorch} disabled={torchBusy}
+                                        className="mt-2 flex items-center gap-1 px-2 py-1 border-2 border-black bg-orange-500 text-black font-permanent uppercase text-[10px] hover:bg-white disabled:opacity-40 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
+                                        <Flame className="w-3 h-3" /> Claim the torch
                                     </button>
                                 )}
                                 {torchTo !== null && (

@@ -12,7 +12,7 @@ import { SettingsError, cleanGmTitle, updateCampaignSettings } from "../planning
 import { clearBanner, requestBannerUpload, setBanner, withBannerUrl } from "../planning/campaignBanner.js";
 import { bus } from "../events/index.js";
 import { query } from "../db/index.js";
-import { TorchError, passTorchPermanently } from "../planning/torch.js";
+import { TorchError, claimTorch, passTorchPermanently } from "../planning/torch.js";
 
 /**
  * Phase 3 (#35, plan §3.4). Auto-enrolment used to branch on req.user.type to
@@ -161,6 +161,17 @@ router.post("/:id/torch", auth, async (req: any, res) => {
         if (error instanceof TorchError) return res.status(error.status).json({ error: error.message });
         console.error("Error passing the torch:", error);
         res.status(500).json({ error: "Failed to pass the torch" });
+    }
+});
+
+// Claim the torch: a party member of an admin-managed campaign with no GM becomes its GM.
+router.post("/:id/torch/claim", auth, async (req: any, res) => {
+    try {
+        res.json(await claimTorch(req.user.id, req.params.id));
+    } catch (error: any) {
+        if (error instanceof TorchError) return res.status(error.status).json({ error: error.message });
+        console.error("Error claiming the torch:", error);
+        res.status(500).json({ error: "Failed to claim the torch" });
     }
 });
 

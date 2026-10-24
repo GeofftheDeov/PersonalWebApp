@@ -1,40 +1,55 @@
-import { ok, type TileSource } from "../overview.js";
-import { ago, centralTime, esc, TIME_ZONE } from "../format.js";
+import { describeError, ok, unavailable, type TileSource } from "../overview.js";
+import { ago, centralDay, centralTime, esc, TIME_ZONE } from "../format.js";
+import { readVaultTasks, VAULT_TASKS_FILE, type VaultTasks } from "../../utils/vaultTasks.js";
 
 /**
- * The Tasks tile (#141): Notion-synced tasks that need attention now, from the
- * `tasks` table the BullMQ Notion poll (jobs/workers.ts) keeps up to date.
+ * The Tasks tile (#141): Notion tasks that need attention now, read from the
+ * vault's Notion sync (raw/notion/tasks.md, utils/vaultTasks.ts) in the local
+ * vault checkout. The backend's own Notion poll (jobs/workers.ts) isn't read:
+ * it has no Notion credentials in prod or dev, so `tasks` never held a Notion
+ * task (#141 follow-up).
  *
- * A task is listed when it has a Notion page id, isn't Completed, and is due
- * before the end of tomorrow, in Central days: overdue first, then today, then
+ * A task is listed when it isn't done (TASKS_DONE_STATUSES) and is due before
+ * the end of tomorrow, in Central days: overdue first, then today, then
  * tomorrow. The counts cover every such task; the list stops at
- * TASKS_MAX_SHOWN. Read-only: nothing here writes to tasks or Notion.
+ * TASKS_MAX_SHOWN. Read-only: nothing here writes to the vault or Notion.
  *
- * Due days. A Notion date with no time ("2026-10-13") is stored as UTC
- * midnight of that date (`new Date("2026-10-13")`), which is the Central
- * evening before. A due_date at exactly 00:00:00 UTC is therefore read as a
- * date-only due date on its UTC date; any other due_date falls on its Central
- * day. (A timed task due at exactly 7 PM CDT / 6 PM CST lands a day late.)
+ * Due days. A Notion date with no time ("2026-10-13") is due on that date,
+ * and its `due` is UTC midnight of it, so it sorts first in its day. A timed
+ * due date (with its offset) falls on its Central day. A range is due at its end.
+ *
+ * The tile is unavailable when the vault isn't configured or the file can't
+ * be read; a file without a readable `synced:` time is ok but never synced.
  *
  * The answers ticket (#147) reads `overview.tiles.tasks` as TasksTileData.
  */
 
 /** At most this many tasks are listed; the rest are "+N more". */
 export const TASKS_MAX_SHOWN = 7;
-/** The sync is flagged stale after this long. The BullMQ poll runs every 15 minutes. */
-export const TASKS_STALE_AFTER_MS = 60 * 60_000;
-/** Tasks in this status are done and never listed. */
-export const TASKS_DONE_STATUS = "Completed";
+/**
+ * The sync is flagged stale after this long: the vault syncs Notion nightly
+ * at 2 AM Central (and at logon), and the backend pulls the vault every 10
+ * minutes, so a day plus two hours of slack.
+ */
+export const TASKS_STALE_AFTER_MS = 26 * 60 * 60_000;
+/** Tasks in these statuses (any case) are done and never listed. */
+export const TASKS_DONE_STATUSES: readonly string[] = ["done", "completed", "complete"];
+
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** The calendar day after a YYYY-MM-DD day. */
+const nextDay = (day: string) => new Date(Date.parse(`${day}T12:00:00Z`) + 24 * 60 * 60_000).toISOString().slice(0, 10);
 
 export type TaskBucket = "overdue" | "today" | "tomorrow";
 
 export interface DueTask {
+    /** The Notion page id. */
     id: string;
     /** As synced from Notion; escape before showing. */
     title: string;
-    /** "Not Started" or "In Progress" (never Completed). */
+    /** The Status as Notion names it ("Not started", "In progress", "backlog"); never a done status. */
     status: string;
-    /** The stored due_date (ISO). */
+    /** When it's due (ISO); UTC midnight of its day for a date-only due date. */
     due: string;
     /** The day it's due, YYYY-MM-DD (see "Due days" above). */
     dueDay: string;
@@ -42,7 +57,7 @@ export interface DueTask {
     dateOnly: boolean;
     bucket: TaskBucket;
     notionPageId: string;
-    /** The Notion page, or null when the page id isn't a Notion id. */
+    /** The Notion page, or null when the vault's link isn't an https link. */
     url: string | null;
 }
 
@@ -57,7 +72,7 @@ export interface TasksTileData {
     tasks: DueTask[];
     /** counts.total - tasks.length. */
     more: number;
-    /** The newest notion_last_synced over the Notion tasks (ISO), or null if none has synced. */
+    /** When the vault last synced Notion (the file's `synced:`, ISO), or null if it doesn't say. */
     lastSync: string | null;
     /** now - lastSync, or null. */
     syncAgeMs: number | null;
@@ -65,81 +80,60 @@ export interface TasksTileData {
     stale: boolean;
 }
 
-/** A Notion page id: 32 hex digits, with or without dashes. */
-const notionUrl = (pageId: string) => {
-    const hex = pageId.trim().replace(/-/g, "");
-    return /^[0-9a-f]{32}$/i.test(hex) ? `https://www.notion.so/${hex.toLowerCase()}` : null;
-};
-
-// The Notion tasks: a page id that isn't blank.
-const NOTION_TASKS = `tasks WHERE notion_page_id IS NOT NULL AND btrim(notion_page_id) <> ''`;
-
 export const tasksTile: TileSource<TasksTileData> = {
     id: "tasks",
     title: "Tasks",
-    href: "/db/tasks",
+    href: `/admin/obsidian?path=${encodeURIComponent(VAULT_TASKS_FILE)}`,
 
-    async build({ now, db }) {
-        // One round trip. Days are computed in Postgres, so "tomorrow" ends at
-        // Central midnight across DST. The lateral list yields one all-null row
-        // when nothing is due, so the day and sync columns always come back.
-        const { rows } = await db.query(
-            `WITH d AS (
-                SELECT ($1::timestamptz AT TIME ZONE '${TIME_ZONE}')::date AS today,
-                       (SELECT max(notion_last_synced) FROM ${NOTION_TASKS}) AS last_sync
-             ), pending AS (
-                SELECT id, title, status, due_date, notion_page_id,
-                       (due_date AT TIME ZONE 'UTC')::time = '00:00' AS date_only
-                FROM ${NOTION_TASKS}
-                  AND status <> $2
-                  AND due_date IS NOT NULL
-                  -- A coarse bound first: nothing due on or after the day after tomorrow starts (Central).
-                  AND due_date < (((SELECT today FROM d) + 2)::timestamp AT TIME ZONE '${TIME_ZONE}')
-             ), due AS (
-                -- The due day: a date-only due date's UTC date, else its Central day.
-                SELECT *, CASE WHEN date_only THEN (due_date AT TIME ZONE 'UTC')::date
-                               ELSE (due_date AT TIME ZONE '${TIME_ZONE}')::date END AS due_day
-                FROM pending
-             )
-             SELECT to_char(d.today, 'YYYY-MM-DD') AS today, to_char(d.today + 1, 'YYYY-MM-DD') AS tomorrow,
-                    d.last_sync, l.*
-             FROM d LEFT JOIN LATERAL (
-                SELECT id, title, status, due_date, notion_page_id, date_only,
-                       to_char(due_day, 'YYYY-MM-DD') AS due_day, bucket,
-                       count(*) FILTER (WHERE bucket = 'overdue') OVER () AS n_overdue,
-                       count(*) FILTER (WHERE bucket = 'today') OVER () AS n_today,
-                       count(*) OVER () AS n_total
-                FROM (SELECT *, CASE WHEN due_day < d.today THEN 'overdue'
-                                     WHEN due_day = d.today THEN 'today' ELSE 'tomorrow' END AS bucket
-                      FROM due WHERE due_day <= d.today + 1) listed
-                ORDER BY due_day, due_date, title, id
-                LIMIT $3
-             ) l ON true`, [now, TASKS_DONE_STATUS, TASKS_MAX_SHOWN]);
+    async build({ now }) {
+        const vaultPath = process.env.OBSIDIAN_VAULT_PATH;
+        if (!vaultPath) return unavailable("the vault isn't configured (OBSIDIAN_VAULT_PATH)");
+        let synced: VaultTasks;
+        try {
+            synced = await readVaultTasks(vaultPath);
+        } catch (err: any) {
+            return unavailable(err?.code === "ENOENT"
+                ? `no Notion sync in the vault yet (${VAULT_TASKS_FILE})`
+                : `${VAULT_TASKS_FILE} can't be read: ${describeError(err)}`);
+        }
 
-        const d = rows[0];
-        const listed = d.id === null ? [] : rows;
-        const total = listed.length ? Number(d.n_total) : 0;
-        const overdue = listed.length ? Number(d.n_overdue) : 0;
-        const today = listed.length ? Number(d.n_today) : 0;
-        const lastSync = d.last_sync ? new Date(d.last_sync) : null;
-        const syncAgeMs = lastSync ? now.getTime() - lastSync.getTime() : null;
+        const today = centralDay(now);
+        const tomorrow = nextDay(today);
+        const due: DueTask[] = [];
+        for (const task of synced.tasks) {
+            if (TASKS_DONE_STATUSES.includes(task.status.toLowerCase()) || !task.due) continue;
+            const dateOnly = DATE_ONLY.test(task.due);
+            const at = new Date(dateOnly ? `${task.due}T00:00:00Z` : task.due);
+            if (Number.isNaN(at.getTime())) continue;
+            const dueDay = dateOnly ? task.due : centralDay(at);
+            if (dueDay > tomorrow) continue;
+            due.push({
+                id: task.pageId,
+                title: task.title,
+                status: task.status,
+                due: at.toISOString(),
+                dueDay,
+                dateOnly,
+                bucket: dueDay < today ? "overdue" : dueDay === today ? "today" : "tomorrow",
+                notionPageId: task.pageId,
+                url: task.url,
+            });
+        }
+        // Due day, then due time, then title and id: the order the list and its cap use.
+        const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+        due.sort((a, b) => cmp(a.dueDay, b.dueDay) || cmp(a.due, b.due) || cmp(a.title, b.title) || cmp(a.id, b.id));
+
+        const n = (bucket: TaskBucket) => due.filter((t) => t.bucket === bucket).length;
+        const tasks = due.slice(0, TASKS_MAX_SHOWN);
+        const lastSync = synced.synced;
+        const syncAgeMs = lastSync ? Math.max(0, now.getTime() - lastSync.getTime()) : null;
 
         return ok({
-            today: d.today,
-            tomorrow: d.tomorrow,
-            counts: { overdue, today, tomorrow: total - overdue - today, total },
-            tasks: listed.map((r): DueTask => ({
-                id: r.id,
-                title: r.title,
-                status: r.status,
-                due: new Date(r.due_date).toISOString(),
-                dueDay: r.due_day,
-                dateOnly: r.date_only === true,
-                bucket: r.bucket,
-                notionPageId: r.notion_page_id,
-                url: notionUrl(r.notion_page_id),
-            })),
-            more: total - listed.length,
+            today,
+            tomorrow,
+            counts: { overdue: n("overdue"), today: n("today"), tomorrow: n("tomorrow"), total: due.length },
+            tasks,
+            more: due.length - tasks.length,
             lastSync: lastSync ? lastSync.toISOString() : null,
             syncAgeMs,
             stale: syncAgeMs === null || syncAgeMs > TASKS_STALE_AFTER_MS,
@@ -155,7 +149,7 @@ export const tasksTile: TileSource<TasksTileData> = {
 
         const sync = t.lastSync
             ? `synced ${esc(centralTime(new Date(t.lastSync), now))} · ${esc(ago(t.syncAgeMs ?? 0))}${
-                t.stale ? ` · <span class="warn">no sync for over ${TASKS_STALE_AFTER_MS / 60_000} min</span>` : ""}`
+                t.stale ? ` · <span class="warn">no sync for over ${TASKS_STALE_AFTER_MS / 3_600_000} h</span>` : ""}`
             : `<span class="warn">never synced from Notion</span>`;
         const meta = `<div class="stat-meta">${sync}</div>`;
 
@@ -179,7 +173,7 @@ export const tasksTile: TileSource<TasksTileData> = {
                 ? `<a href="${esc(task.url)}" target="_blank" rel="noopener noreferrer">${esc(task.title)}</a>`
                 : esc(task.title);
             const tag = task.bucket === "overdue" ? `<span class="task-tag">OVERDUE</span> ` : "";
-            const progress = task.status === "In Progress" ? ` · in progress` : "";
+            const progress = /^in progress$/i.test(task.status) ? ` · in progress` : "";
             return `<li data-bucket="${task.bucket}">${tag}<span class="task-title">${title}</span> <span class="muted">${
                 esc(when(task))}${progress}</span></li>`;
         }).join("");

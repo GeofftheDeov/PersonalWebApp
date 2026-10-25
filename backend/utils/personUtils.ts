@@ -64,7 +64,7 @@ export async function findCampaignPeopleIds(campaignId: string): Promise<string[
     const { rows } = await query<{ id: string }>(
         `SELECT DISTINCT a.id
            FROM campaign_members m JOIN accounts a ON a.id = m.person_id
-          WHERE m.campaign_id = $1`, [campaignId]);
+          WHERE m.campaign_id = $1 AND m.is_active`, [campaignId]);
     return rows.map((r) => r.id);
 }
 

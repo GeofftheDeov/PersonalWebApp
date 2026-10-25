@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
-import { Map, ArrowLeft, Calendar, Book, Users, Shield, ChevronRight, Crown, Save, X, Pencil, UserPlus, Check, Copy, Link2, Plus, Wifi, Flame, ImagePlus } from 'lucide-react';
+import { Map, ArrowLeft, Calendar, Book, Users, Shield, ChevronRight, Crown, Save, X, Pencil, UserPlus, Check, Copy, Link2, Plus, Wifi, Flame, ImagePlus, Sword, UserCheck } from 'lucide-react';
 import CampaignChat from '@/components/CampaignChat';
+import CampaignCharacters from '@/components/CampaignCharacters';
 import { memberName, type MemberPerson } from '@/lib/memberName';
 import CampaignBanner from '@/components/CampaignBanner';
 import BannerEditor from '@/components/BannerEditor';
@@ -22,6 +23,10 @@ interface Session {
     summary?: string;
     status?: string;
     gmOverride?: string | null;
+    /** Players recorded as there (#37). */
+    attendeeCount?: number;
+    /** Set once the GM has taken attendance, even if nobody came. */
+    attendanceConfirmedAt?: string | null;
 }
 
 interface Member {
@@ -32,6 +37,8 @@ interface Member {
     status?: string;
     playerId?: string | null;
     person?: MemberPerson | null;
+    /** False once a GM has deactivated them here (#37). Only GMs and admins are sent inactive members. */
+    isActive?: boolean;
 }
 
 const INPUT_CLS = "w-full p-3 border-4 border-black bg-white text-black font-permanent text-base uppercase focus:border-yellow-400 outline-none";
@@ -95,6 +102,7 @@ export default function CampaignDetailPage() {
     const [torchBusy, setTorchBusy] = useState(false);
     const [torchError, setTorchError] = useState<string | null>(null);
     const [showBannerEditor, setShowBannerEditor] = useState(false);
+    const [recordsTab, setRecordsTab] = useState<'sessions' | 'characters'>('sessions');
 
     const EMPTY_SESSION = { title: '', date: '', endDate: '', location: '', isOnline: false, agenda: '', createDiscordEvent: false, createGoogleEvent: false };
     const [showSessionModal, setShowSessionModal] = useState(false);
@@ -181,6 +189,28 @@ export default function CampaignDetailPage() {
             setTorchError('Could not reach the server.');
         } finally {
             setTorchBusy(false);
+        }
+    };
+
+    // Making a player inactive here, or bringing them back (#37). GM only; the server decides.
+    const [activityBusy, setActivityBusy] = useState<string | null>(null);
+    const [activityError, setActivityError] = useState<string | null>(null);
+    const setMemberActive = async (m: Member, active: boolean) => {
+        if (!active && !window.confirm(`Make ${memberName(m)} inactive? The campaign leaves their list and they can't read or post in Table Talk. Their characters and history stay, and you can bring them back.`)) return;
+        setActivityBusy(m._id);
+        setActivityError(null);
+        try {
+            const res = await fetch(`/api/campaign-members/${m._id}/active`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+                body: JSON.stringify({ active }),
+            });
+            if (!res.ok) { setActivityError((await res.json().catch(() => ({}))).error || 'Could not change that.'); return; }
+            await reloadMembers();
+        } catch {
+            setActivityError('Could not reach the server.');
+        } finally {
+            setActivityBusy(null);
         }
     };
 
@@ -301,8 +331,11 @@ export default function CampaignDetailPage() {
     if (!campaign) return null;
     // The owner is separate from the Game Master (#80): who set the campaign up.
     const ownerMember = campaign.owner ? members.find(m => m.playerId === campaign.owner) : undefined;
-    // Who the torch can pass to (#89): party members with an account who aren't a GM already.
-    const torchCandidates = members.filter(m => m.playerId && m.status !== 'Game Master');
+    // Inactive players (#37) are only sent to GMs, and count for nothing but the list.
+    const activeMembers = members.filter(m => m.isActive !== false);
+    const inactiveMembers = members.filter(m => m.isActive === false);
+    // Who the torch can pass to (#89): active party members with an account who aren't a GM already.
+    const torchCandidates = activeMembers.filter(m => m.playerId && m.status !== 'Game Master');
     const gmMembers = members.filter(m => m.status === 'Game Master' && m.playerId);
     const viewerId = JSON.parse(localStorage.getItem('user') || 'null')?.id;
     const torchNeedsFrom = gmMembers.length > 1 && !gmMembers.some(m => m.playerId === viewerId);
@@ -401,7 +434,7 @@ export default function CampaignDetailPage() {
                                     </div>
                                     <div>
                                         <label className={LABEL_CLS}>Quorum (players a night needs)</label>
-                                        <input type="number" min={1} max={50} className={INPUT_CLS} placeholder={`WHOLE PARTY (${members.length})`} value={form.quorum} onChange={e => setForm({ ...form, quorum: e.target.value })} />
+                                        <input type="number" min={1} max={50} className={INPUT_CLS} placeholder={`WHOLE PARTY (${activeMembers.length})`} value={form.quorum} onChange={e => setForm({ ...form, quorum: e.target.value })} />
                                     </div>
                                     <div>
                                         <label className={LABEL_CLS}>Table link (online sessions)</label>
@@ -551,7 +584,7 @@ export default function CampaignDetailPage() {
                     <div className="lg:w-64 shrink-0">
                         <div className="flex items-center justify-between mb-4">
                             <h2 className="text-2xl font-permanent text-black dark:text-white uppercase flex items-center gap-2">
-                                <Users className="w-5 h-5 text-yellow-500" /> Players <span className="ml-1 text-sm text-zinc-400">({members.length})</span>
+                                <Users className="w-5 h-5 text-yellow-500" /> Players <span className="ml-1 text-sm text-zinc-400">({activeMembers.length})</span>
                             </h2>
                             <button
                                 onClick={() => setShowInviteModal(true)}
@@ -560,6 +593,7 @@ export default function CampaignDetailPage() {
                                 <UserPlus className="w-3 h-3" /> INVITE
                             </button>
                         </div>
+                        {activityError && <p role="alert" className="mb-2 font-permanent text-[10px] text-red-600 uppercase">{activityError}</p>}
                         {members.length === 0 ? (
                             <div className="py-10 border-4 border-dashed border-zinc-300 dark:border-zinc-700 text-center">
                                 <Users className="w-10 h-10 text-zinc-300 dark:text-zinc-600 mx-auto mb-2" />
@@ -567,7 +601,7 @@ export default function CampaignDetailPage() {
                             </div>
                         ) : (
                             <div className="space-y-2">
-                                {members.map(m => {
+                                {activeMembers.map(m => {
                                     const row = (
                                         <>
                                             <div className={`p-1.5 border-2 border-black shrink-0 ${m.status === 'Game Master' ? 'bg-yellow-400' : 'bg-teal-500'}`}>
@@ -584,14 +618,39 @@ export default function CampaignDetailPage() {
                                         </>
                                     );
                                     const cls = "flex items-center gap-3 p-3 border-4 border-black bg-white dark:bg-slate-800 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]";
-                                    return m.playerId ? (
-                                        <Link key={m._id} href={`/players/${m.playerId}`} className={`${cls} hover:-translate-y-0.5 transition-transform`} title="View profile">
+                                    const card = m.playerId ? (
+                                        <Link href={`/players/${m.playerId}`} className={`${cls} hover:-translate-y-0.5 transition-transform`} title="View profile">
                                             {row}
                                         </Link>
                                     ) : (
-                                        <div key={m._id} className={cls}>{row}</div>
+                                        <div className={cls}>{row}</div>
+                                    );
+                                    // A GM can't be made inactive: pass the torch first (#37).
+                                    if (!isGM || m.status === 'Game Master') return <div key={m._id}>{card}</div>;
+                                    return (
+                                        <div key={m._id}>
+                                            {card}
+                                            <button type="button" onClick={() => setMemberActive(m, false)} disabled={activityBusy === m._id}
+                                                className="mt-1 font-permanent text-[10px] uppercase text-zinc-500 hover:text-red-600 hover:underline disabled:opacity-50">
+                                                Make inactive
+                                            </button>
+                                        </div>
                                     );
                                 })}
+                                {inactiveMembers.length > 0 && (
+                                    <div className="pt-3">
+                                        <p className="font-permanent text-[10px] text-zinc-400 uppercase mb-2">Inactive ({inactiveMembers.length}), shown to GMs only</p>
+                                        {inactiveMembers.map(m => (
+                                            <div key={m._id} className="flex items-center gap-3 p-2 mb-2 border-2 border-dashed border-zinc-400 bg-zinc-100 dark:bg-slate-900 opacity-70">
+                                                <p className="flex-grow min-w-0 font-permanent text-sm text-zinc-500 uppercase truncate">{memberName(m)}</p>
+                                                <button type="button" onClick={() => setMemberActive(m, true)} disabled={activityBusy === m._id}
+                                                    className="shrink-0 px-2 py-1 border-2 border-black bg-teal-500 text-white font-permanent text-[10px] uppercase hover:bg-teal-400 disabled:opacity-50">
+                                                    Reactivate
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
@@ -602,8 +661,32 @@ export default function CampaignDetailPage() {
                     </div>
                 </div>
 
+                {/* Sessions | Characters (#36) */}
+                <div role="tablist" aria-label="Campaign records" className="flex gap-0 mb-6 border-b-4 border-black">
+                    {(['sessions', 'characters'] as const).map(tab => (
+                        <button
+                            key={tab}
+                            type="button"
+                            role="tab"
+                            id={`tab-${tab}`}
+                            aria-selected={recordsTab === tab}
+                            aria-controls={`panel-${tab}`}
+                            onClick={() => setRecordsTab(tab)}
+                            className={`flex items-center gap-2 px-4 py-2 border-4 border-b-0 border-black font-permanent uppercase text-sm -mb-[4px] transition-colors ${recordsTab === tab ? 'bg-yellow-400 text-black' : 'bg-white dark:bg-slate-800 text-zinc-500 hover:text-black dark:hover:text-white'}`}
+                        >
+                            {tab === 'sessions' ? <Book className="w-4 h-4" /> : <Sword className="w-4 h-4" />} {tab}
+                        </button>
+                    ))}
+                </div>
+
+                {recordsTab === 'characters' && (
+                    <div role="tabpanel" id="panel-characters" aria-labelledby="tab-characters">
+                        <CampaignCharacters campaignId={id} />
+                    </div>
+                )}
+
                 {/* Sessions: what's coming up beside what's been played */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-6 items-start">
+                <div role="tabpanel" id="panel-sessions" aria-labelledby="tab-sessions" className={`${recordsTab === 'sessions' ? 'grid' : 'hidden'} grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-6 items-start`}>
                 <ComingUp campaignId={id} data={board} />
                 <div>
                     <div className="flex items-center justify-between mb-4">
@@ -649,6 +732,11 @@ export default function CampaignDetailPage() {
                                             {s.isOnline && (
                                                 <span className="flex items-center gap-1 px-1.5 text-xs font-permanent uppercase border-2 border-black bg-teal-500 text-white">
                                                     <Wifi className="w-3 h-3" /> ONLINE
+                                                </span>
+                                            )}
+                                            {s.attendeeCount !== undefined && s.status !== 'cancelled' && (
+                                                <span className="flex items-center gap-1 text-xs font-permanent uppercase text-zinc-500 dark:text-zinc-400" title="Players the GM marked as there">
+                                                    <UserCheck className="w-3 h-3" /> {s.attendanceConfirmedAt || s.attendeeCount > 0 ? `${s.attendeeCount} attended` : 'Attendance not taken'}
                                                 </span>
                                             )}
                                             {s.gmOverride && (

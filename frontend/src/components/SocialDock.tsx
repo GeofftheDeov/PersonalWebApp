@@ -43,6 +43,10 @@ const fmtActivity = (iso: string | null) => {
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }).toUpperCase();
 };
 
+/** Matches the backend's minimum (friendRoutes SEARCH_MIN_CHARS). */
+const SEARCH_MIN_CHARS = 2;
+const SEARCH_DEBOUNCE_MS = 250;
+
 const chatFor = (t: ThreadSummary): ActiveChat => ({
   channel: { kind: t.kind, id: t.targetId },
   title: t.kind === 'dm' ? `@${t.title}` : t.title,
@@ -57,7 +61,7 @@ export default function SocialDock() {
   const [chatFilter, setChatFilter] = useState<ThreadFilter>('all');
   const { threads, totalUnread, markRead, refresh: refreshThreads } = useThreads({ filter: chatFilter });
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResult, setSearchResult] = useState<Friend | null>(null);
+  const [searchResults, setSearchResults] = useState<Friend[]>([]);
   const [searchError, setSearchError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
@@ -109,28 +113,56 @@ export default function SocialDock() {
     setActiveTab('chats');
   };
 
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setSearchError('');
-    setSearchResult(null);
+  // Typeahead (#36): 250 ms after the last keystroke, and each new search
+  // aborts the one before, so a slow answer for "ge" can never land on top of
+  // the results for "geof".
+  const searchAbort = useRef<AbortController | null>(null);
 
+  const runSearch = async (q: string) => {
+    searchAbort.current?.abort();
+    const trimmed = q.trim().replace(/^@/, '');
+    if (trimmed.split('#')[0].trim().length < SEARCH_MIN_CHARS) {
+      setSearchResults([]);
+      setSearchError('');
+      setIsLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    searchAbort.current = controller;
+    setIsLoading(true);
     const token = localStorage.getItem('token');
     try {
-      const res = await fetch(`/api/friends/search?query=${encodeURIComponent(searchQuery)}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+      const res = await fetch(`/api/friends/search?query=${encodeURIComponent(trimmed)}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+        signal: controller.signal,
       });
       const data = await res.json();
+      if (controller.signal.aborted) return;
       if (res.ok) {
-        setSearchResult(data);
+        setSearchResults(data);
+        setSearchError(data.length ? '' : 'Nobody by that handle');
       } else {
-        setSearchError(data.error || "User not found");
+        setSearchResults([]);
+        setSearchError(data.error || 'Search failed');
       }
-    } catch (err) {
-      setSearchError("Search failed");
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return;
+      setSearchError('Search failed');
     } finally {
-      setIsLoading(false);
+      if (searchAbort.current === controller) setIsLoading(false);
     }
+  };
+
+  useEffect(() => {
+    const timer = setTimeout(() => runSearch(searchQuery), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  useEffect(() => () => searchAbort.current?.abort(), []);
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    runSearch(searchQuery);
   };
 
   const sendRequest = async (toUserId: string) => {
@@ -146,8 +178,7 @@ export default function SocialDock() {
       });
       if (res.ok) {
         alert("Friend request sent!");
-        setSearchResult(null);
-        setSearchQuery('');
+        setSearchResults((prev) => prev.filter((p) => p._id !== toUserId));
       } else {
         const data = await res.json();
         alert(data.error || "Failed to send request");
@@ -486,14 +517,15 @@ export default function SocialDock() {
                   <div className="space-y-6">
                     <form onSubmit={handleSearch} className="space-y-2">
                       <label className="text-xs font-black text-zinc-400 uppercase tracking-widest">
-                        Search by Unique ID
+                        Search by handle
                       </label>
                       <div className="relative">
                         <input
                           type="text"
                           value={searchQuery}
                           onChange={(e) => setSearchQuery(e.target.value)}
-                          placeholder="handle#1234"
+                          placeholder="handle or handle#1234"
+                          aria-label="Search players by handle"
                           className="w-full bg-black border-4 border-black p-3 text-white font-black placeholder-zinc-700 focus:border-teal-600 outline-none transition-colors"
                         />
                         <button 
@@ -507,19 +539,24 @@ export default function SocialDock() {
                       {searchError && <p className="text-red-500 text-xs font-black uppercase">{searchError}</p>}
                     </form>
 
-                    {searchResult && (
-                      <div className="p-4 bg-zinc-800 border-4 border-black shadow-[6px_6px_0px_0px_rgba(255,255,255,0.1)] animate-in fade-in zoom-in duration-300">
-                        <div className="mb-4">
-                          <h3 className="font-black text-2xl text-white">@{friendLabel(searchResult).toUpperCase()}</h3>
-                          <p className="text-xs text-zinc-500 font-bold">#{searchResult.userNumber}{searchResult.recordType ? ` · ${searchResult.recordType.toUpperCase()}` : ''}</p>
-                        </div>
-                        <button
-                          onClick={() => sendRequest(searchResult._id)}
-                          className="w-full flex items-center justify-center gap-2 py-3 bg-teal-500 border-2 border-black text-black font-black uppercase hover:bg-teal-400 transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:shadow-none active:translate-x-1 active:translate-y-1"
-                        >
-                          <UserPlus size={18} /> SEND FRIEND REQUEST
-                        </button>
-                      </div>
+                    {searchResults.length > 0 && (
+                      <ul className="space-y-3" aria-label="Search results">
+                        {searchResults.map((person) => (
+                          <li key={person._id} className="p-4 bg-zinc-800 border-4 border-black shadow-[6px_6px_0px_0px_rgba(255,255,255,0.1)] flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <h3 className="font-black text-xl text-white truncate">@{friendLabel(person).toUpperCase()}</h3>
+                              <p className="text-xs text-zinc-500 font-bold">#{person.userNumber}</p>
+                            </div>
+                            <button
+                              onClick={() => sendRequest(person._id)}
+                              aria-label={`Send friend request to ${friendLabel(person)}`}
+                              className="shrink-0 flex items-center gap-2 px-3 py-2 bg-teal-500 border-2 border-black text-black font-black uppercase text-xs hover:bg-teal-400 transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:shadow-none active:translate-x-1 active:translate-y-1"
+                            >
+                              <UserPlus size={16} /> ADD
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
                     )}
                   </div>
                 )}

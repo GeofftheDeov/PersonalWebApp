@@ -21,6 +21,10 @@ const CampaignMember = defineModel({
     person: { col: "person_id", type: "uuid" },
     email: "email", phone: "phone", firstName: "first_name", lastName: "last_name",
     status: "status", joinedAt: { col: "joined_at", type: "date" }, sfID: "sf_id",
+    // Per-campaign deactivation (#37, plan §4.5): hides, never deletes.
+    isActive: "is_active",
+    deactivatedAt: { col: "deactivated_at", type: "date" },
+    deactivatedBy: { col: "deactivated_by", type: "uuid" },
     createdAt: { col: "created_at", type: "date" },
   },
   refs: { campaign: () => Campaign, person: () => Account },

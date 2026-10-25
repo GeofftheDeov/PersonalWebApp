@@ -60,6 +60,7 @@ Thread keys are `campaign:<campaign id>` and `dm:<id>:<id>`, with the two accoun
 | `thread.updated` | `thread`, `lastActivityAt`, `unreadCount` | A thread's last activity and your unread count in it changed (a new message). |
 | `thread.read` | `thread`, `lastReadAt`, `lastReadMessageId`, `unreadCount` | You read a thread, on this or another device. |
 | `noticeboard.changed` | `thread` | A campaign's Notice Board changed (see The Notice Board). |
+| `presence` | `thread`, `people` | Who has a campaign's Table Talk open now (see Presence). |
 | `ping` | none | Heartbeat. Answer with `pong`. |
 
 `message` is:
@@ -114,6 +115,7 @@ Clients must ignore frame types they don't know. Later versions of the server wi
 | `auth` | `v`, `token` | The first frame only. |
 | `pong` | none | Answer to `ping`. |
 | `typing` | `thread` | You are writing in this thread (see Typing). |
+| `presence` | `thread`, `here` | You opened (`true`) or closed (`false`) a campaign's Table Talk (see Presence). |
 
 The server ignores types it doesn't know. When a frame names a thread, the server drops it if the person can't access that thread.
 
@@ -140,6 +142,24 @@ Every socket subscribed to the thread then gets
 except the typist's own sockets, on any device: nobody sees themselves typing. A DM's `typing` reaches only the other one of the pair. `name` is the person's display name, never an email address.
 
 Clients show "Theo is writing…" and take it down `expiresInMs` (5 seconds) after that person's last `typing` frame, or as soon as a `message.created` from that person arrives on the thread. Nothing is replayed: a socket that connects mid-burst sees the indicator at the typist's next frame. The web client's logic is in `frontend/src/lib/realtime/typing.ts` (`TypingTracker`), wrapped by the `useTyping` hook.
+
+## Presence
+
+Added with #37. While a campaign's Table Talk is open, the client sends
+
+```json
+{ "type": "presence", "thread": "campaign:<id>", "here": true }
+```
+
+and `"here": false` when it closes. A new socket is in nobody's Table Talk, so the client says `here: true` again after every `ready` that lists a thread it has open: the first on a connection, and a re-sent one that brings a thread back. The server drops the frame if the thread isn't a campaign thread this socket's `ready` listed. A person is here while any of their sockets is; losing the thread (leaving the campaign, being made inactive in it, disconnecting) takes them out.
+
+Every socket subscribed to the thread then gets the whole list, the viewer included, whenever it changes, and the socket that just said `here: true` gets it straight away:
+
+```json
+{ "type": "presence", "thread": "campaign:<id>", "people": [{ "id": "<account id>", "name": "Theo" }] }
+```
+
+Replace what you have with it; an empty `people` means nobody. `name` is the display name, never an email address. Like typing, presence never touches the database: each backend task publishes its own set on the bus's ephemeral path (`presence.changed`) when it changes and every 20 seconds while it isn't empty, and every task shows the union, leaving out a task it hasn't heard from in 60 seconds. So a task that dies takes its people off the list within a minute. After a reconnect, the list arrives once the client says `here: true` again. The web client's hook is `usePresence` (`frontend/src/lib/realtime/usePresence.ts`).
 
 ## Heartbeat
 

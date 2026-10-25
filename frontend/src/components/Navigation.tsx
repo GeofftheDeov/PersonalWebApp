@@ -115,7 +115,7 @@ export default function Navigation() {
                 <div className={`${decorationCls} -rotate-1`} />
               </Link>
 
-              {/* Paperclip — admins, or people who came from a Salesforce User */}
+              {/* Paperclip — admins, or people linked to a Paperclip account (#36) */}
               {canPaperclip(caps) && (
                 <div className="relative" ref={paperclipRef}>
                   <button

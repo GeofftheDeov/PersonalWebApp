@@ -7,6 +7,7 @@ import { Book, ArrowLeft, Calendar, MapPin, FileText, Map, Save, X, Pencil, Wifi
 import { memberName } from '@/lib/memberName';
 import SessionQuests from '@/components/SessionQuests';
 import SessionTorch from '@/components/SessionTorch';
+import SessionAttendance from '@/components/SessionAttendance';
 import { gmTitleOf } from '@/lib/campaigns';
 
 const INPUT_CLS = "w-full p-3 border-4 border-black bg-white text-black font-permanent text-base uppercase focus:border-yellow-400 outline-none";
@@ -53,9 +54,10 @@ export default function SessionDetailPage() {
                             const mRes = await fetch(`/api/campaigns/${s.campaign._id}/members`, { headers: { Authorization: `Bearer ${t}` } });
                             if (mRes.ok) {
                                 const memberRows = await mRes.json();
-                                setMembers(memberRows);
+                                // Inactive players (#37, sent to GMs only) aren't part of a session.
+                                setMembers(memberRows.filter((m: any) => m.isActive !== false));
                                 const me = JSON.parse(localStorage.getItem('user') || 'null');
-                                setIsCampaignGM(Boolean(me && (me.role === 'admin' || memberRows.some((m: any) =>
+                                setIsCampaignGM(Boolean(me && (me.appRole === 'admin' || memberRows.some((m: any) =>
                                     m.status === 'Game Master' &&
                                     ((m.email && me.email && m.email.toLowerCase() === me.email.toLowerCase()) || (m.playerId && m.playerId === me.id))
                                 ))));
@@ -327,6 +329,7 @@ export default function SessionDetailPage() {
                             </div>
                         )}
                         <SessionQuests sessionId={id} />
+                        <SessionAttendance sessionId={id} />
                         {(session.googleCalendarLink || session.discordEventId) && (
                             <div>
                                 <p className="font-permanent text-xs text-zinc-400 uppercase mb-2">External Events</p>

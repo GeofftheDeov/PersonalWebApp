@@ -17,6 +17,10 @@ switches off embedded Postgres, `paperclipai run` = doctor + start, and
 - `paperclip/Dockerfile` + `paperclip/entrypoint.sh` — headless image, runs as
   `node` (uid 1000) because embedded Postgres refuses root; authenticated mode
   bound to 0.0.0.0; instance data on `/paperclip-data`.
+- Claude Code CLI for `claude_local` agents, pinned via the
+  `CLAUDE_CODE_VERSION` build arg (tracks npm's `stable` dist-tag). Its state
+  lives at `CLAUDE_CONFIG_DIR=/paperclip-data/claude` on EFS, so sessions and
+  settings survive task replacement.
 - EFS access point `fsap-02a0045caa8f59650` → `/paperclip-data` owned 1000:1000
   (already created; wired into the task definition).
 - Task definition draft: `.aws/paperclip-dev-task-definition.json`.
@@ -141,5 +145,29 @@ return an explicit 503 "not configured" rather than dialing a dead port.
   - Confirmed as assumed: `/api/companies/{id}/org|agents|issues`,
     `/api/agents/{id}` (+ `/pause`, `/resume`, `/heartbeat/invoke`),
     `/api/issues/{id}`.
-- **Version pinning**: image pins `paperclipai@2026.707.0`; the Windows
-  instance ran server 2026.609.0. Migrations apply automatically on first boot.
+- **Version pinning**: image pins `paperclipai@2026.1005.0` (was 2026.707.0;
+  the Windows instance ran server 2026.609.0). 2026.1005.0 requires Node
+  >= 24.11, hence the `node:24` base. Migrations apply automatically on first
+  boot and are forward-only, so an older image can't be rolled back onto a
+  migrated database.
+
+## Upgrading Paperclip
+
+1. Bump `PAPERCLIP_VERSION` in `paperclip/Dockerfile` (check the release's
+   `engines.node` against the base image: `npm view paperclipai@<v> engines`).
+2. Snapshot the EFS filesystem behind `fsap-02a0045caa8f59650` (AWS Backup
+   on-demand job). This is the only rollback path once migrations run.
+3. Build and push, tagging the version alongside `:dev` so the previous
+   image stays addressable:
+
+   ```sh
+   cd paperclip
+   docker buildx build --platform linux/amd64 \
+     -t 913447902637.dkr.ecr.us-east-2.amazonaws.com/paperclip:dev \
+     -t 913447902637.dkr.ecr.us-east-2.amazonaws.com/paperclip:<version> --push .
+   ```
+
+4. The task definition pulls `:dev`, so force a new deployment:
+   `aws ecs update-service --cluster dev-cluster --service paperclip-dev-service --force-new-deployment`
+5. Verify `/api/health`, then the admin portal Paperclip page and the
+   frontend `/paperclip/*` pages.

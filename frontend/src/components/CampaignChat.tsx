@@ -8,14 +8,20 @@ import remarkGfm from 'remark-gfm';
 import { MessageSquare, Send, WifiOff, Bold, Italic, Code, List, ListOrdered } from 'lucide-react';
 import { campaignThreadKey } from '@/lib/realtime/threadKeys';
 import { useTyping } from '@/lib/realtime/useTyping';
+import { usePresence } from '@/lib/realtime/usePresence';
 import { myAccountId, useThread } from '@/lib/useThread';
 import { useThreadScroll } from '@/lib/useThreadScroll';
+import { AttachButton, DraftAttachments, MessageAttachments, useAttachmentDraft } from './MessageAttachments';
 
 /** Older messages stored the sender's email as the name — show the handle-ish local part instead. */
 const senderLabel = (s: { name?: string }) => {
     const n = s?.name || 'UNKNOWN';
     return n.includes('@') ? n.split('@')[0] : n;
 };
+
+/** Up to two initials for a presence avatar. (No \p{L}: the frontend's Babel can't compile Unicode property escapes.) */
+const initialsOf = (name: string) =>
+    name.split(/[\s._\-@#]+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?';
 
 /** Convert Tiptap's JSON doc to a markdown string. */
 function docToMarkdown(doc: any): string {
@@ -87,6 +93,8 @@ export default function CampaignChat({ campaignId }: { campaignId: string }) {
     const { label: typingText, typing, sent: typingSent } = useTyping(threadKey);
     // A confirmed send (or resend) ends the typing burst, so the next keystroke announces at once.
     const thread = useThread(threadKey, { onSent: typingSent });
+    // Being on this page puts you in the room (#37); everyone here shows above the composer.
+    const present = usePresence(threadKey);
     const { messages } = thread;
     const connected = thread.status === 'open';
     const onScroll = useThreadScroll(scrollRef, messages, { onNearTop: thread.loadOlder, canLoadMore: thread.hasMore });
@@ -94,6 +102,7 @@ export default function CampaignChat({ campaignId }: { campaignId: string }) {
     // Tiptap 3 doesn't re-render on keystrokes, so track emptiness for the SEND button here,
     // and announce typing (#103) from the same place while the draft has text.
     const [isDraftEmpty, setDraftEmpty] = useState(true);
+    const files = useAttachmentDraft();
     const editor = useEditor({
         extensions: [StarterKit],
         onUpdate: ({ editor }) => {
@@ -120,9 +129,10 @@ export default function CampaignChat({ campaignId }: { campaignId: string }) {
         e?.preventDefault();
         if (!editor) return;
         // The message stays in the log (sending, then sent or failed), so the editor clears at once.
-        if (thread.send(docToMarkdown(editor.getJSON()))) {
+        if (thread.send(docToMarkdown(editor.getJSON()), files.files)) {
             editor.commands.clearContent();
             setDraftEmpty(true);
+            files.clear();
         }
     };
 
@@ -181,6 +191,7 @@ export default function CampaignChat({ campaignId }: { campaignId: string }) {
                                             }}
                                         >{m.body}</ReactMarkdown>
                                     </div>
+                                    <MessageAttachments attachments={m.attachments} files={m.state === 'sent' ? undefined : m.files} />
                                     {failed && (
                                         <div className="mt-1 flex items-center gap-2 font-permanent text-[10px] uppercase">
                                             <span className="text-red-600 dark:text-red-400">{m.error || 'Not sent'}</span>
@@ -193,6 +204,22 @@ export default function CampaignChat({ campaignId }: { campaignId: string }) {
                         );
                     })}
                 </div>
+
+                {/* Who has Table Talk open right now (#37) */}
+                {present.length > 0 && (
+                    <div className="flex items-center gap-2 px-4 pt-2 border-t-2 border-black/10 dark:border-white/10" aria-label="Here now">
+                        <span className="font-permanent text-[10px] uppercase text-zinc-400 shrink-0">Here now</span>
+                        <ul className="flex flex-wrap gap-1 min-w-0">
+                            {present.map(p => (
+                                <li key={p.id} title={p.id === myId ? `${p.name} (you)` : p.name}
+                                    className={`w-7 h-7 flex items-center justify-center border-2 border-black font-permanent text-[10px] uppercase ${p.id === myId ? 'bg-teal-500 text-white' : 'bg-yellow-400 text-black'}`}>
+                                    <span aria-hidden="true">{initialsOf(p.name)}</span>
+                                    <span className="sr-only">{p.id === myId ? `${p.name} (you)` : p.name}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
 
                 {/* Who else is writing (#103); fixed height so the layout doesn't jump */}
                 <p aria-live="polite" className="h-6 px-4 font-permanent text-[11px] italic text-zinc-500 dark:text-zinc-400 truncate">
@@ -222,15 +249,23 @@ export default function CampaignChat({ campaignId }: { campaignId: string }) {
                     <span className="ml-auto font-permanent text-[10px] text-zinc-400 self-center uppercase">Shift+Enter for new line</span>
                 </div>
 
+                {/* Picked attachments (#104) */}
+                {(files.files.length > 0 || files.error) && (
+                    <div className="border-t-2 border-black/20 dark:border-white/10 bg-white dark:bg-slate-900">
+                        <DraftAttachments draft={files} />
+                    </div>
+                )}
+
                 {/* Editor + send */}
                 <form onSubmit={handleSend} className="flex border-t-4 border-black items-end">
+                    <AttachButton draft={files} className="px-3 py-3 self-stretch bg-zinc-50 dark:bg-slate-800 text-black dark:text-white border-r-4 border-black hover:bg-yellow-400 hover:text-black transition-colors" />
                     <div className="flex-grow min-w-0">
                         <EditorContent editor={editor} />
                     </div>
                     <button
                         id="chat-send-btn"
                         type="submit"
-                        disabled={isDraftEmpty}
+                        disabled={isDraftEmpty && !files.files.length}
                         className="px-5 py-3 bg-yellow-400 text-black border-l-4 border-black font-permanent uppercase text-xs flex items-center gap-2 hover:bg-white transition-colors disabled:opacity-50 disabled:hover:bg-yellow-400 self-stretch"
                     >
                         <Send className="w-4 h-4" /> SEND

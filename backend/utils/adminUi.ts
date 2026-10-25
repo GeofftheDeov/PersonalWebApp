@@ -1,16 +1,34 @@
 export interface AdminPageOptions {
     token: string;
     title: string;
-    activePage: 'admin' | 'db' | 'frontend' | 'cloud-claw' | 'obsidian' | 'briefs' | 'alpaca' | 'paperclip' | 'profile' | 'person-sync';
+    activePage: 'admin' | 'os' | 'db' | 'frontend' | 'cloud-claw' | 'obsidian' | 'briefs' | 'alpaca' | 'paperclip' | 'profile' | 'person-sync';
     content: string;
     extraStyles?: string;
+    /**
+     * Lay the page out at the device's width (a viewport meta), so its phone
+     * breakpoints apply on a phone, and below 800px let the nav links scroll
+     * sideways inside the one 60px row (spec #135 W5's rule). Off by default:
+     * without it a phone renders the page at ~980px and zooms out, which is
+     * what the other admin pages are still built for until W5 opts them in.
+     */
+    deviceWidth?: boolean;
 }
 
-export const renderPage = ({ token, title, activePage, content, extraStyles = '' }: AdminPageOptions): string => {
+const DEVICE_WIDTH_STYLES = `
+    @media (max-width: 800px) {
+        .top-nav { padding: 0 1rem; gap: 1rem; }
+        .nav-brand { flex-shrink: 0; font-size: 1.1rem; }
+        .nav-brand .suffix { display: none; }
+        .nav-links { overflow-x: auto; gap: 1.25rem; min-width: 0; scrollbar-width: none; }
+        .nav-link { white-space: nowrap; font-size: 0.8rem; }
+    }`;
+
+export const renderPage = ({ token, title, activePage, content, extraStyles = '', deviceWidth = false }: AdminPageOptions): string => {
     return `
         <html>
             <head>
                 <title>${title}</title>
+                ${deviceWidth ? '<meta name="viewport" content="width=device-width, initial-scale=1">' : ''}
                 <style>
                     * {
                         user-select: none !important;
@@ -116,6 +134,33 @@ export const renderPage = ({ token, title, activePage, content, extraStyles = ''
                         background: #f97316;
                     }
 
+                    .session-banner {
+                        position: fixed;
+                        top: 60px; left: 0; right: 0;
+                        z-index: 999;
+                        background: #2a1a05;
+                        border-bottom: 2px solid #f97316;
+                        color: #fbbf24;
+                        font-size: 0.8rem;
+                        padding: 0.6rem 2rem;
+                        display: flex;
+                        gap: 1rem;
+                        align-items: center;
+                        flex-wrap: wrap;
+                    }
+                    .session-banner[hidden] { display: none; }
+                    .session-banner a, .session-banner button {
+                        color: #000;
+                        background: #f97316;
+                        border: none;
+                        font-family: inherit;
+                        font-weight: bold;
+                        font-size: 0.75rem;
+                        padding: 0.3rem 0.7rem;
+                        text-decoration: none;
+                    }
+                    ${deviceWidth ? DEVICE_WIDTH_STYLES : ''}
+
                     /* Insert Extra Styles */
                     ${extraStyles}
                 </style>
@@ -126,6 +171,7 @@ export const renderPage = ({ token, title, activePage, content, extraStyles = ''
                         GEOFF<span class="teal">THE</span>DEV <span class="suffix">// ADMIN</span>
                     </div>
                     <div class="nav-links">
+                        <a href="/admin/os?token=${token}" class="nav-link ${activePage === 'os' ? 'active' : ''}">OS</a>
                         <a href="/admin?token=${token}" class="nav-link ${activePage === 'admin' ? 'active' : ''}">DASHBOARD</a>
                         <a href="/db?token=${token}" class="nav-link ${activePage === 'db' ? 'active' : ''}">THE SHOP</a>
                         <a href="/admin/cloud-claw?token=${token}" class="nav-link ${activePage === 'cloud-claw' ? 'active' : ''}">CLOUD-CLAW</a>
@@ -139,6 +185,56 @@ export const renderPage = ({ token, title, activePage, content, extraStyles = ''
 
                     </div>
                 </nav>
+                <div id="session-banner" class="session-banner" hidden></div>
+                <script>
+                // These pages carry the login token in their URL, and a login
+                // lasts an hour with no refresh. Without this, a page left open
+                // keeps working until its next API call fails with a bare
+                // "Unauthorized: Invalid token" (e.g. saving keys on PROFILE).
+                (function () {
+                    var PAGE_TOKEN = ${JSON.stringify(token)};
+                    var WARN_MS = 5 * 60 * 1000;
+                    function expiresAt(t) {
+                        try {
+                            var p = JSON.parse(atob(String(t).split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+                            return typeof p.exp === 'number' ? p.exp * 1000 : null;
+                        } catch (e) { return null; }
+                    }
+                    // The frontend shares this origin, so a login in another tab lands here.
+                    function newerLogin() {
+                        var t = null;
+                        try { t = localStorage.getItem('token'); } catch (e) { /* storage blocked */ }
+                        var exp = t && t !== PAGE_TOKEN ? expiresAt(t) : null;
+                        return exp && exp - Date.now() > WARN_MS ? t : null;
+                    }
+                    function continueWithNewLogin() {
+                        var t = newerLogin();
+                        if (!t) { render(true); return; }
+                        var url = new URL(location.href);
+                        url.searchParams.set('token', t);
+                        location.replace(url.toString());
+                    }
+                    var exp = expiresAt(PAGE_TOKEN);
+                    var banner = document.getElementById('session-banner');
+                    function render(noNewer) {
+                        if (!exp) return;
+                        var left = exp - Date.now();
+                        if (left > WARN_MS) { banner.hidden = true; return; }
+                        var when = new Date(exp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+                        banner.innerHTML = (left > 0
+                                ? '<span>Your login expires at ' + when + '. Anything this page saves after that is refused.</span>'
+                                : '<span>Your login expired at ' + when + '. This page can no longer save or load data.</span>')
+                            + '<a href="/login" target="_blank" rel="noopener">LOG IN AGAIN &#8599;</a>'
+                            + '<button type="button" id="session-continue">CONTINUE WITH NEW LOGIN</button>'
+                            + (noNewer ? '<span>No newer login in this browser yet — log in first (the new tab keeps this page as it is).</span>' : '');
+                        document.getElementById('session-continue').onclick = continueWithNewLogin;
+                        banner.hidden = false;
+                    }
+                    render(false);
+                    setInterval(function () { if (banner.hidden) render(false); }, 30 * 1000);
+                    if (exp) setTimeout(function () { render(false); }, Math.max(0, exp - Date.now()) + 1000);
+                })();
+                </script>
                 ${content}
             </body>
         </html>

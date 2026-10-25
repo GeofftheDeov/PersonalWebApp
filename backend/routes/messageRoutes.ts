@@ -48,6 +48,9 @@ function legacyError(kind: Kind, reason: Exclude<HistoryResult | SendResult, { o
         case "invalid-before": return [400, "before must be a message id in this thread or a timestamp"];
         case "invalid-client-id": return [400, "clientId must be 8-64 letters, digits, '-' or '_'"];
         case "client-id-conflict": return [409, "That clientId was already used for another message"];
+        // These endpoints never pass attachments (#104 is thread-keyed only), so these can't happen.
+        case "invalid-attachments": case "too-many-attachments": case "unknown-attachment":
+            return [400, "Send attachments through /api/threads"];
     }
 }
 

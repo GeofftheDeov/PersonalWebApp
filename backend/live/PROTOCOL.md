@@ -4,7 +4,7 @@ One WebSocket per signed-in person. It carries live events for every thread that
 
 - Server: `backend/live/liveChannel.ts`
 - Web client: `frontend/src/lib/realtime/liveClient.ts`, wrapped by the `useLiveThread` hook (threads), `useTyping` (typing) and `useThreads` (the thread list)
-- Tests: `backend/scripts/test-live-channel.ts` (campaigns, auth, heartbeat, client), `backend/scripts/test-live-dms.ts` (DMs), `backend/scripts/test-live-typing.ts` (typing), `backend/scripts/test-live-list.ts` (`thread.updated`, `thread.read`), `backend/scripts/test-live-two-tasks.ts` (every frame across two backend processes), `backend/scripts/test-live-redis-recovery.ts` (Redis outages), `backend/scripts/test-live-access.ts` (access changes, token expiry), `backend/scripts/test-live-combined.ts` (how the tickets' frames combine: access changes with the thread list and typing, resends with unread counts, namespaces, per-stream dedupe), `backend/scripts/test-live-noticeboard.ts` (`noticeboard.changed`)
+- Tests: `backend/scripts/test-live-channel.ts` (campaigns, auth, heartbeat, client), `backend/scripts/test-live-cookie.ts` (session cookie on the upgrade), `backend/scripts/test-live-dms.ts` (DMs), `backend/scripts/test-live-typing.ts` (typing), `backend/scripts/test-live-list.ts` (`thread.updated`, `thread.read`), `backend/scripts/test-live-two-tasks.ts` (every frame across two backend processes), `backend/scripts/test-live-redis-recovery.ts` (Redis outages), `backend/scripts/test-live-access.ts` (access changes, token expiry), `backend/scripts/test-live-combined.ts` (how the tickets' frames combine: access changes with the thread list and typing, resends with unread counts, namespaces, per-stream dedupe), `backend/scripts/test-live-noticeboard.ts` (`noticeboard.changed`)
 
 ## Connecting
 
@@ -28,6 +28,8 @@ The client's first frame carries its JWT:
 - A token in the query string (`/api/live?token=<jwt>`) also works, but use the first frame where possible: URLs end up in logs.
 - A missing, malformed, expired or wrong-secret token, or one whose subject isn't an account, closes the socket with **4001**. So does a first frame that isn't an auth frame, and a connection that sends nothing for 10 seconds.
 - A socket doesn't outlive its token: when the token's `exp` passes, the server closes the socket with **4001** (#105). Reconnect with a fresh token. Deleting the account closes its open sockets with **4001** too.
+- **Session cookie (#107).** A browser signed in by cookie (#69) needs no auth frame: the upgrade carries this environment's session cookie (`SESSION_COOKIE_NAME`, `gtd_session` in prod and `gtd_session_deov` in dev), and the server authenticates it as soon as the socket opens. The cookie only counts when the upgrade's `Origin` is listed in `SESSION_COOKIE_ORIGINS`. An upgrade has no CORS preflight, so this is the CSRF check. From any other origin, or with the other environment's cookie name, the cookie is ignored and the handshake waits for an auth frame as usual. A cookie that is expired, signed with another secret, or names no account closes the socket with **4001**. A cookie client speaks version 1.
+- Precedence: a query-string token, then the session cookie, then the first frame. Once the query token or cookie has started auth, an auth frame that follows is ignored.
 - The 10 seconds cover the whole handshake. If the server is still checking a token when they run out (a slow database), it closes with **1011** instead, and the client should retry.
 
 When auth succeeds, the server answers:
@@ -58,14 +60,25 @@ Thread keys are `campaign:<campaign id>` and `dm:<id>:<id>`, with the two accoun
 | `thread.updated` | `thread`, `lastActivityAt`, `unreadCount` | A thread's last activity and your unread count in it changed (a new message). |
 | `thread.read` | `thread`, `lastReadAt`, `lastReadMessageId`, `unreadCount` | You read a thread, on this or another device. |
 | `noticeboard.changed` | `thread` | A campaign's Notice Board changed (see The Notice Board). |
+| `presence` | `thread`, `people` | Who has a campaign's Table Talk open now (see Presence). |
 | `ping` | none | Heartbeat. Answer with `pong`. |
 
 `message` is:
 
 ```json
 { "id": "<uuid>", "sender": { "id": "<account id or \"system\">", "name": "..." },
-  "body": "markdown", "createdAt": "<ISO>", "eventId": "<uuid, optional>" }
+  "body": "markdown", "createdAt": "<ISO>", "eventId": "<uuid, optional>",
+  "attachments": [ /* optional, see below */ ] }
 ```
+
+`attachments` (#104) only appears when the message has some. A message with attachments may have an empty `body`. Each attachment is:
+
+```json
+{ "key": "message-attachments/...", "name": "map.png", "size": 123456, "contentType": "image/png",
+  "width": 1600, "height": 1200, "url": "<presigned GET>", "expiresAt": "<ISO>" }
+```
+
+`width` and `height` only appear for images whose size the uploader's browser reported. `url` is a presigned S3 GET that stops working at `expiresAt` (an hour), minted for this frame. It's `null` if the server couldn't make one. History (`GET /api/threads/:threadKey/messages`) returns the same shape with fresh URLs, so refetch for a new one. Uploads go through `POST /api/threads/:threadKey/attachments` (see `backend/routes/threadRoutes.ts`).
 
 Campaign threads and DM threads carry the same frame. A DM reaches only its pair: every socket of each of the two people, the sender's own included, so a message sent from a phone also shows on the sender's laptop. `eventId` only appears on campaign messages. Automated posts, such as the ready check, arrive the same way, with `sender.id` set to `"system"`. Sender email addresses are never sent.
 
@@ -102,6 +115,7 @@ Clients must ignore frame types they don't know. Later versions of the server wi
 | `auth` | `v`, `token` | The first frame only. |
 | `pong` | none | Answer to `ping`. |
 | `typing` | `thread` | You are writing in this thread (see Typing). |
+| `presence` | `thread`, `here` | You opened (`true`) or closed (`false`) a campaign's Table Talk (see Presence). |
 
 The server ignores types it doesn't know. When a frame names a thread, the server drops it if the person can't access that thread.
 
@@ -128,6 +142,24 @@ Every socket subscribed to the thread then gets
 except the typist's own sockets, on any device: nobody sees themselves typing. A DM's `typing` reaches only the other one of the pair. `name` is the person's display name, never an email address.
 
 Clients show "Theo is writing…" and take it down `expiresInMs` (5 seconds) after that person's last `typing` frame, or as soon as a `message.created` from that person arrives on the thread. Nothing is replayed: a socket that connects mid-burst sees the indicator at the typist's next frame. The web client's logic is in `frontend/src/lib/realtime/typing.ts` (`TypingTracker`), wrapped by the `useTyping` hook.
+
+## Presence
+
+Added with #37. While a campaign's Table Talk is open, the client sends
+
+```json
+{ "type": "presence", "thread": "campaign:<id>", "here": true }
+```
+
+and `"here": false` when it closes. A new socket is in nobody's Table Talk, so the client says `here: true` again after every `ready` that lists a thread it has open: the first on a connection, and a re-sent one that brings a thread back. The server drops the frame if the thread isn't a campaign thread this socket's `ready` listed. A person is here while any of their sockets is; losing the thread (leaving the campaign, being made inactive in it, disconnecting) takes them out.
+
+Every socket subscribed to the thread then gets the whole list, the viewer included, whenever it changes, and the socket that just said `here: true` gets it straight away:
+
+```json
+{ "type": "presence", "thread": "campaign:<id>", "people": [{ "id": "<account id>", "name": "Theo" }] }
+```
+
+Replace what you have with it; an empty `people` means nobody. `name` is the display name, never an email address. Like typing, presence never touches the database: each backend task publishes its own set on the bus's ephemeral path (`presence.changed`) when it changes and every 20 seconds while it isn't empty, and every task shows the union, leaving out a task it hasn't heard from in 60 seconds. So a task that dies takes its people off the list within a minute. After a reconnect, the list arrives once the client says `here: true` again. The web client's hook is `usePresence` (`frontend/src/lib/realtime/usePresence.ts`).
 
 ## Heartbeat
 

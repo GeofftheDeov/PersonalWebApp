@@ -11,7 +11,9 @@ export interface IAlpacaPosition {
 const AlpacaSnapshot = defineModel({
   table: "alpaca_snapshots",
   fields: {
-    ts: { col: "ts", type: "date" }, equity: "equity", last_equity: "last_equity", cash: "cash",
+    ts: { col: "ts", type: "date" },
+    wallet: "wallet", userId: { col: "user_id", type: "uuid" },
+    equity: "equity", last_equity: "last_equity", cash: "cash",
     buying_power: "buying_power", day_pl: "day_pl",
     positions: { col: "positions", type: "jsonb" },
   },

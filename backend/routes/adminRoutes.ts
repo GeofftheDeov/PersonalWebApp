@@ -12,6 +12,8 @@ import { renderPage } from '../utils/adminUi.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import { resolveVaultFile, isServableVaultName } from '../utils/vaultPath.js';
 import AlpacaSnapshot from '../models/AlpacaSnapshot.js';
+import ApiKeyVault from '../models/ApiKeyVault.js';
+import Account from '../models/Account.js';
 import { getDecryptedKeys } from './apiKeyRoutes.js';
 import { evaluateLiveApplyGate } from '../utils/liveApplyGate.js';
 import { buildAlpacaSnapshot } from '../utils/alpacaSnapshot.js';
@@ -1368,10 +1370,13 @@ router.get('/alpaca/api/w/:wallet/:resource', async (req: any, res) => {
     catch (err: any) { res.status(err instanceof AlpacaError ? err.status : 500).json({ error: err.message }); }
 });
 
-// Per-position value timeseries from our own snapshot table (Cloud-Claw paper
-// wallet only — that is what snapshotAlpacaNow records).
+// Per-position value timeseries from our own snapshot table (snapshotAlpacaNow
+// records every wallet). ?wallet= defaults to cloudclaw; paper and live are the
+// requesting admin's own.
 // period accepted as 1D / 1W / 1M / 3M / ALL.
-router.get('/alpaca/api/snapshots', async (req, res) => {
+router.get('/alpaca/api/snapshots', async (req: any, res) => {
+    const wallet = String(req.query.wallet || 'cloudclaw') as WalletId;
+    if (!WALLET_IDS.includes(wallet)) return res.status(400).json({ error: `Unknown wallet "${wallet}"` });
     try {
         const period = ((req.query.period as string) || '1D').toUpperCase();
         const since = new Date();
@@ -1384,7 +1389,11 @@ router.get('/alpaca/api/snapshots', async (req, res) => {
             default: since.setUTCDate(since.getUTCDate() - 1);
         }
         const docs = await AlpacaSnapshot
-            .find({ ts: { $gte: since } })
+            .find({
+                wallet,
+                userId: wallet === 'cloudclaw' ? null : String(req.adminUser.id),
+                ts: { $gte: since },
+            })
             .sort({ ts: 1 })
             .lean();
         res.json(docs);
@@ -1457,12 +1466,36 @@ router.post('/alpaca/api/apply-to-personal', async (req: any, res) => {
     }
 });
 
-// Capture a single snapshot of the Cloud-Claw paper account + positions.
-// Exported so server.ts can call it on an interval. Errors are swallowed
-// (Alpaca outages / API key issues shouldn't crash the snapshot loop).
+// Capture one snapshot of each wallet's account + positions: Cloud-Claw's
+// (server env keys) and every admin's own paper and live wallets (Profile page
+// vault keys). Exported so server.ts can call it on an interval. Errors are
+// logged per wallet (an Alpaca outage or one rejected key shouldn't stop the
+// other wallets or crash the snapshot loop).
 export async function snapshotAlpacaNow(): Promise<void> {
-    const creds = envPaperCreds();
-    if (!creds) return;
+    const targets: { wallet: WalletId; userId: string | null; creds: AlpacaCreds }[] = [];
+    const envCreds = envPaperCreds();
+    if (envCreds) targets.push({ wallet: 'cloudclaw', userId: null, creds: envCreds });
+    try {
+        const vaultWallets = WALLET_IDS.filter((w) => WALLET_META[w].provider);
+        const entries = await ApiKeyVault
+            .find({ provider: { $in: vaultWallets.map((w) => WALLET_META[w].provider!) } })
+            .lean();
+        for (const e of entries as any[]) {
+            const userId = String(e.userId);
+            // Only admins can open the dashboard that charts these.
+            const person = await Account.findById(userId).select('appRole');
+            if (person?.appRole !== 'admin') continue;
+            const wallet = vaultWallets.find((w) => WALLET_META[w].provider === e.provider)!;
+            const keys = await getDecryptedKeys(userId, e.provider);
+            if (keys) targets.push({ wallet, userId, creds: { ...keys, live: WALLET_META[wallet].live } });
+        }
+    } catch (err: any) {
+        console.error('[ALPACA SNAPSHOT] reading Profile keys failed:', err.message);
+    }
+    await Promise.all(targets.map((t) => snapshotWallet(t.wallet, t.userId, t.creds)));
+}
+
+async function snapshotWallet(wallet: WalletId, userId: string | null, creds: AlpacaCreds): Promise<void> {
     try {
         const [acct, positions] = await Promise.all([
             alpacaRest(creds, '/account'),
@@ -1471,12 +1504,12 @@ export async function snapshotAlpacaNow(): Promise<void> {
         // A malformed response is skipped, not stored as NaN (#169); the next tick retries.
         const snap = buildAlpacaSnapshot(acct, positions);
         if (!snap.ok) {
-            console.warn('[ALPACA SNAPSHOT] skipped malformed response:', snap.reason);
+            console.warn(`[ALPACA SNAPSHOT] ${wallet}${userId ? ` (${userId})` : ''} skipped malformed response:`, snap.reason);
             return;
         }
-        await AlpacaSnapshot.create({ ts: new Date(), ...snap.row });
+        await AlpacaSnapshot.create({ ts: new Date(), wallet, userId, ...snap.row });
     } catch (err: any) {
-        console.error('[ALPACA SNAPSHOT] failed:', err.message);
+        console.error(`[ALPACA SNAPSHOT] ${wallet}${userId ? ` (${userId})` : ''} failed:`, err.message);
     }
 }
 
@@ -2150,13 +2183,10 @@ router.get('/alpaca', (req, res) => {
         const POSITION_COLORS = ['#0d9488','#f97316','#fbbf24','#10b981','#3b82f6','#a855f7','#ec4899','#06b6d4','#eab308','#f43f5e'];
 
         async function loadPositionsChart() {
-            if (currentWallet !== 'cloudclaw') {
-                chartMessage('chart-positions', 'positions', 'Position snapshots are recorded for the Cloud-Claw paper wallet only.');
-                return;
-            }
-            const r = await fetch('/admin/alpaca/api/snapshots?period=' + currentRange + '&token=' + TOKEN);
+            const wallet = currentWallet;
+            const r = await fetch('/admin/alpaca/api/snapshots?period=' + currentRange + '&wallet=' + encodeURIComponent(wallet) + '&token=' + TOKEN);
             const snaps = await r.json();
-            if (currentWallet !== 'cloudclaw') return;
+            if (wallet !== currentWallet) return;
             if (!Array.isArray(snaps) || snaps.length === 0) {
                 chartMessage('chart-positions', 'positions', 'No snapshots yet — the server records one every 5 min.');
                 return;
@@ -2904,6 +2934,7 @@ router.get('/profile', (req: any, res) => {
                     <div class="form-row">
                         <label>KEY ID / CLIENT ID</label>
                         <input id="key-id" type="text" placeholder="Paste your key ID here" autocomplete="off" />
+                        <div class="form-hint">Alpaca: the "API Key" from that account's dashboard (paper keys start with PK). Google / Discord: the OAuth client ID.</div>
                     </div>
                     <div class="form-row">
                         <label>SECRET KEY / CLIENT SECRET</label>
@@ -2957,7 +2988,10 @@ router.get('/profile', (req: any, res) => {
                 headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + TOKEN },
                 body: JSON.stringify({ keyId: keyId, secret: secret, label: label }),
             });
-            if (r.ok) {
+            if (r.status === 401) {
+                status.textContent = 'Not saved: your login expired. Log in again from the banner above, then save.';
+                status.className = 'save-status err';
+            } else if (r.ok) {
                 status.textContent = 'Saved.'; status.className = 'save-status ok';
                 document.getElementById('key-id').value = '';
                 document.getElementById('key-secret').value = '';
@@ -3019,6 +3053,7 @@ router.get('/profile', (req: any, res) => {
         }
         .form-row input:focus, .form-row select:focus { border-color: #0d9488; }
         .form-row select option { background: #2b2b2b; }
+        .form-hint { font-size: 0.7rem; color: #666; }
         .form-actions { display: flex; align-items: center; gap: 1rem; margin-top: 0.25rem; }
         .form-actions button {
             background: #0d9488; border: none; color: #000; padding: 0.6rem 1.5rem;

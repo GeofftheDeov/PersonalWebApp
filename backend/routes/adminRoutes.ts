@@ -10,6 +10,7 @@ import {
 } from '../services/alpacaStream.js';
 import { renderPage } from '../utils/adminUi.js';
 import { renderMarkdown } from '../utils/markdown.js';
+import { resolveVaultFile, isServableVaultName } from '../utils/vaultPath.js';
 import AlpacaSnapshot from '../models/AlpacaSnapshot.js';
 import { getDecryptedKeys } from './apiKeyRoutes.js';
 import { evaluateLiveApplyGate } from '../utils/liveApplyGate.js';
@@ -19,6 +20,7 @@ import { requireAdmin } from '../middleware/auth.js';
 import { runPersonSync, personSyncStatus, retryFailedOutboxRow } from '../jobs/personSync.js';
 import { resolveAccountId } from '../utils/accountRefs.js';
 import briefsRoutes from './briefsRoutes.js';
+import osRoutes from './osRoutes.js';
 
 const router = express.Router();
 
@@ -57,10 +59,16 @@ const verifyToken = async (req: any, res: express.Response, next: express.NextFu
     }
 };
 
-router.use(verifyToken, requireAdmin(true));
+/** The admin gate every route below sits behind; exported for test harnesses that mount a router factory. */
+export const adminGate = [verifyToken, requireAdmin(true)] as const;
+
+router.use(...adminGate);
 
 // Morning briefs from the vault (outputs/briefs/); inherits the admin gate above.
 router.use('/briefs', briefsRoutes);
+
+// The agentic OS home screen (spec #135); inherits the admin gate above.
+router.use('/os', osRoutes);
 
 // ── Person sync (#35, plan §2.7–2.8) ──────────────────────────────────────────
 //
@@ -162,8 +170,6 @@ router.post('/person-sync/retry/:id', async (req, res) => {
 
 // ── Obsidian vault helpers ────────────────────────────────────────────────────
 
-const VAULT_EXCLUDED = new Set(['.git', 'private', 'node_modules']);
-
 interface VaultNode { name: string; type: 'file' | 'dir'; path: string; children?: VaultNode[]; }
 
 function buildVaultTree(dir: string, base: string = ''): VaultNode[] {
@@ -171,7 +177,7 @@ function buildVaultTree(dir: string, base: string = ''): VaultNode[] {
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; }
     const nodes: VaultNode[] = [];
     for (const e of entries) {
-        if (e.name.startsWith('.') || VAULT_EXCLUDED.has(e.name)) continue;
+        if (!isServableVaultName(e.name)) continue;  // hidden (private/, dot entries), or a name the file API refuses
         const full = path.join(dir, e.name);
         const rel = (base ? base + '/' : '') + e.name;
         if (e.isDirectory()) {
@@ -186,11 +192,11 @@ function buildVaultTree(dir: string, base: string = ''): VaultNode[] {
     });
 }
 
-function safeVaultRead(vaultPath: string, relativePath: string): string | null {
-    const full = path.resolve(vaultPath, relativePath);
-    if (!full.startsWith(path.resolve(vaultPath))) return null;
-    try { return fs.readFileSync(full, 'utf-8'); } catch { return null; }
-}
+/** What the vault browser says about a path it won't open (utils/vaultPath.ts says which paths those are). */
+const VAULT_REFUSAL = {
+    invalid: { status: 400, error: 'That path is outside the vault or not shown in the vault browser.' },
+    missing: { status: 404, error: 'No such file in the vault checkout (it may not be pulled yet).' },
+} as const;
 
 router.get('/', (req, res) => {
     const token = req.query.token as string;
@@ -199,6 +205,9 @@ router.get('/', (req, res) => {
         <div class="admin-panel">
             <h1>Admin Command</h1>
             <div class="nav-grid">
+                <a href="/admin/os?token=${token}" class="nav-btn">
+                    Agentic OS
+                </a>
                 <a href="/db?token=${token}" class="nav-btn">
                     Manage Database
                 </a>
@@ -806,18 +815,38 @@ router.post('/obsidian/api/pull', async (_req, res) => {
 router.get('/obsidian/api/file', (req, res) => {
     const vaultPath = process.env.OBSIDIAN_VAULT_PATH;
     if (!vaultPath) return res.status(503).json({ error: 'OBSIDIAN_VAULT_PATH not configured' });
-    const filePath = req.query.path as string;
-    if (!filePath) return res.status(400).json({ error: 'path is required' });
-    const content = safeVaultRead(vaultPath, filePath);
-    if (content === null) return res.status(400).json({ error: 'File not found or access denied' });
-    const html = filePath.endsWith('.md') ? renderMarkdown(content) : '';
-    res.json({ path: filePath, content, html });
+    if (!req.query.path) return res.status(400).json({ error: 'path is required' });
+    const file = resolveVaultFile(vaultPath, req.query.path);
+    if (!file.ok) return res.status(VAULT_REFUSAL[file.reason].status).json({ error: VAULT_REFUSAL[file.reason].error });
+    let content: string;
+    try { content = fs.readFileSync(file.full, 'utf-8'); }
+    catch { return res.status(404).json({ error: VAULT_REFUSAL.missing.error }); }
+    const html = file.rel.endsWith('.md') ? renderMarkdown(content) : '';
+    res.json({ path: file.rel, content, html });
 });
 
 // ── Obsidian vault browser page ───────────────────────────────────────────────
 
 router.get('/obsidian', (req, res) => {
     const token = req.query.token as string;
+
+    // ?path= opens the browser on that file (#158: the briefs page's run history
+    // links here). Resolved as the file API resolves it; a refused path gets the
+    // file API's message and status, and the browser opens on nothing.
+    const vaultPath = process.env.OBSIDIAN_VAULT_PATH;
+    let initialPath: string | null = null;
+    let deepLinkError: string | null = null;
+    let status = 200;
+    if (req.query.path !== undefined && !vaultPath) {
+        status = 503;
+        deepLinkError = 'OBSIDIAN_VAULT_PATH is not set on this server.';
+    } else if (req.query.path !== undefined && vaultPath) {
+        const file = resolveVaultFile(vaultPath, req.query.path);
+        if (file.ok) initialPath = file.rel;
+        else ({ status, error: deepLinkError } = VAULT_REFUSAL[file.reason]);
+    }
+    // Inside a <script>: JSON, with < escaped so a value can't close the tag.
+    const scriptJson = (v: unknown) => JSON.stringify(v).replace(/</g, '\\u003c');
 
     const content = `
         <div class="vault-layout">
@@ -836,12 +865,13 @@ router.get('/obsidian', (req, res) => {
             </div>
             <div class="vault-content" id="vault-content">
                 <div class="vault-welcome">
-                    <p>Select a note from the sidebar to view it here.</p>
+                    ${deepLinkError ? `<p class="err">${esc(deepLinkError)}</p>` : '<p>Select a note from the sidebar to view it here.</p>'}
                 </div>
             </div>
         </div>
         <script>
-        const TOKEN = '${token}';
+        const TOKEN = encodeURIComponent(${scriptJson(token ?? '')});
+        const INITIAL_PATH = ${scriptJson(initialPath)};
         let fullTree = [];
 
         function treeMessage(text, isError) {
@@ -1001,7 +1031,24 @@ router.get('/obsidian', (req, res) => {
 
         function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
-        loadTree();
+        // A deep link (?path=) opens its file, then marks it in the tree once that
+        // loads, opening the folders above it (renderTree builds them collapsed).
+        function revealInTree(p) {
+            if (document.querySelector('.tree-file.active')) return;  // the admin already picked another note
+            const label = Array.prototype.find.call(document.querySelectorAll('.tree-file'), function(el) { return el.title === p; });
+            if (!label) return;
+            label.classList.add('active');
+            for (let el = label.parentElement; el && el.id !== 'vault-tree'; el = el.parentElement) {
+                if (el.tagName === 'DIV' && el.style.display === 'none') {
+                    el.style.display = 'block';
+                    const dir = el.previousElementSibling;
+                    if (dir && dir.classList.contains('tree-dir')) dir.textContent = dir.textContent.replace('▶', '▼');
+                }
+            }
+            label.scrollIntoView({ block: 'nearest' });
+        }
+        if (INITIAL_PATH) openFile(INITIAL_PATH);
+        loadTree().then(function() { if (INITIAL_PATH) revealInTree(INITIAL_PATH); });
         loadStatus();
         </script>
     `;
@@ -1227,7 +1274,7 @@ router.get('/obsidian', (req, res) => {
         .markdown-body input[type="checkbox"] { margin-right: 0.4em; }
     `;
 
-    res.send(renderPage({
+    res.status(status).send(renderPage({
         token,
         title: 'Obsidian Vault',
         activePage: 'obsidian',

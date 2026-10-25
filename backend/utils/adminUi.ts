@@ -1,16 +1,34 @@
 export interface AdminPageOptions {
     token: string;
     title: string;
-    activePage: 'admin' | 'db' | 'frontend' | 'cloud-claw' | 'obsidian' | 'briefs' | 'alpaca' | 'paperclip' | 'profile' | 'person-sync';
+    activePage: 'admin' | 'os' | 'db' | 'frontend' | 'cloud-claw' | 'obsidian' | 'briefs' | 'alpaca' | 'paperclip' | 'profile' | 'person-sync';
     content: string;
     extraStyles?: string;
+    /**
+     * Lay the page out at the device's width (a viewport meta), so its phone
+     * breakpoints apply on a phone, and below 800px let the nav links scroll
+     * sideways inside the one 60px row (spec #135 W5's rule). Off by default:
+     * without it a phone renders the page at ~980px and zooms out, which is
+     * what the other admin pages are still built for until W5 opts them in.
+     */
+    deviceWidth?: boolean;
 }
 
-export const renderPage = ({ token, title, activePage, content, extraStyles = '' }: AdminPageOptions): string => {
+const DEVICE_WIDTH_STYLES = `
+    @media (max-width: 800px) {
+        .top-nav { padding: 0 1rem; gap: 1rem; }
+        .nav-brand { flex-shrink: 0; font-size: 1.1rem; }
+        .nav-brand .suffix { display: none; }
+        .nav-links { overflow-x: auto; gap: 1.25rem; min-width: 0; scrollbar-width: none; }
+        .nav-link { white-space: nowrap; font-size: 0.8rem; }
+    }`;
+
+export const renderPage = ({ token, title, activePage, content, extraStyles = '', deviceWidth = false }: AdminPageOptions): string => {
     return `
         <html>
             <head>
                 <title>${title}</title>
+                ${deviceWidth ? '<meta name="viewport" content="width=device-width, initial-scale=1">' : ''}
                 <style>
                     * {
                         user-select: none !important;
@@ -116,6 +134,8 @@ export const renderPage = ({ token, title, activePage, content, extraStyles = ''
                         background: #f97316;
                     }
 
+                    ${deviceWidth ? DEVICE_WIDTH_STYLES : ''}
+
                     /* Insert Extra Styles */
                     ${extraStyles}
                 </style>
@@ -126,6 +146,7 @@ export const renderPage = ({ token, title, activePage, content, extraStyles = ''
                         GEOFF<span class="teal">THE</span>DEV <span class="suffix">// ADMIN</span>
                     </div>
                     <div class="nav-links">
+                        <a href="/admin/os?token=${token}" class="nav-link ${activePage === 'os' ? 'active' : ''}">OS</a>
                         <a href="/admin?token=${token}" class="nav-link ${activePage === 'admin' ? 'active' : ''}">DASHBOARD</a>
                         <a href="/db?token=${token}" class="nav-link ${activePage === 'db' ? 'active' : ''}">THE SHOP</a>
                         <a href="/admin/cloud-claw?token=${token}" class="nav-link ${activePage === 'cloud-claw' ? 'active' : ''}">CLOUD-CLAW</a>

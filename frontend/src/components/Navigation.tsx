@@ -72,6 +72,9 @@ export default function Navigation() {
   }, []);
 
   const handleLogout = () => {
+    // Clears the parent-domain session cookie too (#69), so the other site is
+    // logged out as well. Fire and forget: local state goes either way.
+    fetch('/api/users/logout', { method: 'POST' }).catch(() => {});
     localStorage.clear();
     setIsLoggedIn(false);
     setIsMenuOpen(false);

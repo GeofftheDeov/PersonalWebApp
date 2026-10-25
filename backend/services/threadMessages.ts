@@ -4,6 +4,7 @@ import Campaign from "../models/Campaign.js";
 import { bus } from "../events/index.js";
 import { notify } from "../utils/notify.js";
 import { findCampaignPeopleIds, findPersonById, personDisplayName } from "../utils/personUtils.js";
+import { issuedAttachments, withAttachmentUrls, type Attachment, type AttachmentMeta } from "./attachments.js";
 import {
     campaignThreadKey,
     canAccessThread,
@@ -26,12 +27,16 @@ import {
  *   threadHistory(person, key, { limit, before })  newest first; `before` is a
  *                                                   message id in the thread or
  *                                                   a timestamp
- *   sendThreadMessage(person, key, { body, eventId, clientId })
+ *   sendThreadMessage(person, key, { body, eventId, clientId, attachments })
  *                                                   a resend with the same
  *                                                   clientId returns the stored
  *                                                   message, so it lands once
  *
- * Attachments (#104) join `SendInput` and the `messages` row here.
+ * Attachments (#104): a message needs a body, at least one attachment, or
+ * both. `attachments` is a list of keys from services/attachments.ts, each
+ * issued to this sender for this thread. The row and the bus events carry
+ * their metadata; read URLs are added per response (toThreadMessage) and per
+ * live frame, never stored.
  */
 
 /** A messages row, as stored. */
@@ -47,6 +52,7 @@ export type MessageRow = {
     body: string;
     created_at: Date;
     client_id: string | null;
+    attachments: AttachmentMeta[] | null;
 };
 
 /**
@@ -60,15 +66,25 @@ export type ThreadMessage = {
     body: string;
     createdAt: string;
     eventId?: string;
+    /** Only when there are some (#104). Each has a short-lived read URL. */
+    attachments?: Attachment[];
 };
 
-export const toThreadMessage = (row: MessageRow): ThreadMessage => ({
-    id: String(row.id),
-    sender: { id: String(row.sender_id), name: row.sender_name },
-    body: row.body,
-    createdAt: new Date(row.created_at).toISOString(),
-    ...(row.event_id ? { eventId: String(row.event_id) } : {}),
-});
+/**
+ * A stored message as the thread endpoints return it. Only call it for someone
+ * who can see the thread: it mints read URLs for the attachments.
+ */
+export async function toThreadMessage(row: MessageRow): Promise<ThreadMessage> {
+    const attachments = await withAttachmentUrls(row.attachments);
+    return {
+        id: String(row.id),
+        sender: { id: String(row.sender_id), name: row.sender_name },
+        body: row.body,
+        createdAt: new Date(row.created_at).toISOString(),
+        ...(row.event_id ? { eventId: String(row.event_id) } : {}),
+        ...(attachments.length ? { attachments } : {}),
+    };
+}
 
 /** The SQL condition (on alias `m`) and parameter that select one thread's messages. */
 function threadFilter(thread: ParsedThreadKey, param: number): { sql: string; value: string } {
@@ -155,13 +171,17 @@ export type SendInput = {
     eventId?: unknown;
     /** The sender's own id for this message; a resend with the same one is stored once. */
     clientId?: unknown;
+    /** Attachment keys (#104), each issued to this sender for this thread. */
+    attachments?: unknown;
 };
 
 export type SendResult =
     | { ok: true; row: MessageRow; created: boolean }
     | {
         ok: false;
-        reason: "invalid-thread" | "empty-body" | "body-too-long" | "invalid-client-id" | "forbidden" | "client-id-conflict";
+        reason:
+            | "invalid-thread" | "empty-body" | "body-too-long" | "invalid-client-id" | "forbidden" | "client-id-conflict"
+            | "invalid-attachments" | "too-many-attachments" | "unknown-attachment";
     };
 
 /**
@@ -180,8 +200,9 @@ export async function sendThreadMessage(
     const key = threadKey as ThreadKey;
 
     const body = typeof input.body === "string" ? input.body.trim() : "";
-    if (!body) return { ok: false, reason: "empty-body" };
     if (body.length > MAX_BODY_LENGTH) return { ok: false, reason: "body-too-long" };
+    const namesAttachments = Array.isArray(input.attachments) && input.attachments.length > 0;
+    if (!body && !namesAttachments) return { ok: false, reason: "empty-body" };
 
     const clientId = input.clientId === undefined || input.clientId === null ? null : input.clientId;
     if (clientId !== null && (typeof clientId !== "string" || !CLIENT_ID.test(clientId))) {
@@ -189,6 +210,10 @@ export async function sendThreadMessage(
     }
 
     if (!(await canAccessThread(person, key))) return { ok: false, reason: "forbidden" };
+
+    const issued = await issuedAttachments(String(person.id), key, input.attachments);
+    if (!issued.ok) return { ok: false, reason: issued.reason };
+    const attachments = issued.attachments;
 
     // Senders may be Users, Leads, Contacts, or Accounts — always display the
     // handle (or name), never the email address.
@@ -205,12 +230,12 @@ export async function sendThreadMessage(
     // outcome instead of reporting a row that may yet be deleted.
     return withSendLock(String(person.id), clientId, async (db): Promise<SendResult> => {
         const { rows: [inserted] } = await db.query<MessageRow>(
-            `INSERT INTO messages (campaign_id, event_id, dm_key, recipient, sender_id, sender_name, sender_email, body, client_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            `INSERT INTO messages (campaign_id, event_id, dm_key, recipient, sender_id, sender_name, sender_email, body, client_id, attachments)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
              ON CONFLICT (sender_id, client_id) WHERE client_id IS NOT NULL DO NOTHING
              RETURNING *`,
             [isCampaign ? thread.campaignId : null, eventId, isCampaign ? null : thread.dmKey, recipient,
-                String(person.id), senderName, email, body, clientId]);
+                String(person.id), senderName, email, body, clientId, JSON.stringify(attachments)]);
 
         if (!inserted) {
             // A resend of a send that has finished (it held the lock until it
@@ -286,6 +311,7 @@ async function publishAndNotify(
     email: string,
 ) {
     const body = inserted.body;
+    const attachments = inserted.attachments ?? [];
     const recipient = inserted.recipient;
     const createdAt = new Date(inserted.created_at).toISOString();
     const senderRef = { id: String(person.id), name: senderName, email };
@@ -296,10 +322,11 @@ async function publishAndNotify(
             eventId: inserted.event_id ? String(inserted.event_id) : undefined,
             sender: senderRef,
             body,
+            ...(attachments.length ? { attachments } : {}),
             createdAt,
         });
         // Best-effort, off the request path so chat latency stays flat.
-        notifyCampaignMembers(thread.campaignId, String(person.id), senderName, body).catch(() => { /* logged inside */ });
+        notifyCampaignMembers(thread.campaignId, String(person.id), senderName, bellText(body, attachments)).catch(() => { /* logged inside */ });
     } else {
         await bus.publish("social.dm", {
             messageId: String(inserted.id),
@@ -307,12 +334,13 @@ async function publishAndNotify(
             recipientId: recipient!,
             sender: senderRef,
             body,
+            ...(attachments.length ? { attachments } : {}),
             createdAt,
         });
         notify(recipient!, {
             type: "message",
             title: `New message from @${senderName}`,
-            body: preview(body),
+            body: preview(bellText(body, attachments)),
             // Collapses per thread key, the same key the Letters list uses.
             sourceKey: dmThreadKey(person.id, recipient!),
             meta: { fromUserId: person.id },
@@ -321,6 +349,13 @@ async function publishAndNotify(
 }
 
 const preview = (body: string) => (body.length > 80 ? `${body.slice(0, 77)}...` : body);
+
+/** What the bell says for a message: its text, or for an attachment-only message, what was attached. */
+function bellText(body: string, attachments: readonly AttachmentMeta[]): string {
+    if (body) return body;
+    if (attachments.length === 1) return `Sent ${attachments[0].name}`;
+    return `Sent ${attachments.length} attachments`;
+}
 
 /** One bell entry per campaign per member, collapsing while unread. */
 async function notifyCampaignMembers(campaignId: string, senderId: string, senderName: string, body: string) {

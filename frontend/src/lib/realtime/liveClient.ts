@@ -40,6 +40,20 @@ export interface LiveMessage {
     body: string;
     createdAt: string;
     eventId?: string;
+    /** Only when there are some (#104). `url` is a presigned GET that stops working at `expiresAt`. */
+    attachments?: MessageAttachment[];
+}
+
+/** An image or PDF on a message (#104; backend/live/PROTOCOL.md). */
+export interface MessageAttachment {
+    key: string;
+    name: string;
+    size: number;
+    contentType: string;
+    width?: number;
+    height?: number;
+    url: string | null;
+    expiresAt: string | null;
 }
 
 /** Someone else is typing in a thread (#103); the server never sends you your own. */

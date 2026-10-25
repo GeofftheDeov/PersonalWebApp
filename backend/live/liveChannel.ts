@@ -10,6 +10,7 @@ import { campaignThreadKey, dmThreadKey, visibleThreadKeys, type ThreadKey } fro
 import { canAccessThread } from "../services/threads.js";
 import { findPersonById, personDisplayName } from "../utils/personUtils.js";
 import { unreadCounts } from "../services/readState.js";
+import { withAttachmentUrls, type Attachment } from "../services/attachments.js";
 
 /**
  * The live channel (#98, spec #58): one authenticated WebSocket per person,
@@ -100,6 +101,8 @@ export interface LiveMessage {
     body: string;
     createdAt: string;
     eventId?: string;
+    /** Only when there are some (#104): metadata plus a short-lived read URL each. */
+    attachments?: Attachment[];
 }
 
 export type ServerFrame =
@@ -207,20 +210,39 @@ export async function attachLiveChannel(
         return true;
     }
 
+    /**
+     * `message.created` frames go out in the order their events arrived. A
+     * message with attachments needs read URLs first (#104), which is async, so
+     * while one is being prepared later messages queue behind it. With nothing
+     * queued, a message without attachments goes out at once, as it always has.
+     */
+    let messageQueue: Promise<void> | null = null;
+    function deliverMessage(thread: ThreadKey, payload: EventMap["gamenight.message"] | EventMap["social.dm"]) {
+        if (!messageQueue && !payload.attachments?.length) {
+            deliver(thread, { type: "message.created", thread, message: liveMessage(payload, []) });
+            return;
+        }
+        const run = (messageQueue ?? Promise.resolve())
+            .then(async () => {
+                // Only the thread's subscribers get this frame, and they're exactly
+                // the people who can see the thread, so they may have the URLs.
+                const attachments = byThread.get(thread)?.size ? await withAttachmentUrls(payload.attachments) : [];
+                deliver(thread, { type: "message.created", thread, message: liveMessage(payload, attachments) });
+            })
+            .catch((err) => console.error("[live] message delivery failed:", err?.message ?? err))
+            .finally(() => { if (messageQueue === run) messageQueue = null; });
+        messageQueue = run;
+    }
+
     const unsubscribes = [
         await bus.subscribeBroadcast("gamenight.message", (payload, meta) => {
             if (!firstSighting("message.created", "gamenight.message", meta?.id)) return;
-            deliver(campaignThreadKey(payload.campaignId), {
-                type: "message.created",
-                thread: campaignThreadKey(payload.campaignId),
-                message: liveMessage(payload),
-            });
+            deliverMessage(campaignThreadKey(payload.campaignId), payload);
         }),
         // A DM thread's subscribers are its pair (every device of each) and nobody else.
         await bus.subscribeBroadcast("social.dm", (payload, meta) => {
             if (!firstSighting("message.created", "social.dm", meta?.id)) return;
-            const thread = dmThreadKey(String(payload.sender?.id), String(payload.recipientId));
-            deliver(thread, { type: "message.created", thread, message: liveMessage(payload) });
+            deliverMessage(dmThreadKey(String(payload.sender?.id), String(payload.recipientId)), payload);
         }),
         ...(await threadListSubscriptions()),
     ];
@@ -695,12 +717,13 @@ function send(ws: WebSocket, frame: ServerFrame) {
 }
 
 /** Campaign messages and DMs share one frame shape; only campaign messages can name an event. */
-function liveMessage(payload: EventMap["gamenight.message"] | EventMap["social.dm"]): LiveMessage {
+function liveMessage(payload: EventMap["gamenight.message"] | EventMap["social.dm"], attachments: Attachment[]): LiveMessage {
     return {
         id: payload.messageId,
         sender: { id: String(payload.sender?.id), name: String(payload.sender?.name ?? "") },
         body: payload.body,
         createdAt: payload.createdAt,
         ...("eventId" in payload && payload.eventId ? { eventId: payload.eventId } : {}),
+        ...(attachments.length ? { attachments } : {}),
     };
 }

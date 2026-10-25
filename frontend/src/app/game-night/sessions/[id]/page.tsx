@@ -57,7 +57,7 @@ export default function SessionDetailPage() {
                                 // Inactive players (#37, sent to GMs only) aren't part of a session.
                                 setMembers(memberRows.filter((m: any) => m.isActive !== false));
                                 const me = JSON.parse(localStorage.getItem('user') || 'null');
-                                setIsCampaignGM(Boolean(me && (me.role === 'admin' || memberRows.some((m: any) =>
+                                setIsCampaignGM(Boolean(me && (me.appRole === 'admin' || memberRows.some((m: any) =>
                                     m.status === 'Game Master' &&
                                     ((m.email && me.email && m.email.toLowerCase() === me.email.toLowerCase()) || (m.playerId && m.playerId === me.id))
                                 ))));

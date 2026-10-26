@@ -1,0 +1,426 @@
+<title>Hearthside Campaigns Prototype</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alegreya+Sans+SC:wght@500;700&family=Alegreya+Sans:wght@400;500;700&family=IM+Fell+English+SC&family=IM+Fell+English:ital@0;1&display=swap">
+<link rel="stylesheet" href="bundle.css">
+<style>
+/* PROTOTYPE — throwaway. Three layouts of the Hearthside Campaigns page, switchable from the bar at the bottom
+   (or ← →). Same facts as the PWA's Campaigns tab: banner, title, status, description, start and end dates,
+   the campaign/session/character counts and New campaign. Data is made up and lives in memory.
+   Layout: the Hearthside AppShell (rail | page | letters over the lit floor); only .hs-page changes per variant. */
+:root{
+  color-scheme:dark;
+  /* Hearthside tokens (from the design system's tokens.json; one theme, Tavern) */
+  --ground:#1a130e;--ground-2:#241a13;--surface:#2c2119;--line:#4a3726;--text:#f1e6d0;--muted:#b8a487;
+  --on-wood-text:#fbf1dc;--on-wood-muted:#d4c2a2;--accent:#e5a13a;--accent-ink:#1a130e;--seal:#b4462c;--moss:#7c9a55;
+  --verdigris:#5aa396;--paper:#eadbb9;--paper-hi:#f0e3c4;--paper-lo:#e2cea5;--paper-ink:#2b1d12;--paper-muted:#6b5337;
+  --paper-line:#c9b28a;--leather-hi:#37281c;--leather:#221810;--gold-hi:#f6dd96;--gold:#d6a84e;--gold-lo:#8a5c1c;
+  --gold-line:rgba(226,184,98,0.38);--gold-rule:rgba(226,184,98,0.14);
+  --heat-0:rgba(43,29,18,0.06);--heat-1:#d8c092;--heat-2:#c49a5c;--heat-3:#9c6c32;--heat-4:#5a3a1a;--firelight:#ffb36b;
+  --font-display:"IM Fell English SC","IM Fell English",Georgia,serif;
+  --font-story:"IM Fell English",Georgia,serif;
+  --font-body:"Alegreya Sans",system-ui,sans-serif;
+  --font-label:"Alegreya Sans SC","Alegreya Sans",system-ui,sans-serif;
+  --space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;--space-5:20px;--space-6:24px;--sheet-foot:44px;
+  --radius-sheet:3px;--radius:4px;--radius-panel:5px;--radius-full:999px;
+  --shadow-panel:0 14px 30px rgba(0,0,0,0.55),0 2px 4px rgba(0,0,0,0.5);
+  --shadow-panel-inset:inset 0 0 0 1px rgba(0,0,0,0.55),inset 0 0 26px rgba(0,0,0,0.5);
+  --shadow-paper:0 16px 34px rgba(0,0,0,0.6),0 2px 4px rgba(0,0,0,0.45);
+  --shadow-pin:0 2px 3px rgba(0,0,0,0.5);
+  --on-wood-shadow:0 1px 2px rgba(0,0,0,0.9),0 0 14px rgba(0,0,0,0.6);
+  /* the prototype switcher only: deliberately not Hearthside */
+  --proto-bg:#fafafa;--proto-fg:#111;--proto-dim:#555;
+}
+body{margin:0;background:var(--ground);color:var(--text)}
+.hs-shell-wrap{padding-block:16px 96px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.hs-nav a{cursor:pointer}
+
+/* ---------- shared bits ---------- */
+.p-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+.p-head > div{min-width:0}
+.p-new{height:36px;font-size:15px}
+.p-status{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.06em;
+  padding:3px 10px;border-radius:var(--radius-full);white-space:nowrap;border:1px solid var(--line);color:var(--muted)}
+.p-status.is-live{border-color:rgba(229,161,58,.55);color:var(--accent)}
+.p-status.is-live::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--firelight);box-shadow:0 0 6px var(--firelight)}
+.p-status.is-done{background:var(--moss);border-color:var(--moss);color:var(--accent-ink)}
+.p-when{font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.04em;color:var(--muted);font-variant-numeric:tabular-nums}
+.p-title{font-family:var(--font-story);font-weight:400;color:var(--text);text-decoration:none;text-wrap:balance}
+.p-title:hover{color:var(--gold-hi)}
+.p-desc{margin:0;color:var(--muted);font-size:15px;line-height:1.5;max-width:65ch}
+.p-tool{background:rgba(26,19,14,.78);color:var(--text);border:1px solid var(--gold-line);border-radius:var(--radius);
+  padding:4px 10px;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.04em;cursor:pointer;backdrop-filter:blur(2px)}
+.p-tool:hover{border-color:var(--gold);color:var(--gold-hi)}
+.p-tools{position:absolute;right:10px;bottom:10px;display:flex;gap:6px;z-index:3}
+
+/* The banner: always 4:1. An uploaded image, or a Hearthside fallback: a dyed cloth with the campaign's
+   initials stitched in gold, so a campaign without one still has a face. */
+.p-banner{position:relative;aspect-ratio:4/1;width:100%;max-width:100%;overflow:hidden;border-radius:2px;background:var(--leather)}
+.p-banner img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+.p-cloth{position:absolute;inset:0;display:grid;place-items:center;
+  background:
+    repeating-linear-gradient(45deg,rgba(0,0,0,.12) 0 1px,transparent 1px 5px),
+    repeating-linear-gradient(-45deg,rgba(255,255,255,.035) 0 1px,transparent 1px 5px),
+    radial-gradient(120% 140% at 15% 100%,rgba(255,179,107,.18),transparent 55%),
+    linear-gradient(160deg,var(--c1),var(--c2))}
+.p-cloth::after{content:"";position:absolute;inset:8px;border:1px dashed rgba(246,221,150,.45);border-radius:2px}
+.p-cloth span{font-family:var(--font-display);font-size:clamp(22px,6cqw,54px);letter-spacing:.12em;color:var(--gold-hi);opacity:.85;
+  text-shadow:0 1px 0 rgba(0,0,0,.6)}
+.p-banner{container-type:inline-size}
+.p-cloth small{position:absolute;left:14px;bottom:10px;font-family:var(--font-label);font-size:12px;letter-spacing:.06em;color:rgba(241,230,208,.7)}
+
+/* ---------- A: Gallery. Each banner is a painting in a gilt frame; a small plaque below says what it is. ---------- */
+.va{display:flex;flex-direction:column;gap:34px}
+.va-item{display:flex;flex-direction:column;align-items:center}
+.va-frame{width:100%;padding:8px}
+.va-frame .p-banner{border-radius:1px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.6)}
+.va-plaque{width:min(92%,560px);margin-top:-14px;z-index:2;padding:14px 20px 16px;text-align:center}
+.va-plaque .p-title{font-size:26px;line-height:1.15;display:block}
+.va-meta{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:6px 12px;margin:6px 0 8px}
+.va-plaque .p-desc{margin:0 auto;font-size:14px}
+
+/* ---------- B: Roster. Filter tabs over a stack of campaigns; each campaign's banner is its background,
+   and its facts sit on a gilded leather panel laid over the banner. ---------- */
+.vb-panel{padding:6px}
+.vb-panel .hs-tabs{padding:0 8px;border-bottom:0}
+.vb-tabs button span{color:var(--muted);font-family:var(--font-body);font-size:12px;margin-left:4px}
+.vb-rows{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:16px}
+/* The card is at least 4:1, so a whole banner shows; it grows taller if the panel needs room, and the banner covers it. */
+.vb-card{position:relative;aspect-ratio:4/1;max-width:100%;padding:16px;display:flex;align-items:center;
+  border-radius:var(--radius-panel);outline:1px solid var(--gold-line);outline-offset:-1px;box-shadow:var(--shadow-panel);overflow:hidden}
+.vb-card > .p-banner{position:absolute;inset:0;aspect-ratio:auto;border-radius:0}
+.vb-card > .p-banner .p-cloth{place-items:center end;padding-right:6%}
+.vb-card > .p-banner .p-cloth::after{inset:6px}
+.vb-card > .p-banner .p-cloth small{left:auto;right:16px;bottom:12px}
+.vb-info{position:relative;z-index:1;width:min(60%,440px);padding:14px 18px 15px;display:flex;flex-direction:column;gap:4px}
+.vb-info .p-title{font-size:22px;line-height:1.15}
+.vb-info .p-desc{font-size:14px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.vb-meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;margin-bottom:2px}
+.vb-card .p-tools{right:14px;bottom:14px}
+.vb-empty{padding:28px 16px;text-align:center;color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow)}
+/* Narrow: the banner shows as a strip across the top, the panel spans the card below it. */
+@media (max-width:620px){
+  .vb-card{aspect-ratio:auto;flex-direction:column;align-items:stretch;padding:calc(25% + 4px) 10px 10px}
+  .vb-card > .p-banner .p-cloth{place-items:start center;padding:4% 0 0}
+  .vb-card > .p-banner .p-cloth small{display:none}
+  .vb-info{width:auto}
+  .vb-card .p-tools{top:10px;bottom:auto;right:10px}
+}
+
+/* ---------- C: Spotlight. One campaign at full size, its banner as the panel's crown; the rest on a shelf below. ---------- */
+.vc-spot{padding:6px}
+.vc-hero{position:relative}
+.vc-hero .p-banner{border-radius:2px 2px 0 0}
+.vc-hero::after{content:"";position:absolute;inset:0;pointer-events:none;border-radius:2px 2px 0 0;
+  background:linear-gradient(180deg,rgba(34,24,16,0) 35%,rgba(34,24,16,.55) 70%,var(--leather) 100%)}
+.vc-name{position:absolute;left:18px;right:18px;bottom:10px;z-index:2;display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:8px}
+.vc-name .p-title{font-size:clamp(26px,3.6vw,36px);line-height:1.05;text-shadow:var(--on-wood-shadow)}
+.vc-hero .p-tools{top:10px;bottom:auto}
+.vc-body{padding:12px 18px 16px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;align-items:start}
+.vc-facts{display:grid;gap:8px;justify-items:end;text-align:right}
+.vc-facts dl{margin:0;display:grid;grid-template-columns:auto auto;gap:2px 12px}
+.vc-facts dt{font-family:var(--font-label);font-size:12.5px;letter-spacing:.06em;color:var(--muted)}
+.vc-facts dd{margin:0;font-size:14px;color:var(--text);font-variant-numeric:tabular-nums}
+.vc-open{height:34px;font-size:15px;margin-top:4px}
+@media (max-width:620px){.vc-body{grid-template-columns:1fr}.vc-facts{justify-items:start;text-align:left}}
+.vc-shelf{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px}
+.vc-tile{appearance:none;background:none;border:0;padding:0;cursor:pointer;text-align:left;color:var(--on-wood-muted);display:flex;flex-direction:column;gap:6px;min-width:0}
+.vc-tile .p-banner{outline:1px solid var(--gold-line);outline-offset:2px;box-shadow:var(--shadow-panel)}
+.vc-tile .p-cloth small{display:none}.vc-tile .p-cloth::after{inset:4px}
+.vc-tile b{font-family:var(--font-label);font-weight:500;font-size:14px;letter-spacing:.04em;text-shadow:var(--on-wood-shadow);line-height:1.25}
+.vc-tile i{font-style:normal;font-size:12px;color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow)}
+.vc-tile[aria-pressed="true"] .p-banner{outline:2px solid var(--gold-hi)}
+.vc-tile[aria-pressed="true"] b{color:var(--gold-hi)}
+.vc-tile:hover b{color:var(--text)}
+
+/* ---------- prototype switcher (not part of any design) ---------- */
+.proto-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:50;
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:center;max-width:calc(100vw - 24px);
+  background:var(--proto-bg);color:var(--proto-fg);border-radius:14px;padding:6px 8px;box-shadow:0 8px 30px rgba(0,0,0,.6);
+  font:13px/1.3 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+.proto-bar button{font:inherit;color:inherit;background:#e9e9e9;border:0;border-radius:8px;padding:6px 10px;cursor:pointer}
+.proto-bar button:hover{background:#dcdcdc}
+.proto-bar .lbl{min-width:170px;text-align:center;font-weight:600;padding:0 4px}
+.proto-bar .lbl small{display:block;font-weight:400;color:var(--proto-dim);font-size:11px}
+.proto-bar .sep{width:1px;height:26px;background:#ccc;margin:0 2px}
+.proto-bar :focus-visible{outline:2px solid #2563eb;outline-offset:2px}
+.proto-toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(76px + env(safe-area-inset-bottom,0px));z-index:50;background:var(--proto-bg);color:var(--proto-fg);
+  font:13px/1.3 ui-sans-serif,system-ui,sans-serif;padding:8px 12px;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.5);max-width:calc(100vw - 32px)}
+</style>
+
+<canvas class="hs-floor" id="floor" aria-hidden="true"></canvas>
+<div class="hs-glow" aria-hidden="true"></div>
+<div class="hs-shell-wrap">
+  <div class="hs-shell">
+    <aside class="hs-rail">
+      <div class="hs-bar"><div class="hs-brand">Hearthside<small>The Party Gathers</small></div>
+        <nav class="hs-nav hs-gilded" aria-label="Main">
+          <a data-stub="The Hearth">The Hearth</a>
+          <a aria-current="page">Campaigns</a>
+          <a data-stub="The Almanac">Almanac</a>
+          <a data-stub="Adventurers">Adventurers</a>
+        </nav>
+      </div>
+      <section class="hs-quests-sec"><h2 class="hs-sec"><span>Your Quests</span><span class="hs-aside" id="qc">2 open</span></h2><div class="hs-gilded"><ul class="hs-quests" id="quests">
+        <li><button class="hs-box" role="checkbox" aria-checked="false" aria-label="Prep the table: mark done"></button>
+          <div><div class="hs-quest-name">Prep the table<span class="hs-tag">Host</span></div><div class="hs-quest-time">Sat 5:30 pm</div><div class="hs-quest-desc">Clear the dining room, set out the battle map and minis.</div></div></li>
+        <li class="is-done"><button class="hs-box" role="checkbox" aria-checked="true" aria-label="Print the chapel handout: mark done"></button>
+          <div><div class="hs-quest-name">Print the chapel handout<span class="hs-tag">DM</span></div><div class="hs-quest-time">Fri</div><div class="hs-quest-desc">Map of the flooded nave, player version.</div></div></li>
+        <li><button class="hs-box" role="checkbox" aria-checked="false" aria-label="Bring dice for Theo: mark done"></button>
+          <div><div class="hs-quest-name">Bring dice for Theo<span class="hs-tag">Favor</span></div><div class="hs-quest-time">Sat 6:30 pm</div><div class="hs-quest-desc">He left his set at the last session.</div></div></li>
+      </ul></div></section>
+    </aside>
+
+    <main class="hs-page" id="page"></main>
+
+    <aside class="hs-letters-col"><h2 class="hs-sec"><span>Letters</span><span class="hs-aside">4 unread</span></h2><div class="hs-gilded"><div class="hs-tabs" role="tablist">
+      <button role="tab" aria-selected="true">All</button><button role="tab" aria-selected="false">Campaigns</button><button role="tab" aria-selected="false">Friends</button>
+    </div>
+    <ul class="hs-threads">
+      <li tabindex="0" role="button"><span class="hs-avatar is-campaign">AC</span><div style="min-width:0"><div class="hs-thread-name">Curse of the Ashen Crown</div><div class="hs-thread-sub">Campaign · 5 in the party</div></div><div class="hs-thread-when">now<span class="hs-dot" aria-label="3 unread"></span></div></li>
+      <li tabindex="0" role="button"><span class="hs-avatar">P</span><div style="min-width:0"><div class="hs-thread-name">Priya</div><div class="hs-thread-sub">Friend</div></div><div class="hs-thread-when">7:02 pm<span class="hs-dot" aria-label="1 unread"></span></div></li>
+      <li tabindex="0" role="button"><span class="hs-avatar is-campaign">SS</span><div style="min-width:0"><div class="hs-thread-name">Starfall Salvage</div><div class="hs-thread-sub">Campaign · 4 in the party</div></div><div class="hs-thread-when">Tue</div></li>
+    </ul></div></aside>
+  </div>
+</div>
+
+<input type="file" id="banner-file" accept="image/jpeg,image/png,image/webp" hidden>
+
+<div class="proto-bar" role="toolbar" aria-label="Prototype controls">
+  <button type="button" id="prev" aria-label="Previous layout">←</button>
+  <div class="lbl" id="lbl" aria-live="polite"></div>
+  <button type="button" id="next" aria-label="Next layout">→</button>
+  <span class="sep" aria-hidden="true"></span>
+  <button type="button" id="role"></button>
+  <button type="button" id="bans"></button>
+</div>
+<div class="proto-toast" id="toast" hidden></div>
+
+<script src="bundle.js"></script>
+<script>
+document.body.classList.add('hs-app');
+
+/* ---------------- data (made up, in memory) ---------------- */
+const CAMPAIGNS = [
+  { id: 'ashen-crown', title: 'Curse of the Ashen Crown', status: 'In Progress', startDate: '2026-03-14', endDate: null, owned: true, art: 'ashen',
+    description: "The old king's crown woke the dead of Vel Harrow. Five sellswords are trying to put it back to sleep before the ash reaches the coast." },
+  { id: 'starfall', title: 'Starfall Salvage', status: 'In Progress', startDate: '2026-06-02', endDate: null, owned: false, art: 'starfall',
+    description: 'A salvage crew picks over a star-barge that fell into the Glass Wastes. Something in the hold keeps calling them by name.' },
+  { id: 'brinewood', title: 'Bones of the Brinewood', status: 'Not Started', startDate: '2026-11-07', endDate: null, owned: true, art: null,
+    description: 'A one-shot that may turn into more: a drowned forest, and a witch who trades in teeth.' },
+  { id: 'lantern-road', title: 'The Lantern Road', status: 'Completed', startDate: '2025-09-06', endDate: '2026-02-21', owned: true, art: 'lantern',
+    description: "Twelve sessions escorting the Lamplighters' Guild from Orrin to the sea. Everyone made it but the mule." },
+];
+const COUNTS = { sessions: 31, characters: 9 };
+
+/* ---------------- stand-in banner art: what an uploaded 4:1 image would look like ---------------- */
+function rng(seed) { let h = 2166136261; for (const c of seed) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return () => ((h = Math.imul(h ^ (h >>> 15), 2246822507) ^ Math.imul(h ^ (h >>> 13), 3266489909)) >>> 0) / 4294967296; }
+function ridge(ctx, r, W, y0, amp, step, color) {
+  ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(0, 400);
+  let y = y0; for (let x = 0; x <= W + step; x += step) { y = Math.max(y0 - amp, Math.min(y0 + amp, y + (r() - .5) * amp)); ctx.lineTo(x, y); }
+  ctx.lineTo(W, 400); ctx.closePath(); ctx.fill();
+}
+function paint(kind) {
+  const W = 1600, H = 400, c = document.createElement('canvas'); c.width = W; c.height = H;
+  const ctx = c.getContext('2d'), r = rng(kind);
+  const sky = (stops) => { const g = ctx.createLinearGradient(0, 0, 0, H); stops.forEach(([o, col]) => g.addColorStop(o, col)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); };
+  if (kind === 'ashen') {
+    sky([[0, '#2a0f0c'], [.55, '#7a2a14'], [.8, '#d0652a'], [1, '#f2a24a']]);
+    for (let i = 0; i < 220; i++) { ctx.fillStyle = `rgba(230,200,180,${r() * .35})`; ctx.fillRect(r() * W, r() * H * .8, 2, 2); }
+    ridge(ctx, r, W, 250, 60, 40, '#3a1710');
+    ridge(ctx, r, W, 300, 30, 30, '#1c0b08');
+    ctx.fillStyle = '#0e0605'; // the crowned keep
+    const kx = 1060; ctx.fillRect(kx, 170, 160, 140);
+    [[kx - 30, 140, 40, 170], [kx + 60, 110, 40, 200], [kx + 150, 140, 40, 170]].forEach(([x, y, w, h]) => {
+      ctx.fillRect(x, y, w, h); for (let i = 0; i < 3; i++) ctx.fillRect(x + i * 15, y - 12, 9, 12);
+    });
+    ctx.fillStyle = 'rgba(255,170,80,.8)'; [[kx + 76, 140], [kx + 20, 210], [kx + 120, 230]].forEach(([x, y]) => ctx.fillRect(x, y, 6, 10));
+    ridge(ctx, r, W, 360, 14, 24, '#070303');
+  } else if (kind === 'starfall') {
+    sky([[0, '#060a1c'], [.6, '#13294a'], [1, '#2f6a74']]);
+    for (let i = 0; i < 380; i++) { const s = r(); ctx.fillStyle = `rgba(255,255,240,${.3 + s * .7})`; ctx.fillRect(r() * W, r() * H * .75, s > .93 ? 3 : 1.5, s > .93 ? 3 : 1.5); }
+    const g = ctx.createLinearGradient(300, 40, 760, 220); g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(1, 'rgba(255,236,190,.95)');
+    ctx.strokeStyle = g; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(300, 40); ctx.lineTo(760, 220); ctx.stroke();
+    ctx.fillStyle = '#fff6d8'; ctx.beginPath(); ctx.arc(762, 221, 6, 0, 7); ctx.fill();
+    ridge(ctx, r, W, 300, 26, 60, '#3a3550');
+    ctx.fillStyle = '#16142a'; ctx.beginPath(); // the wreck's ribs
+    ctx.moveTo(380, 330); ctx.quadraticCurveTo(520, 200, 720, 300); ctx.lineTo(700, 330); ctx.closePath(); ctx.fill();
+    for (let i = 0; i < 6; i++) { ctx.fillRect(430 + i * 45, 250 - Math.sin(i / 5 * Math.PI) * 30, 7, 90); }
+    ridge(ctx, r, W, 350, 18, 50, '#0b0a18');
+  } else if (kind === 'lantern') {
+    sky([[0, '#2b1f3e'], [.5, '#6b3d52'], [.85, '#d98b4a'], [1, '#f3c27a']]);
+    ridge(ctx, r, W, 240, 40, 50, '#40304a');
+    ridge(ctx, r, W, 290, 26, 40, '#2a2133');
+    ctx.fillStyle = '#17121d'; ctx.fillRect(0, 320, W, 80);
+    ctx.strokeStyle = 'rgba(214,168,110,.55)'; ctx.lineWidth = 34; ctx.beginPath(); // the road
+    ctx.moveTo(-20, 390); ctx.bezierCurveTo(420, 300, 900, 380, 1640, 300); ctx.stroke();
+    for (let i = 0; i < 9; i++) {
+      const t = i / 8, x = t * 1600, y = 360 - t * 60 + Math.sin(t * 6) * 14 - 30;
+      const glow = ctx.createRadialGradient(x, y, 0, x, y, 40); glow.addColorStop(0, 'rgba(255,200,110,.9)'); glow.addColorStop(1, 'rgba(255,160,60,0)');
+      ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(x, y, 40, 0, 7); ctx.fill();
+      ctx.fillStyle = '#0d0a10'; ctx.fillRect(x - 2, y + 4, 4, 30);
+    }
+    for (let i = 0; i < 24; i++) { const x = r() * W, h = 40 + r() * 60; ctx.fillStyle = '#100c14'; ctx.beginPath(); ctx.moveTo(x, 330); ctx.lineTo(x + 18, 330 - h); ctx.lineTo(x + 36, 330); ctx.fill(); }
+  }
+  return c.toDataURL('image/jpeg', .85);
+}
+CAMPAIGNS.forEach(c => { c.uploaded = c.art ? paint(c.art) : null; c.bannerUrl = c.uploaded; });
+
+/* ---------------- prototype state ---------------- */
+const VARIANTS = [
+  { key: 'A', name: 'Gallery', note: 'Banners hung as framed paintings' },
+  { key: 'B', name: 'Roster', note: 'Banner behind each campaign, facts on gilded leather' },
+  { key: 'C', name: 'Spotlight', note: 'One campaign large, the rest on a shelf' },
+];
+const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+let variant = Math.max(0, VARIANTS.findIndex(v => v.key === (new URLSearchParams(location.search).get('variant') || location.hash.slice(1) || store.get('hs-proto-variant'))));
+let asOwner = store.get('hs-proto-role') !== 'player';
+let bannersOn = store.get('hs-proto-bans') !== 'none';
+let rosterFilter = 'All';
+let spotId = CAMPAIGNS[0].id;
+let editing = null;
+
+/* ---------------- helpers ---------------- */
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmt = d => new Date(d + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+const when = c => c.endDate ? `${fmt(c.startDate)} – ${fmt(c.endDate)}`
+  : c.status === 'Not Started' ? `Starts ${fmt(c.startDate)}` : `Since ${fmt(c.startDate)}`;
+const statusPill = c => {
+  const cls = c.status === 'In Progress' ? 'is-live' : c.status === 'Completed' ? 'is-done' : '';
+  const word = c.status === 'In Progress' ? 'In progress' : c.status === 'Not Started' ? 'Not started' : 'Completed';
+  return `<span class="p-status ${cls}">${word}</span>`;
+};
+const initials = t => t.replace(/^(The|A|An) /, '').split(/\s+/).filter(w => !/^(of|the|and)$/i.test(w)).slice(0, 2).map(w => w[0]).join('');
+const CLOTHS = [['#1f4a44', '#0f2422'], ['#5a2416', '#2a0f0a'], ['#4a3218', '#22160b'], ['#2c3a24', '#141c10']];
+const clothFor = id => { let h = 0; for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return CLOTHS[h % CLOTHS.length]; };
+const url = c => bannersOn ? c.bannerUrl : null;
+function banner(c, { tools = false } = {}) {
+  const u = url(c), [c1, c2] = clothFor(c.id);
+  const inner = u ? `<img src="${u}" alt="${esc(c.title)} banner">`
+    : `<div class="p-cloth" style="--c1:${c1};--c2:${c2}"><span>${esc(initials(c.title))}</span>${tools && c.owned && asOwner ? '<small>No banner yet</small>' : ''}</div>`;
+  return `<div class="p-banner">${inner}${tools ? bannerTools(c) : ''}</div>`;
+}
+function bannerTools(c) {
+  if (!(c.owned && asOwner)) return '';
+  const has = !!url(c);
+  return `<div class="p-tools"><button type="button" class="p-tool" data-banner="${c.id}">${has ? 'Change banner' : 'Add banner'}</button>${has ? `<button type="button" class="p-tool" data-remove="${c.id}">Remove</button>` : ''}</div>`;
+}
+const titleLink = (c, cls = '') => `<a class="p-title ${cls}" href="#" data-open="${c.id}">${esc(c.title)}</a>`;
+function head() {
+  const n = CAMPAIGNS.length;
+  return `<header class="hs-page-head p-head"><div><h1>Campaigns</h1>
+    <p><b>${n} campaign${n !== 1 ? 's' : ''}</b> · ${COUNTS.sessions} sessions · ${COUNTS.characters} characters</p></div>
+    <button type="button" class="hs-btn-amber p-new" data-stub="the new-campaign form">New campaign</button></header>`;
+}
+
+/* ---------------- A: Gallery ---------------- */
+function VariantA() {
+  return head() + `<section class="va" aria-label="Your campaigns">${CAMPAIGNS.map(c => `
+    <article class="va-item">
+      <div class="hs-gilded va-frame">${banner(c, { tools: true })}</div>
+      <div class="hs-gilded va-plaque">
+        ${titleLink(c)}
+        <div class="va-meta">${statusPill(c)}<span class="p-when">${when(c)}</span></div>
+        <p class="p-desc">${esc(c.description)}</p>
+      </div>
+    </article>`).join('')}</section>`;
+}
+
+/* ---------------- B: Roster ---------------- */
+function VariantB() {
+  const filters = ['All', 'In Progress', 'Not Started', 'Completed'];
+  const label = f => f === 'All' ? 'All' : f === 'In Progress' ? 'In progress' : f === 'Not Started' ? 'Not started' : 'Completed';
+  const count = f => f === 'All' ? CAMPAIGNS.length : CAMPAIGNS.filter(c => c.status === f).length;
+  const rows = CAMPAIGNS.filter(c => rosterFilter === 'All' || c.status === rosterFilter);
+  const live = CAMPAIGNS.filter(c => c.status === 'In Progress').length;
+  return head() + `<section><h2 class="hs-sec"><span>The Roster</span><span class="hs-aside">${live} at the table</span></h2>
+    <div class="hs-gilded vb-panel">
+      <div class="hs-tabs vb-tabs" role="tablist" aria-label="Filter by status">${filters.map(f =>
+        `<button role="tab" type="button" aria-selected="${f === rosterFilter}" data-filter="${f}">${label(f)}<span>${count(f)}</span></button>`).join('')}</div>
+    </div></section>
+    ${rows.length ? `<ul class="vb-rows" aria-label="${esc(label(rosterFilter))} campaigns">${rows.map(c => `
+      <li class="vb-card">
+        ${banner(c, { tools: true })}
+        <div class="hs-gilded vb-info">
+          ${titleLink(c)}
+          <div class="vb-meta">${statusPill(c)}<span class="p-when">${when(c)}</span></div>
+          <p class="p-desc">${esc(c.description)}</p>
+        </div>
+      </li>`).join('')}</ul>` : `<p class="vb-empty">No campaigns here.</p>`}`;
+}
+
+/* ---------------- C: Spotlight ---------------- */
+function VariantC() {
+  const c = CAMPAIGNS.find(x => x.id === spotId) || CAMPAIGNS[0];
+  return head() + `<section aria-label="${esc(c.title)}">
+    <div class="hs-gilded vc-spot">
+      <div class="vc-hero">${banner(c, { tools: true })}
+        <div class="vc-name">${titleLink(c)}${statusPill(c)}</div></div>
+      <div class="vc-body">
+        <p class="p-desc">${esc(c.description)}</p>
+        <div class="vc-facts">
+          <dl><dt>Started</dt><dd>${fmt(c.startDate)}</dd><dt>Ended</dt><dd>${c.endDate ? fmt(c.endDate) : c.status === 'Completed' ? 'Not set' : 'Still going'}</dd></dl>
+          <button type="button" class="hs-btn-amber vc-open" data-open="${c.id}">Open campaign</button>
+        </div>
+      </div>
+    </div></section>
+    <section><h2 class="hs-sec"><span>All campaigns</span><span class="hs-aside">${CAMPAIGNS.length} on the shelf</span></h2>
+      <div class="vc-shelf">${CAMPAIGNS.map(x => `
+        <button type="button" class="vc-tile" data-spot="${x.id}" aria-pressed="${x.id === c.id}">${banner(x)}<b>${esc(x.title)}</b><i>${x.status === 'In Progress' ? 'In progress' : x.status === 'Not Started' ? 'Not started' : 'Completed'} · ${when(x)}</i></button>`).join('')}
+      </div></section>`;
+}
+
+/* ---------------- render + wiring ---------------- */
+const page = document.getElementById('page');
+const RENDER = [VariantA, VariantB, VariantC];
+function render() {
+  page.innerHTML = RENDER[variant]();
+  Hearthside.GildedPanel.decorate(page);
+  const v = VARIANTS[variant];
+  document.getElementById('lbl').innerHTML = `${v.key} — ${v.name}<small>${v.note}</small>`;
+  document.getElementById('role').textContent = asOwner ? 'Viewing as: owner' : 'Viewing as: player';
+  document.getElementById('bans').textContent = bannersOn ? 'Banners: uploaded' : 'Banners: none set';
+  store.set('hs-proto-variant', v.key);
+  try { const u = new URL(location.href); u.searchParams.set('variant', v.key); history.replaceState(null, '', u); } catch {}
+}
+function go(d) { variant = (variant + d + VARIANTS.length) % VARIANTS.length; render(); }
+document.getElementById('prev').onclick = () => go(-1);
+document.getElementById('next').onclick = () => go(1);
+document.getElementById('role').onclick = () => { asOwner = !asOwner; store.set('hs-proto-role', asOwner ? 'owner' : 'player'); render(); };
+document.getElementById('bans').onclick = () => { bannersOn = !bannersOn; store.set('hs-proto-bans', bannersOn ? 'on' : 'none'); render(); };
+addEventListener('keydown', e => {
+  if (e.target.closest('input,textarea,select,[contenteditable]')) return;
+  if (e.key === 'ArrowLeft') go(-1); else if (e.key === 'ArrowRight') go(1);
+});
+
+let toastTimer;
+function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 2600); }
+
+const fileInput = document.getElementById('banner-file');
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-open],[data-stub],[data-banner],[data-remove],[data-filter],[data-spot]');
+  if (!el) return;
+  e.preventDefault();
+  const d = el.dataset;
+  if (d.open) toast(`Prototype: this opens ${CAMPAIGNS.find(c => c.id === d.open).title}'s own page.`);
+  else if (d.stub) toast(`Prototype: this goes to ${d.stub}.`);
+  else if (d.filter) { rosterFilter = d.filter; render(); }
+  else if (d.spot) { spotId = d.spot; render(); }
+  else if (d.remove) { const c = CAMPAIGNS.find(x => x.id === d.remove); c.bannerUrl = null; render(); toast('Banner removed (in this tab only).'); }
+  else if (d.banner) { editing = d.banner; if (!bannersOn) { bannersOn = true; } fileInput.value = ''; fileInput.click(); }
+});
+fileInput.addEventListener('change', () => {
+  const f = fileInput.files && fileInput.files[0], c = CAMPAIGNS.find(x => x.id === editing);
+  if (!f || !c) return;
+  c.bannerUrl = URL.createObjectURL(f);
+  render();
+  toast('Banner set, centre-cropped to 4:1 (in this tab only; the real flow has a cropper).');
+});
+
+render();
+Hearthside.QuestList.bind(document.getElementById('quests'), { count: document.getElementById('qc') });
+Hearthside.GildedPanel.decorate();
+const floor = Hearthside.Floor.mount(document.getElementById('floor'));
+if (floor && floor.page) floor.page(1, false);
+</script>

@@ -8,10 +8,11 @@
  *
  *   DATABASE_URL=postgresql://postgres@127.0.0.1:5433/pwatest npx tsx scripts/test-quests-api.ts
  */
+import "./use-test-jwt-secret.js";
 import express from "express";
 import type { AddressInfo } from "net";
 import crypto from "crypto";
-import jwt from "jsonwebtoken";
+import { signJwt } from "../utils/jwt.js";
 import pool from "../db/index.js";
 import { bus } from "../events/index.js";
 import { buildQuestRouter } from "../routes/questRoutes.js";
@@ -22,7 +23,6 @@ if (!/(\/\/|@)(127\.0\.0\.1|localhost)[:/]/.test(process.env.DATABASE_URL ?? "")
     process.exit(2);
 }
 
-const SECRET = process.env.JWT_SECRET || "your-secret-key-change-this";
 const HOUR = 60 * 60 * 1000, DAY = 24 * HOUR;
 
 let pass = 0, fail = 0;
@@ -88,7 +88,7 @@ async function main() {
             const { rows: [r] } = await pool.query(
                 `INSERT INTO accounts (id, handle, email, app_role, app_role_source) VALUES (gen_random_uuid(), $1, $2, $3, 'manual') RETURNING id`,
                 [`${name}_${tag}`, email, name === "admin" ? "admin" : "user"]);
-            who[name] = { id: r.id, token: jwt.sign({ id: r.id, email }, SECRET, { expiresIn: "1h" }) };
+            who[name] = { id: r.id, token: signJwt({ id: r.id, email }, { expiresIn: "1h" }) };
         }
         const campaign = async (title: string, gmTitle: string, members: [string, string][]) => {
             const { rows: [c] } = await pool.query(

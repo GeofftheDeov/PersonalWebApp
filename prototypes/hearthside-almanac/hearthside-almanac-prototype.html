@@ -215,20 +215,25 @@ body{margin:0;background:var(--ground);color:var(--text)}
 .p-dd-thumb .bn.is-cloth span{display:none}
 .p-dd-stack .p-dd-thumb + .p-dd-thumb{margin-left:-24px}
 .p-tok{display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 9px 0 3px;border-radius:var(--radius);border:1px solid var(--gold);
-  background:rgba(229,161,58,.14);color:var(--text);cursor:pointer;font-size:13px;max-width:100%}
+  background:rgba(229,161,58,.14);color:var(--text);cursor:pointer;font-size:13px;max-width:100%;min-width:0}
+/* a long name shortens with an ellipsis rather than wrapping out of the token; the full name is in the button's label */
+.p-tok-n{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .p-tok .p-dd-thumb{width:34px;height:20px}
-.p-tok i{font-style:normal;color:var(--muted);font-size:15px;line-height:1}
+.p-tok i{flex:none;font-style:normal;color:var(--muted);font-size:15px;line-height:1}
 .p-tok:hover i{color:var(--gold-hi)}
 .p-dd-pop{position:absolute;z-index:30;top:calc(100% + 10px);left:0;width:min(420px,100%);padding:10px 12px 12px;display:flex;flex-direction:column;gap:10px}
 .p-dd-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:2px 4px 0;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--muted)}
 .p-dd-list{display:flex;flex-direction:column;gap:8px}
-.p-opt{position:relative;display:block;width:100%;aspect-ratio:4/1;min-height:70px;border:0;padding:0;border-radius:3px;overflow:hidden;cursor:pointer;text-align:left;
+/* At least 4:1 so the whole banner shows, and taller when the name wraps: the text is in flow, and min-height stays
+   auto so aspect-ratio lets the content grow the box. overflow:clip, not hidden: hidden makes it a scroll container,
+   which drops that content minimum. The right padding keeps text clear of the check seal. */
+.p-opt{position:relative;display:flex;align-items:center;width:100%;aspect-ratio:4/1;border:0;padding:10px 48px 10px 12px;border-radius:3px;overflow:clip;cursor:pointer;text-align:left;
   color:var(--text);background:var(--leather);box-shadow:0 0 0 1px var(--gold-line),0 3px 8px rgba(0,0,0,.55)}
 .p-opt::before{content:"";position:absolute;inset:0;z-index:1;background:linear-gradient(90deg,rgba(20,13,8,.9) 0%,rgba(20,13,8,.55) 50%,rgba(20,13,8,0) 80%)}
 .p-opt .bn.is-cloth{padding-right:58px}
 .p-opt .bn.is-cloth span{font-size:28px}
-.p-opt-name{position:absolute;z-index:2;left:12px;right:44px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:2px}
-.p-opt-name b{font-family:var(--font-story);font-weight:400;font-size:19px;line-height:1.1;color:var(--on-wood-text);text-shadow:var(--on-wood-shadow)}
+.p-opt-name{position:relative;z-index:2;min-width:0;display:flex;flex-direction:column;gap:2px}
+.p-opt-name b{font-family:var(--font-story);font-weight:400;font-size:19px;line-height:1.1;color:var(--on-wood-text);text-shadow:var(--on-wood-shadow);overflow-wrap:anywhere}
 .p-opt-name small{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.05em;color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow)}
 .p-opt-check{position:absolute;z-index:2;right:10px;top:50%;margin-top:-13px;width:26px;height:26px;border-radius:50%;border:2px solid var(--gold);background:rgba(20,13,8,.65);box-shadow:0 1px 4px #000}
 .p-opt.is-on{box-shadow:0 0 0 2px var(--gold-hi),0 3px 10px rgba(0,0,0,.6)}
@@ -242,8 +247,8 @@ body{margin:0;background:var(--ground);color:var(--text)}
 /* phones: the list spans the filter panel's full width, so it sits centred under it */
 @media (max-width:620px){
   .p-dd-pop{width:100%;padding:10px}
-  .p-opt{min-height:64px}
-  .p-opt-name{left:10px}
+  .p-opt{padding:8px 44px 8px 10px}
+  .p-opt-check{right:9px}
   .p-opt-name b{font-size:17px}
   .p-opt .bn.is-cloth span{display:none}
   .p-tok,.p-dd-btn{max-width:100%;min-width:0}
@@ -734,7 +739,7 @@ function campDropdown(camps, countOf) {
         <span class="p-dd-stack">${shown.map(c => `<span class="p-dd-thumb">${banner(c)}</span>`).join('')}</span>
         <span class="p-dd-txt">${summary}</span><span class="p-dd-caret" aria-hidden="true">${fOpen ? '▴' : '▾'}</span></button>
       ${picked.map(c => `<button type="button" class="p-tok" data-fcamp="${c}" aria-label="Stop filtering to ${esc(CAMPS[c].title)}">
-        <span class="p-dd-thumb">${banner(c)}</span>${esc(CAMPS[c].title)}<i aria-hidden="true">×</i></button>`).join('')}
+        <span class="p-dd-thumb">${banner(c)}</span><span class="p-tok-n">${esc(CAMPS[c].title)}</span><i aria-hidden="true">×</i></button>`).join('')}
       ${fOpen ? `<div class="hs-gilded p-dd-pop">
         <div class="p-dd-h"><span>${picked.length ? `${picked.length} of ${camps.length} picked` : 'Pick any campaigns'}</span>
           ${picked.length ? '<button type="button" class="p-link" data-fcampall="1">Show all</button>' : ''}</div>

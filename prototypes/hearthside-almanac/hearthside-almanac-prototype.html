@@ -203,7 +203,8 @@ body{margin:0;background:var(--ground);color:var(--text)}
 .p-fclear{margin-left:auto}
 /* the campaign dropdown: a button stacking the picked banners, a token per pick, and a gilded list of banners */
 .p-filters{position:relative;z-index:5}
-.p-dd{position:relative;flex:1 1 240px;display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0}
+/* .p-dd stays static so the list hangs from the whole filter panel (.p-filters), never past its edges */
+.p-dd{flex:1 1 240px;display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0}
 .p-dd-btn{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 10px 0 5px;border-radius:var(--radius);border:1px solid var(--gold-line);
   background:var(--surface);color:var(--text);cursor:pointer;font-size:14px;max-width:100%}
 .p-dd-btn:hover,.p-dd-btn[aria-expanded="true"]{border-color:var(--gold)}
@@ -218,7 +219,7 @@ body{margin:0;background:var(--ground);color:var(--text)}
 .p-tok .p-dd-thumb{width:34px;height:20px}
 .p-tok i{font-style:normal;color:var(--muted);font-size:15px;line-height:1}
 .p-tok:hover i{color:var(--gold-hi)}
-.p-dd-pop{position:absolute;z-index:30;top:calc(100% + 8px);left:0;width:min(400px,calc(100vw - 32px));padding:10px 12px 12px;display:flex;flex-direction:column;gap:10px}
+.p-dd-pop{position:absolute;z-index:30;top:calc(100% + 10px);left:0;width:min(420px,100%);padding:10px 12px 12px;display:flex;flex-direction:column;gap:10px}
 .p-dd-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:2px 4px 0;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--muted)}
 .p-dd-list{display:flex;flex-direction:column;gap:8px}
 .p-opt{position:relative;display:block;width:100%;aspect-ratio:4/1;min-height:70px;border:0;padding:0;border-radius:3px;overflow:hidden;cursor:pointer;text-align:left;
@@ -238,6 +239,15 @@ body{margin:0;background:var(--ground);color:var(--text)}
 .p-opt:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .p-dd-f{display:flex;justify-content:flex-end}
 .p-dd-f .hs-btn-amber{height:32px}
+/* phones: the list spans the filter panel's full width, so it sits centred under it */
+@media (max-width:620px){
+  .p-dd-pop{width:100%;padding:10px}
+  .p-opt{min-height:64px}
+  .p-opt-name{left:10px}
+  .p-opt-name b{font-size:17px}
+  .p-opt .bn.is-cloth span{display:none}
+  .p-tok,.p-dd-btn{max-width:100%;min-width:0}
+}
 @media (max-width:620px){.p-flab{width:100%}}
 
 /* ---------- B: Chronicle. No grid: a running list by week, each session a pinned sheet beside its date. ---------- */
@@ -349,7 +359,6 @@ body{margin:0;background:var(--ground);color:var(--text)}
   <div class="lbl" id="lbl" aria-live="polite"></div>
   <button type="button" id="next" aria-label="Next layout">→</button>
   <span class="sep" aria-hidden="true"></span>
-  <button type="button" id="campui"></button>
   <button type="button" id="busy"></button>
 </div>
 <div class="proto-toast" id="toast" hidden></div>
@@ -457,7 +466,6 @@ let cSel = null, cQuest = null, cScrolled = false;
 // B's filters: any set of campaigns (empty = all), and online / in person
 let fCamps = new Set(), fWhere = 'all';
 let fOpen = false;   // the campaign dropdown
-let campUI = store.get('hs-alm-campui') === 'chips' ? 'chips' : 'dropdown';
 
 const base = () => quiet
   ? { sessions: SESSIONS.filter(s => s.id === 'ac-14'), quests: [] }
@@ -706,12 +714,8 @@ function filters() {
   const camps = Object.keys(CAMPS).filter(c => base().sessions.some(s => s.camp === c));
   const chip = (attr, val, on, label, n, av = '') => `<button type="button" class="p-chip" data-${attr}="${val}" aria-pressed="${on}">${av}${label}<span>${n}</span></button>`;
   const on = fCamps.size || fWhere !== 'all';
-  const campRow = campUI === 'chips'
-    ? chip('fcampall', '1', !fCamps.size, 'All', count(new Set(), fWhere))
-      + camps.map(c => chip('fcamp', c, fCamps.has(c), esc(CAMPS[c].title), count(new Set([c]), fWhere), `<i class="va-av">${CAMPS[c].init}</i>`)).join('')
-    : campDropdown(camps, c => count(new Set([c]), fWhere));
   return `<div class="hs-gilded p-filters" role="group" aria-label="Filter sessions">
-      <div class="p-frow"><span class="p-flab">Campaigns</span>${campRow}</div>
+      <div class="p-frow"><span class="p-flab">Campaigns</span>${campDropdown(camps, c => count(new Set([c]), fWhere))}</div>
       <div class="p-frow"><span class="p-flab">Where</span>
         ${[['all', 'Anywhere'], ['person', 'In person'], ['online', 'Online']].map(([v, l]) => chip('fwhere', v, v === fWhere, l, count(fCamps, v))).join('')}
         ${on ? '<button type="button" class="p-link p-fclear" data-fclear="1">Clear filters</button>' : ''}</div>
@@ -821,8 +825,6 @@ function render() {
   renderRail();
   const v = VARIANTS[variant];
   document.getElementById('lbl').innerHTML = `${v.key} — ${v.name}<small>${v.note}</small>`;
-  document.getElementById('campui').textContent = campUI === 'chips' ? 'Campaign filter: chips' : 'Campaign filter: banner dropdown';
-  document.getElementById('campui').hidden = variant !== 1;
   document.getElementById('busy').textContent = quiet ? 'Data: a quiet month' : 'Data: a busy month';
   store.set('hs-alm-variant', v.key);
   try { const u = new URL(location.href); u.searchParams.set('variant', v.key); history.replaceState(null, '', u); } catch {}
@@ -830,7 +832,6 @@ function render() {
 function go(d) { variant = (variant + d + VARIANTS.length) % VARIANTS.length; render(); }
 document.getElementById('prev').onclick = () => go(-1);
 document.getElementById('next').onclick = () => go(1);
-document.getElementById('campui').onclick = () => { campUI = campUI === 'chips' ? 'dropdown' : 'chips'; store.set('hs-alm-campui', campUI); fOpen = false; render(); };
 document.getElementById('busy').onclick = () => { quiet = !quiet; store.set('hs-alm-busy', quiet ? 'quiet' : 'busy'); aSel = null; cSel = null; cQuest = null; render(); };
 addEventListener('keydown', e => {
   if (e.key === 'Escape' && fOpen) { fOpen = false; render(); document.querySelector('.p-dd-btn')?.focus(); return; }

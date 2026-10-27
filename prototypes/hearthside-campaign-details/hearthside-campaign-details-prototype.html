@@ -1,0 +1,1537 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Hearthside Campaign Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alegreya+Sans+SC:wght@500;700&family=Alegreya+Sans:wght@400;500;700&family=IM+Fell+English+SC&family=IM+Fell+English:ital@0;1&display=swap">
+<link rel="stylesheet" href="bundle.css">
+<style>
+/* PROTOTYPE — throwaway. The PWA's campaign page (frontend/src/app/game-night/campaigns/[id]/page.tsx) in the
+   Hearthside design system: the same sections in the same order, every control it has, restyled. Nothing is
+   saved: data is made up and lives in memory. The bar at the bottom (or ← →) switches what the Notice Board is
+   doing; it also switches who is looking, whether anyone holds the torch, and the banner. */
+:root{
+  color-scheme:dark;
+  /* Hearthside tokens (from the design system's tokens.json; one theme, Tavern) */
+  --ground:#1a130e;--ground-2:#241a13;--surface:#2c2119;--line:#4a3726;--text:#f1e6d0;--muted:#b8a487;
+  --on-wood-text:#fbf1dc;--on-wood-muted:#d4c2a2;--accent:#e5a13a;--accent-ink:#1a130e;--seal:#b4462c;--moss:#7c9a55;
+  --verdigris:#5aa396;--paper:#eadbb9;--paper-hi:#f0e3c4;--paper-lo:#e2cea5;--paper-ink:#2b1d12;--paper-muted:#6b5337;
+  --paper-line:#c9b28a;--leather-hi:#37281c;--leather:#221810;--gold-hi:#f6dd96;--gold:#d6a84e;--gold-lo:#8a5c1c;
+  --gold-line:rgba(226,184,98,0.38);--gold-rule:rgba(226,184,98,0.14);
+  --heat-0:rgba(43,29,18,0.06);--heat-1:#d8c092;--heat-2:#c49a5c;--heat-3:#9c6c32;--heat-4:#5a3a1a;--firelight:#ffb36b;
+  --font-display:"IM Fell English SC","IM Fell English",Georgia,serif;
+  --font-story:"IM Fell English",Georgia,serif;
+  --font-body:"Alegreya Sans",system-ui,sans-serif;
+  --font-label:"Alegreya Sans SC","Alegreya Sans",system-ui,sans-serif;
+  --space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;--space-5:20px;--space-6:24px;--sheet-foot:44px;
+  --radius-sheet:3px;--radius:4px;--radius-panel:5px;--radius-full:999px;
+  --shadow-panel:0 14px 30px rgba(0,0,0,0.55),0 2px 4px rgba(0,0,0,0.5);
+  --shadow-panel-inset:inset 0 0 0 1px rgba(0,0,0,0.55),inset 0 0 26px rgba(0,0,0,0.5);
+  --shadow-paper:0 16px 34px rgba(0,0,0,0.6),0 2px 4px rgba(0,0,0,0.45);
+  --shadow-pin:0 2px 3px rgba(0,0,0,0.5);
+  --on-wood-shadow:0 1px 2px rgba(0,0,0,0.9),0 0 14px rgba(0,0,0,0.6);
+  /* the prototype bar only: deliberately not Hearthside */
+  --proto-bg:#fafafa;--proto-fg:#111;--proto-dim:#555;
+}
+body{margin:0;background:var(--ground);color:var(--text)}
+.hs-shell-wrap{padding-block:16px 110px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.hs-nav a{cursor:pointer}
+/* Phones: the menu folds behind a hamburger on the left, and the way back to Campaigns sits on the right of the same row.
+   (The design system's AppShell shows the nav as a 2 × 2 grid here; this replaces that.) */
+.cd-burger,.hs-bar .cd-back-m{display:none}
+.cd-burger{width:40px;height:40px;flex:none;place-items:center;padding:0;cursor:pointer;color:var(--gold-hi);border-radius:var(--radius);
+  border:1px solid var(--gold-line);background:radial-gradient(130% 90% at 50% 0%,var(--leather-hi),var(--leather));box-shadow:var(--shadow-panel)}
+.cd-burger svg{width:22px;height:22px}
+.cd-burger[aria-expanded="true"]{border-color:var(--gold)}
+@media (max-width:759px){
+  .hs-bar{position:relative;flex-wrap:nowrap;justify-content:flex-start;gap:12px;align-self:stretch}
+  .cd-burger{display:grid}
+  .hs-brand{font-size:24px}
+  .hs-bar .cd-back-m{display:inline-flex;margin-left:auto;flex:none}
+  /* The shell's column aligns items to the start, so anything whose content doesn't push it wide (the banner, Table Talk) shrank. */
+  .hs-page > *,.hs-quests-sec,.hs-letters-col{align-self:stretch}
+  .cd-head > .cd-back{display:none}
+  .hs-bar .hs-nav{display:none;position:absolute;z-index:30;top:calc(100% + 8px);left:0;width:min(260px,100%);flex-direction:column}
+  .hs-bar.is-open .hs-nav{display:flex}
+}
+.hs-app select,.hs-app textarea{font:inherit;color:inherit}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* ---------- On the floor: the heading, back link, section rows ---------- */
+.cd-back{align-self:flex-start;display:inline-flex;align-items:center;gap:6px;text-decoration:none;color:var(--accent-ink)}
+/* The torch: orange, with a flame, wherever the Game Master's role changes hands (as on the PWA). Not a token yet. */
+:root{--torch:#f07b2c;--torch-ink:#9a4a12}
+.cd-flame-i{width:14px;height:14px;flex:none}
+.cd-flame{color:var(--torch);display:inline-flex;align-items:center;gap:4px}
+.cd-btn-torch{background:var(--torch);color:var(--accent-ink);border:0;border-radius:var(--radius);height:30px;padding:0 12px;cursor:pointer;
+  font-family:var(--font-label);font-size:14px;font-weight:500;letter-spacing:.04em;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.cd-btn-torch:disabled{opacity:.55;cursor:default}
+.hs-btn.is-torch{border-color:var(--torch-ink);color:var(--torch-ink);display:inline-flex;align-items:center;gap:5px}
+.cd-head{display:flex;flex-direction:column;gap:14px}
+.cd-title-row{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+.cd-title-row > div{min-width:0}
+.cd-kicker{font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow)}
+.cd-head p{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
+.cd-amber{height:34px;font-size:15px;white-space:nowrap}
+.cd-amber:disabled{opacity:.55;cursor:default}
+.cd-sec-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:10px}
+.cd-sec-row .hs-sec{margin:0;flex:1;min-width:0}
+.cd-sec-row .hs-btn-amber{height:30px;font-size:14px;flex:none}
+.cd-empty{padding:18px 4px}
+
+/* Status: the Campaigns page's pills (amber with a lit dot, moss seal, muted outline) */
+.p-status{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.06em;
+  padding:3px 10px;border-radius:var(--radius-full);white-space:nowrap;border:1px solid var(--line);color:var(--muted);background:rgba(26,19,14,.6);text-shadow:none}
+.p-status.is-live{border-color:rgba(229,161,58,.55);color:var(--accent)}
+.p-status.is-live::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--firelight);box-shadow:0 0 6px var(--firelight)}
+.p-status.is-done{background:var(--moss);border-color:var(--moss);color:var(--accent-ink)}
+
+/* The banner: 4:1, in a gilded frame. An image, or the dyed-cloth fallback with the campaign's initials. */
+.cd-banner-frame{padding:6px}
+.p-banner{position:relative;aspect-ratio:4/1;width:100%;overflow:hidden;border-radius:2px;background:var(--leather);container-type:inline-size}
+.p-banner img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+.p-cloth{position:absolute;inset:0;display:grid;place-items:center;
+  background:repeating-linear-gradient(45deg,rgba(0,0,0,.12) 0 1px,transparent 1px 5px),repeating-linear-gradient(-45deg,rgba(255,255,255,.035) 0 1px,transparent 1px 5px),
+    radial-gradient(120% 140% at 15% 100%,rgba(255,179,107,.18),transparent 55%),linear-gradient(160deg,#5a2416,#2a0f0a)}
+.p-cloth::after{content:"";position:absolute;inset:8px;border:1px dashed rgba(246,221,150,.45);border-radius:2px}
+.p-cloth span{font-family:var(--font-display);font-size:clamp(22px,6cqw,54px);letter-spacing:.12em;color:var(--gold-hi);opacity:.85;text-shadow:0 1px 0 rgba(0,0,0,.6)}
+.p-tools{position:absolute;right:10px;bottom:10px;display:flex;gap:6px;z-index:3}
+.p-tool{background:rgba(26,19,14,.78);color:var(--text);border:1px solid var(--gold-line);border-radius:var(--radius);padding:4px 10px;
+  font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.04em;cursor:pointer}
+.p-tool:hover{border-color:var(--gold);color:var(--gold-hi)}
+
+/* ---------- On leather ---------- */
+.cd-pad{padding:14px 16px}
+.cd-desc{margin:0 0 14px;font-family:var(--font-story);font-size:18px;line-height:1.45;color:var(--text);max-width:62ch}
+.cd-facts{margin:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px 20px}
+.cd-facts + .cd-facts{margin-top:14px;padding-top:14px;border-top:1px solid var(--gold-rule)}
+.cd-facts dt{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.06em;color:var(--muted)}
+.cd-facts dd{margin:2px 0 0;font-size:15px;color:var(--text);overflow-wrap:anywhere}
+.cd-facts dd a{color:var(--accent)}
+.cd-facts .is-wide{grid-column:1/-1}
+.cd-facts dd .cd-link{display:flex}
+.cd-link{background:none;border:0;padding:0;margin-top:4px;cursor:pointer;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.04em;color:var(--accent);display:inline-flex;gap:5px;align-items:center}
+.cd-link:hover{text-decoration:underline}
+.cd-link:disabled{opacity:.5;cursor:default;text-decoration:none}
+.cd-link.is-quiet{color:var(--muted)}
+.cd-link.is-quiet:hover{color:var(--text)}
+.cd-ghost{background:transparent;border:1px solid var(--line);color:var(--text);border-radius:var(--radius);padding:0 12px;height:30px;cursor:pointer;
+  font-family:var(--font-label);font-size:14px;font-weight:500;letter-spacing:.04em;white-space:nowrap}
+.cd-ghost:hover{border-color:var(--gold-line);color:var(--gold-hi)}
+.cd-ghost:disabled{opacity:.5;cursor:default}
+.cd-ghost.is-warn{color:#e8a08b}
+.cd-ghost.is-warn:hover{border-color:var(--seal);color:#f3b7a5}
+.cd-icon{width:30px;padding:0;display:grid;place-items:center;font-size:16px}
+.cd-alert{margin:8px 0 0;font-size:13px;color:#f0a58f}
+.cd-fine{margin:6px 0 0;font-size:13px;color:var(--muted);line-height:1.45}
+.cd-rule{margin:14px 0;border:0;border-top:1px solid var(--gold-rule)}
+
+/* Fields on leather. Forms aren't in the design system yet: these follow the composer (surface, line, radius). */
+.cd-form{display:flex;flex-direction:column;gap:12px}
+.cd-form h3{margin:0;font-family:var(--font-display);font-weight:400;font-size:20px;color:var(--text)}
+.cd-form-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.cd-group{font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--accent);margin:4px 0 -2px}
+.cd-field{display:flex;flex-direction:column;gap:4px;min-width:0}
+.cd-field > span{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.06em;color:var(--muted)}
+.cd-input{width:100%;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:8px 10px;color:var(--text)}
+.cd-input:focus{outline:none;border-color:var(--accent)}
+textarea.cd-input{resize:vertical;min-height:70px;line-height:1.45}
+.cd-grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+.cd-actions{display:flex;gap:8px;flex-wrap:wrap}
+.cd-actions .hs-btn-amber{height:34px}
+.cd-actions .cd-ghost{height:34px}
+.cd-switch{display:flex;align-items:center;gap:10px;background:none;border:0;padding:0;cursor:pointer;color:var(--text);text-align:left;font-size:14px}
+.cd-switch i{position:relative;width:38px;height:20px;border-radius:var(--radius-full);background:var(--surface);border:1px solid var(--line);flex:none;transition:background .15s}
+.cd-switch i::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--muted);transition:left .15s}
+.cd-switch[aria-checked="true"] i{background:var(--accent);border-color:var(--accent)}
+.cd-switch[aria-checked="true"] i::after{left:20px;background:var(--accent-ink)}
+
+/* The party and Table Talk sit side by side when the page is wide enough, as on the PWA. */
+.cd-split{container-type:inline-size}
+.cd-split-in{display:grid;gap:var(--space-5)}
+@container (min-width:620px){.cd-split-in{grid-template-columns:240px minmax(0,1fr);align-items:start}}
+.cd-roster{list-style:none;margin:0;padding:0}
+.cd-roster > li{padding:7px 12px;border-top:1px solid var(--gold-rule)}
+.cd-roster > li:first-child{border-top:0}
+.cd-member{display:grid;grid-template-columns:30px minmax(0,1fr);gap:10px;align-items:start}
+.cd-member .hs-avatar{width:30px;height:30px;font-size:14px;margin-top:1px}
+.cd-member a{display:block;color:var(--text);text-decoration:none;min-width:0}
+.cd-mini{background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:var(--radius);height:22px;padding:0 8px;cursor:pointer;
+  font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.04em}
+.cd-mini:hover{border-color:var(--gold-line);color:var(--text)}
+.cd-mini,.cd-with-i{display:inline-flex;align-items:center;gap:5px}
+.cd-mini{width:28px;height:24px;padding:0;justify-content:center}
+.cd-i{width:14px;height:14px;flex:none}
+.cd-with-i .cd-i{width:15px;height:15px}
+.cd-mini.is-warn:hover{border-color:var(--seal);color:#f3b7a5}
+.cd-tip{display:inline-grid;place-items:center;width:16px;height:16px;margin-left:4px;border-radius:50%;border:1px solid var(--muted);color:var(--muted);font-size:11px;cursor:help;vertical-align:1px}
+.cd-link.cd-flame{color:var(--torch)}
+.cd-member a:hover .cd-name{color:var(--gold-hi)}
+.cd-name{font-weight:500;font-size:15px;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cd-role{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.04em;color:var(--accent)}
+.cd-role.is-plain{color:var(--muted)}
+.hs-avatar.is-gm{box-shadow:0 0 0 2px var(--leather),0 0 0 3px var(--gold)}
+.hs-avatar.is-off{background:var(--surface);color:var(--muted)}
+.cd-member-tools{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px}
+.cd-roster > li.cd-inactive-head{padding:8px 12px 2px;font-family:var(--font-label);font-size:12.5px;letter-spacing:.06em;color:var(--muted)}
+.cd-roster > li.cd-inactive-head + li{border-top:0}
+.cd-roster .is-inactive .cd-name{color:var(--muted)}
+.cd-roster-foot{padding:10px 12px 12px;border-top:1px solid var(--gold-rule)}
+
+.cd-talk-head{display:grid;grid-template-columns:38px minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--gold-rule)}
+.cd-live{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.06em;color:var(--moss);display:inline-flex;align-items:center;gap:6px}
+.cd-live::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.cd-live.is-off{color:var(--muted)}
+.hs-convo{min-height:220px}
+.hs-msg p{margin:0}.hs-msg ul,.hs-msg ol{margin:4px 0;padding-left:20px}
+.hs-msg code{font-family:ui-monospace,Consolas,monospace;font-size:13px;background:rgba(0,0,0,.25);padding:0 4px;border-radius:3px}
+.hs-msg.is-me code{background:rgba(0,0,0,.12)}
+.hs-msg pre{margin:4px 0;padding:6px 8px;background:rgba(0,0,0,.25);border-radius:3px;white-space:pre-wrap}
+.hs-msg-time{font-size:11px;opacity:.7;margin-left:6px}
+.cd-here{display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:1px solid var(--gold-rule);background:var(--surface)}
+.cd-here > span{font-family:var(--font-label);font-size:12.5px;letter-spacing:.06em;color:var(--muted)}
+.cd-here ul{display:flex;gap:4px;list-style:none;margin:0;padding:0}
+.cd-here .hs-avatar{width:24px;height:24px;font-size:12px}
+.cd-toolbar{display:flex;gap:4px;align-items:center;padding:6px 14px 0;background:var(--surface);border-top:1px solid var(--gold-rule)}
+.cd-toolbar button{background:transparent;border:1px solid transparent;color:var(--muted);border-radius:var(--radius);height:26px;min-width:28px;padding:0 6px;cursor:pointer;font-size:13px}
+.cd-toolbar button:hover{color:var(--text);border-color:var(--line)}
+.cd-toolbar small{margin-left:auto;font-size:12px;color:var(--muted)}
+.hs-compose{border-top:0}
+.cd-editor{flex:1;min-width:0;min-height:36px;max-height:140px;overflow-y:auto;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:7px 10px;color:var(--text);line-height:1.4;font-size:14px}
+.cd-editor:focus{outline:none;border-color:var(--accent)}
+.cd-editor:empty::before{content:attr(data-placeholder);color:var(--muted)}
+.cd-editor p{margin:0}.cd-editor ul,.cd-editor ol{margin:2px 0;padding-left:20px}
+.cd-editor code{font-family:ui-monospace,Consolas,monospace;font-size:13px;background:rgba(0,0,0,.25);padding:0 3px;border-radius:3px}
+.hs-compose .hs-btn-amber{height:36px}
+.cd-failed{display:block;margin-top:4px;font-size:12px}
+.cd-failed button{background:none;border:0;padding:0;margin-left:8px;color:inherit;text-decoration:underline;cursor:pointer;font-size:12px}
+
+/* Records: the tabs in a gilded strip, the lists in panels below */
+.cd-tabstrip{padding:2px 8px}
+.cd-tabstrip .hs-tabs{border-bottom:0}
+.cd-tabstrip .hs-tabs button span{font-family:var(--font-body);font-size:12px;color:var(--muted);margin-left:5px}
+/* Coming up beside Previous sessions on desktop (the shell's three-column width); stacked on tablets and phones. */
+.cd-records-in{display:grid;gap:var(--space-5)}
+@media (min-width:1100px){.cd-records-in{grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:start}}
+.cd-rows{list-style:none;margin:0;padding:0}
+.cd-rows > li{border-top:1px solid var(--gold-rule)}
+.cd-rows > li:first-child{border-top:0}
+.cd-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:11px 14px;color:var(--text);text-decoration:none}
+a.cd-row:hover .cd-row-title{color:var(--gold-hi)}
+a.cd-row:hover .cd-chev{color:var(--accent)}
+.cd-row-title{font-weight:500;font-size:15px;line-height:1.3}
+.cd-row-title.is-struck{text-decoration:line-through;text-decoration-color:var(--muted);color:var(--muted)}
+.cd-meta{display:flex;flex-wrap:wrap;gap:2px 10px;align-items:center;margin-top:2px;font-size:13px;color:var(--muted)}
+.cd-when{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.04em;color:var(--accent);font-variant-numeric:tabular-nums}
+.cd-when.is-planning{color:var(--seal)}
+.cd-when.is-cancelled{color:var(--muted);text-decoration:line-through}
+.cd-meta .hs-tag{margin-left:0}
+.cd-sum{margin:3px 0 0;font-size:13px;color:var(--muted);display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+.cd-chev{color:var(--muted);font-size:18px}
+.cd-row-tools{padding:0 14px 12px;margin-top:-4px}
+.cd-row-sheet{padding:4px 10px 18px}
+.cd-row-sheet .hs-sheet{padding-top:20px}
+.cd-warn{padding:10px 14px;display:flex;gap:10px;align-items:flex-start;justify-content:space-between}
+.cd-warn p{margin:0;font-size:14px;color:var(--accent)}
+.cd-chars{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr))}
+.cd-chars a{display:grid;grid-template-columns:38px minmax(0,1fr);gap:10px;align-items:center;padding:11px 14px;border-top:1px solid var(--gold-rule);color:var(--text);text-decoration:none}
+.cd-chars a:hover .cd-row-title{color:var(--gold-hi)}
+.cd-chars.is-former{opacity:.62}
+.hs-avatar.is-char{border-radius:var(--radius);background:var(--surface);color:var(--gold-hi);border:1px solid var(--gold-line)}
+.hs-avatar.is-fallen{color:var(--muted);border-style:dashed}
+
+/* ---------- On parchment ---------- */
+.cd-agenda{margin:10px 0 0;font-size:14px;color:var(--paper-ink);max-width:62ch}
+.cd-torch{margin-top:10px;font-size:14px;color:var(--paper-ink);display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center}
+.cd-torch b{font-weight:500;color:var(--torch-ink)}
+.cd-torch > span{display:inline-flex;align-items:center;gap:5px}
+.cd-torch .cd-flame-i{color:var(--torch-ink)}
+.hs-sheet .hs-steps{margin-top:14px}
+.hs-step h4 .cd-round{font-family:var(--font-body);font-size:12px;letter-spacing:0;color:var(--paper-muted);font-weight:400}
+.hs-step p + p{margin-top:6px}
+.cd-paper-note{margin:0 0 10px;padding:8px 10px;border:1px dashed var(--paper-line);border-radius:var(--radius-sheet);font-size:14px;color:var(--paper-ink);background:rgba(255,255,255,.18)}
+.cd-sealq{display:inline-flex;align-items:center;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.06em;padding:3px 10px;border-radius:var(--radius-full);
+  border:1.5px solid var(--paper-ink);color:var(--paper-ink);white-space:nowrap}
+.cd-ptag{display:inline-block;font-family:var(--font-label);font-size:11px;font-weight:500;letter-spacing:.08em;padding:0 7px;border-radius:var(--radius-full);border:1px solid var(--paper-muted);color:var(--paper-muted);white-space:nowrap}
+.cd-ptag.is-ink{border-color:var(--paper-ink);background:var(--paper-ink);color:var(--paper)}
+.hs-vote > label{display:flex;gap:8px;align-items:flex-start;min-width:0}
+.hs-vote > label > span{min-width:0}
+.hs-vote input,.cd-sheet-form input[type=radio],.cd-sheet-form input[type=checkbox]{accent-color:var(--paper-ink);margin:3px 0 0;flex:none;width:15px;height:15px}
+.cd-vline{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
+.cd-addr{display:block;font-size:12.5px;color:var(--paper-muted)}
+.cd-sheet-form{margin-top:12px;padding:12px;border:1px dashed var(--paper-line);border-radius:var(--radius-sheet);display:flex;flex-direction:column;gap:8px}
+.cd-sheet-form p{margin:0;font-size:14px;color:var(--paper-ink)}
+.cd-sheet-form .hs-btn-row{margin-top:2px}
+.cd-pinput{width:100%;background:rgba(255,253,245,.45);border:1px solid var(--paper-line);border-radius:var(--radius);padding:6px 9px;color:var(--paper-ink);font-size:14px}
+.cd-pinput:focus{outline:none;border-color:var(--paper-ink)}
+.cd-pinput::placeholder{color:#8a7350}
+.cd-pfield{display:flex;flex-direction:column;gap:3px;min-width:0}
+.cd-pfield > span{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.06em;color:var(--paper-muted)}
+.cd-prow{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;font-size:14px;color:var(--paper-ink)}
+.cd-prow label{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
+.cd-checklist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.cd-checklist label{display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-size:14px}
+.hs-ledger .cd-claim{display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+.hs-ledger .hs-btn{padding:1px 9px;font-size:13px}
+.cd-alert-paper{margin:10px 0 0;font-size:14px;color:var(--seal);font-style:italic}
+.cd-sheet-foot{margin-top:14px;padding-top:10px;border-top:1px solid var(--paper-line);display:flex;justify-content:flex-end}
+.cd-plink{background:none;border:0;padding:0;cursor:pointer;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.04em;color:var(--seal)}
+.cd-plink:hover{text-decoration:underline}
+.cd-plink.is-ink{color:var(--paper-ink)}
+details.cd-rounds{margin-top:12px;border-top:1px dotted var(--paper-line);padding-top:8px;font-size:13px;color:var(--paper-muted)}
+details.cd-rounds summary{cursor:pointer;font-family:var(--font-label);letter-spacing:.06em;color:var(--paper-ink)}
+details.cd-rounds ol{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}
+details.cd-rounds ul{list-style:none;margin:2px 0 0;padding:0}
+details.cd-rounds .is-won{color:var(--paper-ink);font-weight:500}
+
+/* The overlap picker (the Dungeon Master choosing nights): the AvailabilityGrid's heat, but every cell can be picked */
+.cd-picker{display:flex;flex-direction:column;gap:12px;margin-top:6px}
+.cd-picker h5{margin:0 0 6px;font-family:var(--font-label);font-size:14px;font-weight:500;letter-spacing:.06em;color:var(--paper-ink)}
+.cd-best{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:5px}
+.cd-best button{width:100%;text-align:left;display:flex;flex-wrap:wrap;gap:2px 10px;align-items:center;padding:6px 9px;border:1px solid var(--paper-line);border-radius:var(--radius);
+  background:rgba(255,253,245,.3);color:var(--paper-ink);cursor:pointer;font-size:14px}
+.cd-best button:hover{border-color:var(--paper-ink)}
+.cd-best button[aria-pressed="true"]{background:var(--paper-ink);color:var(--paper);border-color:var(--paper-ink)}
+.cd-best button[aria-pressed="true"] .cd-ptag{border-color:var(--paper);color:var(--paper)}
+.cd-best small{flex-basis:100%;font-size:12px;opacity:.8}
+.cd-heatwrap{overflow-x:auto}
+.cd-heat{border-collapse:separate;border-spacing:3px;font-size:12px;font-variant-numeric:tabular-nums}
+.cd-heat th{font-family:var(--font-label);font-weight:500;color:var(--paper-muted);letter-spacing:.04em;white-space:nowrap;padding:0 4px}
+.cd-heat th[scope=row]{text-align:right;color:var(--paper-ink)}
+.cd-heat th[scope=col]{text-align:center;line-height:1.15;padding:0 0 2px;color:var(--paper-ink)}
+.cd-dow{display:block;font-size:11px;color:var(--paper-muted)}
+.cd-heat td{padding:0}
+.cd-heat button{width:32px;height:26px;border:0;border-radius:var(--radius-sheet);background:var(--heat);color:var(--paper-ink);cursor:pointer;font:inherit;font-size:12px}
+.cd-heat button[data-v="0"]{outline:1px solid var(--paper-line);color:transparent;cursor:default}
+.cd-heat button[data-v="3"],.cd-heat button[data-v="4"],.cd-heat button[data-v="5"]{color:var(--paper)}
+.cd-heat button.is-q{box-shadow:inset 0 0 0 1.5px var(--paper-ink)}
+.cd-heat button.is-q[data-v="4"],.cd-heat button.is-q[data-v="5"]{box-shadow:inset 0 0 0 1.5px var(--paper)}
+.cd-heat button[aria-pressed="true"]{outline:2px solid var(--seal);outline-offset:1px;font-weight:700}
+.cd-heat [data-v="0"]{--heat:var(--heat-0)}.cd-heat [data-v="1"]{--heat:var(--heat-1)}.cd-heat [data-v="2"]{--heat:var(--heat-2)}
+.cd-heat [data-v="3"]{--heat:var(--heat-3)}.cd-heat [data-v="4"],.cd-heat [data-v="5"]{--heat:var(--heat-4)}
+.cd-chips{list-style:none;margin:0 0 8px;padding:0;display:flex;flex-wrap:wrap;gap:6px}
+.cd-chips li{display:inline-flex;align-items:center;gap:4px;padding:2px 4px 2px 10px;border-radius:var(--radius-full);background:var(--paper-ink);color:var(--paper);font-size:13px}
+.cd-chips button{background:none;border:0;color:inherit;cursor:pointer;width:20px;height:20px;border-radius:50%;padding:0}
+.cd-chips button:hover{background:rgba(255,255,255,.15)}
+
+/* Dialogs: a gilded panel over a dimmed room */
+.cd-modal{position:fixed;inset:0;z-index:40;display:grid;place-items:center;padding:16px;background:rgba(10,6,3,.72);backdrop-filter:blur(2px)}
+/* The frame's corner flourishes reach past the panel, so only the content inside scrolls, and only when it must. */
+.cd-dialog{width:min(100%,480px)}
+.cd-dialog.is-wide{width:min(100%,720px)}
+.cd-dialog > .cd-pad{padding:18px 20px;max-height:calc(100vh - 48px);overflow:hidden auto;overscroll-behavior:contain}
+.cd-x{background:transparent;border:1px solid var(--line);border-radius:var(--radius);width:30px;height:30px;color:var(--muted);cursor:pointer;font-size:16px;flex:none}
+.cd-x:hover{color:var(--text)}
+.cd-copy{display:flex;gap:8px}
+.cd-copy .cd-input{flex:1;min-width:0}
+.cd-copy .hs-btn-amber{flex:none;height:38px;padding:0 16px;white-space:nowrap}
+.cd-friends{list-style:none;margin:0;padding:0;max-height:200px;overflow-y:auto}
+.cd-friends li{display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--gold-rule)}
+.cd-friends li:first-child{border-top:0}
+.cd-friends .hs-btn-amber{height:28px;font-size:13px}
+.cd-crop{position:relative;aspect-ratio:4/1;width:100%;overflow:hidden;background:var(--ground-2);border-radius:2px;outline:1px dashed var(--gold-line);outline-offset:2px;touch-action:none}
+.cd-crop img{position:absolute;left:0;top:0;max-width:none;user-select:none;-webkit-user-drag:none;cursor:grab}
+.cd-crop.is-empty{display:grid;place-items:center;cursor:pointer}
+.cd-crop.is-empty span{font-family:var(--font-label);letter-spacing:.06em;color:var(--muted)}
+.cd-zoom{display:flex;gap:10px;align-items:center;font-family:var(--font-label);font-size:13px;color:var(--muted)}
+.cd-zoom input{flex:1;accent-color:var(--accent)}
+
+/* ---------- the prototype's own bar (not part of the design) ---------- */
+.proto-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:60;
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:center;max-width:calc(100vw - 24px);
+  background:var(--proto-bg);color:var(--proto-fg);border-radius:14px;padding:6px 8px;box-shadow:0 8px 30px rgba(0,0,0,.6);
+  font:13px/1.3 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+.proto-bar button{font:inherit;color:inherit;background:#e9e9e9;border:0;border-radius:8px;padding:6px 10px;cursor:pointer}
+.proto-bar button:hover{background:#dcdcdc}
+.proto-bar .lbl{min-width:160px;text-align:center;font-weight:600;padding:0 4px}
+.proto-bar .lbl small{display:block;font-weight:400;color:var(--proto-dim);font-size:11px}
+.proto-bar .sep{width:1px;height:26px;background:#ccc;margin:0 2px}
+.proto-bar :focus-visible{outline:2px solid #2563eb;outline-offset:2px}
+@media (max-width:600px){
+  .proto-bar{gap:4px;padding:5px;bottom:calc(8px + env(safe-area-inset-bottom,0px));font-size:12px;left:8px;right:8px;transform:none;max-width:none}
+  .proto-bar .lbl{min-width:0;flex:1}.proto-bar .lbl small,.proto-bar .sep{display:none}
+  .proto-bar button{padding:5px 8px}
+}
+.proto-toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:61;background:var(--proto-bg);color:var(--proto-fg);
+  font:13px/1.3 ui-sans-serif,system-ui,sans-serif;padding:8px 12px;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.5);max-width:calc(100vw - 32px)}
+</style>
+</head>
+<body>
+<canvas class="hs-floor" id="floor" aria-hidden="true"></canvas>
+<div class="hs-glow" aria-hidden="true"></div>
+<div class="hs-shell-wrap">
+  <div class="hs-shell">
+    <aside class="hs-rail">
+      <div class="hs-bar">
+        <button type="button" class="cd-burger" id="burger" aria-label="Menu" aria-expanded="false" aria-controls="main-nav">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+        <div class="hs-brand">Hearthside<small>The Party Gathers</small></div>
+        <a class="hs-btn-amber cd-amber cd-back cd-back-m" href="#" data-act="stub" data-msg="the Campaigns list">← Campaigns</a>
+        <nav class="hs-nav hs-gilded" id="main-nav" aria-label="Main">
+          <a data-act="stub" data-msg="The Hearth">The Hearth</a>
+          <a aria-current="page" data-act="stub" data-msg="the Campaigns list">Campaigns</a>
+          <a data-act="stub" data-msg="the Almanac">Almanac</a>
+          <a data-act="stub" data-msg="Adventurers">Adventurers</a>
+        </nav>
+      </div>
+      <section class="hs-quests-sec"><h2 class="hs-sec"><span>Your Quests</span><span class="hs-aside" id="qc">2 open</span></h2><div class="hs-gilded"><ul class="hs-quests" id="quests">
+        <li><button class="hs-box" role="checkbox" aria-checked="false" aria-label="Prep the table: mark done"></button>
+          <div><div class="hs-quest-name">Prep the table<span class="hs-tag">Host</span></div><div class="hs-quest-time">Sat 5:30 pm</div><div class="hs-quest-desc">Clear the dining room, set out the battle map and minis.</div></div></li>
+        <li class="is-done"><button class="hs-box" role="checkbox" aria-checked="true" aria-label="Print the chapel handout: mark done"></button>
+          <div><div class="hs-quest-name">Print the chapel handout<span class="hs-tag">DM</span></div><div class="hs-quest-time">Fri</div><div class="hs-quest-desc">Map of the flooded nave, player version.</div></div></li>
+        <li><button class="hs-box" role="checkbox" aria-checked="false" aria-label="Bring dice for Theo: mark done"></button>
+          <div><div class="hs-quest-name">Bring dice for Theo<span class="hs-tag">Favor</span></div><div class="hs-quest-time">Sat 6:30 pm</div><div class="hs-quest-desc">He left his set at the last session.</div></div></li>
+      </ul></div></section>
+    </aside>
+
+    <main class="hs-page" id="page"></main>
+
+    <aside class="hs-letters-col"><h2 class="hs-sec"><span>Letters</span><span class="hs-aside">4 unread</span></h2><div class="hs-gilded"><div class="hs-tabs" role="tablist">
+      <button role="tab" aria-selected="true">All</button><button role="tab" aria-selected="false">Campaigns</button><button role="tab" aria-selected="false">Friends</button>
+    </div>
+    <ul class="hs-threads">
+      <li tabindex="0" role="button"><span class="hs-avatar is-campaign">AC</span><div style="min-width:0"><div class="hs-thread-name">Curse of the Ashen Crown</div><div class="hs-thread-sub">Campaign · 5 in the party</div></div><div class="hs-thread-when">now<span class="hs-dot" aria-label="3 unread"></span></div></li>
+      <li tabindex="0" role="button"><span class="hs-avatar">P</span><div style="min-width:0"><div class="hs-thread-name">Priya</div><div class="hs-thread-sub">Friend</div></div><div class="hs-thread-when">7:02 pm<span class="hs-dot" aria-label="1 unread"></span></div></li>
+      <li tabindex="0" role="button"><span class="hs-avatar is-campaign">SS</span><div style="min-width:0"><div class="hs-thread-name">Starfall Salvage</div><div class="hs-thread-sub">Campaign · 4 in the party</div></div><div class="hs-thread-when">Tue</div></li>
+    </ul></div></aside>
+  </div>
+</div>
+
+<div id="modal"></div>
+<input type="file" id="banner-file" accept="image/jpeg,image/png,image/webp" hidden>
+
+<div class="proto-bar" role="toolbar" aria-label="Prototype controls">
+  <button type="button" id="prev" aria-label="Previous board state">←</button>
+  <div class="lbl" id="lbl" aria-live="polite"></div>
+  <button type="button" id="next" aria-label="Next board state">→</button>
+  <span class="sep" aria-hidden="true"></span>
+  <button type="button" id="viewer"></button>
+  <button type="button" id="torch"></button>
+  <button type="button" id="ban"></button>
+  <button type="button" id="reset">Reset</button>
+</div>
+<div class="proto-toast" id="toast" hidden></div>
+
+<script src="bundle.js"></script>
+<script>
+document.body.classList.add('hs-app');
+
+/* =============================================================== helpers */
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+const at = (mo, d, h = 0, mi = 0) => new Date(2026, mo, d, h, mi).getTime();
+const NOW = at(9, 25, 19, 30); // Sun Oct 25, 7:30 pm: the prototype's "now"
+let seq = 0; const nid = p => `${p}${++seq}`;
+const day = t => new Date(t).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }).replace(',', '');
+const dayY = t => new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+const longDate = t => new Date(t).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+const clock = t => { const d = new Date(t), h = d.getHours(), m = d.getMinutes(); return `${h % 12 || 12}:${String(m).padStart(2, '0')}`; };
+const ampm = t => new Date(t).getHours() < 12 ? 'am' : 'pm';
+const timeRange = (s, e) => `${day(s)}, ${clock(s)}${ampm(s) !== ampm(e) ? ' ' + ampm(s) : ''} – ${clock(e)} ${ampm(e)}`;
+const whenOf = (s, e) => e ? timeRange(s, e) : `${day(s)}, ${clock(s)} ${ampm(s)}`;
+const list = ids => ids.map(nameOf).join(', ');
+/* The party's icons, borrowed from the PWA (Lucide: UserMinus, UserCheck, LogOut; CirclePause where the PWA has none). */
+const lucide = d => `<svg class="cd-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const PERSON = '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>';
+const ICON = {
+  userMinus: lucide(PERSON + '<path d="M22 11h-6"/>'),
+  userCheck: lucide(PERSON + '<path d="m16 11 2 2 4-4"/>'),
+  pause: lucide('<circle cx="12" cy="12" r="10"/><path d="M10 15V9M14 15V9"/>'),
+  logOut: lucide('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/>'),
+};
+/* The torch: a hairline flame (Hearthside has no icon set yet; this follows its note to draw at the filigree's weight). */
+const FLAME = '<svg class="cd-flame-i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5c.5 2.3 3.9 3.9 3.9 7.4A3.9 3.9 0 0 1 8 12.8a3.9 3.9 0 0 1-3.9-3.9c0-1.6.9-2.7 1.7-3.5.1 1.2.7 2 1.5 2.3C7 6.3 7.2 3.6 8 1.5Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M5 14.6h6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>';
+const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
+const toInput = t => { if (!t) return ''; const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const fromInput = s => { if (!s) return null; const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d, 12).getTime(); };
+
+/* =============================================================== the prototype's own switches */
+const VIEWERS = [
+  { id: 'geoff', isAdmin: false, label: 'Geoff' },
+  { id: 'priya', isAdmin: false, label: 'Priya' },
+  { id: 'avery', isAdmin: true, label: 'Avery, an admin' },
+];
+const BOARDS = [
+  { key: 'night', name: 'Night vote', note: 'In person, potluck · round 2 open' },
+  { key: 'tie', name: 'Night tied', note: 'The Dungeon Master breaks the tie' },
+  { key: 'shortlist', name: 'Shortlisting', note: 'No nights put to the party yet' },
+  { key: 'venue', name: 'Venue vote', note: 'Night set; the party picks where' },
+  { key: 'food', name: 'Potluck', note: 'Claiming what to bring' },
+  { key: 'provided', name: 'Food provided', note: 'Sam brings dinner' },
+  { key: 'online', name: 'Online night vote', note: 'Priya holds the torch for this one' },
+  { key: 'empty', name: 'Nothing pinned', note: 'No session being planned' },
+];
+const q = new URLSearchParams(location.search);
+let viewerIdx = Math.max(0, VIEWERS.findIndex(v => v.id === (q.get('viewer') || store.get('hs-cd-viewer'))));
+let boardIdx = Math.max(0, BOARDS.findIndex(b => b.key === (q.get('board') || store.get('hs-cd-board'))));
+let torchHeld = store.get('hs-cd-torch') !== 'unclaimed';
+let bannerOn = store.get('hs-cd-banner') !== 'none';
+
+/* =============================================================== made-up data */
+const PARTY_IDS = ['geoff', 'priya', 'marcus', 'theo', 'sam'];
+const NAMES = { geoff: 'Geoff', priya: 'Priya', marcus: 'Marcus', theo: 'Theo', sam: 'Sam', jordan: 'Jordan', avery: 'Avery' };
+const savedVenues = () => [
+  { id: 'v-geoff', name: 'Geoff’s place', kind: 'home', hostId: 'geoff', address: '418 Alder Lane', lastUsedAt: at(9, 17) },
+  { id: 'v-hearth', name: 'Hearthside Games', kind: 'store', hostId: null, address: '12 Market St', lastUsedAt: at(8, 26) },
+  { id: 'v-library', name: 'Town Library, Room B', kind: 'other', hostId: null, address: '200 Main St', lastUsedAt: at(7, 1) },
+];
+const opt = (start, hours, approvals = [], extra = {}) => ({ id: nid('o'), start, end: start ? start + hours * 3600e3 : null, approvals: [...approvals], venueId: null, suggestedBy: null, ...extra });
+const mkPoll = (round, options, o = {}) => ({ id: nid('p'), round, status: 'open', result: null, closedReason: null, quorum: 4, eligibleIds: [...PARTY_IDS],
+  voted: [], winningOptionId: null, tiedOptionIds: [], options, ...o });
+const mkSession = o => ({ id: nid('s'), title: 'Session 14: The Drowned Chapel', status: 'planning', stage: 'night', isOnline: false,
+  agenda: 'We pick up in the flooded nave. Bring the chapel handout and something warm.', date: null, endDate: null,
+  foodMode: 'potluck', foodOwnerId: null, venue: null, hostId: null, gmOverride: null, ...o });
+const mkPlan = (session, o = {}) => ({ session, night: null, nightRounds: [], venue: null, venueRounds: [], venues: savedVenues(), food: null, ...o });
+const withNight = (p, rounds) => { p.nightRounds = rounds; p.night = rounds[rounds.length - 1] || null; return p; };
+const fq = (title, assignee, status = 'open') => ({ id: nid('f'), title, notes: null, assignee, status });
+
+function boardFixture(key) {
+  const r1 = mkPoll(1, [opt(at(9, 28, 18, 30), 4, ['geoff', 'marcus']), opt(at(9, 29, 18, 30), 4, ['geoff', 'theo', 'sam'])],
+    { status: 'closed', result: 'no_quorum', closedReason: 'all_voted', voted: [...PARTY_IDS] });
+  const r2opts = () => [opt(at(9, 30, 18, 30), 4, ['geoff', 'marcus']), opt(at(9, 31, 17), 4, ['geoff', 'marcus', 'theo']), opt(at(10, 7, 18, 30), 4, ['geoff', 'marcus', 'theo'])];
+  const set = { date: at(10, 7, 18, 30), endDate: at(10, 7, 22, 30) };
+  if (key === 'empty') return [];
+  if (key === 'shortlist') return [mkPlan(mkSession({}))];
+  if (key === 'night') return [withNight(mkPlan(mkSession({})), [r1, mkPoll(2, r2opts(), { voted: ['geoff', 'marcus', 'theo'] })])];
+  if (key === 'tie') {
+    const o = r2opts(); o[0].approvals.push('sam'); o[1].approvals.push('priya'); o[2].approvals.push('priya', 'sam');
+    o[1].approvals.push('sam');
+    return [withNight(mkPlan(mkSession({})), [r1, mkPoll(2, o, { status: 'closed', result: 'tie', closedReason: 'all_voted', voted: [...PARTY_IDS], tiedOptionIds: [o[1].id, o[2].id] })])];
+  }
+  if (key === 'online') {
+    return [withNight(mkPlan(mkSession({ title: 'Session 15: Ghosts on the Ferry', isOnline: true, foodMode: null, agenda: 'Short one: the ferry, and whatever followed us aboard.',
+      gmOverride: { id: 'priya', name: 'Priya' } })),
+      [mkPoll(1, [opt(at(9, 27, 19), 3, ['priya']), opt(at(9, 29, 19), 3, ['priya', 'theo']), opt(at(10, 3, 19), 3, [])], { voted: ['priya', 'theo'] })])];
+  }
+  const won = () => { const o = r2opts(); o[2].approvals.push('priya'); return mkPoll(2, o, { status: 'closed', result: 'winner', closedReason: 'all_voted', voted: [...PARTY_IDS], winningOptionId: o[2].id }); };
+  if (key === 'venue') {
+    const p = withNight(mkPlan(mkSession({ ...set, stage: 'venue' })), [r1, won()]);
+    p.venues.push({ id: 'v-keeper', name: 'The Keeper’s Den', kind: 'store', hostId: null, address: '7 Lantern Row', lastUsedAt: null });
+    p.venue = mkPoll(1, [opt(null, 0, ['geoff', 'theo'], { venueId: 'v-geoff' }), opt(null, 0, ['marcus'], { venueId: 'v-hearth' }),
+      opt(null, 0, [], { venueId: 'v-keeper', suggestedBy: 'marcus' })], { quorum: null, voted: ['geoff', 'theo', 'marcus'] });
+    p.venueRounds = [p.venue];
+    return [p];
+  }
+  const v = savedVenues()[0];
+  if (key === 'food') {
+    const p = withNight(mkPlan(mkSession({ ...set, stage: 'food', venue: v, hostId: 'geoff' })), [r1, won()]);
+    p.food = { mode: 'potluck', ownerId: null, quests: [fq('Main: pizza order (split 5 ways)', 'priya'), fq('Snacks & chips', 'marcus'), fq('Drinks', null), fq('Dessert', 'theo', 'done')] };
+    return [p];
+  }
+  if (key === 'provided') {
+    const p = withNight(mkPlan(mkSession({ ...set, stage: 'food', venue: v, hostId: 'geoff', foodMode: 'provided', foodOwnerId: 'sam' })), [r1, won()]);
+    p.food = { mode: 'provided', ownerId: 'sam', quests: [fq('Dinner for the table', 'sam')] };
+    return [p];
+  }
+}
+
+let S, banner0 = null;
+function reset() {
+  S = {
+    campaign: { id: 'ashen-crown', title: 'Curse of the Ashen Crown', status: 'In Progress',
+      description: 'The old king’s crown woke the dead of Vel Harrow. Five sellswords are trying to put it back to sleep before the ash reaches the coast.',
+      startDate: at(2, 14, 12), endDate: null, createdAt: at(2, 1, 12), owner: torchHeld ? 'geoff' : null, gmTitle: 'Dungeon Master', quorum: 4,
+      tableLink: 'https://foundry.example/ashen-crown', discordGuildId: '881204977365123072', discordChannelId: '', bannerUrl: bannerOn ? banner0 : null },
+    members: [
+      { _id: 'm1', playerId: 'geoff', name: 'Geoff', status: torchHeld ? 'Game Master' : 'Player', isActive: true },
+      { _id: 'm2', playerId: 'priya', name: 'Priya', status: 'Player', isActive: true },
+      { _id: 'm3', playerId: 'marcus', name: 'Marcus', status: 'Player', isActive: true },
+      { _id: 'm4', playerId: 'theo', name: 'Theo', status: 'Player', isActive: true },
+      { _id: 'm5', playerId: 'sam', name: 'Sam', status: 'Player', isActive: true },
+      { _id: 'm6', playerId: null, name: 'bea@example.com', status: 'Invited', isActive: true },
+      { _id: 'm7', playerId: 'jordan', name: 'Jordan', status: 'Player', isActive: false },
+    ],
+    planning: boardFixture(BOARDS[boardIdx].key),
+    upcoming: [{ id: 'u1', title: 'One-shot: The Lantern Fair', date: at(10, 21, 18), endDate: at(10, 21, 22), isOnline: true, venue: null }],
+    past: [
+      { _id: 'p13', title: 'Session 13: The Ferryman’s Toll', date: at(9, 17, 18, 30), location: 'Geoff’s place', isOnline: false, status: 'scheduled',
+        summary: 'The party paid the ferryman in teeth and crossed into Vel Harrow’s drowned quarter.', attendeeCount: 5, attendanceConfirmedAt: true },
+      { _id: 'p12', title: 'Session 12: Ash on the Water', date: at(9, 3, 19), location: '', isOnline: true, status: 'scheduled',
+        summary: 'A river chase through the burning reeds. Priya ran it while Geoff was away.', attendeeCount: 4, attendanceConfirmedAt: true, gmOverride: 'priya' },
+      { _id: 'p11', title: 'Session 11: The Bell Tower', date: at(8, 26, 18, 30), location: 'Hearthside Games', isOnline: false, status: 'cancelled', attendeeCount: 0 },
+      { _id: 'p10', title: 'Session 10: Smoke over Orrin', date: at(8, 12, 18, 30), location: 'Hearthside Games', isOnline: false, status: 'scheduled',
+        summary: 'Orrin burned, and the crown was not where the map said.', attendeeCount: 0, attendanceConfirmedAt: null },
+    ],
+    characters: [
+      { _id: 'c1', name: 'Ser Aldric Vane', class: 'Paladin', level: 6, player: 'priya', active: true },
+      { _id: 'c2', name: 'Wren', class: 'Rogue', level: 6, player: 'marcus', active: true },
+      { _id: 'c3', name: 'Mira Thistle', class: 'Wizard', level: 6, player: 'theo', active: true },
+      { _id: 'c4', name: 'Brother Osk', class: 'Cleric', level: 5, player: 'theo', active: true, isDead: true },
+      { _id: 'c5', name: 'Kael of the Reeds', class: 'Ranger', level: 6, player: 'sam', active: true },
+      { _id: 'c6', name: 'Dunmore', class: 'Fighter', level: 4, player: 'jordan', active: false },
+    ],
+    messages: [
+      { key: 'k1', by: 'marcus', html: 'I found a map for the chapel level.', att: 'drowned-chapel-map.png · 2.4 MB', at: '6:58 pm' },
+      { key: 'k2', by: 'geoff', html: 'Love it. Voting stays open until <strong>everyone</strong> is in.', at: '7:01 pm' },
+      { key: 'k3', by: 'priya', html: 'Can someone bring spare d20s? Theo lost his again.', at: '7:04 pm' },
+    ],
+    friends: [{ _id: 'f1', handle: 'lenore', userNumber: 1042 }, { _id: 'f2', handle: 'okonkwo', userNumber: 877 }, { _id: 'f3', handle: 'theo.r', userNumber: 311 }],
+    ui: { editing: false, form: null, settingsErr: null, torchTo: null, torchFrom: '', torchErr: null, torchBusy: false, tab: 'sessions', membershipErr: null, activityErr: null,
+      kickoff: null, kickErr: null, warnings: [], cards: {}, upcoming: {}, draft: '', typing: null, live: true, modal: null, confirm: null,
+      sessionForm: null, sessionErr: null, invites: {}, copied: false, crop: null },
+  };
+}
+
+/* =============================================================== who is looking */
+const me = () => VIEWERS[viewerIdx];
+const nameOf = id => id === me().id ? 'you' : (S.members.find(m => m.playerId === id)?.name || NAMES[id] || 'someone');
+const nameCap = id => { const n = nameOf(id); return n === 'you' ? 'You' : n; };
+const myMembership = () => S.members.find(m => m.playerId === me().id);
+const isAdmin = () => me().isAdmin;
+const isGM = () => isAdmin() || myMembership()?.status === 'Game Master';
+const isOwner = () => S.campaign.owner === me().id || isAdmin();
+const gmTitle = () => S.campaign.gmTitle || 'Dungeon Master';
+const activeMembers = () => S.members.filter(m => m.isActive !== false);
+const gmMembers = () => S.members.filter(m => m.status === 'Game Master' && m.playerId);
+const partyIds = () => activeMembers().filter(m => m.playerId).map(m => m.playerId);
+const quorum = () => S.campaign.quorum || partyIds().length;
+const cardGM = p => isGM() || p.session.gmOverride?.id === me().id;
+const roleLabel = m => m.status === 'Game Master' ? gmTitle() : m.status === 'Player' ? '' : m.status;
+
+/* =============================================================== stand-in banner art (an "upload") */
+function rng(seed) { let h = 2166136261; for (const c of seed) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return () => ((h = Math.imul(h ^ (h >>> 15), 2246822507) ^ Math.imul(h ^ (h >>> 13), 3266489909)) >>> 0) / 4294967296; }
+function paintAshen() {
+  const W = 1600, H = 400, c = document.createElement('canvas'); c.width = W; c.height = H;
+  const ctx = c.getContext('2d'), r = rng('ashen');
+  const g = ctx.createLinearGradient(0, 0, 0, H); [[0, '#2a0f0c'], [.55, '#7a2a14'], [.8, '#d0652a'], [1, '#f2a24a']].forEach(([o, col]) => g.addColorStop(o, col));
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  for (let i = 0; i < 220; i++) { ctx.fillStyle = `rgba(230,200,180,${r() * .35})`; ctx.fillRect(r() * W, r() * H * .8, 2, 2); }
+  const ridge = (y0, amp, step, color) => { ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(0, 400); let y = y0;
+    for (let x = 0; x <= W + step; x += step) { y = Math.max(y0 - amp, Math.min(y0 + amp, y + (r() - .5) * amp)); ctx.lineTo(x, y); } ctx.lineTo(W, 400); ctx.closePath(); ctx.fill(); };
+  ridge(250, 60, 40, '#3a1710'); ridge(300, 30, 30, '#1c0b08');
+  ctx.fillStyle = '#0e0605'; const kx = 1060; ctx.fillRect(kx, 170, 160, 140);
+  [[kx - 30, 140, 40, 170], [kx + 60, 110, 40, 200], [kx + 150, 140, 40, 170]].forEach(([x, y, w, h]) => { ctx.fillRect(x, y, w, h); for (let i = 0; i < 3; i++) ctx.fillRect(x + i * 15, y - 12, 9, 12); });
+  ctx.fillStyle = 'rgba(255,170,80,.8)'; [[kx + 76, 140], [kx + 20, 210], [kx + 120, 230]].forEach(([x, y]) => ctx.fillRect(x, y, 6, 10));
+  ridge(360, 14, 24, '#070303');
+  return c.toDataURL('image/jpeg', .85);
+}
+
+/* =============================================================== the party's availability (for the overlap picker) */
+function overlap(from, days, hours) {
+  const slots = [];
+  for (let d = 0; d < days; d++) for (const h of [16, 17, 18, 19, 20]) {
+    const start = new Date(from); start.setDate(start.getDate() + d); start.setHours(h, 0, 0, 0);
+    const wd = start.getDay(), weekend = wd === 5 || wd === 6, r = rng(`${start.toDateString()}|${h}`);
+    const free = [], busy = [], unknown = [];
+    partyIds().forEach(id => {
+      if (id === 'sam' && r() < .35) { unknown.push(id); return; }
+      (r() < (weekend ? .78 : h >= 18 ? .5 : .28) ? free : busy).push(id);
+    });
+    slots.push({ start: start.getTime(), end: start.getTime() + hours * 3600e3, headcount: free.length, meetsQuorum: free.length >= quorum(), free, busy, unknown });
+  }
+  return slots;
+}
+
+/* =============================================================== render: the page */
+const page = document.getElementById('page');
+const modalRoot = document.getElementById('modal');
+
+function statusPill(st) {
+  const cls = st === 'In Progress' ? 'is-live' : st === 'Completed' ? 'is-done' : '';
+  return `<span class="p-status ${cls}">${st === 'In Progress' ? 'In progress' : st === 'Not Started' ? 'Not started' : 'Completed'}</span>`;
+}
+
+function Head() {
+  const c = S.campaign, gms = S.members.filter(m => m.status === 'Game Master');
+  const initials = c.title.replace(/^(The|A|An) /, '').split(/\s+/).filter(w => !/^(of|the|and)$/i.test(w)).slice(0, 2).map(w => w[0]).join('');
+  const ban = c.bannerUrl ? `<img src="${c.bannerUrl}" alt="${esc(c.title)} banner">` : `<div class="p-cloth" aria-hidden="true"><span>${esc(initials)}</span></div>`;
+  const tools = isOwner() ? `<div class="p-tools"><button type="button" class="p-tool" data-act="banner-open">${c.bannerUrl ? 'Change banner' : 'Add banner'}</button></div>` : '';
+  return `<header class="hs-page-head cd-head">
+    <a class="hs-btn-amber cd-amber cd-back" href="#" data-act="stub" data-msg="the Campaigns list">← Back to Campaigns</a>
+    <div class="hs-gilded cd-banner-frame"><div class="p-banner">${ban}${tools}</div></div>
+    <div class="cd-title-row"><div>
+      <div class="cd-kicker">Campaign</div>
+      <h1>${esc(c.title)}</h1>
+      <p>${statusPill(c.status)}<span>· <b>${activeMembers().filter(m => m.playerId).length} in the party</b> · ${gms.length ? `${esc(gms.map(m => m.name).join(', '))} ${gms.length > 1 ? 'are' : 'is'} ${esc(gmTitle())}` : `no ${esc(gmTitle())} yet`}</span></p>
+    </div>${S.ui.editing ? '' : `<button type="button" class="hs-btn-amber cd-amber" data-act="edit">Edit</button>`}</div>
+  </header>`;
+}
+
+function Info() {
+  const c = S.campaign, u = S.ui;
+  const ownerMember = c.owner ? S.members.find(m => m.playerId === c.owner) : null;
+  const active = activeMembers();
+  const candidates = active.filter(m => m.playerId && m.status !== 'Game Master');
+  const gms = gmMembers();
+  const torchNeedsFrom = gms.length > 1 && !gms.some(m => m.playerId === me().id);
+  const canClaim = !c.owner && gms.length === 0 && !isGM() && S.members.some(m => m.playerId === me().id);
+  const torch = `
+    ${isGM() && u.torchTo === null && candidates.length ? `<button type="button" class="cd-link cd-flame" data-act="torch-open">${FLAME} Pass the torch</button>` : ''}
+    ${canClaim ? `<div><button type="button" class="cd-btn-torch" style="margin-top:6px" data-act="torch-claim" ${u.torchBusy ? 'disabled' : ''}>${FLAME} Claim the torch</button></div>` : ''}
+    ${u.torchTo !== null ? `<form data-form="torch-pass" class="cd-form" style="gap:6px;margin-top:6px">
+      <label class="sr-only" for="torch-to">New ${esc(gmTitle())}</label>
+      <select id="torch-to" class="cd-input" data-bind="torchTo"><option value="">New ${esc(gmTitle())}…</option>${candidates.map(m => `<option value="${m.playerId}" ${u.torchTo === m.playerId ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>
+      ${torchNeedsFrom ? `<label class="sr-only" for="torch-from">Who steps down</label><select id="torch-from" class="cd-input" data-bind="torchFrom"><option value="">Who steps down…</option>${gms.map(m => `<option value="${m.playerId}" ${u.torchFrom === m.playerId ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>` : ''}
+      <div class="cd-actions"><button type="submit" class="cd-btn-torch" ${u.torchBusy ? 'disabled' : ''}>${FLAME} Pass it</button><button type="button" class="cd-ghost" data-act="torch-cancel">Never mind</button></div>
+    </form>` : ''}
+    ${u.torchErr ? `<p class="cd-alert" role="alert">${esc(u.torchErr)}</p>` : ''}`;
+  return `<section aria-label="About the campaign"><div class="hs-gilded"><div class="cd-pad">
+    ${c.description ? `<p class="cd-desc">${esc(c.description)}</p>` : ''}
+    ${c.startDate || c.endDate ? `<dl class="cd-facts">
+      ${c.startDate ? `<div><dt>Started</dt><dd>${longDate(c.startDate)}</dd></div>` : ''}
+      ${c.endDate ? `<div><dt>Ended</dt><dd>${longDate(c.endDate)}</dd></div>` : ''}
+    </dl>` : ''}
+    <dl class="cd-facts">
+      <div><dt>Created</dt><dd>${longDate(c.createdAt)}</dd></div>
+      <div><dt>${esc(gmTitle())}</dt><dd>${esc(S.members.filter(m => m.status === 'Game Master').map(m => m.name).join(', ') || 'None yet')}${torch}</dd></div>
+      <div><dt>Owner</dt><dd>${!c.owner ? 'Admin-managed' : ownerMember ? esc(ownerMember.name) : 'Not in the party'}</dd></div>
+      <div><dt>Quorum</dt><dd>${c.quorum ? `${c.quorum} of the party` : 'Whole party'}</dd></div>
+      <div><dt>Table</dt><dd>${c.tableLink ? `<a href="${esc(c.tableLink)}" target="_blank" rel="noopener noreferrer">${esc(c.tableLink.replace(/^https?:\/\//, ''))}</a>` : 'Not set'}</dd></div>
+      <div><dt>Discord server</dt><dd>${c.discordGuildId ? `Linked${c.discordChannelId ? ' (voice channel)' : ''}` : 'Not linked'}</dd></div>
+    </dl>
+  </div></div></section>`;
+}
+
+function EditForm() {
+  const f = S.ui.form;
+  return `<section aria-label="Edit the campaign"><div class="hs-gilded"><form class="cd-pad cd-form" data-form="edit">
+    <div class="cd-form-head"><h3>Edit the campaign</h3><button type="button" class="cd-x" data-act="edit-cancel" aria-label="Close">✕</button></div>
+    <label class="cd-field"><span>Title</span><input class="cd-input" required maxlength="120" data-bind="form.title" value="${esc(f.title)}"></label>
+    <label class="cd-field"><span>Description</span><textarea class="cd-input" rows="3" data-bind="form.description">${esc(f.description)}</textarea></label>
+    <div class="cd-grid2">
+      <label class="cd-field"><span>Start date</span><input type="date" class="cd-input" data-bind="form.startDate" value="${f.startDate}"></label>
+      <label class="cd-field"><span>End date</span><input type="date" class="cd-input" data-bind="form.endDate" value="${f.endDate}"></label>
+      <label class="cd-field"><span>Status</span><select class="cd-input" data-bind="form.status">${['Not Started', 'In Progress', 'Completed'].map(s => `<option ${f.status === s ? 'selected' : ''}>${s}</option>`).join('')}</select></label>
+    </div>
+    ${isOwner() ? `<hr class="cd-rule" style="margin:2px 0"><div class="cd-group">Planning</div>
+      <label class="cd-field"><span>What this campaign calls its Game Master</span><input class="cd-input" required maxlength="40" placeholder="Dungeon Master" data-bind="form.gmTitle" value="${esc(f.gmTitle)}"></label>
+      <div class="cd-grid2">
+        <label class="cd-field"><span>Quorum (players a night needs)</span><input type="number" min="1" max="50" class="cd-input" placeholder="Whole party (${partyIds().length})" data-bind="form.quorum" value="${esc(f.quorum)}"></label>
+        <label class="cd-field"><span>Table link (online sessions)</span><input type="url" class="cd-input" placeholder="https://foundry.example/game" data-bind="form.tableLink" value="${esc(f.tableLink)}"></label>
+      </div>
+      <p class="cd-fine">The Game Master title is what the party sees: Dungeon Master, Host, Organizer. Leave quorum empty to need the whole party. The table link (Foundry, Roll20, a Discord voice channel) shows on every online session.</p>
+      ${S.ui.settingsErr ? `<p class="cd-alert" role="alert">${esc(S.ui.settingsErr)}</p>` : ''}` : ''}
+    <hr class="cd-rule" style="margin:2px 0"><div class="cd-group">Discord</div>
+    <div class="cd-grid2">
+      <label class="cd-field"><span>Discord server ID</span><input class="cd-input" placeholder="123456789012345678" data-bind="form.discordGuildId" value="${esc(f.discordGuildId)}"></label>
+      <label class="cd-field"><span>Voice channel ID (optional)</span><input class="cd-input" placeholder="123456789012345678" data-bind="form.discordChannelId" value="${esc(f.discordChannelId)}"></label>
+    </div>
+    <p class="cd-fine">Lets new sessions make Discord events. Your bot (its token is in your API Key Vault under “discord”) must be in this server with Manage Events. With a voice channel, events are voice events; without one, they use the session’s location. Turn on Developer Mode in Discord and right-click the server or channel to copy its ID.</p>
+    <div class="cd-actions"><button type="submit" class="hs-btn-amber">Save changes</button><button type="button" class="cd-ghost" data-act="edit-cancel">Cancel</button></div>
+  </form></div></section>`;
+}
+
+/* ---------- The Notice Board ---------- */
+function NoticeBoard() {
+  const n = S.planning.length, k = S.ui.kickoff;
+  return `<section id="notice-board" aria-labelledby="nb-h">
+    <div class="cd-sec-row"><h2 class="hs-sec" id="nb-h"><span>The Notice Board</span><span class="hs-aside">${n ? `${n} pinned up` : 'nothing pinned'}</span></h2>
+      ${isGM() && !k ? `<button type="button" class="hs-btn-amber" data-act="kickoff-open">Plan a session</button>` : ''}</div>
+    <div style="display:flex;flex-direction:column;gap:28px;padding-top:6px">
+      ${k ? Kickoff() : ''}
+      ${n ? S.planning.map(PlanningCard).join('') : k ? '' : `<p class="hs-note cd-empty">Nothing pinned up. When the ${esc(gmTitle())} starts planning a session, the vote goes here.</p>`}
+    </div>
+  </section>`;
+}
+
+function Kickoff() {
+  const k = S.ui.kickoff;
+  const ok = k.title.trim() && (k.isOnline || (k.foodMode && (k.foodMode !== 'provided' || k.foodOwnerId)));
+  return `<article class="hs-sheet" data-seed="ashen-crown/new"><form data-form="kickoff">
+    <header class="hs-sheet-head"><div><div class="hs-kicker">${esc(S.campaign.title)}</div><h3 class="hs-sheet-title">A new notice</h3><div class="hs-byline">Start planning a session. The party is told.</div></div>
+      <button type="button" class="hs-btn" data-act="kickoff-close">Never mind</button></header>
+    <div class="cd-sheet-form" style="border:0;padding:0;margin-top:16px">
+      <label class="cd-pfield"><span>Session title</span><input class="cd-pinput" required maxlength="120" placeholder="Session 14: The Drowned Chapel" data-bind="kickoff.title" value="${esc(k.title)}"></label>
+      <label class="cd-pfield"><span>Agenda (optional)</span><textarea class="cd-pinput" rows="2" maxlength="2000" data-bind="kickoff.agenda">${esc(k.agenda)}</textarea></label>
+      <fieldset style="border:0;margin:0;padding:0"><legend class="cd-pfield"><span>Where</span></legend>
+        <div class="cd-prow" style="margin-top:3px"><label><input type="radio" name="ko-where" data-act="kickoff-where" data-v="online" ${k.isOnline ? 'checked' : ''}> Online</label>
+          <label><input type="radio" name="ko-where" data-act="kickoff-where" data-v="inperson" ${k.isOnline ? '' : 'checked'}> In person</label></div>
+        <p style="margin-top:4px;color:var(--paper-muted)">${k.isOnline ? 'The party picks a night, and it’s on, at the campaign’s table link.' : 'The party picks a night, then a venue, then sorts the food.'}</p>
+      </fieldset>
+      ${k.isOnline ? '' : `<div class="cd-prow" style="align-items:flex-end">
+        <label class="cd-pfield" style="flex:1;min-width:10rem"><span>Food</span><select class="cd-pinput" required data-bind="kickoff.foodMode" data-rerender><option value="">Choose…</option><option value="potluck" ${k.foodMode === 'potluck' ? 'selected' : ''}>Potluck</option><option value="provided" ${k.foodMode === 'provided' ? 'selected' : ''}>Food provided</option></select></label>
+        ${k.foodMode === 'provided' ? `<label class="cd-pfield" style="flex:1;min-width:10rem"><span>Provided by</span><select class="cd-pinput" required data-bind="kickoff.foodOwnerId" data-rerender><option value="">Choose…</option>${partyIds().map(id => `<option value="${id}" ${k.foodOwnerId === id ? 'selected' : ''}>${esc(NAMES[id])}</option>`).join('')}</select></label>` : ''}
+      </div>`}
+      ${S.ui.kickErr ? `<p class="cd-alert-paper" role="alert">${esc(S.ui.kickErr)}</p>` : ''}
+      <div class="hs-btn-row"><button type="submit" class="hs-btn is-primary" ${ok ? '' : 'disabled'}>Start planning</button></div>
+    </div>
+  </form></article>`;
+}
+
+function card(p) { return S.ui.cards[p.session.id] ||= { choice: null, venuePick: undefined, suggesting: false, suggest: null, reNight: false, reVenue: null, seed: 'Main, Snacks, Drinks', own: '', error: null, torchTo: '', busy: false }; }
+const optLabel = (p, o) => o.venue ? o.venue.name : timeRange(o.start, o.end);
+const venueOf = (p, id) => p.venues.find(v => v.id === id) || null;
+const kindLabel = v => v.kind === 'home' ? (v.hostId ? `${nameCap(v.hostId) === 'You' ? 'your' : NAMES[v.hostId] + '’s'} home` : 'a home') : v.kind === 'store' ? 'store' : 'venue';
+
+function PlanningCard(p) {
+  const s = p.session, night = p.night, gm = cardGM(p), c = card(p), meId = me().id, title = gmTitle();
+  const open = night?.status === 'open', tie = night?.status === 'closed' && night.result === 'tie', failed = night?.status === 'closed' && night.result === 'no_quorum';
+  const needsShortlist = !open && !tie;
+  const stage = s.stage || 'night', vp = p.venue, vOpen = vp?.status === 'open', vTie = vp?.status === 'closed' && vp.result === 'tie';
+  const unclaimed = p.food?.mode === 'potluck' ? p.food.quests.filter(x => x.status === 'open' && !x.assignee).length : 0;
+  const seal = stage === 'venue' ? (vOpen ? `Pick the venue · ${vp.voted.length} of ${vp.eligibleIds.length}` : vTie ? `Tie · the ${title} decides` : 'Venue')
+    : stage === 'food' ? (unclaimed ? `Food · ${unclaimed} unclaimed` : gm ? 'Confirm the food' : `Food · waiting on the ${title}`)
+    : open ? `Awaiting votes · ${night.voted.length} of ${night.eligibleIds.length}` : tie ? `Tie · the ${title} decides` : gm ? 'Pick some nights' : `Waiting on the ${title}`;
+  const hot = stage === 'night' ? (open || tie || gm) : stage === 'venue' ? (vOpen || vTie) : (unclaimed > 0 || gm);
+  const foodLabel = s.foodMode === 'potluck' ? 'potluck' : s.foodMode === 'provided' ? `food by ${nameOf(s.foodOwnerId)}` : null;
+  const where = s.isOnline ? `Online · ${S.campaign.tableLink ? `<a href="${esc(S.campaign.tableLink)}" target="_blank" rel="noopener noreferrer" style="color:inherit">${esc(S.campaign.tableLink.replace(/^https?:\/\//, ''))}</a>` : 'no table link set yet'}`
+    : `In person${s.venue ? ` · ${esc(s.venue.name)}` : ''}${foodLabel ? ` · ${esc(foodLabel)}` : ''}`;
+  const nightStatus = stage === 'night'
+    ? (night ? `<span class="cd-round">round ${night.round}</span>` : '') + (open ? `<span class="hs-step-status">${night.voted.length} of ${night.eligibleIds.length} voted · closes when everyone votes</span>` : '')
+    : `<span class="hs-step-status">${esc(whenOf(s.date, s.endDate))}</span>`;
+
+  return `<article class="hs-sheet" data-seed="${S.campaign.id}/${s.id}">
+    <header class="hs-sheet-head"><div>
+      <div class="hs-kicker">${esc(S.campaign.title)}</div>
+      <h3 class="hs-sheet-title">${esc(s.title)}</h3>
+      <div class="hs-byline">A summons for the party · ${where}</div>
+    </div><span class="${hot ? 'hs-seal' : 'cd-sealq'}">${esc(seal)}</span></header>
+    ${s.agenda ? `<p class="cd-agenda">${esc(s.agenda)}</p>` : ''}
+    ${SessionTorch(p)}
+    <ol class="hs-steps">
+      <li class="hs-step ${stage === 'night' ? 'is-live' : 'is-done'}"><span class="hs-step-n">1</span><div>
+        <h4><span>${stage === 'night' ? 'Pick the night' : 'The night'}</span> ${nightStatus}</h4>
+        ${stage === 'night' ? NightStep(p, { open, tie, failed, needsShortlist, gm, c }) : ''}
+      </div></li>
+      ${s.isOnline ? '' : `<li class="hs-step ${stage === 'venue' ? 'is-live' : s.venue ? 'is-done' : ''}"><span class="hs-step-n">2</span><div>
+        <h4><span>${stage === 'venue' ? 'Pick the venue' : 'The venue'}</span>
+          ${stage === 'venue' && vp ? `<span class="cd-round">round ${vp.round}</span>${vOpen ? `<span class="hs-step-status">${vp.voted.length} of ${vp.eligibleIds.length} voted · closes when everyone votes</span>` : ''}`
+            : s.venue && stage !== 'venue' ? `<span class="hs-step-status">${esc(s.venue.name)}${s.hostId ? ` · host: ${esc(nameOf(s.hostId))}` : ''}</span>` : `<span class="hs-step-status">opens when the night is set</span>`}</h4>
+        ${stage === 'night' && !s.venue ? `<p>Once the night is set, the party picks where.</p>` : ''}
+        ${stage === 'venue' ? VenueStep(p, gm, c) : ''}
+        ${stage !== 'venue' && s.venue ? VenueLine(p, s.venue) : ''}
+      </div></li>`}
+      ${!s.isOnline && s.foodMode && !(stage === 'night' && s.venue) ? `<li class="hs-step ${stage === 'food' ? 'is-live' : ''}"><span class="hs-step-n">3</span><div>
+        <h4><span>${stage === 'food' ? 'Sort the food' : 'Provisions'}</span> <span class="hs-step-status">${s.foodMode === 'potluck' ? 'potluck · everyone brings something' : `provided by ${esc(nameOf(s.foodOwnerId))}`}${stage === 'food' ? '' : ' · opens when the venue is set'}</span></h4>
+        ${stage === 'food' ? FoodStep(p, gm, c) : `<p>${s.foodMode === 'potluck' ? 'Each claim becomes a quest for that player.' : 'It goes in their quests once the venue is set.'}</p>`}
+      </div></li>` : ''}
+    </ol>
+    ${c.error ? `<p class="cd-alert-paper" role="alert">${esc(c.error)}</p>` : ''}
+    ${gm ? `<div class="cd-sheet-foot"><button type="button" class="cd-plink" data-act="plan-cancel" data-sid="${s.id}">Cancel planning</button></div>` : ''}
+  </article>`;
+}
+
+function SessionTorch(p) {
+  const s = p.session, canPass = isGM(), c = card(p);
+  if (!s.gmOverride && !canPass) return '';
+  const isStandIn = s.gmOverride?.id === me().id;
+  const candidates = partyIds().filter(id => !gmMembers().some(m => m.playerId === id) && id !== s.gmOverride?.id);
+  return `<div class="cd-torch">
+    ${s.gmOverride ? `<span>${FLAME} Temporary ${esc(gmTitle())} for this session: <b>${isStandIn ? 'you' : esc(s.gmOverride.name)}</b></span>
+      ${canPass || isStandIn ? `<button type="button" class="cd-plink is-ink" data-act="st-back" data-sid="${s.id}">${isStandIn && !canPass ? 'Hand it back' : 'Take it back'}</button>` : ''}` : ''}
+    ${canPass && candidates.length ? `<span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <label for="st-${s.id}" style="font-size:13px;color:var(--paper-muted)">${s.gmOverride ? 'Or pass it to' : 'Pass the torch for this session to'}</label>
+      <select id="st-${s.id}" class="cd-pinput" style="width:auto" data-bind="cards.${s.id}.torchTo"><option value="">Choose a player</option>${candidates.map(id => `<option value="${id}" ${c.torchTo === id ? 'selected' : ''}>${esc(NAMES[id])}</option>`).join('')}</select>
+      <button type="button" class="hs-btn is-torch" data-act="st-pass" data-sid="${s.id}">${FLAME} Pass it</button></span>` : ''}
+  </div>`;
+}
+
+function NightStep(p, { open, tie, failed, needsShortlist, gm, c }) {
+  const s = p.session, night = p.night, meId = me().id, title = gmTitle();
+  const eligible = !!night?.eligibleIds.includes(meId), hasVoted = !!night?.voted.includes(meId);
+  const mine = night ? new Set(night.options.filter(o => o.approvals.includes(meId)).map(o => o.id)) : new Set();
+  const choice = c.choice || mine;
+  const waiting = night ? night.eligibleIds.filter(id => !night.voted.includes(id)) : [];
+  const lead = night ? Math.max(0, ...night.options.map(o => o.approvals.length)) : 0;
+  let h = '';
+  if (s.date) h += `<p class="cd-paper-note">Changing the night. It’s set for ${esc(whenOf(s.date, s.endDate))} until a new night is confirmed.</p>`;
+  if (failed) h += `<p class="cd-paper-note">Round ${night.round}: none of those times had enough of the party (needed ${night.quorum}).${gm ? ' Shortlist some new ones.' : ''}</p>`;
+  if (open) {
+    h += `<form data-form="night-vote" data-sid="${s.id}"><div class="hs-votes">${night.options.map(o => `
+      <div class="hs-vote ${o.approvals.length === lead && lead ? 'is-lead' : ''}">
+        <label>${eligible ? `<input type="checkbox" data-change="night-choice" data-sid="${s.id}" data-oid="${o.id}" ${choice.has(o.id) ? 'checked' : ''} aria-label="I can make ${esc(timeRange(o.start, o.end))}">` : ''}
+          <span class="cd-vline">${esc(timeRange(o.start, o.end))}${o.approvals.length >= night.quorum ? ' <span class="cd-ptag is-ink">Meets quorum</span>' : ''}</span></label>
+        <span class="hs-vote-who">${o.approvals.length} of ${night.eligibleIds.length}${o.approvals.length ? ` · ${esc(list(o.approvals))}` : ''}</span>
+        <span class="hs-vote-bar"><i style="width:${o.approvals.length / Math.max(1, night.eligibleIds.length) * 100}%"></i></span>
+      </div>`).join('')}</div>
+      <p style="margin-top:8px">Tick every night you can make. Quorum: ${night.quorum}.${waiting.length ? ` Waiting on ${esc(list(waiting))}.` : ''}</p>
+      <div class="hs-btn-row">
+        ${eligible ? `<button type="submit" class="hs-btn is-primary">${choice.size === 0 ? 'I can’t make any of these' : `${hasVoted ? 'Update my vote' : 'Cast my vote'}: I can make ${choice.size}`}</button>` : ''}
+        ${gm ? `<button type="button" class="hs-btn" data-act="night-advance" data-sid="${s.id}">Move forward now (${esc(title)})</button>
+          <button type="button" class="hs-btn" data-act="night-reshort" data-sid="${s.id}">${c.reNight ? 'Keep these nights' : 'Re-shortlist'}</button>` : ''}
+      </div>
+      ${hasVoted ? `<p style="margin-top:8px">You’ve voted. You can change it until the vote closes.</p>` : ''}
+    </form>`;
+  }
+  if (tie) {
+    h += `<p>The vote tied. ${gm ? 'Pick the night:' : `The ${esc(title)} will pick between:`}</p><div class="hs-votes">${night.options.filter(o => night.tiedOptionIds.includes(o.id)).map(o => `
+      <div class="hs-vote is-lead"><span>${esc(timeRange(o.start, o.end))}</span>
+        <span class="hs-vote-who">${o.approvals.length} of ${night.eligibleIds.length} · ${esc(list(o.approvals))}</span>
+        <span class="hs-vote-bar"><i style="width:${o.approvals.length / night.eligibleIds.length * 100}%"></i></span>
+        ${gm ? `<div style="grid-column:1/-1"><button type="button" class="hs-btn is-primary" data-act="night-tiebreak" data-sid="${s.id}" data-oid="${o.id}">Pick this night</button></div>` : ''}
+      </div>`).join('')}</div>`;
+  }
+  if (needsShortlist && !gm && !failed) h += `<p>The ${esc(title)} is choosing some nights to vote on.</p>`;
+  if (gm && (needsShortlist || tie || c.reNight)) {
+    h += `<div ${open || tie ? 'style="margin-top:14px;padding-top:12px;border-top:1px dotted var(--paper-line)"' : ''}>
+      ${open || tie ? `<p style="color:var(--paper-ink)">Or shortlist new times${open ? ' (this round’s votes are discarded)' : ''}:</p>` : ''}
+      ${Picker(`night:${s.id}`, open || tie ? 'Re-shortlist' : 'Send to the party', c.reNight)}
+    </div>`;
+  }
+  const earlier = p.nightRounds.slice(0, -1);
+  if (earlier.length) {
+    const outcome = r => r.closedReason === 'gm_reshortlisted' ? 'replaced by a new shortlist' : r.closedReason === 'cancelled' ? 'cancelled'
+      : r.result === 'no_quorum' ? 'failed: nothing reached quorum' : r.result === 'tie' ? 'tied' : r.result === 'winner' ? 'decided' : 'open';
+    h += `<details class="cd-rounds"><summary>Earlier rounds (${earlier.length})</summary><ol>${earlier.map(r => `<li><span style="color:var(--paper-ink)">Round ${r.round} · ${outcome(r)}</span>
+      <ul>${r.options.map(o => `<li class="${o.id === r.winningOptionId ? 'is-won' : ''}">${o.id === r.winningOptionId ? '✓ ' : ''}${esc(timeRange(o.start, o.end))} · ${o.approvals.length} of ${r.eligibleIds.length}${o.approvals.length ? ` · ${esc(list(o.approvals))}` : ''}</li>`).join('')}</ul></li>`).join('')}</ol></details>`;
+  }
+  return h;
+}
+
+function VenueLine(p, v, note) {
+  return `<span style="display:block;min-width:0"><span class="cd-vline"><span>${esc(v.name)}</span><span class="cd-ptag">${esc(kindLabel(v))}</span>${note ? `<span style="font-size:12.5px;color:var(--paper-muted)">${esc(note)}</span>` : ''}</span>
+    ${v.address ? `<span class="cd-addr">${esc(v.address)}</span>` : ''}</span>`;
+}
+
+function VenueStep(p, gm, c) {
+  const poll = p.venue, meId = me().id, title = gmTitle();
+  if (!poll) return '';
+  const open = poll.status === 'open', tie = poll.status === 'closed' && poll.result === 'tie';
+  const eligible = poll.eligibleIds.includes(meId);
+  const mine = poll.options.find(o => o.approvals.includes(meId))?.id ?? null;
+  const pick = c.venuePick === undefined ? mine : c.venuePick;
+  const waiting = poll.eligibleIds.filter(id => !poll.voted.includes(id));
+  const lead = Math.max(0, ...poll.options.map(o => o.approvals.length));
+  const note = o => o.suggestedBy ? `suggested by ${nameOf(o.suggestedBy)}` : 'recent';
+  let h = '';
+  if (open) {
+    h += `<form data-form="venue-vote" data-sid="${p.session.id}">${poll.options.length === 0 ? `<p>No venues yet. ${gm ? 'Add one, or wait for a suggestion.' : 'Suggest one, say if you can host.'}</p>` : `<div class="hs-votes">${poll.options.map(o => {
+        const v = venueOf(p, o.venueId);
+        return `<div class="hs-vote ${o.approvals.length === lead && lead ? 'is-lead' : ''}">
+          <label>${eligible ? `<input type="radio" name="vp-${poll.id}" data-change="venue-pick" data-sid="${p.session.id}" data-oid="${o.id}" ${pick === o.id ? 'checked' : ''} aria-label="Pick ${esc(v.name)}">` : ''}${VenueLine(p, v, note(o))}</label>
+          <span class="hs-vote-who">${plural(o.approvals.length, 'vote')}${o.approvals.length ? ` · ${esc(list(o.approvals))}` : ''}</span>
+          <span class="hs-vote-bar"><i style="width:${o.approvals.length / Math.max(1, poll.eligibleIds.length) * 100}%"></i></span></div>`;
+      }).join('')}</div>`}
+      <p style="margin-top:8px">Pick one. Most votes wins.${waiting.length ? ` Waiting on ${esc(list(waiting))}.` : ''}</p>
+      <div class="hs-btn-row">
+        ${eligible && poll.options.length ? `<button type="submit" class="hs-btn is-primary" ${!pick || pick === mine ? 'disabled' : ''}>${mine ? (pick === mine ? `Voted: ${esc(venueOf(p, poll.options.find(o => o.id === mine).venueId).name)}` : 'Change my vote') : 'Cast my vote'}</button>` : ''}
+        ${!c.suggesting ? `<button type="button" class="hs-btn" data-act="venue-suggest" data-sid="${p.session.id}">${gm ? 'Add a venue' : 'Suggest a venue'}</button>` : ''}
+        ${gm ? `<button type="button" class="hs-btn" data-act="venue-advance" data-sid="${p.session.id}" ${poll.options.length ? '' : 'disabled'}>Move forward now (${esc(title)})</button>
+          ${p.venues.length ? `<button type="button" class="hs-btn" data-act="venue-reshort" data-sid="${p.session.id}">Re-shortlist</button>` : ''}` : ''}
+      </div>
+      ${mine ? `<p style="margin-top:8px">You’ve voted. You can change it until the vote closes.</p>` : ''}
+    </form>`;
+  }
+  if (tie) {
+    h += `<p>The vote tied. ${gm ? 'Pick the venue:' : `The ${esc(title)} will pick between:`}</p><div class="hs-votes">${poll.options.filter(o => poll.tiedOptionIds.includes(o.id)).map(o => `
+      <div class="hs-vote is-lead">${VenueLine(p, venueOf(p, o.venueId))}<span class="hs-vote-who">${plural(o.approvals.length, 'vote')}</span>
+        ${gm ? `<div style="grid-column:1/-1"><button type="button" class="hs-btn is-primary" data-act="venue-tiebreak" data-sid="${p.session.id}" data-oid="${o.id}">Pick this venue</button></div>` : ''}</div>`).join('')}</div>
+      ${gm && !c.reVenue ? `<div class="hs-btn-row"><button type="button" class="hs-btn" data-act="venue-reshort" data-sid="${p.session.id}">Or shortlist again</button></div>` : ''}`;
+  }
+  if (c.suggesting && open) {
+    const onVote = new Set(poll.options.map(o => o.venueId)), saved = p.venues.filter(v => !onVote.has(v.id));
+    const sg = c.suggest ||= { mode: saved.length ? 'saved' : 'new', venueId: saved[0]?.id || '', name: '', address: '', kind: 'other', hostId: partyIds().includes(me().id) ? me().id : partyIds()[0] };
+    h += `<form class="cd-sheet-form" data-form="venue-suggest" data-sid="${p.session.id}">
+      <div class="cd-prow">${saved.length ? `<label><input type="radio" name="sg-${p.session.id}" data-act="sg-mode" data-sid="${p.session.id}" data-v="saved" ${sg.mode === 'saved' ? 'checked' : ''}> One of ours</label>` : ''}
+        <label><input type="radio" name="sg-${p.session.id}" data-act="sg-mode" data-sid="${p.session.id}" data-v="new" ${sg.mode === 'new' ? 'checked' : ''}> Somewhere new</label></div>
+      ${sg.mode === 'saved' ? `<select class="cd-pinput" aria-label="Saved venue" data-bind="cards.${p.session.id}.suggest.venueId">${saved.map(v => `<option value="${v.id}" ${sg.venueId === v.id ? 'selected' : ''}>${esc(v.name)} (${esc(kindLabel(v))})</option>`).join('')}</select>`
+        : `<input class="cd-pinput" required maxlength="120" placeholder="Name" aria-label="Venue name" data-bind="cards.${p.session.id}.suggest.name" value="${esc(sg.name)}">
+          <input class="cd-pinput" maxlength="300" placeholder="Address (only the party sees it)" aria-label="Address" data-bind="cards.${p.session.id}.suggest.address" value="${esc(sg.address)}">
+          <div class="cd-prow"><select class="cd-pinput" style="width:auto" aria-label="Kind of venue" data-bind="cards.${p.session.id}.suggest.kind" data-rerender>
+            <option value="home" ${sg.kind === 'home' ? 'selected' : ''}>${gm ? 'Someone’s home' : 'My home (I’ll host)'}</option><option value="store" ${sg.kind === 'store' ? 'selected' : ''}>A store</option><option value="other" ${sg.kind === 'other' ? 'selected' : ''}>Somewhere else</option></select>
+            ${gm && sg.kind === 'home' ? `<select class="cd-pinput" style="width:auto" aria-label="Host" data-bind="cards.${p.session.id}.suggest.hostId">${partyIds().map(id => `<option value="${id}" ${sg.hostId === id ? 'selected' : ''}>${id === me().id ? 'Me' : esc(NAMES[id])}</option>`).join('')}</select>` : ''}</div>`}
+      <div class="hs-btn-row"><button type="submit" class="hs-btn is-primary">${gm ? 'Add to the vote' : 'Suggest it'}</button><button type="button" class="hs-btn" data-act="venue-suggest-cancel" data-sid="${p.session.id}">Never mind</button></div>
+    </form>`;
+  }
+  if (gm && c.reVenue) {
+    h += `<form class="cd-sheet-form" data-form="venue-reshort" data-sid="${p.session.id}"><p>Put these to the party${open ? ' (this round’s votes are discarded)' : ''}:</p>
+      <ul class="cd-checklist">${p.venues.map(v => `<li><label><input type="checkbox" data-change="venue-re" data-sid="${p.session.id}" data-vid="${v.id}" ${c.reVenue.has(v.id) ? 'checked' : ''}>${VenueLine(p, v, v.lastUsedAt ? `last used ${dayY(v.lastUsedAt)}` : 'new')}</label></li>`).join('')}</ul>
+      <div class="hs-btn-row"><button type="submit" class="hs-btn is-primary" ${c.reVenue.size === 0 || c.reVenue.size > 6 ? 'disabled' : ''}>Send ${c.reVenue.size || ''} to the party</button><button type="button" class="hs-btn" data-act="venue-reshort" data-sid="${p.session.id}">Never mind</button></div>
+    </form>`;
+  }
+  return h;
+}
+
+function FoodStep(p, gm, c) {
+  const food = p.food, meId = me().id, inParty = partyIds().includes(meId), title = gmTitle(), sid = p.session.id;
+  if (!food) return '';
+  let h = '';
+  if (food.mode === 'provided') {
+    const fqt = food.quests[0];
+    h += fqt ? `<ul class="hs-ledger"><li><span>${esc(fqt.title)}</span><span>${fqt.assignee ? esc(nameCap(fqt.assignee)) : '<span class="is-open">unclaimed</span>'} · ${fqt.status === 'done' ? 'done' : 'on it'}</span></li></ul>` : `<p>Food provided.</p>`;
+    if (fqt?.assignee === meId) h += `<p style="margin-top:8px">It’s in Your Quests. Mark it done there when the food’s sorted.</p>`;
+  } else {
+    const qs = food.quests, openQ = qs.filter(x => x.status === 'open' && !x.assignee);
+    h += qs.length === 0 ? `<p>${gm ? 'List what’s needed and the party can claim it.' : `The ${esc(title)} hasn’t listed what’s needed yet. You can add what you’ll bring.`}</p>`
+      : `<ul class="hs-ledger">${qs.map(x => {
+          const un = x.status === 'open' && !x.assignee, mine = x.assignee === meId;
+          return `<li><span>${esc(x.title)}</span><span class="cd-claim">${un ? '<span class="is-open">unclaimed</span>' : `<span>${esc(nameCap(x.assignee))}${x.status === 'done' ? ' · done' : ''}</span>`}
+            ${un && inParty ? `<button type="button" class="hs-btn is-primary" data-act="food-claim" data-sid="${sid}" data-qid="${x.id}">I’ll bring it</button>` : ''}
+            ${mine && x.status === 'open' ? `<button type="button" class="hs-btn" data-act="food-unclaim" data-sid="${sid}" data-qid="${x.id}">Back out</button>` : ''}</span></li>`;
+        }).join('')}</ul>
+        <p style="margin-top:6px">${qs.length - openQ.length} of ${qs.length} claimed${openQ.length ? ` · ${openQ.length} still open` : ' · all covered'}</p>`;
+    if (inParty) h += `<form class="cd-prow" style="margin-top:10px;flex-wrap:nowrap" data-form="food-add" data-sid="${sid}">
+        <input class="cd-pinput" maxlength="120" placeholder="Something else you’ll bring" aria-label="Something else you’ll bring" data-bind="cards.${sid}.own" value="${esc(c.own)}">
+        <button type="submit" class="hs-btn" style="white-space:nowrap">I’ll bring this</button></form>`;
+    if (gm) h += `<form class="cd-sheet-form" data-form="food-seed" data-sid="${sid}"><label class="cd-pfield"><span>What’s needed (comma-separated)</span>
+        <input class="cd-pinput" placeholder="Main, Snacks, Drinks" aria-label="Slots to add" data-bind="cards.${sid}.seed" value="${esc(c.seed)}"></label>
+        <div class="hs-btn-row"><button type="submit" class="hs-btn">Add these slots</button></div></form>`;
+  }
+  if (gm) h += `<div class="hs-btn-row" style="margin-top:12px"><button type="button" class="hs-btn is-primary" data-act="food-confirm" data-sid="${sid}">Food’s sorted: schedule it</button></div>
+    <p style="margin-top:6px">${unclaimedOf(p) ? 'Unclaimed slots won’t hold it up. ' : ''}Otherwise the food step closes when the session starts.</p>`;
+  else h += `<p style="margin-top:8px">The ${esc(title)} will confirm the food (or it closes when the session starts), and then it’s on.</p>`;
+  return h;
+}
+const unclaimedOf = p => p.food?.mode === 'potluck' ? p.food.quests.filter(x => x.status === 'open' && !x.assignee).length : 0;
+
+/* The overlap picker: settings, best times, every start time, then the shortlist. */
+function picker(key) { return S.ui.pickers?.[key] || ((S.ui.pickers ||= {})[key] = { from: toInput(NOW + 86400e3), days: 14, hours: 4, picked: [] }); }
+function Picker(key, submitLabel, cancellable) {
+  const pk = picker(key), slots = overlap(fromInput(pk.from), pk.days, pk.hours), size = partyIds().length;
+  const isPicked = s => pk.picked.some(x => x.start === s.start);
+  const best = [...slots].filter(s => s.headcount).sort((a, b) => b.headcount - a.headcount || a.start - b.start).slice(0, 4);
+  const level = n => n <= 0 ? 0 : n >= size ? 5 : Math.min(4, Math.ceil(n / size * 4));
+  const days = []; for (let i = 0; i < pk.days; i++) days.push(slots.slice(i * 5, i * 5 + 5));
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone.replace(/_/g, ' ');
+  return `<div class="cd-picker" data-picker="${key}">
+    <div class="cd-prow" style="align-items:flex-end">
+      <label class="cd-pfield"><span>From</span><input type="date" class="cd-pinput" style="width:auto" data-bind="pickers.${key}.from" data-rerender value="${pk.from}"></label>
+      <label class="cd-pfield"><span>For</span><select class="cd-pinput" style="width:auto" data-bind="pickers.${key}.days" data-num data-rerender>${[7, 14, 28].map(n => `<option value="${n}" ${pk.days === n ? 'selected' : ''}>${n} days</option>`).join('')}</select></label>
+      <label class="cd-pfield"><span>Session length</span><select class="cd-pinput" style="width:auto" data-bind="pickers.${key}.hours" data-num data-rerender>${[3, 4, 5].map(n => `<option value="${n}" ${pk.hours === n ? 'selected' : ''}>${n} hours</option>`).join('')}</select></label>
+      <span style="font-size:13px;color:var(--paper-muted);padding-bottom:6px">Quorum: ${quorum()} of ${size}</span>
+    </div>
+    <p class="cd-paper-note" role="status" style="margin:0">One player’s Discord can’t be read, so some of their busy time may be missing.</p>
+    <div><h5>Best times</h5>${best.length ? `<ul class="cd-best">${best.map(s => `<li><button type="button" data-act="pick" data-key="${key}" data-start="${s.start}" aria-pressed="${isPicked(s)}">
+        <span>${esc(timeRange(s.start, s.end))}</span><span class="cd-ptag ${s.meetsQuorum ? 'is-ink' : ''}">${s.headcount}/${size} free${s.meetsQuorum ? '' : ' · below quorum'}</span>
+        <small>${s.busy.length ? `Busy: ${esc(list(s.busy))}` : ''}${s.busy.length && s.unknown.length ? ' · ' : ''}${s.unknown.length ? `Unknown: ${esc(list(s.unknown))}` : ''}</small></button></li>`).join('')}</ul>`
+      : `<p>Nobody in the party has availability in this range yet.</p>`}</div>
+    <div><h5>Every start time · free count</h5><div class="cd-heatwrap"><table class="cd-heat"><thead><tr><th></th>${days.map((row, i) => {
+        const d = new Date(row[0].start), mon = i === 0 || d.getDate() === 1 ? d.toLocaleDateString('en-US', { month: 'short' }) + ' ' : '';
+        return `<th scope="col"><span class="cd-dow">${d.toLocaleDateString('en-US', { weekday: 'short' })}</span>${mon}${d.getDate()}</th>`; }).join('')}</tr></thead><tbody>
+      ${[0, 1, 2, 3, 4].map(i => `<tr><th scope="row">${4 + i} pm</th>${days.map(row => row[i]).map(s => `<td><button type="button" data-v="${level(s.headcount)}" class="${s.meetsQuorum ? 'is-q' : ''}" ${s.headcount ? '' : 'disabled'}
+        data-act="pick" data-key="${key}" data-start="${s.start}" aria-pressed="${isPicked(s)}" aria-label="${esc(timeRange(s.start, s.end))}: ${s.headcount} of ${size} free"
+        title="${esc(timeRange(s.start, s.end))}&#10;Free: ${esc(list(s.free) || 'nobody')}&#10;Busy: ${esc(list(s.busy) || 'nobody')}&#10;Unknown: ${esc(list(s.unknown) || 'nobody')}">${s.headcount || ''}</button></td>`).join('')}</tr>`).join('')}
+    </tbody></table></div>
+      <p style="margin-top:4px;font-size:12px">Darker means more of the party is free. An inked outline meets quorum. Times are yours (${esc(tz)}).</p></div>
+    <div style="padding-top:10px;border-top:1px solid var(--paper-line)"><h5>Shortlist (${pk.picked.length} of 4): pick 2 to 4</h5>
+      ${pk.picked.length ? `<ul class="cd-chips">${pk.picked.map(x => `<li>${esc(timeRange(x.start, x.end))}<button type="button" data-act="pick" data-key="${key}" data-start="${x.start}" aria-label="Remove from the shortlist">✕</button></li>`).join('')}</ul>` : ''}
+      <div class="hs-btn-row"><button type="button" class="hs-btn is-primary" data-act="pick-send" data-key="${key}" ${pk.picked.length < 2 ? 'disabled' : ''}>${esc(submitLabel)}</button>
+        ${cancellable ? `<button type="button" class="hs-btn" data-act="pick-cancel" data-key="${key}">Never mind</button>` : ''}</div></div>
+  </div>`;
+}
+
+/* ---------- The party and Table Talk ---------- */
+function Party() {
+  const u = S.ui, active = activeMembers(), inactive = isGM() ? S.members.filter(m => m.isActive === false) : [];
+  const ownerMember = S.campaign.owner ? S.members.find(m => m.playerId === S.campaign.owner) : null;
+  const meId = me().id, mine = myMembership();
+  const isLastGm = mine?.status === 'Game Master' && !S.members.some(m => m.status === 'Game Master' && m.playerId !== meId) && S.members.some(m => m.playerId !== meId);
+  const canRemove = m => m.playerId !== meId && (isAdmin() || (isGM() && m.status !== 'Game Master'));
+  const avatar = m => `<span class="hs-avatar ${m.status === 'Game Master' ? 'is-gm' : ''} ${m.playerId ? '' : 'is-off'}">${esc((m.name[0] || '?').toUpperCase())}</span>`;
+  // Buttons sit under the name, so a long name keeps the row's width.
+  const tools = btns => btns.length ? `<div class="cd-member-tools">${btns.join('')}</div>` : '';
+  const removeBtn = m => canRemove(m) ? `<button type="button" class="cd-mini is-warn" data-act="member-remove" data-mid="${m._id}" aria-label="Remove ${esc(m.name)}" title="Remove ${esc(m.name)} from the campaign">${ICON.userMinus}</button>` : '';
+  const row = m => {
+    const roles = [roleLabel(m), m === ownerMember ? 'Owner' : ''].filter(Boolean).join(' · ');
+    const who = `<div class="cd-name" title="${esc(m.name)}">${esc(m.name)}${m.playerId === meId ? ' <span style="color:var(--muted);font-weight:400">(you)</span>' : ''}</div>${roles ? `<div class="cd-role ${m.status === 'Game Master' ? '' : 'is-plain'}">${esc(roles)}</div>` : ''}`;
+    return `<li><div class="cd-member">${avatar(m)}<div style="min-width:0">${m.playerId ? `<a href="#" data-act="stub" data-msg="${esc(m.name)}’s profile">${who}</a>` : who}
+      ${tools([isGM() && m.status !== 'Game Master' && m.playerId ? `<button type="button" class="cd-mini" data-act="member-inactive" data-mid="${m._id}" title="Make ${esc(m.name)} inactive" aria-label="Make ${esc(m.name)} inactive">${ICON.pause}</button>` : '', removeBtn(m)].filter(Boolean))}</div></div></li>`;
+  };
+  return `<section aria-labelledby="party-h">
+    <div class="cd-sec-row"><h2 class="hs-sec" id="party-h"><span>The Party</span><span class="hs-aside">${active.filter(m => m.playerId).length} playing</span></h2>
+      <button type="button" class="hs-btn-amber" data-act="invite-open">Invite</button></div>
+    ${u.activityErr ? `<p class="hs-note" role="alert" style="margin-bottom:8px">${esc(u.activityErr)}</p>` : ''}
+    <div class="hs-gilded"><ul class="cd-roster">${active.map(row).join('')}
+      ${inactive.length ? `<li class="cd-inactive-head">Inactive (${inactive.length})
+          <span class="cd-tip" tabindex="0" role="img" aria-label="Inactive players can’t read or post in Table Talk. Their characters and history stay. Only the ${esc(gmTitle())} sees this list."
+            title="Inactive players can’t read or post in Table Talk. Their characters and history stay. Only the ${esc(gmTitle())} sees this list.">?</span></li>
+        ${inactive.map(m => `<li class="is-inactive"><div class="cd-member"><span class="hs-avatar is-off">${esc(m.name[0])}</span><div style="min-width:0"><div class="cd-name" title="${esc(m.name)}">${esc(m.name)}</div>
+          ${tools([`<button type="button" class="cd-mini" data-act="member-active" data-mid="${m._id}" title="Reactivate ${esc(m.name)}" aria-label="Reactivate ${esc(m.name)}">${ICON.userCheck}</button>`, removeBtn(m)].filter(Boolean))}</div></div></li>`).join('')}` : ''}
+      ${mine ? `<li class="cd-roster-foot">${isLastGm ? `<p class="cd-fine" style="margin:0">You’re the only ${esc(gmTitle())}: pass the torch before you leave.</p>`
+        : `<button type="button" class="cd-ghost is-warn cd-with-i" data-act="member-leave">${ICON.logOut}Leave the campaign</button>`}
+        ${u.membershipErr ? `<p class="cd-alert" role="alert">${esc(u.membershipErr)}</p>` : ''}</li>` : u.membershipErr ? `<li class="cd-roster-foot"><p class="cd-alert" role="alert">${esc(u.membershipErr)}</p></li>` : ''}
+    </ul></div>
+  </section>`;
+}
+
+function TableTalk() {
+  const meId = me().id, here = [...new Set(['geoff', 'priya', 'marcus', ...(partyIds().includes(meId) || isAdmin() ? [meId] : [])])];
+  return `<section aria-labelledby="talk-h">
+    <h2 class="hs-sec" id="talk-h"><span>Table Talk</span><span class="hs-aside">${here.length} here now</span></h2>
+    <div class="hs-gilded">
+      <div class="cd-talk-head"><span class="hs-avatar is-campaign">AC</span><div style="min-width:0"><div class="hs-thread-name">${esc(S.campaign.title)}</div><div class="hs-thread-sub">Campaign · ${partyIds().length} in the party</div></div>
+        <span class="cd-live ${S.ui.live ? '' : 'is-off'}">${S.ui.live ? 'Live' : 'Offline'}</span></div>
+      <div class="hs-convo" id="convo" aria-live="polite">
+        ${S.messages.map(m => `<div class="hs-msg ${m.by === meId ? 'is-me' : ''}"><span class="hs-msg-by">${esc(m.by === meId ? 'You' : NAMES[m.by] || m.by)}<span class="hs-msg-time">${esc(m.at)}</span></span>${m.html}
+          ${m.att ? `<div class="hs-att"><span class="hs-att-icon"></span><span>${esc(m.att)}</span></div>` : ''}
+          ${m.failed ? `<span class="cd-failed">Not sent.<button type="button" data-act="msg-resend" data-key="${m.key}">Resend</button><button type="button" data-act="msg-discard" data-key="${m.key}">Discard</button></span>` : ''}</div>`).join('')}
+        ${S.ui.typing ? `<div class="hs-typing">${esc(NAMES[S.ui.typing])} is writing<i></i><i></i><i></i></div>` : ''}
+      </div>
+      <div class="cd-here" aria-label="Here now"><span>Here now</span><ul>${here.map(id => `<li title="${esc(NAMES[id])}${id === meId ? ' (you)' : ''}"><span class="hs-avatar">${esc(NAMES[id][0])}</span></li>`).join('')}</ul></div>
+      <div class="cd-toolbar" role="toolbar" aria-label="Formatting">
+        <button type="button" data-act="fmt" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+        <button type="button" data-act="fmt" data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></button>
+        <button type="button" data-act="fmt" data-cmd="code" title="Inline code"><code>&lt;/&gt;</code></button>
+        <button type="button" data-act="fmt" data-cmd="insertUnorderedList" title="Bullet list">•≡</button>
+        <button type="button" data-act="fmt" data-cmd="insertOrderedList" title="Ordered list">1≡</button>
+        <button type="button" data-act="fmt" data-cmd="pre" title="Code block">{ }</button>
+        <small>Shift+Enter for a new line</small>
+      </div>
+      <form class="hs-compose" data-form="send"><div class="cd-editor" id="editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Message" data-placeholder="Write to the party…">${S.ui.draft}</div>
+        <button type="button" class="hs-attach" data-act="stub" data-msg="the file picker (attachments)" aria-label="Attach a file">+</button>
+        <button type="submit" class="hs-btn-amber">Send</button></form>
+    </div>
+  </section>`;
+}
+
+/* ---------- Sessions | Characters ---------- */
+function Records() {
+  const tab = S.ui.tab, upcomingIds = new Set(S.upcoming.map(u => u.id));
+  const past = S.past.filter(s => !upcomingIds.has(s._id) && !(s.date > NOW && s.status === 'scheduled'));
+  const chars = S.characters, current = chars.filter(c => c.active), former = chars.filter(c => !c.active);
+  const tabs = `<div class="hs-gilded cd-tabstrip"><div class="hs-tabs" role="tablist" aria-label="Campaign records">
+    <button role="tab" type="button" id="tab-sessions" aria-controls="panel-sessions" aria-selected="${tab === 'sessions'}" data-act="tab" data-tab="sessions">Sessions<span>${S.upcoming.length + past.length}</span></button>
+    <button role="tab" type="button" id="tab-characters" aria-controls="panel-characters" aria-selected="${tab === 'characters'}" data-act="tab" data-tab="characters">Characters<span>${chars.length}</span></button></div></div>`;
+  if (tab === 'characters') {
+    const grid = (cs, former) => `<div class="hs-gilded"><div class="cd-chars ${former ? 'is-former' : ''}">${cs.map(c => `<a href="#" data-act="stub" data-msg="${esc(c.name)}’s character sheet">
+      <span class="hs-avatar is-char ${c.isDead ? 'is-fallen' : ''}">${esc(c.name.replace(/^(Ser|Brother) /, '')[0])}</span>
+      <div style="min-width:0"><div class="cd-row-title ${c.isDead ? 'is-struck' : ''}">${esc(c.name)}</div>
+        <div class="cd-when">${esc([c.class, c.level ? `Level ${c.level}` : null].filter(Boolean).join(' · ') || 'Adventurer')}${c.isDead ? ' · fallen' : ''}</div>
+        <div class="cd-meta">Played by ${esc(NAMES[c.player] || 'no one')}</div></div></a>`).join('')}</div></div>`;
+    return `<section aria-label="Campaign records">${tabs}<div role="tabpanel" id="panel-characters" aria-labelledby="tab-characters" style="margin-top:var(--space-5);display:flex;flex-direction:column;gap:var(--space-5)">
+      ${chars.length === 0 ? `<p class="hs-note">No characters in this party yet.</p>` : ''}
+      ${current.length ? `<div><h2 class="hs-sec"><span>Adventurers</span><span class="hs-aside">${current.length} in the party</span></h2>${grid(current)}</div>` : ''}
+      ${former.length ? `<div><h2 class="hs-sec"><span>Former party</span><span class="hs-aside">${former.length}</span></h2>${grid(former, true)}</div>` : ''}
+    </div></section>`;
+  }
+  const up = S.upcoming.map(u => {
+    const ch = S.ui.upcoming[u.id];
+    return `<li><a href="#" class="cd-row" data-act="stub" data-msg="${esc(u.title)}’s session page"><div style="min-width:0"><div class="cd-row-title">${esc(u.title)}</div>
+      <div class="cd-meta"><span class="cd-when">${esc(whenOf(u.date, u.endDate))}</span><span>${u.isOnline ? 'Online' : u.venue ? esc(u.venue.name) : 'In person'}</span>${!u.isOnline && u.venue?.address ? `<span>${esc(u.venue.address)}</span>` : ''}</div></div><span class="cd-chev" aria-hidden="true">›</span></a>
+      ${isGM() && !ch ? `<div class="cd-row-tools"><button type="button" class="cd-ghost" data-act="up-change" data-uid="${u.id}">Change the night</button></div>` : ''}
+      ${ch ? `<div class="cd-row-sheet"><article class="hs-sheet" data-seed="${S.campaign.id}/${u.id}/change">
+        <div class="hs-kicker">${esc(u.title)}</div><h3 class="hs-sheet-title" style="font-size:21px">Change the night</h3>
+        <p class="cd-agenda" style="color:var(--paper-muted)">Shortlist new times and the party votes again. Until a new night is confirmed the session keeps its date and events, but it’s back to being planned (no ready check). Then the Discord and calendar events move with it.</p>
+        ${Picker(`up:${u.id}`, 'Put it to a vote', true)}</article></div>` : ''}</li>`;
+  }).join('');
+  const pastRows = past.map(s => {
+    const whenCls = s.status === 'planning' ? 'is-planning' : s.status === 'cancelled' ? 'is-cancelled' : '';
+    const when = s.status === 'planning' ? 'Planning' : s.status === 'cancelled' ? `Cancelled · ${dayY(s.date)}` : s.date ? dayY(s.date) : 'Date TBD';
+    return `<li><a href="#" class="cd-row" data-act="stub" data-msg="${esc(s.title)}’s session page"><div style="min-width:0"><div class="cd-row-title">${esc(s.title)}</div>
+      <div class="cd-meta"><span class="cd-when ${whenCls}">${esc(when)}</span>${s.location ? `<span>${esc(s.location)}</span>` : ''}${s.isOnline ? '<span class="hs-tag">Online</span>' : ''}
+        ${s.status !== 'cancelled' && s.attendeeCount !== undefined ? `<span title="Players the ${esc(gmTitle())} marked as there">${s.attendanceConfirmedAt || s.attendeeCount > 0 ? `${s.attendeeCount} attended` : 'Attendance not taken'}</span>` : ''}
+        ${s.gmOverride ? `<span class="cd-flame">${FLAME} ${esc(NAMES[s.gmOverride])} ran it as ${esc(gmTitle())}</span>` : ''}</div>
+      ${s.summary ? `<p class="cd-sum">${esc(s.summary)}</p>` : ''}</div><span class="cd-chev" aria-hidden="true">›</span></a></li>`;
+  }).join('');
+  return `<section aria-label="Campaign records">${tabs}
+    <div role="tabpanel" id="panel-sessions" aria-labelledby="tab-sessions" class="cd-records" style="margin-top:var(--space-5)"><div class="cd-records-in">
+      <div><h2 class="hs-sec"><span>Coming up</span><span class="hs-aside">${S.upcoming.length}</span></h2>
+        ${S.upcoming.length ? `<div class="hs-gilded"><ul class="cd-rows">${up}</ul></div>` : `<p class="hs-note">Nothing scheduled yet.</p>`}</div>
+      <div><div class="cd-sec-row"><h2 class="hs-sec"><span>Previous sessions</span><span class="hs-aside">${past.length}</span></h2>
+          ${isGM() ? `<button type="button" class="hs-btn-amber" data-act="session-open">Add a session</button>` : ''}</div>
+        ${S.ui.warnings.length ? `<div class="hs-gilded" style="margin-bottom:12px"><div class="cd-warn"><div>${S.ui.warnings.map(w => `<p>${esc(w)}</p>`).join('')}</div><button type="button" class="cd-x" data-act="warn-dismiss" aria-label="Dismiss">✕</button></div></div>` : ''}
+        ${past.length ? `<div class="hs-gilded"><ul class="cd-rows">${pastRows}</ul></div>` : `<p class="hs-note">No sessions logged yet.</p>`}</div>
+    </div></div>
+  </section>`;
+}
+
+function Page() {
+  return Head() + (S.ui.editing ? EditForm() : Info()) + NoticeBoard()
+    + `<div class="cd-split"><div class="cd-split-in">${Party()}${TableTalk()}</div></div>` + Records();
+}
+
+/* =============================================================== render: dialogs */
+function Modal() {
+  const m = S.ui.modal, u = S.ui;
+  if (!m) return '';
+  let body = '';
+  if (m === 'confirm') {
+    body = `<div class="cd-pad cd-form"><p style="margin:0;font-size:16px;line-height:1.45">${esc(u.confirm.text)}</p>
+      <div class="cd-actions"><button type="button" class="hs-btn-amber" data-act="confirm-yes">${esc(u.confirm.yes)}</button><button type="button" class="cd-ghost" data-act="modal-close">Never mind</button></div></div>`;
+  } else if (m === 'invite') {
+    const link = `https://hearthside.geoffthedeov.net/game-night/join/${S.campaign.id}`;
+    const err = Object.values(u.invites).find(s => s !== 'sent' && s !== 'sending');
+    body = `<div class="cd-pad cd-form"><div class="cd-form-head"><h3>Invite players</h3><button type="button" class="cd-x" data-act="modal-close" aria-label="Close">✕</button></div>
+      <p class="cd-fine" style="margin:0">Share this link and they can join the campaign.</p>
+      <div class="cd-copy"><input class="cd-input" readonly value="${esc(link)}" aria-label="Invite link" id="invite-link"><button type="button" class="hs-btn-amber" data-act="invite-copy">${u.copied ? 'Copied' : 'Copy link'}</button></div>
+      <hr class="cd-rule" style="margin:4px 0"><div class="cd-group">Or invite a friend</div>
+      ${S.friends.length ? `<ul class="cd-friends">${S.friends.map(f => { const st = u.invites[f._id]; return `<li><div style="flex:1;min-width:0"><div class="cd-name">@${esc(f.handle)}</div><div class="cd-fine" style="margin:0">#${f.userNumber}</div></div>
+        <button type="button" class="${st === 'sent' ? 'cd-ghost' : 'hs-btn-amber'}" style="height:28px" data-act="invite-friend" data-fid="${f._id}" ${st === 'sent' || st === 'sending' ? 'disabled' : ''}>${st === 'sent' ? 'Invited' : st === 'sending' ? 'Sending…' : 'Invite'}</button></li>`; }).join('')}</ul>`
+        : `<p class="cd-fine">No friends yet. Add some from the Social Hub.</p>`}
+      ${err ? `<p class="cd-alert" role="alert">${esc(err)}</p>` : ''}</div>`;
+  } else if (m === 'session') {
+    const f = u.sessionForm, needsTimes = f.createDiscordEvent || f.createGoogleEvent, needsLoc = f.createDiscordEvent && !S.campaign.discordChannelId && !f.isOnline;
+    const sw = (k, label) => `<button type="button" class="cd-switch" role="switch" aria-checked="${!!f[k]}" data-act="sf-toggle" data-k="${k}"><i></i><span>${esc(label)}</span></button>`;
+    body = `<form class="cd-pad cd-form" data-form="session"><div class="cd-form-head"><h3>Add a session</h3><button type="button" class="cd-x" data-act="modal-close" aria-label="Close">✕</button></div>
+      <label class="cd-field"><span>Title</span><input class="cd-input" required data-bind="sessionForm.title" value="${esc(f.title)}"></label>
+      <div class="cd-grid2"><label class="cd-field"><span>Starts${needsTimes ? ' (required)' : ''}</span><input type="datetime-local" class="cd-input" ${needsTimes ? 'required' : ''} data-bind="sessionForm.date" value="${f.date}"></label>
+        <label class="cd-field"><span>Ends${needsTimes ? ' (required)' : ''}</span><input type="datetime-local" class="cd-input" ${needsTimes ? 'required' : ''} data-bind="sessionForm.endDate" value="${f.endDate}"></label></div>
+      <label class="cd-field"><span>Location${needsLoc ? ' (required)' : ''}</span><input class="cd-input" ${needsLoc ? 'required' : ''} placeholder="${f.isOnline ? 'Online' : 'Geoff’s place'}" data-bind="sessionForm.location" value="${esc(f.location)}"></label>
+      ${sw('isOnline', 'Online session')}
+      <label class="cd-field"><span>Agenda and prep notes</span><textarea class="cd-input" rows="3" data-bind="sessionForm.agenda">${esc(f.agenda)}</textarea></label>
+      <hr class="cd-rule" style="margin:2px 0"><div class="cd-group">Events elsewhere</div>
+      ${sw('createDiscordEvent', S.campaign.discordGuildId ? 'Make a Discord event' : 'Make a Discord event (link a server on this campaign first)')}
+      ${sw('createGoogleEvent', 'Make a Google Calendar event')}
+      ${needsTimes ? `<p class="cd-fine" style="margin:0">Events need a start and end time${f.createDiscordEvent && !S.campaign.discordChannelId ? ', and Discord needs a location (or online)' : ''}. The agenda becomes the event’s description.</p>` : ''}
+      ${u.sessionErr ? `<p class="cd-alert" role="alert">${esc(u.sessionErr)}</p>` : ''}
+      <div class="cd-actions"><button type="submit" class="hs-btn-amber">Add the session</button><button type="button" class="cd-ghost" data-act="modal-close">Cancel</button></div></form>`;
+  } else if (m === 'banner') {
+    const cr = u.crop;
+    body = `<div class="cd-pad cd-form"><div class="cd-form-head"><h3>The campaign’s banner</h3><button type="button" class="cd-x" data-act="modal-close" aria-label="Close">✕</button></div>
+      <div class="cd-crop ${cr.src ? '' : 'is-empty'}" id="crop" ${cr.src ? 'tabindex="0" aria-label="Banner crop. Drag, or use the arrow keys, to move the image."' : 'data-act="banner-pick"'}>${cr.src ? `<img id="crop-img" src="${cr.src}" alt="" draggable="false">` : '<span>Pick an image</span>'}</div>
+      ${cr.src ? `<label class="cd-zoom"><span>Zoom</span><input type="range" min="1" max="3" step="0.01" value="${cr.zoom}" id="crop-zoom"></label>` : ''}
+      <p class="cd-fine" style="margin:0">It shows at 4:1 across the top of the campaign, and on the Campaigns page. Drag to choose what shows.</p>
+      <div class="cd-actions"><button type="button" class="hs-btn-amber" data-act="banner-save" ${cr.src ? '' : 'disabled'}>Save the banner</button>
+        <button type="button" class="cd-ghost" data-act="banner-pick">${cr.src ? 'Pick another image' : 'Pick an image'}</button>
+        ${S.campaign.bannerUrl ? `<button type="button" class="cd-ghost is-warn" data-act="banner-remove">Remove it</button>` : ''}</div></div>`;
+  }
+  return `<div class="cd-modal" data-act="modal-backdrop"><div class="hs-gilded cd-dialog ${m === 'banner' ? 'is-wide' : ''}" role="dialog" aria-modal="true">${body}</div></div>`;
+}
+
+/* =============================================================== render + wiring */
+function render() {
+  const convo = document.getElementById('convo'), atBottom = !convo || convo.scrollHeight - convo.scrollTop - convo.clientHeight < 40;
+  page.innerHTML = Page();
+  modalRoot.innerHTML = Modal();
+  Hearthside.GildedPanel.decorate(document);
+  document.querySelectorAll('.hs-sheet').forEach(el => { try { Hearthside.NoticeSheet.mount(el); } catch {} });
+  const c2 = document.getElementById('convo'); if (c2 && atBottom) c2.scrollTop = c2.scrollHeight;
+  if (S.ui.modal === 'banner') wireCrop();
+  updateBar();
+}
+
+function updateBar() {
+  const b = BOARDS[boardIdx], m = myMembership();
+  const role = isAdmin() ? 'admin, not in the party' : m?.status === 'Game Master' ? `${gmTitle()}${S.campaign.owner === me().id ? ', owner' : ''}` : 'player';
+  document.getElementById('lbl').innerHTML = `${esc(b.name)}<small>${esc(b.note)}</small>`;
+  document.getElementById('viewer').textContent = `Viewing as: ${me().label} (${role})`;
+  document.getElementById('torch').textContent = torchHeld ? 'Torch: Geoff holds it' : 'Torch: nobody (admin-managed)';
+  document.getElementById('ban').textContent = bannerOn ? 'Banner: uploaded' : 'Banner: none';
+  store.set('hs-cd-viewer', me().id); store.set('hs-cd-board', b.key); store.set('hs-cd-torch', torchHeld ? 'held' : 'unclaimed'); store.set('hs-cd-banner', bannerOn ? 'on' : 'none');
+  try { const u = new URL(location.href); u.searchParams.set('board', b.key); u.searchParams.set('viewer', me().id); history.replaceState(null, '', u); } catch {}
+}
+
+let toastTimer;
+function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 3200); }
+
+let onConfirm = null;
+function ask(text, yes, fn) { S.ui.confirm = { text, yes }; S.ui.modal = 'confirm'; onConfirm = fn; render(); }
+
+function setPath(obj, path, val) { const ks = path.split('.'); let o = obj; ks.slice(0, -1).forEach(k => { o = o[k] ||= {}; }); o[ks[ks.length - 1]] = val; }
+const planOf = sid => S.planning.find(p => p.session.id === sid);
+
+/* ---------- the planning rules, in memory (the server's job in the real app) ---------- */
+function closeNight(p, reason) {
+  const n = p.night; n.status = 'closed'; n.closedReason = reason;
+  const ok = n.options.filter(o => o.approvals.length >= n.quorum);
+  if (!ok.length) { n.result = 'no_quorum'; return; }
+  const max = Math.max(...ok.map(o => o.approvals.length)), top = ok.filter(o => o.approvals.length === max);
+  if (top.length > 1) { n.result = 'tie'; n.tiedOptionIds = top.map(o => o.id); return; }
+  setNight(p, top[0]);
+}
+function setNight(p, o) {
+  const s = p.session, n = p.night; n.status = 'closed'; n.result = 'winner'; n.winningOptionId = o.id;
+  s.date = o.start; s.endDate = o.end;
+  if (s.isOnline || s.venue) { schedule(p); return; }
+  s.stage = 'venue';
+  p.venue = mkPoll(1, p.venues.slice(0, 3).map(v => opt(null, 0, [], { venueId: v.id })), { quorum: null, eligibleIds: partyIds() });
+  p.venueRounds = [p.venue];
+}
+function closeVenue(p, reason) {
+  const v = p.venue; v.status = 'closed'; v.closedReason = reason;
+  const max = Math.max(0, ...v.options.map(o => o.approvals.length)), top = v.options.filter(o => o.approvals.length === max);
+  if (top.length > 1) { v.result = 'tie'; v.tiedOptionIds = top.map(o => o.id); return; }
+  setVenue(p, top[0]);
+}
+function setVenue(p, o) {
+  const s = p.session, v = p.venue; v.status = 'closed'; v.result = 'winner'; v.winningOptionId = o.id;
+  s.venue = venueOf(p, o.venueId); s.hostId = s.venue.hostId; s.stage = 'food';
+  p.food = s.foodMode === 'provided' ? { mode: 'provided', ownerId: s.foodOwnerId, quests: [fq('Dinner for the table', s.foodOwnerId)] } : { mode: 'potluck', ownerId: null, quests: [] };
+}
+function schedule(p) {
+  const s = p.session;
+  S.planning = S.planning.filter(x => x !== p);
+  S.upcoming.push({ id: s.id, title: s.title, date: s.date, endDate: s.endDate, isOnline: s.isOnline, venue: s.venue });
+  S.upcoming.sort((a, b) => a.date - b.date);
+  toast(`Scheduled: ${s.title}, ${whenOf(s.date, s.endDate)}. It moved to Coming up.`);
+}
+
+const ACT = {
+  stub(el) { toast(`Prototype: this goes to ${el.dataset.msg}.`); },
+  edit() { const c = S.campaign; S.ui.form = { title: c.title, description: c.description || '', status: c.status, startDate: toInput(c.startDate), endDate: toInput(c.endDate),
+    discordGuildId: c.discordGuildId || '', discordChannelId: c.discordChannelId || '', quorum: c.quorum ?? '', tableLink: c.tableLink || '', gmTitle: c.gmTitle }; S.ui.editing = true; S.ui.settingsErr = null; },
+  'edit-cancel'() { S.ui.editing = false; },
+  'torch-open'() { S.ui.torchTo = ''; S.ui.torchFrom = ''; S.ui.torchErr = null; },
+  'torch-cancel'() { S.ui.torchTo = null; S.ui.torchErr = null; },
+  'torch-claim'() {
+    ask(`Claim the torch? You become the ${gmTitle()} and owner of ${S.campaign.title}, and plan its sessions.`, 'Claim the torch', () => {
+      myMembership().status = 'Game Master'; S.campaign.owner = me().id; toast('You hold the torch.');
+    });
+  },
+  'banner-open'() { S.ui.crop = { src: S.campaign.bannerUrl, zoom: 1, x: 0, y: 0, fresh: true }; S.ui.modal = 'banner'; },
+  'banner-pick'() { fileInput.value = ''; fileInput.click(); return false; },
+  'banner-remove'() { S.campaign.bannerUrl = null; bannerOn = false; S.ui.modal = null; toast('Banner removed.'); },
+  'banner-save'() { saveCrop(); },
+  'modal-close'() { S.ui.modal = null; S.ui.copied = false; },
+  'modal-backdrop'(el, e) { if (e.target === el) { S.ui.modal = null; S.ui.copied = false; } else return false; },
+  'confirm-yes'() { S.ui.modal = null; const fn = onConfirm; onConfirm = null; fn && fn(); },
+  'kickoff-open'() { S.ui.kickoff = { title: '', agenda: '', isOnline: true, foodMode: '', foodOwnerId: '' }; S.ui.kickErr = null; },
+  'kickoff-close'() { S.ui.kickoff = null; },
+  'kickoff-where'(el) { S.ui.kickoff.isOnline = el.dataset.v === 'online'; },
+  'plan-cancel'(el) { const p = planOf(el.dataset.sid); ask(`Cancel planning “${p.session.title}”? The party will be told.`, 'Cancel planning', () => { S.planning = S.planning.filter(x => x !== p); toast('Planning cancelled. The party was told.'); }); },
+  'st-pass'(el) {
+    const p = planOf(el.dataset.sid), c = card(p), to = c.torchTo; if (!to) { c.error = 'Choose a player to pass it to.'; return; }
+    ask(`Pass the torch to ${NAMES[to]} for this session? They’ll run it as ${gmTitle()}; you stay the campaign’s ${gmTitle()}.`, 'Pass it', () => { p.session.gmOverride = { id: to, name: NAMES[to] }; c.torchTo = ''; c.error = null; });
+  },
+  'st-back'(el) {
+    const p = planOf(el.dataset.sid), standIn = p.session.gmOverride, isStandIn = standIn.id === me().id;
+    ask(isStandIn && !isGM() ? `Hand this session back to the ${gmTitle()}?` : `Take the torch back from ${standIn.name}?`, isStandIn && !isGM() ? 'Hand it back' : 'Take it back', () => { p.session.gmOverride = null; });
+  },
+  'night-advance'(el) { const p = planOf(el.dataset.sid); closeNight(p, 'gm_advanced'); },
+  'night-reshort'(el) { const c = card(planOf(el.dataset.sid)); c.reNight = !c.reNight; },
+  'night-tiebreak'(el) { const p = planOf(el.dataset.sid); setNight(p, p.night.options.find(o => o.id === el.dataset.oid)); },
+  'venue-suggest'(el) { const c = card(planOf(el.dataset.sid)); c.suggesting = true; c.suggest = null; c.reVenue = null; },
+  'venue-suggest-cancel'(el) { card(planOf(el.dataset.sid)).suggesting = false; },
+  'sg-mode'(el) { card(planOf(el.dataset.sid)).suggest.mode = el.dataset.v; },
+  'venue-advance'(el) { closeVenue(planOf(el.dataset.sid), 'gm_advanced'); },
+  'venue-tiebreak'(el) { const p = planOf(el.dataset.sid); setVenue(p, p.venue.options.find(o => o.id === el.dataset.oid)); },
+  'venue-reshort'(el) { const p = planOf(el.dataset.sid), c = card(p); c.suggesting = false; c.reVenue = c.reVenue ? null : new Set(p.venue.status === 'open' ? p.venue.options.map(o => o.venueId) : []); },
+  'food-claim'(el) { const p = planOf(el.dataset.sid); p.food.quests.find(x => x.id === el.dataset.qid).assignee = me().id; toast('Claimed. It’s in Your Quests now.'); },
+  'food-unclaim'(el) { const p = planOf(el.dataset.sid); p.food.quests.find(x => x.id === el.dataset.qid).assignee = null; },
+  'food-confirm'(el) { schedule(planOf(el.dataset.sid)); },
+  pick(el) {
+    const pk = picker(el.dataset.key), start = Number(el.dataset.start), i = pk.picked.findIndex(x => x.start === start);
+    if (i >= 0) pk.picked.splice(i, 1); else if (pk.picked.length < 4) pk.picked.push({ start, end: start + pk.hours * 3600e3 }); else toast('Four at most: take one off the shortlist first.');
+    pk.picked.sort((a, b) => a.start - b.start);
+  },
+  'pick-cancel'(el) {
+    const key = el.dataset.key; delete S.ui.pickers[key];
+    if (key.startsWith('night:')) card(planOf(key.slice(6))).reNight = false; else delete S.ui.upcoming[key.slice(3)];
+  },
+  'pick-send'(el) {
+    const key = el.dataset.key, pk = picker(key), opts = pk.picked.map(x => opt(x.start, (x.end - x.start) / 3600e3));
+    if (key.startsWith('night:')) {
+      const p = planOf(key.slice(6)), c = card(p);
+      if (p.night?.status === 'open') { p.night.status = 'closed'; p.night.closedReason = 'gm_reshortlisted'; }
+      p.night = mkPoll((p.night?.round || 0) + 1, opts, { quorum: quorum(), eligibleIds: partyIds() }); p.nightRounds.push(p.night);
+      c.reNight = false; c.choice = null; toast('Sent to the party. They’ve been told to vote.');
+    } else {
+      const u = S.upcoming.find(x => x.id === key.slice(3));
+      S.upcoming = S.upcoming.filter(x => x !== u); delete S.ui.upcoming[u.id];
+      const p = mkPlan(mkSession({ id: u.id, title: u.title, isOnline: u.isOnline, foodMode: null, agenda: null, date: u.date, endDate: u.endDate, venue: u.venue }));
+      p.night = mkPoll(1, opts, { quorum: quorum(), eligibleIds: partyIds() }); p.nightRounds = [p.night]; S.planning.push(p);
+      toast('Back on the Notice Board: the party votes on a new night.');
+    }
+    delete S.ui.pickers[key];
+  },
+  'up-change'(el) { S.ui.upcoming[el.dataset.uid] = true; },
+  tab(el) { S.ui.tab = el.dataset.tab; },
+  'warn-dismiss'() { S.ui.warnings = []; },
+  'session-open'() { S.ui.sessionForm = { title: '', date: '', endDate: '', location: '', isOnline: false, agenda: '', createDiscordEvent: false, createGoogleEvent: false }; S.ui.sessionErr = null; S.ui.modal = 'session'; },
+  'sf-toggle'(el) { const f = S.ui.sessionForm; f[el.dataset.k] = !f[el.dataset.k]; },
+  'invite-open'() { S.ui.modal = 'invite'; S.ui.invites = {}; S.ui.copied = false; },
+  'invite-copy'() { const v = document.getElementById('invite-link').value; try { navigator.clipboard.writeText(v).catch(() => {}); } catch {} S.ui.copied = true; setTimeout(() => { S.ui.copied = false; if (S.ui.modal === 'invite') render(); }, 2000); },
+  'invite-friend'(el) {
+    const id = el.dataset.fid; S.ui.invites[id] = 'sending';
+    setTimeout(() => { S.ui.invites[id] = id === 'f3' ? '@theo.r is already in the party.' : 'sent'; render(); }, 500);
+  },
+  'member-remove'(el) {
+    const m = S.members.find(x => x._id === el.dataset.mid);
+    ask(`Remove ${m.name} from ${S.campaign.title}?`, 'Remove them', () => { S.members = S.members.filter(x => x !== m); S.ui.membershipErr = null; });
+  },
+  'member-inactive'(el) {
+    const m = S.members.find(x => x._id === el.dataset.mid);
+    ask(`Make ${m.name} inactive? The campaign leaves their list and they can’t read or post in Table Talk. Their characters and history stay, and you can bring them back.`, 'Make inactive', () => { m.isActive = false; S.characters.forEach(c => { if (c.player === m.playerId) c.active = false; }); });
+  },
+  'member-active'(el) { const m = S.members.find(x => x._id === el.dataset.mid); m.isActive = true; S.characters.forEach(c => { if (c.player === m.playerId) c.active = true; }); },
+  'member-leave'() { ask(`Leave ${S.campaign.title}? You’ll need the invite link to rejoin.`, 'Leave', () => toast('Prototype: you’d leave, and go back to the Campaigns list.')); },
+  fmt(el) {
+    const ed = document.getElementById('editor'); ed.focus(); const cmd = el.dataset.cmd;
+    if (cmd === 'code' || cmd === 'pre') { const sel = getSelection(), t = sel.toString() || (cmd === 'pre' ? 'code' : 'code');
+      document.execCommand('insertHTML', false, cmd === 'pre' ? `<pre>${esc(t)}</pre><p><br></p>` : `<code>${esc(t)}</code>&nbsp;`); }
+    else document.execCommand(cmd);
+    S.ui.draft = ed.innerHTML; return false;
+  },
+  'msg-resend'(el) { const m = S.messages.find(x => x.key === el.dataset.key); m.failed = false; },
+  'msg-discard'(el) { S.messages = S.messages.filter(x => x.key !== el.dataset.key); },
+};
+
+const FORM = {
+  edit() {
+    const f = S.ui.form, c = S.campaign;
+    Object.assign(c, { title: f.title.trim() || c.title, description: f.description, status: f.status, startDate: fromInput(f.startDate), endDate: fromInput(f.endDate),
+      discordGuildId: f.discordGuildId.trim(), discordChannelId: f.discordChannelId.trim() });
+    if (isOwner()) {
+      const qn = f.quorum === '' ? null : Number(f.quorum);
+      if (qn !== null && (qn < 1 || qn > partyIds().length)) { S.ui.settingsErr = `Quorum must be between 1 and the party’s ${partyIds().length}.`; return; }
+      Object.assign(c, { quorum: qn, tableLink: f.tableLink.trim(), gmTitle: f.gmTitle.trim() || 'Dungeon Master' });
+    }
+    S.ui.editing = false; toast('Saved.');
+  },
+  'torch-pass'() {
+    const u = S.ui, target = S.members.find(m => m.playerId === u.torchTo); if (!target) { u.torchErr = `Choose the new ${gmTitle()}.`; return; }
+    const gms = gmMembers(), iAmGm = gms.some(m => m.playerId === me().id);
+    const from = iAmGm ? myMembership() : gms.length === 1 ? gms[0] : gms.find(m => m.playerId === u.torchFrom);
+    if (!iAmGm && gms.length > 1 && !from) { u.torchErr = `Choose which ${gmTitle()} steps down.`; return; }
+    const stepsDown = iAmGm ? 'you become a player' : from ? `${from.name} becomes a player` : 'no one steps down';
+    const ownership = S.campaign.owner ? 'Ownership doesn’t change.' : 'They become its owner, too.';
+    ask(`Pass the torch to ${target.name}? They become the ${gmTitle()} and ${stepsDown}. ${ownership}`, 'Pass the torch', () => {
+      target.status = 'Game Master'; if (from) from.status = 'Player'; if (!S.campaign.owner) S.campaign.owner = target.playerId; u.torchTo = null; u.torchErr = null;
+    });
+  },
+  kickoff() {
+    const k = S.ui.kickoff, food = !k.isOnline && k.foodMode ? k.foodMode : null;
+    const p = mkPlan(mkSession({ title: k.title.trim(), agenda: k.agenda.trim() || null, isOnline: k.isOnline, foodMode: food, foodOwnerId: food === 'provided' ? k.foodOwnerId : null }));
+    S.planning.push(p); S.ui.kickoff = null; toast('Pinned up. Now pick some nights for the party.');
+  },
+  'night-vote'(form) {
+    const p = planOf(form.dataset.sid), c = card(p), n = p.night, meId = me().id;
+    const choice = c.choice || new Set(n.options.filter(o => o.approvals.includes(meId)).map(o => o.id));
+    n.options.forEach(o => { o.approvals = o.approvals.filter(id => id !== meId); if (choice.has(o.id)) o.approvals.push(meId); });
+    if (!n.voted.includes(meId)) n.voted.push(meId); c.choice = null;
+    if (n.eligibleIds.every(id => n.voted.includes(id))) closeNight(p, 'all_voted');
+  },
+  'venue-vote'(form) {
+    const p = planOf(form.dataset.sid), c = card(p), v = p.venue, meId = me().id;
+    v.options.forEach(o => { o.approvals = o.approvals.filter(id => id !== meId); if (o.id === c.venuePick) o.approvals.push(meId); });
+    if (!v.voted.includes(meId)) v.voted.push(meId); c.venuePick = undefined;
+    if (v.eligibleIds.every(id => v.voted.includes(id))) closeVenue(p, 'all_voted');
+  },
+  'venue-suggest'(form) {
+    const p = planOf(form.dataset.sid), c = card(p), sg = c.suggest, gm = cardGM(p);
+    let vid = sg.venueId;
+    if (sg.mode === 'new') {
+      vid = nid('v'); p.venues.push({ id: vid, name: sg.name.trim(), kind: sg.kind, hostId: sg.kind === 'home' ? (gm ? sg.hostId : me().id) : null, address: sg.address.trim() || null, lastUsedAt: null });
+    }
+    if (!vid) return;
+    p.venue.options.push(opt(null, 0, [], { venueId: vid, suggestedBy: me().id }));
+    c.suggesting = false; c.suggest = null;
+  },
+  'venue-reshort'(form) {
+    const p = planOf(form.dataset.sid), c = card(p);
+    if (p.venue.status === 'open') { p.venue.status = 'closed'; p.venue.closedReason = 'gm_reshortlisted'; }
+    p.venue = mkPoll(p.venue.round + 1, [...c.reVenue].map(id => opt(null, 0, [], { venueId: id })), { quorum: null, eligibleIds: partyIds() });
+    p.venueRounds.push(p.venue); c.reVenue = null; c.venuePick = undefined;
+  },
+  'food-add'(form) { const p = planOf(form.dataset.sid), c = card(p); if (!c.own.trim()) return; p.food.quests.push(fq(c.own.trim(), me().id)); c.own = ''; },
+  'food-seed'(form) {
+    const p = planOf(form.dataset.sid), c = card(p), titles = c.seed.split(',').map(t => t.trim()).filter(Boolean);
+    if (!titles.length || titles.length > 10) { c.error = 'List between 1 and 10 things, separated by commas.'; return; }
+    titles.forEach(t => p.food.quests.push(fq(t, null))); c.seed = ''; c.error = null;
+  },
+  session() {
+    const f = S.ui.sessionForm, c = S.campaign;
+    if (f.createDiscordEvent || f.createGoogleEvent) {
+      if (!f.date || !f.endDate) { S.ui.sessionErr = 'Events in Discord or Google Calendar need a start and an end.'; return; }
+      if (new Date(f.endDate) <= new Date(f.date)) { S.ui.sessionErr = 'The end has to be after the start.'; return; }
+      if (f.createDiscordEvent && !c.discordChannelId && !f.location.trim() && !f.isOnline) { S.ui.sessionErr = 'Discord events need a location: enter one, or make it online.'; return; }
+    }
+    const date = f.date ? new Date(f.date).getTime() : null, end = f.endDate ? new Date(f.endDate).getTime() : null;
+    const w = [];
+    if (f.createDiscordEvent && !c.discordGuildId) w.push('No Discord server is linked to this campaign, so no Discord event was made.');
+    if (f.createGoogleEvent) w.push('Google Calendar isn’t connected for your account, so no calendar event was made.');
+    if (date && date > NOW) S.upcoming.push({ id: nid('u'), title: f.title, date, endDate: end, isOnline: f.isOnline, venue: f.location ? { name: f.location, address: null } : null });
+    else S.past.unshift({ _id: nid('p'), title: f.title, date, location: f.location, isOnline: f.isOnline, status: 'scheduled', summary: f.agenda, attendeeCount: 0, attendanceConfirmedAt: null });
+    S.past.sort((a, b) => (b.date || 0) - (a.date || 0)); S.upcoming.sort((a, b) => a.date - b.date);
+    S.ui.warnings = w; S.ui.modal = null; toast(date && date > NOW ? 'Added under Coming up.' : 'Added to Previous sessions.');
+  },
+  send() {
+    const ed = document.getElementById('editor'), html = clean(ed.innerHTML);
+    if (!ed.textContent.trim()) return;
+    const t = new Date(), at = `${t.getHours() % 12 || 12}:${String(t.getMinutes()).padStart(2, '0')} ${t.getHours() < 12 ? 'am' : 'pm'}`;
+    S.messages.push({ key: nid('k'), by: me().id, html, at, failed: /\bfail\b/i.test(ed.textContent) });
+    S.ui.draft = '';
+    if (!S.ui.typing) { S.ui.typing = 'theo'; setTimeout(() => { S.ui.typing = null; S.messages.push({ key: nid('k'), by: 'theo', html: 'Heard. I’ll bring the good dice this time.', at }); render(); }, 2600); }
+  },
+};
+
+/* Messages keep bold, italic, code and lists; everything else becomes text. */
+function clean(html) {
+  const t = document.createElement('template'); t.innerHTML = html; const ok = new Set(['B', 'STRONG', 'I', 'EM', 'CODE', 'PRE', 'UL', 'OL', 'LI', 'BR', 'P', 'DIV']);
+  const walk = n => [...n.childNodes].forEach(c => { if (c.nodeType === 1) { walk(c); if (!ok.has(c.tagName)) c.replaceWith(...c.childNodes); else [...c.attributes].forEach(a => c.removeAttribute(a.name)); } });
+  walk(t.content); return t.innerHTML;
+}
+
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-act]'); if (!el) return;
+  const fn = ACT[el.dataset.act]; if (!fn) return;
+  if (el.tagName === 'A' || el.dataset.act === 'stub') e.preventDefault();
+  if (fn(el, e) !== false) render();
+});
+// Formatting buttons mustn't take focus (and the selection) from the message being written.
+document.addEventListener('mousedown', e => { if (e.target.closest('.cd-toolbar button')) e.preventDefault(); });
+document.addEventListener('submit', e => {
+  const f = e.target.closest('[data-form]'); if (!f) return; e.preventDefault();
+  const fn = FORM[f.dataset.form]; if (fn && fn(f) !== false) render();
+});
+document.addEventListener('input', e => {
+  const el = e.target;
+  if (el.id === 'editor') { S.ui.draft = el.innerHTML; return; }
+  if (!el.dataset.bind || el.tagName === 'SELECT') return;
+  setPath(S.ui, el.dataset.bind, 'num' in el.dataset ? Number(el.value) : el.value);
+  if ('rerender' in el.dataset && el.type !== 'date') render();
+  else if (el.closest('[data-form="kickoff"]')) { const b = el.closest('form').querySelector('button[type=submit]'); const k = S.ui.kickoff; b.disabled = !(k.title.trim() && (k.isOnline || (k.foodMode && (k.foodMode !== 'provided' || k.foodOwnerId)))); }
+});
+document.addEventListener('change', e => {
+  const el = e.target;
+  if (el.dataset.bind && el.tagName === 'SELECT') { setPath(S.ui, el.dataset.bind, 'num' in el.dataset ? Number(el.value) : el.value); if ('rerender' in el.dataset) render(); return; }
+  if (el.dataset.bind && el.type === 'date' && 'rerender' in el.dataset) { render(); return; }
+  const kind = el.dataset.change; if (!kind) return;
+  const p = planOf(el.dataset.sid), c = card(p);
+  if (kind === 'night-choice') { const meId = me().id; c.choice ||= new Set(p.night.options.filter(o => o.approvals.includes(meId)).map(o => o.id)); el.checked ? c.choice.add(el.dataset.oid) : c.choice.delete(el.dataset.oid); }
+  if (kind === 'venue-pick') c.venuePick = el.dataset.oid;
+  if (kind === 'venue-re') el.checked ? c.reVenue.add(el.dataset.vid) : c.reVenue.delete(el.dataset.vid);
+  render();
+});
+document.addEventListener('keydown', e => {
+  if (e.target.id === 'editor' && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (FORM.send() !== false) render(); document.getElementById('editor')?.focus(); return; }
+  if (e.key === 'Escape' && S.ui.modal) { S.ui.modal = null; render(); return; }
+  if (e.target.closest('input,textarea,select,[contenteditable]') || S.ui.modal) return;
+  if (e.key === 'ArrowLeft') go(-1); else if (e.key === 'ArrowRight') go(1);
+});
+
+/* ---------- the banner cropper ---------- */
+const fileInput = document.getElementById('banner-file');
+fileInput.addEventListener('change', () => {
+  const f = fileInput.files && fileInput.files[0]; if (!f) return;
+  const r = new FileReader(); r.onload = () => { S.ui.crop = { src: r.result, zoom: 1, x: 0, y: 0, fresh: true }; S.ui.modal = 'banner'; render(); }; r.readAsDataURL(f);
+});
+function cropGeom() {
+  const frame = document.getElementById('crop'), img = document.getElementById('crop-img'), cr = S.ui.crop;
+  const fw = frame.clientWidth, fh = fw / 4, base = Math.max(fw / img.naturalWidth, fh / img.naturalHeight), sc = base * cr.zoom;
+  return { frame, img, cr, fw, fh, w: img.naturalWidth * sc, h: img.naturalHeight * sc };
+}
+function placeCrop() {
+  const g = cropGeom(), cr = g.cr;
+  if (cr.fresh) { cr.x = (g.fw - g.w) / 2; cr.y = (g.fh - g.h) / 2; cr.fresh = false; }
+  cr.x = Math.min(0, Math.max(g.fw - g.w, cr.x)); cr.y = Math.min(0, Math.max(g.fh - g.h, cr.y));
+  Object.assign(g.img.style, { width: g.w + 'px', height: g.h + 'px', transform: `translate(${cr.x}px,${cr.y}px)` });
+}
+function wireCrop() {
+  const img = document.getElementById('crop-img'); if (!img) return;
+  const go = () => placeCrop(); img.complete && img.naturalWidth ? go() : img.addEventListener('load', go, { once: true });
+  const frame = document.getElementById('crop'); let drag = null;
+  new ResizeObserver(() => { if (img.isConnected && img.naturalWidth) placeCrop(); }).observe(frame);
+  frame.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, ox: S.ui.crop.x, oy: S.ui.crop.y }; frame.setPointerCapture(e.pointerId); img.style.cursor = 'grabbing'; });
+  frame.addEventListener('pointermove', e => { if (!drag) return; S.ui.crop.x = drag.ox + e.clientX - drag.x; S.ui.crop.y = drag.oy + e.clientY - drag.y; placeCrop(); });
+  frame.addEventListener('pointerup', () => { drag = null; img.style.cursor = ''; });
+  frame.addEventListener('keydown', e => { const d = { ArrowLeft: [10, 0], ArrowRight: [-10, 0], ArrowUp: [0, 10], ArrowDown: [0, -10] }[e.key]; if (!d) return; e.preventDefault(); e.stopPropagation(); S.ui.crop.x += d[0]; S.ui.crop.y += d[1]; placeCrop(); });
+  document.getElementById('crop-zoom').addEventListener('input', e => {
+    const g = cropGeom(), cr = g.cr, cx = g.fw / 2, cy = g.fh / 2, old = cr.zoom, nz = Number(e.target.value);
+    cr.x = cx - (cx - cr.x) * nz / old; cr.y = cy - (cy - cr.y) * nz / old; cr.zoom = nz; placeCrop();
+  });
+}
+function saveCrop() {
+  const g = cropGeom(), cr = g.cr, out = document.createElement('canvas'); out.width = 1600; out.height = 400;
+  const r = 1600 / g.fw; out.getContext('2d').drawImage(g.img, cr.x * r, cr.y * r, g.w * r, g.h * r);
+  S.campaign.bannerUrl = out.toDataURL('image/jpeg', .88); bannerOn = true; S.ui.modal = null; toast('Banner saved.');
+}
+
+/* ---------- the phone menu: opens from the hamburger, closes on a choice, Escape or a tap elsewhere ---------- */
+const burger = document.getElementById('burger'), bar = burger.closest('.hs-bar');
+function setMenu(open) { bar.classList.toggle('is-open', open); burger.setAttribute('aria-expanded', open); }
+burger.addEventListener('click', e => { e.stopPropagation(); setMenu(!bar.classList.contains('is-open')); });
+document.addEventListener('click', e => { if (bar.classList.contains('is-open') && (!e.target.closest('#main-nav, #burger') || e.target.closest('#main-nav a'))) setMenu(false); }, true);
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && bar.classList.contains('is-open')) { setMenu(false); burger.focus(); } });
+
+/* ---------- the prototype bar ---------- */
+function go(d) { boardIdx = (boardIdx + d + BOARDS.length) % BOARDS.length; S.planning = boardFixture(BOARDS[boardIdx].key); S.ui.cards = {}; S.ui.pickers = {}; S.ui.kickoff = null; render(); }
+document.getElementById('prev').onclick = () => go(-1);
+document.getElementById('next').onclick = () => go(1);
+document.getElementById('viewer').onclick = () => { viewerIdx = (viewerIdx + 1) % VIEWERS.length; S.ui.cards = {}; S.ui.torchTo = null; S.ui.editing = false; S.ui.membershipErr = null; render(); };
+document.getElementById('torch').onclick = () => { torchHeld = !torchHeld; reset(); render(); };
+document.getElementById('ban').onclick = () => { bannerOn = !bannerOn; S.campaign.bannerUrl = bannerOn ? banner0 : null; render(); };
+document.getElementById('reset').onclick = () => { reset(); render(); toast('Reset to the starting data.'); };
+
+banner0 = paintAshen();
+reset();
+render();
+Hearthside.QuestList.bind(document.getElementById('quests'), { count: document.getElementById('qc') });
+const floor = Hearthside.Floor.mount(document.getElementById('floor'));
+if (floor && floor.page) floor.page(1, false);
+</script>
+</body>
+</html>

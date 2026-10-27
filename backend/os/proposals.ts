@@ -17,6 +17,15 @@ import { SKILLS, enqueueRun, isSkill, type AgentRun, type SkillId } from "../ser
 /** How long a proposal can be confirmed for. */
 export const PROPOSAL_TTL_MS = 2 * 60_000;
 
+/**
+ * How long a claim with no run may hold a proposal (#173). A confirm that
+ * couldn't queue its run and then couldn't undo its claim leaves confirmed_at
+ * set and run_id NULL; after this long, another confirm may claim it again.
+ * The enqueue's duplicate check keeps a reclaim from queuing a second run
+ * while the first is still queued or running.
+ */
+export const CLAIM_STALE_MS = 30_000;
+
 const label = (skill: SkillId) => SKILLS.find((k) => k.id === skill)!.label;
 
 /** What a proposal says: "Run the morning brief?" */
@@ -54,6 +63,8 @@ export type ConfirmOutcome =
     /** Unknown id, another account's, or not a proposal. */
     | { status: "not_found" }
     | { status: "already_confirmed" }
+    /** Claimed by a confirm that hasn't recorded its run (yet, or ever): try again shortly. */
+    | { status: "claimed" }
     | { status: "expired" }
     /** The proposed skill has since left SKILLS. */
     | { status: "not_runnable" };
@@ -63,23 +74,27 @@ export type ConfirmOutcome =
  * `enqueue` and records confirmed_at and run_id. A proposal confirms at most
  * once, even with two confirms racing (the UPDATE claims it). If the enqueue
  * throws, the claim is undone so the admin can try again, and the error is
- * rethrown.
+ * rethrown. If undoing it fails too, the claim lapses after CLAIM_STALE_MS.
  */
 export async function confirmProposal(
     db: Queryable,
     { id, accountId, now, enqueue = enqueueRun }: { id: number; accountId: string; now: Date; enqueue?: Enqueue },
 ): Promise<ConfirmOutcome> {
+    const staleBefore = new Date(now.getTime() - CLAIM_STALE_MS);
     const claimed = await db.query<{ skill: string }>(
         `UPDATE os_asks SET confirmed_at = $3
           WHERE id = $1 AND account_id = $2 AND kind = 'confirm_run' AND skill IS NOT NULL
-            AND confirmed_at IS NULL AND expires_at > $3
-          RETURNING skill`, [id, accountId, now]);
+            AND (confirmed_at IS NULL OR (run_id IS NULL AND confirmed_at <= $4)) AND expires_at > $3
+          RETURNING skill`, [id, accountId, now, staleBefore]);
     if (!claimed.rows[0]) {
-        const { rows: [p] } = await db.query<{ confirmed_at: Date | null }>(
-            `SELECT confirmed_at FROM os_asks
+        const { rows: [p] } = await db.query<{ confirmed_at: Date | null; run_id: string | null; expires_at: Date }>(
+            `SELECT confirmed_at, run_id, expires_at FROM os_asks
               WHERE id = $1 AND account_id = $2 AND kind = 'confirm_run' AND skill IS NOT NULL`, [id, accountId]);
         if (!p) return { status: "not_found" };
-        return { status: p.confirmed_at ? "already_confirmed" : "expired" };
+        if (!p.confirmed_at) return { status: "expired" };
+        // A claim that never got its run and can't be reclaimed now is either fresh or past expiry.
+        if (p.run_id === null) return { status: p.expires_at > now ? "claimed" : "expired" };
+        return { status: "already_confirmed" };
     }
 
     const unclaim = () => db.query(`UPDATE os_asks SET confirmed_at = NULL WHERE id = $1 AND run_id IS NULL`, [id])

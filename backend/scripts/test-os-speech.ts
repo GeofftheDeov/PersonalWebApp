@@ -855,6 +855,67 @@ async function main() {
             p.say() === "Queued the morning brief." && lastSpoken(p.synth) !== "Queued the morning brief." && !p.OS.pending());
     }
 
+    // ── page scripts: the ask box never locks up, and a confirm outlives the timer (#173) ──
+    // A JSON body of `null` makes the page's reply handling throw, ask and confirm alike.
+    {
+        const replies = t151Replies();
+        const p = t150Boot({ reply: (n, body) => n === 1 ? { status: 200, body: null } : replies(n, body) });
+        const errors: unknown[] = [];
+        const realError = console.error;
+        console.error = (...a: unknown[]) => { errors.push(a[0]); };
+        try { p.submit("what's my p&l"); await flush(); } finally { console.error = realError; }
+        check("a reply the page can't handle doesn't lock the ask box: it's re-enabled and the failure is shown and logged",
+            !p.OS.pending() && !p.els["ask-send"].disabled && p.say() === "Something went wrong showing the reply." && errors.length >= 1,
+            { pending: p.OS.pending(), shown: p.say(), errors: errors.length });
+        p.submit("what's due");
+        await flush();
+        check("... and the next ask goes through", p.fetches.length === 2 && !p.OS.pending() && p.say() === "Router heard: what's due");
+    }
+    {
+        const p = t150Boot({ reply: t151Replies(() => ({ status: 201, body: null })) });
+        const realError = console.error;
+        console.error = () => {};
+        try { p.submit("run my morning brief"); await flush(); p.els["ask-confirm-yes"].fire("click"); await flush(); }
+        finally { console.error = realError; }
+        check("... nor does a confirm reply it can't handle",
+            !p.OS.pending() && !p.els["ask-send"].disabled && p.say() === "Something went wrong showing the reply.", { shown: p.say() });
+    }
+    {
+        const p = t150Boot({ reply: t151Replies(() => ({ status: 410, body: { error: "that skill is no longer runnable", reason: "not_runnable" } })) });
+        p.submit("run my morning brief"); await flush();
+        p.els["ask-confirm-yes"].fire("click"); await flush();
+        check("a 410 for a skill that's no longer runnable says so, not \"expired\"",
+            p.say() === "That skill can no longer be run." && lastSpoken(p.synth) === "That skill can no longer be run."
+                && p.OS.proposal() === null, { shown: p.say() });
+        p.submit("yes"); await flush();
+        check("... and a later \"yes\" goes to the router instead of saying the proposal expired",
+            t151Asks(p).length === 2 && t151Asks(p)[1].body.text === "yes", p.fetches);
+    }
+    {
+        const p = t150Boot({ reply: t151Replies(() => ({ status: 503, body: { error: "that proposal is still being confirmed" } })) });
+        p.submit("run my morning brief"); await flush();
+        p.els["ask-confirm-yes"].fire("click"); await flush();
+        check("a 503 (a claim still settling) leaves the proposal up to try again",
+            p.OS.proposal()?.id === 101 && !p.els["ask-confirm"].hidden && !p.els["ask-confirm-yes"].disabled
+                && p.say() === "Sorry, the run couldn't be queued. Try again.", { shown: p.say(), proposal: p.OS.proposal() });
+    }
+    for (const [what, confirmReply, expectSay, expectDisplay] of [
+        ["queues it", undefined, "Queued the morning brief.", ""],
+        ["fails (500)", () => ({ status: 500, body: { error: "queue down" } }), "Run the morning brief?", "Expired. Ask again to run it."],
+    ] as const) {
+        const p = t150Boot({ hold: true, reply: t151Replies(confirmReply) });
+        p.submit("run my morning brief"); await p.release();
+        p.els["ask-confirm-yes"].fire("click");
+        await flush();
+        p.timers.advance(61_000);
+        check(`the expiry timer firing while a confirm is in flight waits for it (confirm ${what})`,
+            p.OS.pending() && p.say() === "…" && p.els["ask-confirm-yes"].disabled, { shown: p.say() });
+        await p.release();
+        check(`... then the confirm's outcome stands: "${expectSay}"`,
+            !p.OS.pending() && p.OS.proposal() === null && p.els["ask-confirm"].hidden
+                && p.say() === expectSay && p.display() === expectDisplay, { shown: p.say(), display: p.display() });
+    }
+
     // ── page scripts: a confirmed run is followed and its outcome said (#153) ──
     const T153_START = Date.parse("2026-10-22T11:45:00Z");
     const T153_SAY = "Good morning. You have three things due today, and the first is the dentist at ten. "

@@ -90,15 +90,30 @@ body{margin:0;background:var(--ground);color:var(--text)}
 .va-num{font-family:var(--font-label);font-size:13px;font-weight:500;color:var(--muted);width:24px;height:24px;display:grid;place-items:center;border-radius:50%;font-variant-numeric:tabular-nums}
 .va-cell.is-today .va-num{background:var(--accent);color:var(--accent-ink);font-weight:700}
 .va-items{display:flex;flex-direction:column;gap:3px;min-width:0}
-.va-sess{display:flex;flex-wrap:wrap;align-items:center;gap:2px 4px;min-width:0;padding:2px 4px 3px 2px;border-radius:var(--radius);background:var(--surface);border:1px solid var(--gold-line);
-  font-size:12px;line-height:1.25;overflow:hidden}
-.va-sess span{flex-basis:100%;padding-left:2px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere}
-.va-sess b{font-family:var(--font-label);font-weight:500;color:var(--accent);font-size:11.5px;flex:none}
-.va-sess em{font-style:normal;color:var(--accent);flex:none}
+/* a campaign banner: fills its positioned parent. Cloth = no banner set (as on the Campaigns page). */
+.bn{position:absolute;inset:0;background-size:cover;background-position:center}
+.bn.is-cloth{display:grid;place-items:center end;padding-right:8%;
+  background:repeating-linear-gradient(45deg,rgba(0,0,0,.12) 0 1px,transparent 1px 5px),repeating-linear-gradient(-45deg,rgba(255,255,255,.035) 0 1px,transparent 1px 5px),
+    radial-gradient(120% 140% at 15% 100%,rgba(255,179,107,.18),transparent 55%),linear-gradient(160deg,var(--c1),var(--c2))}
+.bn.is-cloth::after{content:"";position:absolute;inset:4px;border:1px dashed rgba(246,221,150,.4);border-radius:2px}
+.bn.is-cloth span{font-family:var(--font-display);font-size:20px;letter-spacing:.12em;color:var(--gold-hi);opacity:.85;text-shadow:0 1px 0 rgba(0,0,0,.6)}
+/* a session in a month cell: banner behind, darkened toward the bottom where the time and title sit; the frame is a gilded panel's gold */
+.va-sess{position:relative;display:block;min-height:50px;border-radius:var(--radius);overflow:hidden;box-shadow:0 2px 5px rgba(0,0,0,.65);border:1px solid transparent;
+  background:linear-gradient(var(--leather),var(--leather)) padding-box,linear-gradient(135deg,var(--gold-hi) 0%,#b07c2c 22%,#f0cf7a 45%,#7c5318 68%,#e7c06a 88%,#a87228 100%) border-box}
+.va-sess::before{content:"";position:absolute;inset:0;z-index:1;background:linear-gradient(180deg,rgba(20,13,8,.05) 0%,rgba(20,13,8,.6) 45%,rgba(20,13,8,.92) 100%)}
+.va-sess .bn.is-cloth span{display:none}
+.va-sess-in{position:relative;z-index:2;display:flex;flex-direction:column;gap:1px;padding:16px 5px 5px}
+.va-sess b{font-family:var(--font-label);font-weight:700;font-size:11.5px;letter-spacing:.04em;color:var(--accent);text-shadow:0 1px 2px #000}
+.va-sess .tt{font-family:var(--font-story);font-size:13.5px;line-height:1.12;color:var(--on-wood-text);text-shadow:0 1px 2px #000;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.va-sess em{position:absolute;z-index:3;top:3px;right:3px;min-width:16px;height:16px;border-radius:8px;background:var(--seal);color:#fff;font:700 10px/16px var(--font-body);text-align:center;font-style:normal}
 .va-av{flex:none;width:16px;height:16px;border-radius:3px;background:var(--verdigris);color:#fff;font:500 9.5px/16px var(--font-label);text-align:center;font-style:normal;letter-spacing:.02em}
-.va-sess.is-cancelled{background:transparent;border-style:dashed;border-color:var(--line);color:var(--muted)}
-.va-sess.is-cancelled span{text-decoration:line-through}
-.va-sess.is-completed{background:transparent;color:var(--muted)}
+.va-sess.is-cancelled{min-height:0;background:transparent;border:1px dashed var(--line);box-shadow:none}
+.va-sess.is-cancelled::before{display:none}
+.va-sess.is-cancelled .va-sess-in{padding:3px 5px}
+.va-sess.is-cancelled b{color:var(--muted);text-shadow:none}
+.va-sess.is-cancelled .tt{color:var(--muted);text-decoration:line-through;text-shadow:none;font-size:12.5px}
+.va-sess.is-completed .bn{filter:grayscale(.75) brightness(.75)}
 .va-num{border:0;background:none;padding:0;cursor:pointer}
 /* a quest slip: torn paper on the leather, tilted a touch, its own checkbox and a mark for its kind */
 .cq{display:block;margin:1px 2px 2px;filter:drop-shadow(0 1.5px 1.5px rgba(0,0,0,.6));transform:rotate(-.9deg)}
@@ -143,15 +158,20 @@ body{margin:0;background:var(--ground);color:var(--text)}
 .vw-dh b{font-family:var(--font-display);font-weight:400;font-size:24px;line-height:1;letter-spacing:0;color:var(--text)}
 .vw-day.is-today .vw-dh b{color:var(--accent)}
 .vw-items{display:flex;flex-direction:column;gap:6px;min-width:0}
-.vw-sess{display:flex;flex-direction:column;gap:2px;padding:5px 6px 6px;border-radius:var(--radius);background:var(--surface);border:1px solid var(--gold-line);
+.vw-sess{display:flex;flex-direction:column;border-radius:var(--radius);overflow:hidden;box-shadow:0 3px 8px rgba(0,0,0,.6);border:1px solid transparent;
+  background:linear-gradient(var(--leather),var(--leather)) padding-box,linear-gradient(135deg,var(--gold-hi) 0%,#b07c2c 22%,#f0cf7a 45%,#7c5318 68%,#e7c06a 88%,#a87228 100%) border-box;
   font-size:12.5px;line-height:1.3;min-width:0}
 .vw-sess .t{display:flex;align-items:center;gap:4px;font-family:var(--font-label);font-weight:500;color:var(--accent);font-size:12px;letter-spacing:.02em}
-.vw-sess b{font-weight:500;color:var(--text);overflow-wrap:anywhere}
+.vw-bn{position:relative;display:block;aspect-ratio:2.6/1}
+.vw-bn .bn.is-cloth span{font-size:16px}
+.vw-body{display:flex;flex-direction:column;gap:2px;padding:5px 7px 7px;background:radial-gradient(130% 90% at 50% 0%,var(--leather-hi),var(--leather))}
+.vw-sess b{font-family:var(--font-story);font-weight:400;font-size:15.5px;line-height:1.12;color:var(--text);overflow-wrap:anywhere}
 .vw-sess small{font-size:12px;color:var(--muted)}
-.vw-sess.is-cancelled{background:transparent;border-style:dashed;border-color:var(--line)}
-.vw-sess.is-cancelled b{text-decoration:line-through;color:var(--muted)}
+.vw-sess.is-cancelled{background:transparent;border:1px dashed var(--line);box-shadow:none}
+.vw-sess.is-cancelled .vw-body{background:none}
+.vw-sess.is-cancelled b{text-decoration:line-through;color:var(--muted);font-size:13.5px}
 .vw-sess.is-cancelled .t{color:var(--muted)}
-.vw-sess.is-completed{background:transparent}
+.vw-sess.is-completed .bn{filter:grayscale(.75) brightness(.75)}
 .vw .cq-t{display:block}
 .vw .cq-in{font-size:12.5px}
 .vw-none{font-size:12px;color:var(--muted);opacity:.55;padding-left:2px}
@@ -181,6 +201,43 @@ body{margin:0;background:var(--ground);color:var(--text)}
 .p-chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .p-chip[aria-pressed="true"] span{color:var(--accent-ink);opacity:.75}
 .p-fclear{margin-left:auto}
+/* the campaign dropdown: a button stacking the picked banners, a token per pick, and a gilded list of banners */
+.p-filters{position:relative;z-index:5}
+.p-dd{position:relative;flex:1 1 240px;display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0}
+.p-dd-btn{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 10px 0 5px;border-radius:var(--radius);border:1px solid var(--gold-line);
+  background:var(--surface);color:var(--text);cursor:pointer;font-size:14px;max-width:100%}
+.p-dd-btn:hover,.p-dd-btn[aria-expanded="true"]{border-color:var(--gold)}
+.p-dd-txt{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.p-dd-caret{color:var(--muted);font-size:11px}
+.p-dd-stack{display:inline-flex;flex:none}
+.p-dd-thumb{position:relative;display:block;flex:none;width:40px;height:22px;border-radius:2px;overflow:hidden;box-shadow:0 0 0 1px rgba(0,0,0,.7),0 1px 3px rgba(0,0,0,.6)}
+.p-dd-thumb .bn.is-cloth span{display:none}
+.p-dd-stack .p-dd-thumb + .p-dd-thumb{margin-left:-24px}
+.p-tok{display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 9px 0 3px;border-radius:var(--radius);border:1px solid var(--gold);
+  background:rgba(229,161,58,.14);color:var(--text);cursor:pointer;font-size:13px;max-width:100%}
+.p-tok .p-dd-thumb{width:34px;height:20px}
+.p-tok i{font-style:normal;color:var(--muted);font-size:15px;line-height:1}
+.p-tok:hover i{color:var(--gold-hi)}
+.p-dd-pop{position:absolute;z-index:30;top:calc(100% + 8px);left:0;width:min(400px,calc(100vw - 32px));padding:10px 12px 12px;display:flex;flex-direction:column;gap:10px}
+.p-dd-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:2px 4px 0;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--muted)}
+.p-dd-list{display:flex;flex-direction:column;gap:8px}
+.p-opt{position:relative;display:block;width:100%;aspect-ratio:4/1;min-height:70px;border:0;padding:0;border-radius:3px;overflow:hidden;cursor:pointer;text-align:left;
+  color:var(--text);background:var(--leather);box-shadow:0 0 0 1px var(--gold-line),0 3px 8px rgba(0,0,0,.55)}
+.p-opt::before{content:"";position:absolute;inset:0;z-index:1;background:linear-gradient(90deg,rgba(20,13,8,.9) 0%,rgba(20,13,8,.55) 50%,rgba(20,13,8,0) 80%)}
+.p-opt .bn.is-cloth{padding-right:58px}
+.p-opt .bn.is-cloth span{font-size:28px}
+.p-opt-name{position:absolute;z-index:2;left:12px;right:44px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:2px}
+.p-opt-name b{font-family:var(--font-story);font-weight:400;font-size:19px;line-height:1.1;color:var(--on-wood-text);text-shadow:var(--on-wood-shadow)}
+.p-opt-name small{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.05em;color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow)}
+.p-opt-check{position:absolute;z-index:2;right:10px;top:50%;margin-top:-13px;width:26px;height:26px;border-radius:50%;border:2px solid var(--gold);background:rgba(20,13,8,.65);box-shadow:0 1px 4px #000}
+.p-opt.is-on{box-shadow:0 0 0 2px var(--gold-hi),0 3px 10px rgba(0,0,0,.6)}
+.p-opt.is-on .p-opt-check{background:var(--accent);border-color:var(--gold-hi)}
+.p-opt.is-on .p-opt-check::after{content:"";position:absolute;left:7px;top:3px;width:6px;height:11px;border:solid var(--accent-ink);border-width:0 2.5px 2.5px 0;transform:rotate(45deg)}
+.p-dd.has-sel .p-opt:not(.is-on) .bn{filter:grayscale(.85) brightness(.5)}
+.p-dd.has-sel .p-opt:not(.is-on) .p-opt-name{opacity:.7}
+.p-opt:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.p-dd-f{display:flex;justify-content:flex-end}
+.p-dd-f .hs-btn-amber{height:32px}
 @media (max-width:620px){.p-flab{width:100%}}
 
 /* ---------- B: Chronicle. No grid: a running list by week, each session a pinned sheet beside its date. ---------- */
@@ -292,7 +349,7 @@ body{margin:0;background:var(--ground);color:var(--text)}
   <div class="lbl" id="lbl" aria-live="polite"></div>
   <button type="button" id="next" aria-label="Next layout">→</button>
   <span class="sep" aria-hidden="true"></span>
-  <button type="button" id="place"></button>
+  <button type="button" id="campui"></button>
   <button type="button" id="busy"></button>
 </div>
 <div class="proto-toast" id="toast" hidden></div>
@@ -304,11 +361,56 @@ document.body.classList.add('hs-app');
 /* ---------------- data (made up, in memory). Shapes follow AlmanacSession / Quest in frontend/src/lib/quests.ts ---------------- */
 const D = (m, d, h = 0, min = 0) => new Date(2026, m - 1, d, h, min);
 const TODAY = D(10, 26, 12);
+// art: a stand-in for an uploaded 4:1 banner (painted below); null = no banner set, so the dyed-cloth fallback
 const CAMPS = {
-  ac: { title: 'Curse of the Ashen Crown', init: 'AC' },
-  ss: { title: 'Starfall Salvage', init: 'SS' },
-  bb: { title: 'Bones of the Brinewood', init: 'BB' },
+  ac: { title: 'Curse of the Ashen Crown', init: 'AC', art: 'ashen', cloth: ['#5a2416', '#2a0f0a'] },
+  ss: { title: 'Starfall Salvage', init: 'SS', art: 'starfall', cloth: ['#1f4a44', '#0f2422'] },
+  bb: { title: 'Bones of the Brinewood', init: 'BB', art: null, cloth: ['#2c3a24', '#141c10'] },
 };
+
+/* ---------------- stand-in banner art, as in the Campaigns prototype: what an uploaded 4:1 image would look like ---------------- */
+function rng(seed) { let h = 2166136261; for (const c of seed) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return () => ((h = Math.imul(h ^ (h >>> 15), 2246822507) ^ Math.imul(h ^ (h >>> 13), 3266489909)) >>> 0) / 4294967296; }
+function ridge(ctx, r, W, y0, amp, step, color) {
+  ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(0, 400);
+  let y = y0; for (let x = 0; x <= W + step; x += step) { y = Math.max(y0 - amp, Math.min(y0 + amp, y + (r() - .5) * amp)); ctx.lineTo(x, y); }
+  ctx.lineTo(W, 400); ctx.closePath(); ctx.fill();
+}
+function paint(kind) {
+  const W = 1600, H = 400, c = document.createElement('canvas'); c.width = W; c.height = H;
+  const ctx = c.getContext('2d'), r = rng(kind);
+  const sky = (stops) => { const g = ctx.createLinearGradient(0, 0, 0, H); stops.forEach(([o, col]) => g.addColorStop(o, col)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); };
+  if (kind === 'ashen') {
+    sky([[0, '#2a0f0c'], [.55, '#7a2a14'], [.8, '#d0652a'], [1, '#f2a24a']]);
+    for (let i = 0; i < 220; i++) { ctx.fillStyle = `rgba(230,200,180,${r() * .35})`; ctx.fillRect(r() * W, r() * H * .8, 2, 2); }
+    ridge(ctx, r, W, 250, 60, 40, '#3a1710');
+    ridge(ctx, r, W, 300, 30, 30, '#1c0b08');
+    ctx.fillStyle = '#0e0605'; // the crowned keep
+    const kx = 1060; ctx.fillRect(kx, 170, 160, 140);
+    [[kx - 30, 140, 40, 170], [kx + 60, 110, 40, 200], [kx + 150, 140, 40, 170]].forEach(([x, y, w, h]) => {
+      ctx.fillRect(x, y, w, h); for (let i = 0; i < 3; i++) ctx.fillRect(x + i * 15, y - 12, 9, 12);
+    });
+    ctx.fillStyle = 'rgba(255,170,80,.8)'; [[kx + 76, 140], [kx + 20, 210], [kx + 120, 230]].forEach(([x, y]) => ctx.fillRect(x, y, 6, 10));
+    ridge(ctx, r, W, 360, 14, 24, '#070303');
+  } else if (kind === 'starfall') {
+    sky([[0, '#060a1c'], [.6, '#13294a'], [1, '#2f6a74']]);
+    for (let i = 0; i < 380; i++) { const s = r(); ctx.fillStyle = `rgba(255,255,240,${.3 + s * .7})`; ctx.fillRect(r() * W, r() * H * .75, s > .93 ? 3 : 1.5, s > .93 ? 3 : 1.5); }
+    const g = ctx.createLinearGradient(300, 40, 760, 220); g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(1, 'rgba(255,236,190,.95)');
+    ctx.strokeStyle = g; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(300, 40); ctx.lineTo(760, 220); ctx.stroke();
+    ctx.fillStyle = '#fff6d8'; ctx.beginPath(); ctx.arc(762, 221, 6, 0, 7); ctx.fill();
+    ridge(ctx, r, W, 300, 26, 60, '#3a3550');
+    ctx.fillStyle = '#16142a'; ctx.beginPath(); // the wreck's ribs
+    ctx.moveTo(380, 330); ctx.quadraticCurveTo(520, 200, 720, 300); ctx.lineTo(700, 330); ctx.closePath(); ctx.fill();
+    for (let i = 0; i < 6; i++) { ctx.fillRect(430 + i * 45, 250 - Math.sin(i / 5 * Math.PI) * 30, 7, 90); }
+    ridge(ctx, r, W, 350, 18, 50, '#0b0a18');
+  }
+  return c.toDataURL('image/jpeg', .85);
+}
+// each banner is painted once and set on a class, so pages can reuse it without repeating the data URL
+document.head.insertAdjacentHTML('beforeend', `<style>${Object.entries(CAMPS).filter(([, c]) => c.art)
+  .map(([k, c]) => `.bn-${k}{background-image:url(${paint(c.art)})}`).join('\n')}</style>`);
+/* a campaign's banner, filling its (position:relative) parent; the cloth fallback stitches its initials */
+const banner = c => CAMPS[c].art ? `<span class="bn bn-${c}" aria-hidden="true"></span>`
+  : `<span class="bn is-cloth" aria-hidden="true" style="--c1:${CAMPS[c].cloth[0]};--c2:${CAMPS[c].cloth[1]}"><span>${CAMPS[c].init}</span></span>`;
 const SESSIONS = [
   { id: 'ac-13', camp: 'ac', n: 13, title: 'Session 13: The Ash Market', date: D(10, 17, 18, 30), end: D(10, 17, 22, 30), status: 'completed', location: "Geoff's place" },
   { id: 'ac-14', camp: 'ac', n: 14, title: 'Session 14: The Drowned Chapel', date: D(10, 31, 18, 30), end: D(10, 31, 22, 30), status: 'scheduled', location: "Geoff's place" },
@@ -344,7 +446,7 @@ const store = { get(k) { try { return localStorage.getItem(k); } catch { return 
 const asked = new URLSearchParams(location.search).get('variant') || location.hash.slice(1) || store.get('hs-alm-variant');
 let variant = VARIANTS.findIndex(v => v.key === asked);
 if (variant < 0) variant = 1;
-let byDue = store.get('hs-alm-place') !== 'session';   // calendar: quests on their due day, or folded into their session
+const byDue = true;   // calendar quests sit on their due day (decided); false folds them into their session as a count
 let quiet = store.get('hs-alm-busy') === 'quiet';      // a quiet month: one session, no quests
 let aMonth = new Date(2026, 9, 1), aWeek = new Date(2026, 9, 26), aSel = null;
 let view = store.get('hs-alm-view') === 'calendar' ? 'calendar' : 'list';   // B: the list, or the calendar
@@ -352,12 +454,15 @@ let calMode = store.get('hs-alm-cal') === 'week' ? 'week' : 'month';
 let bTab = 'up';
 let cSel = null, cQuest = null, cScrolled = false;
 
-let fCamp = 'all', fWhere = 'all';   // B's filters: a campaign, and online / in person
+// B's filters: any set of campaigns (empty = all), and online / in person
+let fCamps = new Set(), fWhere = 'all';
+let fOpen = false;   // the campaign dropdown
+let campUI = store.get('hs-alm-campui') === 'chips' ? 'chips' : 'dropdown';
 
 const base = () => quiet
   ? { sessions: SESSIONS.filter(s => s.id === 'ac-14'), quests: [] }
   : { sessions: SESSIONS, quests: QUESTS };
-const matches = (s, camp = fCamp, where = fWhere) => (camp === 'all' || s.camp === camp) && (where === 'all' || (where === 'online') === !!s.online);
+const matches = (s, camps = fCamps, where = fWhere) => (!camps.size || camps.has(s.camp)) && (where === 'all' || (where === 'online') === !!s.online);
 /* what the page shows: B applies its filters; the rail's Your Quests always uses base() */
 const data = () => {
   const b = base();
@@ -488,7 +593,9 @@ function monthPanel(tabs) {
     const items = [
       ...ss.map(s => {
         const first = same(d, s.date), open = openOf(s);
-        return `<span class="va-sess is-${s.status}"><i class="va-av">${CAMPS[s.camp].init}</i>${first ? `<b>${tm(s.date)}</b>` : '<b>cont.</b>'}<span>${esc(s.title)}</span>${!byDue && open && first ? `<em>· ${open}</em>` : ''}</span>`;
+        // the session is the event: its campaign's banner behind it, in a gold frame, its title in the story face
+        return `<span class="va-sess is-${s.status}" title="${esc(CAMPS[s.camp].title)}: ${esc(s.title)}">${s.status === 'cancelled' ? '' : banner(s.camp)}
+          <span class="va-sess-in"><b>${s.status === 'cancelled' ? 'Cancelled' : first ? tm(s.date) : 'cont.'}</b><span class="tt">${esc(s.title)}</span></span>${!byDue && open && first ? `<em>${open}</em>` : ''}</span>`;
       }),
       ...qs.map(q => questSlip(q)),
     ];
@@ -517,8 +624,9 @@ function weekPanel() {
     const items = [
       ...ss.map(s => {
         const first = same(d, s.date), open = openOf(s);
-        return `<span class="vw-sess is-${s.status}"><span class="t"><i class="va-av">${CAMPS[s.camp].init}</i>${first ? `${tm(s.date)}${s.end && same(s.date, s.end) ? ' – ' + tm(s.end) : ' onward'}` : same(d, s.end) ? `Until ${tm(s.end)}` : 'All day'}</span>
-          <b>${esc(s.title)}</b><small>${s.status === 'cancelled' ? 'Cancelled' : esc(where(s))}${!byDue && open ? ` · ${plural(open, 'quest')} open` : ''}</small></span>`;
+        return `<span class="vw-sess is-${s.status}" title="${esc(CAMPS[s.camp].title)}">${s.status === 'cancelled' ? '' : `<span class="vw-bn">${banner(s.camp)}</span>`}
+          <span class="vw-body"><span class="t">${first ? `${tm(s.date)}${s.end && same(s.date, s.end) ? ' – ' + tm(s.end) : ' onward'}` : same(d, s.end) ? `Until ${tm(s.end)}` : 'All day'}</span>
+          <b>${esc(s.title)}</b><small>${s.status === 'cancelled' ? 'Cancelled' : esc(where(s))}${!byDue && open ? ` · ${plural(open, 'quest')} open` : ''}</small></span></span>`;
       }),
       ...qs.map(q => questSlip(q, { time: true })),
     ];
@@ -580,7 +688,7 @@ function chronicle() {
         : sessionSheet(s)).join('')}</div></div>`;
   };
   return tabs + awaitingNight() + (weeks.length ? weeks.map(g => `<section class="vb-week" aria-label="${esc(weekName(g.w))}">
-      <h2 class="vb-week-h">${weekName(g.w)}</h2>${g.days.map(entry).join('')}</section>`).join('') : (fCamp !== 'all' || fWhere !== 'all'
+      <h2 class="vb-week-h">${weekName(g.w)}</h2>${g.days.map(entry).join('')}</section>`).join('') : (fCamps.size || fWhere !== 'all'
       ? '<p class="hs-note">No sessions coming up match these filters.</p>'
       : '<p class="hs-note">Nothing coming up. When a session gets a night, it shows here.</p>'));
 }
@@ -591,20 +699,47 @@ function VariantB() {
   if (view === 'list') return head(toggle) + filters() + chronicle();
   return head(toggle) + filters() + (calMode === 'week' ? weekPanel() : monthPanel(true)) + dayDetail() + awaitingNight();
 }
-/* one campaign or all, and online / in person / both. Counts are the sessions the list would show (coming up or undated). */
+/* any campaigns (none picked = all), and online / in person / both. Counts are the sessions the list would show (coming up or undated). */
 function filters() {
   const ahead = s => !s.date || sod(s.end || s.date) >= sod(TODAY);
-  const count = (camp, where) => base().sessions.filter(s => ahead(s) && matches(s, camp, where)).length;
+  const count = (camps, where) => base().sessions.filter(s => ahead(s) && matches(s, camps, where)).length;
   const camps = Object.keys(CAMPS).filter(c => base().sessions.some(s => s.camp === c));
-  const chip = (attr, val, cur, label, n, av = '') => `<button type="button" class="p-chip" data-${attr}="${val}" aria-pressed="${val === cur}">${av}${label}<span>${n}</span></button>`;
-  const on = fCamp !== 'all' || fWhere !== 'all';
+  const chip = (attr, val, on, label, n, av = '') => `<button type="button" class="p-chip" data-${attr}="${val}" aria-pressed="${on}">${av}${label}<span>${n}</span></button>`;
+  const on = fCamps.size || fWhere !== 'all';
+  const campRow = campUI === 'chips'
+    ? chip('fcampall', '1', !fCamps.size, 'All', count(new Set(), fWhere))
+      + camps.map(c => chip('fcamp', c, fCamps.has(c), esc(CAMPS[c].title), count(new Set([c]), fWhere), `<i class="va-av">${CAMPS[c].init}</i>`)).join('')
+    : campDropdown(camps, c => count(new Set([c]), fWhere));
   return `<div class="hs-gilded p-filters" role="group" aria-label="Filter sessions">
-      <div class="p-frow"><span class="p-flab">Campaign</span>
-        ${chip('fcamp', 'all', fCamp, 'All', count('all', fWhere))}
-        ${camps.map(c => chip('fcamp', c, fCamp, esc(CAMPS[c].title), count(c, fWhere), `<i class="va-av">${CAMPS[c].init}</i>`)).join('')}</div>
+      <div class="p-frow"><span class="p-flab">Campaigns</span>${campRow}</div>
       <div class="p-frow"><span class="p-flab">Where</span>
-        ${[['all', 'Anywhere'], ['person', 'In person'], ['online', 'Online']].map(([v, l]) => chip('fwhere', v, fWhere, l, count(fCamp, v))).join('')}
+        ${[['all', 'Anywhere'], ['person', 'In person'], ['online', 'Online']].map(([v, l]) => chip('fwhere', v, v === fWhere, l, count(fCamps, v))).join('')}
         ${on ? '<button type="button" class="p-link p-fclear" data-fclear="1">Clear filters</button>' : ''}</div>
+    </div>`;
+}
+
+/* Campaigns as a dropdown of banners. Pick any number: a picked one keeps its colour, gains a gold rim and a filled
+   check seal, and the rest fade. Closed, the button stacks the picked banners and each pick gets a removable token. */
+function campDropdown(camps, countOf) {
+  const picked = camps.filter(c => fCamps.has(c));
+  const shown = picked.length ? picked : camps;
+  const summary = picked.length ? plural(picked.length, 'campaign') : 'All campaigns';   // the tokens beside it name them
+  return `<div class="p-dd ${picked.length ? 'has-sel' : ''}">
+      <button type="button" class="p-dd-btn" data-fdd="toggle" aria-haspopup="listbox" aria-expanded="${fOpen}"
+        title="${picked.length ? esc(picked.map(c => CAMPS[c].title).join(', ')) : 'All campaigns'}">
+        <span class="p-dd-stack">${shown.map(c => `<span class="p-dd-thumb">${banner(c)}</span>`).join('')}</span>
+        <span class="p-dd-txt">${summary}</span><span class="p-dd-caret" aria-hidden="true">${fOpen ? '▴' : '▾'}</span></button>
+      ${picked.map(c => `<button type="button" class="p-tok" data-fcamp="${c}" aria-label="Stop filtering to ${esc(CAMPS[c].title)}">
+        <span class="p-dd-thumb">${banner(c)}</span>${esc(CAMPS[c].title)}<i aria-hidden="true">×</i></button>`).join('')}
+      ${fOpen ? `<div class="hs-gilded p-dd-pop">
+        <div class="p-dd-h"><span>${picked.length ? `${picked.length} of ${camps.length} picked` : 'Pick any campaigns'}</span>
+          ${picked.length ? '<button type="button" class="p-link" data-fcampall="1">Show all</button>' : ''}</div>
+        <div class="p-dd-list" role="listbox" aria-multiselectable="true" aria-label="Campaigns">${camps.map(c => `
+          <button type="button" role="option" class="p-opt ${fCamps.has(c) ? 'is-on' : ''}" aria-selected="${fCamps.has(c)}" data-fcamp="${c}">${banner(c)}
+            <span class="p-opt-name"><b>${esc(CAMPS[c].title)}</b><small>${plural(countOf(c), 'session')} coming up${CAMPS[c].art ? '' : ' · no banner yet'}</small></span>
+            <span class="p-opt-check" aria-hidden="true"></span></button>`).join('')}</div>
+        <div class="p-dd-f"><button type="button" class="hs-btn-amber" data-fdd="close">Done</button></div>
+      </div>` : ''}
     </div>`;
 }
 
@@ -686,7 +821,8 @@ function render() {
   renderRail();
   const v = VARIANTS[variant];
   document.getElementById('lbl').innerHTML = `${v.key} — ${v.name}<small>${v.note}</small>`;
-  document.getElementById('place').textContent = byDue ? 'Calendar quests: on their due day' : 'Calendar quests: with their session';
+  document.getElementById('campui').textContent = campUI === 'chips' ? 'Campaign filter: chips' : 'Campaign filter: banner dropdown';
+  document.getElementById('campui').hidden = variant !== 1;
   document.getElementById('busy').textContent = quiet ? 'Data: a quiet month' : 'Data: a busy month';
   store.set('hs-alm-variant', v.key);
   try { const u = new URL(location.href); u.searchParams.set('variant', v.key); history.replaceState(null, '', u); } catch {}
@@ -694,9 +830,10 @@ function render() {
 function go(d) { variant = (variant + d + VARIANTS.length) % VARIANTS.length; render(); }
 document.getElementById('prev').onclick = () => go(-1);
 document.getElementById('next').onclick = () => go(1);
-document.getElementById('place').onclick = () => { byDue = !byDue; store.set('hs-alm-place', byDue ? 'due' : 'session'); aSel = null; render(); };
+document.getElementById('campui').onclick = () => { campUI = campUI === 'chips' ? 'dropdown' : 'chips'; store.set('hs-alm-campui', campUI); fOpen = false; render(); };
 document.getElementById('busy').onclick = () => { quiet = !quiet; store.set('hs-alm-busy', quiet ? 'quiet' : 'busy'); aSel = null; cSel = null; cQuest = null; render(); };
 addEventListener('keydown', e => {
+  if (e.key === 'Escape' && fOpen) { fOpen = false; render(); document.querySelector('.p-dd-btn')?.focus(); return; }
   if (e.target.closest('input,textarea,select,[contenteditable]')) return;
   if (e.key === 'ArrowLeft') go(-1); else if (e.key === 'ArrowRight') go(1);
 });
@@ -705,8 +842,11 @@ let toastTimer;
 function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 2600); }
 
 document.addEventListener('click', e => {
-  const el = e.target.closest('[data-q],[data-open],[data-stub],[data-day],[data-amonth],[data-aweek],[data-view],[data-cal],[data-fcamp],[data-fwhere],[data-fclear],[data-tab],[data-cs],[data-cq]');
-  if (!el) return;
+  // a click outside the open campaign dropdown closes it, and still does whatever it was aimed at
+  const closing = fOpen && !e.target.closest('.p-dd');
+  if (closing) fOpen = false;
+  const el = e.target.closest('[data-q],[data-open],[data-stub],[data-day],[data-amonth],[data-aweek],[data-view],[data-cal],[data-fcamp],[data-fcampall],[data-fdd],[data-fwhere],[data-fclear],[data-tab],[data-cs],[data-cq]');
+  if (!el) { if (closing) render(); return; }
   e.preventDefault();
   const d = el.dataset;
   if (d.q) { const q = QUESTS.find(x => x.id === d.q); q.status = q.status === 'done' ? 'open' : 'done'; render(); }
@@ -715,9 +855,11 @@ document.addEventListener('click', e => {
   else if (d.day) { aSel = d.day; const day = fromKey(d.day); if (day.getMonth() !== aMonth.getMonth()) aMonth = new Date(day.getFullYear(), day.getMonth(), 1); render(); }
   else if (d.amonth) { const n = +d.amonth; aMonth = n ? new Date(aMonth.getFullYear(), aMonth.getMonth() + n, 1) : new Date(TODAY.getFullYear(), TODAY.getMonth(), 1); aSel = n ? null : key(TODAY); render(); }
   else if (d.aweek) { const n = +d.aweek; aWeek = n ? addDays(aWeek, 7 * n) : mondayOf(TODAY); aSel = n ? null : key(TODAY); render(); }
-  else if (d.fcamp) { fCamp = d.fcamp; render(); }
+  else if (d.fcamp) { fCamps.has(d.fcamp) ? fCamps.delete(d.fcamp) : fCamps.add(d.fcamp); render(); }
+  else if (d.fcampall) { fCamps.clear(); render(); }
+  else if (d.fdd) { fOpen = d.fdd === 'toggle' ? !fOpen : false; render(); if (fOpen) document.querySelector('.p-opt')?.focus(); }
   else if (d.fwhere) { fWhere = d.fwhere; render(); }
-  else if (d.fclear) { fCamp = fWhere = 'all'; render(); }
+  else if (d.fclear) { fCamps.clear(); fWhere = 'all'; render(); }
   else if (d.view) { view = d.view; store.set('hs-alm-view', view); render(); }
   else if (d.cal) {   // keep the chosen day when switching between month and week
     calMode = d.cal; store.set('hs-alm-cal', calMode);

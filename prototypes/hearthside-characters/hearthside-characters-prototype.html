@@ -129,7 +129,8 @@ body{margin:0;background:var(--ground);color:var(--text)}
 .va-wall{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:30px 22px;padding-top:4px}
 .va-card{display:flex;flex-direction:column;align-items:center;background:none;border:0;padding:0;cursor:pointer;color:inherit;text-align:center;font:inherit;min-width:0}
 .va-card .gframe{width:100%}
-.va-card:hover .gframe{box-shadow:var(--shadow-panel),0 0 0 2px rgba(246,221,150,.35)}
+.va-card:hover .gframe,.va-card:focus-visible .gframe{box-shadow:var(--shadow-panel),0 0 0 2px rgba(246,221,150,.8),0 0 28px 6px rgba(255,179,107,.5)}
+.va-card:focus-visible{outline:0}
 /* the brass name plate, screwed to the frame's foot */
 .va-plate{position:relative;z-index:4;margin-top:-14px;max-width:92%;min-width:66%;padding:6px 12px 7px;border-radius:2px;
   background:linear-gradient(180deg,#f4d98e,#d7ab55 55%,#b88834);box-shadow:0 3px 6px rgba(0,0,0,.65),inset 0 1px 0 rgba(255,255,255,.4);color:var(--accent-ink)}
@@ -299,8 +300,56 @@ body{margin:0;background:var(--ground);color:var(--text)}
 .vc-road .is-mark .vc-node{background:var(--gold);width:10px;height:10px;margin-top:5px;border:0}
 .vc-road .is-mark b{font-weight:400;color:var(--muted);font-size:13.5px}
 .vc-road .p-link{font-size:12.5px}
-.vc-arts{display:flex;flex-wrap:wrap;gap:8px;padding:10px 14px 12px}
-.vc-arts .ad-th{width:50px;height:66px}
+/* sessions in their time that they missed, or played without their player */
+.vc-road .is-missed{opacity:.6}
+.vc-road .is-missed .vc-node{background:transparent;border:1.5px dashed var(--muted)}
+.vc-road .is-missed b{font-weight:400;text-decoration:line-through;text-decoration-color:var(--muted)}
+.vc-road .is-stood .vc-node{border-style:dashed}
+.vc-road small.away{font-style:italic;color:var(--on-wood-muted)}
+.vc-side{display:flex;flex-direction:column;gap:var(--space-5);min-width:0}
+.p-hr{border-top:1px solid var(--gold-rule)}
+/* the art, in its own panel above the sheet */
+.vc-art{padding:12px}
+.vc-art-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(82px,1fr));gap:10px}
+.vc-art-t{position:relative;display:block;aspect-ratio:3/4;padding:0;border:2px solid transparent;border-radius:3px;overflow:hidden;cursor:pointer;
+  background:linear-gradient(var(--leather),var(--leather)) padding-box,linear-gradient(var(--line),var(--line)) border-box;box-shadow:0 2px 6px rgba(0,0,0,.6)}
+.vc-art-t.is-pt,.vc-art-t:hover{background:linear-gradient(var(--leather),var(--leather)) padding-box,var(--gild) border-box}
+.vc-art-t .hs-tag{position:absolute;z-index:2;left:4px;bottom:4px;margin:0;background:rgba(20,13,8,.85);border-color:var(--gold);color:var(--gold-hi)}
+.vc-art-add{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border:1.5px dashed var(--gold-line);background:rgba(26,19,14,.6);
+  font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.04em;color:var(--muted)}
+.vc-art-add i{font-style:normal;font-family:var(--font-display);font-size:28px;line-height:1;color:var(--accent)}
+.vc-art-add:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+.vc-art-add input,.fs-acts input{position:absolute;width:1px;height:1px;opacity:0}
+/* the full sheet: a link, an uploaded copy, or both */
+.fs{padding:2px 14px 12px;display:flex;flex-direction:column;gap:8px}
+.fs .hs-att{margin-top:0;background:var(--ground-2);gap:10px}
+.fs .hs-att > div{min-width:0;flex:1}
+.fs .hs-att b{display:block;font-weight:500;font-size:14px;overflow-wrap:anywhere}
+.fs .hs-att small{display:block;font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
+.fs-ico{width:26px;height:32px;border-radius:2px;flex:none;display:grid;place-items:center;border:1px solid var(--gold-line);color:var(--accent);font-size:15px}
+.fs p{margin:0;font-size:13.5px;color:var(--muted)}
+.fs-acts{display:flex;flex-wrap:wrap;gap:8px}
+.fs-acts .up{margin-top:0;position:relative;font-family:var(--font-label);font-size:14px;font-weight:500;letter-spacing:.04em}
+/* the art, large */
+.lb-panel{width:min(720px,100%);max-height:calc(100dvh - 32px);display:flex;flex-direction:column;padding:6px}
+.lb-img{position:relative;height:min(68dvh,720px);background:#0d0906;border-radius:3px;overflow:hidden}
+.lb-img .art{background-size:contain;background-repeat:no-repeat}
+.lb-f{display:flex;align-items:center;gap:8px;padding:10px 8px 6px;flex-wrap:wrap}
+.lb-f > span{flex:1 1 160px;min-width:0;color:var(--muted);font-size:14px}
+.lb-f .p-ghost,.lb-f .hs-btn-amber{height:32px;font-size:14px}
+/* the GM's attendance: who came, and for anyone who didn't, whether their adventurer was there anyway */
+.att-k{padding:2px 10px 0;font-size:13.5px;color:var(--muted)}
+.att{list-style:none;margin:6px 0 0;padding:0}
+.att > li{padding:10px 2px;border-top:1px solid var(--gold-rule)}
+.att > li:first-child{border-top:0}
+.att-row{display:grid;grid-template-columns:22px 38px minmax(0,1fr);gap:10px;align-items:center}
+.att-row .hs-box{margin-top:0}
+.att-row .medal{width:38px}
+.att b{display:block;font-weight:500}
+.att small{display:block;font-size:13px;color:var(--muted)}
+.att-away{margin:8px 0 0 32px;padding:8px 10px;border-radius:3px;background:var(--ground-2);border:1px solid var(--line);display:flex;flex-direction:column;gap:7px;font-size:14px}
+.att-away .p-seg{align-self:flex-start;flex-wrap:wrap}
+@media (max-width:520px){.att-away{margin-left:0}}
 
 /* ---------- the editor: a gilded dialog. Hearthside has no form styles yet; fields follow its message composer. ---------- */
 .dlg-back{position:fixed;inset:0;z-index:60;background:rgba(10,7,4,.74);display:flex;align-items:center;justify-content:center;padding:16px;overflow:hidden}
@@ -346,7 +395,7 @@ body{margin:0;background:var(--ground);color:var(--text)}
 .proto-bar button{font:inherit;color:inherit;background:#e9e9e9;border:0;border-radius:8px;padding:6px 10px;cursor:pointer}
 .proto-bar button:hover{background:#dcdcdc}
 .proto-bar .lbl{min-width:190px;text-align:center;font-weight:600;padding:0 4px}
-@media (max-width:520px){.proto-bar .lbl{min-width:0;flex:1 1 0}.proto-bar .sep{display:none}}
+@media (max-width:520px){.proto-bar .lbl{min-width:0;flex:1 1 0}.proto-bar .sep{display:none}.proto-bar .lbl small{display:none}}
 .proto-bar .lbl small{display:block;font-weight:400;color:var(--proto-dim);font-size:11px}
 .proto-bar .sep{width:1px;height:26px;background:#ccc;margin:0 2px}
 .proto-bar :focus-visible{outline:2px solid #2563eb;outline-offset:2px}
@@ -384,6 +433,7 @@ body{margin:0;background:var(--ground);color:var(--text)}
   </div>
 </div>
 <div id="dlg" hidden></div>
+<div id="ov" hidden></div>
 
 <div class="proto-bar" role="toolbar" aria-label="Prototype controls">
   <button type="button" id="prev" aria-label="Previous layout">←</button>
@@ -391,6 +441,7 @@ body{margin:0;background:var(--ground);color:var(--text)}
   <button type="button" id="next" aria-label="Next layout">→</button>
   <span class="sep" aria-hidden="true"></span>
   <button type="button" id="data"></button>
+  <button type="button" id="att">As the GM: take attendance</button>
 </div>
 <div class="proto-toast" id="toast" hidden></div>
 
@@ -547,6 +598,16 @@ SESSIONS.push({ id: 'bb-1', camp: 'bb', n: 1, title: 'The Drowned Wood', date: D
   'A New Lantern', 'The Ashwater', 'The Monastery', 'Fog on the Moor', 'The Witch of Hale', 'Ransom', 'The Long Night', 'The Gates of Carrow', 'The Last Nine Miles']
   .forEach((t, i) => sess('lr', i + 1, t, new Date(2025, 10, 8 + i * 14, 18, 30), 'completed', { location: i % 2 ? "Priya's place" : "Geoff's place" }));
 SESSIONS.push({ id: 'bw-1', camp: 'bw', n: 1, title: 'Night at Blackwater Manor', date: D(2025, 10, 31, 20), status: 'completed', location: "Theo's place" });
+/* Attendance, as the GM confirms it: which players came, and which adventurers were there without their player
+   (the party ran them). An adventurer played a session if their player came, or the GM says they were there anyway. */
+const PLAYERS = { ss: ['Geoff', 'Priya', 'Theo', 'Marco'], bb: ['Geoff', 'Priya', 'Avery'], lr: ['Geoff', 'Priya', 'Theo'], bw: ['Geoff', 'Theo', 'Priya'] };
+SESSIONS.filter(s => s.status === 'completed').forEach(s => { s.came = new Set(PLAYERS[s.camp]); s.stood = new Set(); });
+const att = (id, away, stood) => { const s = SESSIONS.find(x => x.id === id); away.forEach(p => s.came.delete(p)); (stood || []).forEach(c => s.stood.add(c)); };
+att('ss-3', ['Geoff'], ['kestrel']);   // Geoff was away; the party brought Kestrel along
+att('ss-5', ['Geoff']);                // Geoff was away; Kestrel sat it out
+att('ss-4', ['Marco']);
+att('lr-14', ['Geoff'], ['mags']);
+att('lr-6', ['Geoff']);
 
 // levels: [after which session (null = made at), level]. No level at all: a game without them.
 const CHARS = [
@@ -556,28 +617,30 @@ const CHARS = [
     traits: [['Ancestry', 'Ysoki'], ['Ship', "The Gull's Wager"], ['Owes', '4,000 credits to the Ferro Syndicate']],
     story: 'Grew up in the ducts of Absalom Station. Won the Gull\'s Wager in a card game she is fairly sure was rigged in her favour, which worries her more than if it hadn\'t been.',
     art: [ART.kestrel, ART.kestrelShip, ART.kestrelSketch], artCaps: ['Portrait by Priya', 'The Gull\'s Wager', 'First sketch'],
-    played: ['ss-1', 'ss-2', 'ss-3', 'ss-4', 'ss-5', 'ss-6'], levels: [[null, 2], ['ss-2', 3], ['ss-4', 4], ['ss-6', 5]] },
+    from: 'ss-1', levels: [[null, 2], ['ss-2', 3], ['ss-4', 4], ['ss-6', 5]] },
   { id: 'odran', name: 'Brother Odran', cls: 'Cleric', level: 3, system: 'D&D 5e', camp: 'bb', status: 'active', made: D(2026, 10, 19),
     epithet: 'A drowned man the sea gave back. He hasn\'t said what it asked for in return.',
     link: 'https://www.dndbeyond.com/characters/odran', linkName: 'D&D Beyond',
     traits: [['Ancestry', 'Human'], ['God', 'The Drowned Saint']], story: '',
-    art: [ART.odran], artCaps: [''], played: [], levels: [[null, 3]] },
+    art: [ART.odran], artCaps: [''], from: 'bb-1', levels: [[null, 3]] },
   { id: 'wren', name: 'Wren Ashdown', cls: 'Bard', level: 1, system: 'D&D 5e', camp: null, status: 'active', made: D(2026, 10, 24),
-    epithet: '', link: '', traits: [], story: '', art: [], artCaps: [], played: [], levels: [[null, 1]] },
+    epithet: '', link: '', traits: [], story: '', art: [], artCaps: [], levels: [[null, 1]] },
   { id: 'mags', name: 'Mags Ironhollow', cls: 'Fighter', level: 11, system: 'D&D 5e', camp: 'lr', status: 'retired', made: D(2026, 3, 20),
     epithet: 'Carried the lantern the last nine miles. Keeps an inn at Carrow now.',
     link: 'https://www.dndbeyond.com/characters/mags', linkName: 'D&D Beyond',
     traits: [['Ancestry', 'Dwarf'], ['Inn', 'The Ninth Mile, Carrow']],
     story: 'Joined the road at the Ashwater when the party needed someone who would stand on a bridge and not move. Retired when the road ended.',
     art: [ART.mags, ART.magsSketch], artCaps: ['Portrait', 'The last nine miles'],
-    played: ['lr-10', 'lr-11', 'lr-12', 'lr-13', 'lr-14', 'lr-15', 'lr-16', 'lr-17', 'lr-18'], levels: [[null, 7], ['lr-11', 8], ['lr-13', 9], ['lr-15', 10], ['lr-17', 11]] },
+    sheetFile: { name: 'mags-ironhollow-level-11.pdf', size: 248000, type: 'application/pdf', at: D(2026, 7, 19) },
+    from: 'lr-10', to: 'lr-18', levels: [[null, 7], ['lr-11', 8], ['lr-13', 9], ['lr-15', 10], ['lr-17', 11]] },
   { id: 'ada', name: 'Dr. Ada Marsh', cls: 'Antiquarian', level: null, system: 'Call of Cthulhu 7e', camp: 'bw', status: 'retired', made: D(2025, 10, 25),
     epithet: 'Survived Blackwater Manor. Doesn\'t talk about the cellar.', link: '', traits: [['Sanity', '31, from 65'], ['Era', '1920s Boston']],
-    story: '', art: [ART.ada], artCaps: [''], played: ['bw-1'], levels: [] },
+    story: '', art: [ART.ada], artCaps: [''], from: 'bw-1', levels: [],
+    sheetFile: { name: 'ada-marsh-investigator.jpg', size: 1400000, type: 'image/jpeg', at: D(2025, 10, 31) } },
   { id: 'pip', name: 'Pip Thistlewick', cls: 'Rogue', level: 6, system: 'D&D 5e', camp: 'lr', status: 'fallen', fellIn: 'lr-9', made: D(2025, 11, 1),
     epithet: 'Never met a lock he liked. Met a bridge he didn\'t.', link: 'https://www.dndbeyond.com/characters/pip', linkName: 'D&D Beyond',
     traits: [['Ancestry', 'Halfling'], ['Last words', '"It\'ll hold."']], story: '',
-    art: [ART.pip], artCaps: [''], played: ['lr-1', 'lr-2', 'lr-3', 'lr-4', 'lr-5', 'lr-6', 'lr-7', 'lr-8', 'lr-9'], levels: [[null, 1], ['lr-2', 2], ['lr-3', 3], ['lr-5', 4], ['lr-7', 5], ['lr-8', 6]] },
+    art: [ART.pip], artCaps: [''], from: 'lr-1', to: 'lr-9', levels: [[null, 1], ['lr-2', 2], ['lr-3', 3], ['lr-5', 4], ['lr-7', 5], ['lr-8', 6]] },
 ];
 // the rest of each party: other players' adventurers (read-only here)
 const PARTY = {
@@ -599,12 +662,14 @@ const VARIANTS = [
   { key: 'A', name: 'Portrait gallery', note: 'Art first: portraits hung on the floor' },
   { key: 'B', name: 'Ledger and sheet', note: 'Words first: a roster, and a parchment sheet' },
   { key: 'C', name: 'The road so far', note: 'History first: by campaign, and a timeline' },
+  { key: 'D', name: 'Gallery + road', note: "Chosen: A's roster, C's page (revised)" },
 ];
 const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
 const qs0 = new URLSearchParams(location.search);
 let variant = VARIANTS.findIndex(v => v.key === (qs0.get('variant') || store.get('hs-adv-variant')));
-if (variant < 0) variant = 0;
-let sel = qs0.get('adventurer');              // an adventurer's own page (A, C) or sheet (B); null = the roster
+if (variant < 0) variant = 3;
+let sel = qs0.get('adventurer');              // an adventurer's own page (A, C, D) or sheet (B); null = the roster
+let ov = null;         // an overlay: { kind: 'lb', id, i } for art, or { kind: 'att', sid, came, stood } for the GM's attendance
 let empty = store.get('hs-adv-data') === 'empty';   // a new player with no adventurers yet
 let aArt = 0;          // A: which piece of art is in the big frame
 let bTab = 'active';   // B: Adventuring | Retired & fallen
@@ -627,7 +692,13 @@ const S = id => SESSIONS.find(s => s.id === id);
 const isActive = c => c.status === 'active';
 const shortS = s => s.title.replace(/:.*/, '');
 const where = s => s.online ? 'Online' : s.location || 'Place to be decided';
-const playedOf = c => c.played.map(S).sort((a, b) => b.date - a.date);    // newest first
+/* the campaign's sessions while this adventurer was in it: from the one they joined at (or, for a new one, the day
+   they were made) to the one they left at */
+const tenure = c => c.camp ? SESSIONS.filter(s => s.camp === c.camp && s.status === 'completed'
+  && (c.from ? s.n >= S(c.from).n : s.date >= c.made) && (!c.to || s.n <= S(c.to).n)) : [];
+const youCame = s => !!s.came?.has('Geoff');
+const wasThere = (c, s) => youCame(s) || !!s.stood?.has(c.id);
+const playedOf = c => tenure(c).filter(s => wasThere(c, s)).sort((a, b) => b.date - a.date);    // newest first
 const nextOf = c => isActive(c) && c.camp ? SESSIONS.filter(s => s.camp === c.camp && s.status === 'scheduled' && s.date >= TODAY).sort((a, b) => a.date - b.date)[0] : null;
 const clsLine = c => [c.cls, c.level != null && c.level !== '' ? `Level ${c.level}` : ''].filter(Boolean).join(' · ') || 'No class set';
 const statusLine = c => c.status === 'fallen' ? (c.fellIn ? `Fell in ${shortS(S(c.fellIn))}` : 'Fallen') : c.status === 'retired' ? 'Retired' : 'Adventuring';
@@ -672,7 +743,14 @@ const mates = k => PARTY[k] ? `<div class="mates">${PARTY[k].map((m, i) => `<but
 /* ---------------- A: Portrait gallery ---------------- */
 function VariantA() {
   const c = sel && C(sel);
-  if (c) return aPage(c);
+  return c ? aPage(c) : aRoster();
+}
+/* D, chosen: A's portrait wall as the roster, C's road as an adventurer's page */
+function VariantD() {
+  const c = sel && C(sel);
+  return c ? cPage(c) : aRoster();
+}
+function aRoster() {
   const list = mine();
   if (!list.length) return head('') + emptyState();
   const act = list.filter(isActive), past = list.filter(c => !isActive(c));
@@ -757,7 +835,7 @@ function bSheet(c) {
     ${nx || pl.length ? `<ul class="vb-sess">${nx ? `<li class="is-next"><time>Next · ${shortDate(nx.date)}</time><div><b>${esc(nx.title)}</b><small>${esc(CAMPS[nx.camp].title)} · ${tm(nx.date)} · ${esc(where(nx))}</small>${nextQuests(nx)}</div></li>` : ''}
       ${pl.map(s => { const up = reachedAfter(c, s); return `<li><time>${shortDate(s.date)}</time><div><b>${esc(s.title)}</b>${c.fellIn === s.id ? '<span class="hs-tag">Fell here</span>' : up ? `<span class="hs-tag">Level ${up}</span>` : ''}<small>${esc(CAMPS[s.camp].title)} · ${esc(where(s))}</small></div></li>`; }).join('')}</ul>`
       : `<p class="vb-kept" style="margin-top:4px">${c.camp ? 'None yet.' : 'Not in a campaign yet. Join one, and the sessions they play are written here.'}</p>`}
-    ${c.art.length > 1 ? `<div class="vb-h">Art · ${c.art.length}</div><div class="vb-arts">${c.art.map((a, j) => `<button type="button" class="vb-photo" data-zoom="${j}" aria-label="${esc(c.artCaps[j] || 'Art ' + (j + 1))}"><span class="pt"><span class="art art-${a}"></span></span></button>`).join('')}</div>` : ''}
+    ${c.art.length > 1 ? `<div class="vb-h">Art · ${c.art.length}</div><div class="vb-arts">${c.art.map((a, j) => `<button type="button" class="vb-photo" data-zoom="${j}" data-zid="${c.id}" aria-label="${esc(c.artCaps[j] || 'Art ' + (j + 1))}"><span class="pt"><span class="art art-${a}"></span></span></button>`).join('')}</div>` : ''}
     <div class="hs-btn-row"><button type="button" class="hs-btn is-primary" data-edit="${c.id}">Edit the sheet</button>
       <label class="hs-btn" style="display:inline-flex;align-items:center">Add art<input type="file" accept="image/*" data-addart="${c.id}" style="position:absolute;width:1px;height:1px;opacity:0"></label></div>
   </article>`;
@@ -794,10 +872,15 @@ function cPage(c) {
   if (nx) stops.push(`<li class="is-next"><span class="vc-node"></span><div><time>Next · ${dayLabel(nx.date)}, ${tm(nx.date)}</time><b>${esc(nx.title)}</b><small>${esc(where(nx))}</small>${nextQuests(nx)}</div></li>`);
   if (c.status === 'fallen' && c.fellIn) stops.push(`<li class="is-fell"><span class="vc-node"></span><div><time>${shortDate(S(c.fellIn).date)}</time><b>Fell at ${esc(S(c.fellIn).title.replace(/^Session \d+: /, ''))}</b><small>${esc(c.traits.find(([k]) => k === 'Last words')?.[1] || '')}</small></div></li>`);
   if (c.status === 'retired') stops.push(`<li class="is-mark"><span class="vc-node"></span><div><b>Retired${CAMPS[c.camp]?.ended ? ` when ${esc(CAMPS[c.camp].title)} ended, ${monthYear(CAMPS[c.camp].ended)}` : ''}</b></div></li>`);
-  pl.forEach(s => {
+  // every session of their time in the campaign: played (with you, or brought along without you) or sat out
+  const ten = tenure(c).sort((a, b) => b.date - a.date), missed = ten.length - pl.length;
+  ten.forEach(s => {
+    const when = `<time>${dayLabel(s.date)}${s.date.getFullYear() !== TODAY.getFullYear() ? ', ' + s.date.getFullYear() : ''}</time>`;
+    if (!wasThere(c, s)) { stops.push(`<li class="is-missed"><span class="vc-node"></span><div>${when}<b>${esc(s.title)}</b><small>You were away, and ${esc(c.name)} sat it out</small></div></li>`); return; }
     const up = reachedAfter(c, s);
     if (up) stops.push(`<li class="is-lvl"><span class="vc-node"></span><div><b>Reached level ${up}</b></div></li>`);
-    stops.push(`<li><span class="vc-node"></span><div><time>${dayLabel(s.date)}${s.date.getFullYear() !== TODAY.getFullYear() ? ', ' + s.date.getFullYear() : ''}</time><b>${esc(s.title)}</b>
+    stops.push(`<li class="${youCame(s) ? '' : 'is-stood'}"><span class="vc-node"></span><div>${when}<b>${esc(s.title)}</b>
+      ${youCame(s) ? '' : `<small class="away">You were away; the party brought ${esc(c.name)} along</small>`}
       <button type="button" class="p-link" data-session="${s.id}">Recap</button></div></li>`);
   });
   if (c.camp) stops.push(`<li class="is-mark"><span class="vc-node"></span><div><b>${pl.length ? 'Joined' : 'Will join'} ${esc(CAMPS[c.camp].title)}${c.levels[0] ? ` at level ${c.levels[0][1]}` : ''}</b></div></li>`);
@@ -807,18 +890,35 @@ function cPage(c) {
       <div class="vc-hero-in"><span class="medal">${pt(c, true)}</span>
         <div style="min-width:0"><h1>${esc(c.name)}</h1><p class="k">${esc(clsLine(c))}${c.system ? ' · ' + esc(c.system) : ''}</p>${c.epithet ? `<p class="e">${esc(c.epithet)}</p>` : ''}</div>${lvl(c)}</div></div>
     <div class="vc-cols">
-      <section><h2 class="hs-sec"><span>The road so far</span><span class="hs-aside">${plural(pl.length, 'session')}${levelUps(c) ? ` · ${plural(levelUps(c), 'level')} gained` : ''}</span></h2>
+      <section><h2 class="hs-sec"><span>The road so far</span><span class="hs-aside">${pl.length} played${missed ? ` · ${missed} missed` : ''}${levelUps(c) ? ` · ${plural(levelUps(c), 'level')} gained` : ''}</span></h2>
         <div class="hs-gilded"><ol class="vc-road">${stops.join('')}</ol></div></section>
-      <section><h2 class="hs-sec"><span>Their sheet</span></h2>
-        <div class="hs-gilded">${dl([['Played by', 'You'], ...facts(c)])}
-          ${c.story ? `<div class="p-panel-h" style="border-top:1px solid var(--gold-rule)"><span>Their story</span></div><p class="story">${esc(c.story)}</p>` : ''}
-          <div class="p-panel-h" style="border-top:1px solid var(--gold-rule)"><span>Art · ${c.art.length}</span></div>
-          <div class="vc-arts">${c.art.map((a, j) => `<button type="button" class="ad-th ${j === 0 ? 'is-on' : ''}" data-zoom="${j}" aria-label="${esc(c.artCaps[j] || 'Art ' + (j + 1))}"><span class="art art-${a}"></span></button>`).join('')}
-            <label class="ad-th ad-add" title="Add art">+<input type="file" accept="image/*" data-addart="${c.id}" style="position:absolute;width:1px;height:1px;opacity:0"></label></div>
-          <div class="ad-foot">${sheetLink(c) || '<span></span>'}<button type="button" class="hs-btn-amber" data-edit="${c.id}">Edit</button></div></div>
-        ${c.camp ? `<h2 class="hs-sec" style="margin-top:var(--space-5)"><span>${CAMPS[c.camp].ended ? 'Travelled with' : 'Travels with'}</span></h2><div class="hs-gilded">${mates(c.camp) || '<div class="p-empty">Nobody else yet.</div>'}</div>` : ''}
-      </section>
+      <div class="vc-side">
+        <section><h2 class="hs-sec"><span>Art</span><span class="hs-aside">${c.art.length ? plural(c.art.length, 'piece') : 'none yet'}</span></h2>
+          <div class="hs-gilded vc-art"><div class="vc-art-grid">${c.art.map((a, j) => `<button type="button" class="vc-art-t ${j === 0 ? 'is-pt' : ''}" data-zoom="${j}" data-zid="${c.id}" aria-label="${esc(c.artCaps[j] || 'Art ' + (j + 1))}${j === 0 ? ' (the portrait)' : ''}"><span class="art art-${a}"></span>${j === 0 ? '<span class="hs-tag">Portrait</span>' : ''}</button>`).join('')}
+            <label class="vc-art-t vc-art-add"><i>+</i>Add art<input type="file" accept="image/*" data-addart="${c.id}"></label></div></div></section>
+        <section><h2 class="hs-sec"><span>Their sheet</span></h2>
+          <div class="hs-gilded">${dl([['Played by', 'You'], ...facts(c)])}
+            ${c.story ? `<div class="p-panel-h p-hr"><span>Their story</span></div><p class="story">${esc(c.story)}</p>` : ''}
+            ${fullSheet(c)}
+            ${c.camp ? `<div class="p-panel-h p-hr"><span>${CAMPS[c.camp].ended ? 'Travelled with' : 'Travels with'}</span></div>${mates(c.camp) || '<div class="p-empty">Nobody else yet.</div>'}` : ''}
+            <div class="ad-foot"><span></span><button type="button" class="hs-btn-amber" data-edit="${c.id}">Edit</button></div></div></section>
+      </div>
     </div>`;
+}
+/* the full sheet stays wherever it lives: a link to it, an uploaded copy (a PDF or a picture), or both.
+   Hearthside never reads either into fields, so it stays system-agnostic. */
+const fileSize = n => n < 1e6 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1e6).toFixed(1)} MB`;
+function fullSheet(c) {
+  const f = c.sheetFile;
+  return `<div class="p-panel-h p-hr"><span>The full sheet</span></div><div class="fs">
+    ${c.link ? `<div class="hs-att"><span class="fs-ico" aria-hidden="true">↗</span><div><b>On ${esc(host(c))}</b><small>${esc(c.link)}</small></div>
+      <button type="button" class="p-link" data-ext="${c.id}">Open</button></div>` : ''}
+    ${f ? `<div class="hs-att"><span class="hs-att-icon" aria-hidden="true"></span><div><b>${esc(f.name)}</b><small>${f.type === 'application/pdf' ? 'PDF' : 'Picture'} · ${fileSize(f.size)} · uploaded ${shortDate(f.at)}</small></div>
+      <button type="button" class="p-link" data-fsopen="${c.id}">Open</button><button type="button" class="p-link" data-fsdel="${c.id}" style="color:var(--muted)">Remove</button></div>` : ''}
+    ${!c.link && !f ? '<p>None yet. Link to wherever it lives (D&D Beyond, Demiplane, Drive), or upload a copy for the party to open.</p>' : ''}
+    <div class="fs-acts"><label class="up">${f ? 'Replace the copy' : 'Upload a sheet'}<input type="file" accept=".pdf,image/*" data-fsup="${c.id}"></label>
+      <button type="button" class="up" data-fslink="${c.id}">${c.link ? 'Change the link' : 'Link to it'}</button></div>
+  </div>`;
 }
 
 /* ---------------- the editor (shared by every layout). Only a name is required. ---------------- */
@@ -852,6 +952,11 @@ function renderDlg() {
       <div class="fld"><label for="f-ep">In a line</label><input id="f-ep" name="epithet" value="${v('epithet')}" placeholder="Never met a lock he liked."></div>
       <div class="fld"><label for="f-link">Where the full sheet lives</label><input id="f-link" name="link" type="url" value="${v('link')}" placeholder="https://">
         <small>D&D Beyond, Demiplane, a PDF in Drive. Hearthside links to it; nothing is copied.</small></div>
+      <div class="fld fs" style="padding:0"><span class="lab">Or upload a copy</span>
+        ${d.sheetFile ? `<div class="hs-att"><span class="hs-att-icon" aria-hidden="true"></span><div><b>${esc(d.sheetFile.name)}</b><small>${d.sheetFile.type === 'application/pdf' ? 'PDF' : 'Picture'} · ${fileSize(d.sheetFile.size)}</small></div>
+          <button type="button" class="p-link" data-dfsdel="1" style="color:var(--muted)">Remove</button></div>` : ''}
+        <div class="fs-acts"><label class="up">${d.sheetFile ? 'Replace the copy' : 'Upload a sheet'}<input type="file" accept=".pdf,image/*" id="f-sheet"></label></div>
+        <small>A PDF or a picture of the sheet, for the party to open. Hearthside keeps the file as it is and doesn't read it.</small></div>
       <fieldset class="fld"><legend>Details</legend><small style="margin-top:-2px;margin-bottom:4px">Anything the party should see at a glance, named your way.</small>
         <div class="trs">${d.traits.map(([k, t], i) => `<div class="tr-row"><input aria-label="Detail ${i + 1} name" data-tk="${i}" value="${esc(k)}" placeholder="Ancestry"><input aria-label="Detail ${i + 1}" data-tv="${i}" value="${esc(t)}" placeholder="Dwarf">
           <button type="button" data-trdel="${i}" aria-label="Remove detail ${i + 1}">×</button></div>`).join('')}</div>
@@ -875,9 +980,10 @@ function saveDraft() {
     const c = CHARS.find(x => x.id === d.id);
     if (c.level !== level && level != null) c.levels.push([null, level]);   // a level change would be dated in the real thing
     Object.assign(c, clean, { levels: c.levels });
+    if (!clean.sheetFile) delete c.sheetFile;
   } else {
     const id = 'new' + Date.now();
-    CHARS.unshift({ ...clean, id, made: new Date(TODAY), played: [], levels: level != null ? [[null, level]] : [] });
+    CHARS.unshift({ ...clean, id, made: new Date(TODAY), levels: level != null ? [[null, level]] : [] });
     empty = false; store.set('hs-adv-data', 'full');
     sel = id;
   }
@@ -885,6 +991,46 @@ function saveDraft() {
   toast('Prototype: saved in memory only.');
 }
 const readImage = (file, done) => { const fr = new FileReader(); fr.onload = () => done(fr.result); fr.readAsDataURL(file); };
+
+/* ---------------- overlays: the art, large; and the GM's attendance ---------------- */
+/* who sat at the table for a session: you (with whichever adventurer you had in it then) and the rest of the party */
+function attRows(s) {
+  const yours = CHARS.find(c => c.camp === s.camp && tenure(c).includes(s));
+  return [{ player: 'Geoff', who: 'You', ch: yours && { id: yours.id, name: yours.name, art: yours.art } },
+    ...(PARTY[s.camp] || []).map((m, i) => ({ player: m.player, who: m.player, ch: { id: `${s.camp}/${i}`, name: m.name, art: m.art ? [m.art] : [] } }))];
+}
+function openAttendance(sid) { const s = S(sid); ov = { kind: 'att', sid, came: new Set(s.came), stood: new Set(s.stood) }; renderOv(); }
+function renderOv() {
+  const el = document.getElementById('ov');
+  if (!ov) { el.hidden = true; el.innerHTML = ''; return; }
+  el.hidden = false;
+  if (ov.kind === 'lb') {
+    const c = C(ov.id), n = c.art.length, i = ov.i;
+    el.innerHTML = `<div class="dlg-back"><div class="hs-gilded lb-panel" role="dialog" aria-modal="true" aria-label="${esc(c.name)}'s art">
+      <div class="lb-img"><span class="art art-${c.art[i]}"></span></div>
+      <div class="lb-f">${n > 1 ? '<button type="button" class="p-ghost" data-lbstep="-1" aria-label="Previous">‹</button>' : ''}
+        <span>${esc(c.artCaps[i] || 'Art')} · ${i + 1} of ${n}${i === 0 ? ' · the portrait' : ''}</span>
+        ${i ? '<button type="button" class="p-ghost" data-lbpt="1">Make this the portrait</button>' : ''}
+        ${n > 1 ? '<button type="button" class="p-ghost" data-lbstep="1" aria-label="Next">›</button>' : ''}<button type="button" class="hs-btn-amber" data-ovclose="1">Close</button></div></div></div>`;
+  } else {
+    const s = S(ov.sid), k = s.camp;
+    el.innerHTML = `<div class="dlg-back"><div class="hs-gilded dlg" role="dialog" aria-modal="true" aria-labelledby="att-t">
+      <div class="dlg-h"><h2 id="att-t">Who came?</h2><button type="button" class="hs-back" data-ovclose="1" aria-label="Close">×</button></div>
+      <div class="dlg-body">
+        <p class="att-k">${esc(CAMPS[k].title)} · confirmed by its Game Master. Whoever came brought their adventurer. For anyone who didn't, say whether their adventurer was there anyway.</p>
+        <div class="fld"><label for="att-s">Session</label><select id="att-s" data-attsel="1">${SESSIONS.filter(x => x.camp === k && x.status === 'completed').reverse()
+          .map(x => `<option value="${x.id}" ${x.id === s.id ? 'selected' : ''}>${esc(x.title)} · ${shortDate(x.date)}</option>`).join('')}</select></div>
+        <ul class="att">${attRows(s).map(r => { const came = ov.came.has(r.player), there = r.ch && ov.stood.has(r.ch.id);
+          return `<li><div class="att-row"><button type="button" class="hs-box" role="checkbox" aria-checked="${came}" data-attp="${esc(r.player)}" aria-label="${esc(r.who)} came"></button>
+            <span class="medal">${r.ch ? pt(r.ch, true) : ''}</span><div><b>${esc(r.who)}</b><small>${r.ch ? esc(r.ch.name) : 'No adventurer in this session'}</small></div></div>
+            ${!came && r.ch ? `<div class="att-away"><span>${r.who === 'You' ? "You weren't there." : esc(r.who) + " wasn't there."} Was ${esc(r.ch.name)}?</span>
+              <div class="p-seg" role="group" aria-label="Was ${esc(r.ch.name)} there?"><button type="button" data-attc="${r.ch.id}" data-v="0" aria-pressed="${!there}">No, they sat it out</button>
+                <button type="button" data-attc="${r.ch.id}" data-v="1" aria-pressed="${!!there}">Yes, the party played them</button></div></div>` : ''}</li>`; }).join('')}</ul>
+      </div>
+      <div class="dlg-f"><button type="button" class="p-ghost" data-ovclose="1">Cancel</button><button type="button" class="hs-btn-amber" data-attsave="1">Save attendance</button></div></div></div>`;
+  }
+  Hearthside.GildedPanel.decorate(el);
+}
 
 /* ---------------- the rail's Your Quests (shell) ---------------- */
 function renderRail() {
@@ -899,7 +1045,7 @@ function renderRail() {
 
 /* ---------------- render + wiring ---------------- */
 const page = document.getElementById('page');
-const RENDER = [VariantA, VariantB, VariantC];
+const RENDER = [VariantA, VariantB, VariantC, VariantD];
 function render() {
   if (sel && !C(sel)) sel = null;
   page.innerHTML = RENDER[variant]();
@@ -917,9 +1063,13 @@ function go(d) { variant = (variant + d + VARIANTS.length) % VARIANTS.length; re
 document.getElementById('prev').onclick = () => go(-1);
 document.getElementById('next').onclick = () => go(1);
 document.getElementById('data').onclick = () => { empty = !empty; store.set('hs-adv-data', empty ? 'empty' : 'full'); sel = null; render(); };
+// the GM's attendance, for the open adventurer's latest session (or Starfall Salvage's)
+document.getElementById('att').onclick = () => { const c = sel && C(sel), t = c ? tenure(c) : []; openAttendance(t.length ? t[t.length - 1].id : 'ss-6'); };
+const lbStep = n => { const c = C(ov.id); ov.i = (ov.i + n + c.art.length) % c.art.length; renderOv(); };
 addEventListener('keydown', e => {
-  if (e.key === 'Escape' && draft) { draft = null; renderDlg(); return; }
-  if (draft || e.target.closest('input,textarea,select,[contenteditable]')) return;
+  if (e.key === 'Escape' && (draft || ov)) { draft = null; ov = null; renderDlg(); renderOv(); return; }
+  if (ov?.kind === 'lb' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { lbStep(e.key === 'ArrowLeft' ? -1 : 1); return; }
+  if (draft || ov || e.target.closest('input,textarea,select,[contenteditable]')) return;
   if (e.key === 'ArrowLeft') go(-1); else if (e.key === 'ArrowRight') go(1);
 });
 
@@ -927,8 +1077,9 @@ let toastTimer;
 function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 2800); }
 
 document.addEventListener('click', e => {
-  if (e.target.matches('.dlg-back')) { draft = null; renderDlg(); return; }   // a click on the dimmed floor closes the editor
-  const el = e.target.closest('[data-q],[data-sel],[data-pick],[data-back],[data-home],[data-new],[data-edit],[data-art],[data-mkpt],[data-zoom],[data-btab],[data-camp],[data-mate],[data-session],[data-ext],[data-stub],[data-dlgclose],[data-dstatus],[data-tradd],[data-trdel]');
+  if (e.target.matches('.dlg-back')) { draft = null; ov = null; renderDlg(); renderOv(); return; }   // a click on the dimmed floor closes the dialog
+  const el = e.target.closest('[data-q],[data-sel],[data-pick],[data-back],[data-home],[data-new],[data-edit],[data-art],[data-mkpt],[data-zoom],[data-btab],[data-camp],[data-mate],[data-session],[data-ext],[data-stub],[data-dlgclose],[data-dstatus],[data-tradd],[data-trdel],'
+    + '[data-lbstep],[data-lbpt],[data-ovclose],[data-attp],[data-attc],[data-attsave],[data-fsopen],[data-fsdel],[data-fslink],[data-dfsdel]');
   if (!el) return;
   e.preventDefault();
   const d = el.dataset;
@@ -940,7 +1091,21 @@ document.addEventListener('click', e => {
   else if (d.edit) openEditor(d.edit);
   else if (d.art) { aArt = +d.art; render(); }
   else if (d.mkpt) { const c = C(sel), [a] = c.art.splice(aArt, 1), [cap] = c.artCaps.splice(aArt, 1); c.art.unshift(a); c.artCaps.unshift(cap); aArt = 0; render(); }
-  else if (d.zoom) { if (variant === 2 || variant === 1) { variant = 0; aArt = +d.zoom; sel = sel || C(page.querySelector('[data-edit]').dataset.edit).id; render(); toast('Prototype: opened in layout A, which shows art large.'); } }
+  else if (d.zoom) { ov = { kind: 'lb', id: d.zid, i: +d.zoom }; renderOv(); }
+  else if (d.lbstep) lbStep(+d.lbstep);
+  else if (d.lbpt) { const c = C(ov.id), [a] = c.art.splice(ov.i, 1), [cap] = c.artCaps.splice(ov.i, 1); c.art.unshift(a); c.artCaps.unshift(cap); ov.i = 0; render(); renderOv(); }
+  else if (d.ovclose) { ov = null; renderOv(); }
+  else if (d.attp) { ov.came.has(d.attp) ? ov.came.delete(d.attp) : ov.came.add(d.attp); renderOv(); }
+  else if (d.attc) { d.v === '1' ? ov.stood.add(d.attc) : ov.stood.delete(d.attc); renderOv(); }
+  else if (d.attsave) {
+    const s = S(ov.sid); s.came = ov.came;
+    s.stood = new Set([...ov.stood].filter(id => !attRows(s).some(r => r.ch?.id === id && s.came.has(r.player))));   // only those whose player was away
+    ov = null; renderOv(); render(); toast(`Prototype: attendance for ${s.title} saved in memory.`);
+  }
+  else if (d.fsopen) { const f = C(d.fsopen).sheetFile; f.url ? open(f.url, '_blank') : toast(`Prototype: this opens ${f.name}.`); }
+  else if (d.fsdel) { delete C(d.fsdel).sheetFile; render(); }
+  else if (d.fslink) { openEditor(d.fslink); const l = document.getElementById('f-link'); l?.focus(); l?.scrollIntoView({ block: 'center' }); }
+  else if (d.dfsdel) { delete draft.sheetFile; renderDlg(); }
   else if (d.btab) { bTab = d.btab; sel = null; render(); }
   else if (d.camp) toast(`Prototype: this opens ${CAMPS[d.camp].title}'s page.`);
   else if (d.mate) { const [k, i] = d.mate.split('/'); const m = PARTY[k][+i]; toast(`Prototype: this opens ${m.name}, ${m.player}'s adventurer (read only).`); }
@@ -963,6 +1128,11 @@ document.getElementById('dlg').addEventListener('submit', e => { e.preventDefaul
 document.addEventListener('change', e => {
   const t = e.target;
   if (t.id === 'f-art' && t.files[0]) readImage(t.files[0], url => { draft.art = [addArt(url), ...draft.art]; draft.artCaps = ['Uploaded just now', ...draft.artCaps]; renderDlg(); });
+  else if (t.dataset.attsel) { openAttendance(t.value); }
+  else if ((t.dataset.fsup || t.id === 'f-sheet') && t.files[0]) {
+    const file = t.files[0], sheet = { name: file.name, size: file.size, type: file.type, at: new Date(TODAY), url: URL.createObjectURL(file) };
+    if (t.id === 'f-sheet') { draft.sheetFile = sheet; renderDlg(); } else { C(t.dataset.fsup).sheetFile = sheet; render(); toast('Prototype: kept in memory only.'); }
+  }
   else if (t.dataset.addart && t.files[0]) readImage(t.files[0], url => { const c = C(t.dataset.addart); c.art.push(addArt(url)); c.artCaps.push('Uploaded just now'); aArt = c.art.length - 1; render(); toast('Prototype: added in memory only.'); });
 });
 

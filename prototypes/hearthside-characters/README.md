@@ -24,11 +24,27 @@ The editor is the same in every layout: a gilded dialog, with "New adventurer" o
 
 Material is part of the question. The design system keeps parchment for "one session's own business". B puts an adventurer on parchment, which stretches that rule. A and C keep them on leather and the floor.
 
+## The answer
+
+**D, "Gallery + road": A's roster with C's adventurer page.** Picked by Geoff on 2026-10-26. The prototype now opens on it, and A, B and C stay in the switcher for comparison.
+
+- **Roster:** A's portrait wall and Hall of Heroes. Hovering or focusing a portrait lights its frame brighter than in round 1: a stronger gold rim and a firelight glow around it.
+- **An adventurer's page:** C's hero and road, with the right-hand column reorganized:
+  - **Art** is its own panel, above the sheet. It's a grid of every piece, with the portrait marked, plus an Add art tile. Picking a piece opens it large, where you can step through the pieces and make any of them the portrait. C's page shows the same changes.
+  - **Their sheet** holds the facts, the player's details and their story, then **The full sheet**, then **Travels with** (moved inside the panel), then Edit.
+  - **The full sheet** can be a link (D&D Beyond, Demiplane, Drive), an **uploaded copy** (a PDF or a picture), or both. "Upload a sheet", "Replace the copy" and "Link to it" sit right there, and the editor has the same upload. Hearthside keeps the file as it is and never reads it into fields, so it stays game-system agnostic. Parsing an import from a particular system would break that, so it isn't offered.
+- **Sessions come from attendance (decided).** An adventurer was at a session if their player was. If the player wasn't, the GM says whether the adventurer was there anyway when confirming who came. The road shows all three cases: played; played while you were away ("the party brought Kestrel Vane along", dashed node); and sat out (struck through and faded, counted as "missed"). "As the GM: take attendance" on the bar opens the GM's dialog for the open adventurer's latest session. Unticking a player asks "Was Kestrel Vane there?", with the answers "No, they sat it out" and "Yes, the party played them". Saving updates the road. In the real app this belongs in the campaign page's attendance step.
+
 ## What the data would need
 
 The prototype shows more than the `characters` table holds today (`backend/db/schema.sql`: name, player, one campaign, game_type, class, level, is_dead).
 
-- **Which sessions an adventurer played: not recorded yet.** Attendance (`player_sessions`) records players, not characters. Every layout's session list, and C's whole road, needs a character on attendance (or a session ↔ character table), filled in when the GM confirms who came.
+- **Which sessions an adventurer played.** Attendance (`player_sessions`) records players, not characters. The rule above needs two more things:
+  - Each adventurer's span in their campaign: the session they joined at, and the one they left at by falling or retiring. That span says which adventurer a player's attendance counts for. Pip played Sessions 1 to 9 of The Lantern Road and Mags played 10 to 18, both for Geoff.
+  - A record of the adventurers who were at a session without their player, set from the GM's attendance step.
+
+  If a player ever has two adventurers in one campaign at once, attendance can't tell which one came. The GM would have to pick, which this prototype doesn't draw.
+- **The uploaded sheet:** a file per adventurer (S3, like campaign banners), shown to the party.
 - **Level history:** "Reached level 5 after Session 6" needs the level change to be dated or tied to a session. Today `level` is a single number.
 - **New columns:** art (several images, one of them the portrait), sheet link, epithet, story, details (label/value pairs), and status in place of `is_dead`. Status adds Retired, and Fallen can name a session.
 - **One campaign per adventurer** stays as it is. Nothing here needs more.
@@ -50,8 +66,11 @@ python -m http.server 4174 --bind 127.0.0.1 --directory prototypes/hearthside-ch
 
 Then open http://127.0.0.1:4174/hearthside-characters-prototype.html (or start `characters-prototype` from `.claude/launch.json`). It needs a server rather than a double-click because it loads `bundle.css` and `bundle.js`, copies of the Hearthside design system's components (https://claude.ai/artifact/4X4uHuC4vyx4Qk6mLR8KoR).
 
-Use the bar at the bottom or the arrow keys to switch layouts. `?variant=A|B|C` picks a layout and `&adventurer=kestrel` opens one adventurer. The bar also switches:
+Use the bar at the bottom or the arrow keys to switch layouts. `?variant=A|B|C|D` picks a layout (D is the default) and `&adventurer=kestrel` opens one adventurer. The bar also has:
 
 - **Data: Geoff's adventurers / no adventurers yet.** Six adventurers across four games, or none, to see the empty state.
+- **As the GM: take attendance.** The GM's attendance dialog, for the open adventurer's latest session.
+
+The sample attendance has Geoff away from Starfall Salvage's Session 3 (the party brought Kestrel along) and Session 5 (Kestrel sat it out), and from The Lantern Road's Sessions 6 (Pip sat it out) and 14 (Mags came anyway).
 
 All data is made up and kept in memory, with "today" fixed at Mon Oct 26 2026 (the same campaigns and sessions as the Almanac prototype). Kestrel's next session carries the Almanac's "Level Kestrel up to 6" quest. The portraits are painted by the page as stand-ins for uploads, and Wren has none, to show the fallback. Uploading a real image works, but only in memory: new adventurers, edits and art all vanish on reload.

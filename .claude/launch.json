@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--prefix", "frontend"],
       "port": 3000
+    },
+    {
+      "name": "almanac-prototype",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "4173", "--bind", "127.0.0.1", "--directory", "prototypes/hearthside-almanac"],
+      "port": 4173
     }
   ]
 }

@@ -1,0 +1,571 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hearthside Almanac Prototype</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alegreya+Sans+SC:wght@500;700&family=Alegreya+Sans:wght@400;500;700&family=IM+Fell+English+SC&family=IM+Fell+English:ital@0;1&display=swap">
+<link rel="stylesheet" href="bundle.css">
+<style>
+/* PROTOTYPE — throwaway. Three layouts of the Hearthside Almanac (the calendar), switchable from the bar at the
+   bottom (or ← →). It shows the viewer's game sessions and their quests: the same facts GET /api/quests/almanac
+   returns (a session's title, campaign, date/endDate, status, online/location, and the viewer's quests on it).
+   Data is made up, "today" is fixed at Mon Oct 26 2026, and everything lives in memory.
+   Layout: the Hearthside AppShell (rail | page | letters over the lit floor); only .hs-page changes per variant. */
+:root{
+  color-scheme:dark;
+  /* Hearthside tokens (from the design system's tokens.json; one theme, Tavern) */
+  --ground:#1a130e;--ground-2:#241a13;--surface:#2c2119;--line:#4a3726;--text:#f1e6d0;--muted:#b8a487;
+  --on-wood-text:#fbf1dc;--on-wood-muted:#d4c2a2;--accent:#e5a13a;--accent-ink:#1a130e;--seal:#b4462c;--moss:#7c9a55;
+  --verdigris:#5aa396;--paper:#eadbb9;--paper-hi:#f0e3c4;--paper-lo:#e2cea5;--paper-ink:#2b1d12;--paper-muted:#6b5337;
+  --paper-line:#c9b28a;--leather-hi:#37281c;--leather:#221810;--gold-hi:#f6dd96;--gold:#d6a84e;--gold-lo:#8a5c1c;
+  --gold-line:rgba(226,184,98,0.38);--gold-rule:rgba(226,184,98,0.14);
+  --heat-0:rgba(43,29,18,0.06);--heat-1:#d8c092;--heat-2:#c49a5c;--heat-3:#9c6c32;--heat-4:#5a3a1a;--firelight:#ffb36b;
+  --font-display:"IM Fell English SC","IM Fell English",Georgia,serif;
+  --font-story:"IM Fell English",Georgia,serif;
+  --font-body:"Alegreya Sans",system-ui,sans-serif;
+  --font-label:"Alegreya Sans SC","Alegreya Sans",system-ui,sans-serif;
+  --space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;--space-5:20px;--space-6:24px;--sheet-foot:44px;
+  --radius-sheet:3px;--radius:4px;--radius-panel:5px;--radius-full:999px;
+  --shadow-panel:0 14px 30px rgba(0,0,0,0.55),0 2px 4px rgba(0,0,0,0.5);
+  --shadow-panel-inset:inset 0 0 0 1px rgba(0,0,0,0.55),inset 0 0 26px rgba(0,0,0,0.5);
+  --shadow-paper:0 16px 34px rgba(0,0,0,0.6),0 2px 4px rgba(0,0,0,0.45);
+  --shadow-pin:0 2px 3px rgba(0,0,0,0.5);
+  --on-wood-shadow:0 1px 2px rgba(0,0,0,0.9),0 0 14px rgba(0,0,0,0.6);
+  /* the prototype switcher only: deliberately not Hearthside */
+  --proto-bg:#fafafa;--proto-fg:#111;--proto-dim:#555;
+}
+body{margin:0;background:var(--ground);color:var(--text)}
+.hs-shell-wrap{padding-block:16px 110px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.hs-nav a{cursor:pointer}
+/* on phones .hs-page is display:contents, so its sections are flex items of the shell: make them full width */
+.hs-page > *{align-self:stretch;min-width:0}
+
+/* ---------- shared bits ---------- */
+.p-panel-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:10px 14px 6px;
+  font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--muted)}
+.hs-quests .hs-quest-for{font-size:13px;color:var(--muted);margin-top:2px}
+.p-empty{padding:14px;color:var(--muted);font-size:14px}
+.p-sheets{display:flex;flex-direction:column;gap:30px;padding-top:6px}
+.p-seal-off{background:transparent;color:var(--paper-muted);border:1px solid var(--paper-line)}
+/* quests written on a session's parchment */
+.pq-h{margin:16px 0 2px;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--paper-muted)}
+.pq{list-style:none;margin:0;padding:0}
+.pq li{display:grid;grid-template-columns:20px minmax(0,1fr);gap:10px;padding:9px 6px;margin:0 -6px;border-top:1px solid var(--paper-line);border-radius:2px}
+.pq li:first-child{border-top:0}
+.pq .hs-box{border-color:var(--paper-ink)}
+.pq .hs-box[aria-checked="true"]{border-color:var(--moss)}
+.pq-name{font-weight:500;font-size:14px;line-height:1.3}
+.pq-time{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.04em;color:var(--paper-muted);font-variant-numeric:tabular-nums}
+.pq-desc{font-size:13px;color:var(--paper-muted);margin-top:1px}
+.pq .hs-tag{border-color:var(--paper-line);color:var(--paper-muted)}
+.pq li.is-done .pq-name{text-decoration:line-through;color:var(--paper-muted)}
+.pq li.is-hl{background:rgba(229,161,58,.28)}
+.pq-none{margin:14px 0 0;font-size:14px;color:var(--paper-muted)}
+/* sessions still picking a night: the API leaves these out today (no date) */
+.p-await li{display:grid;grid-template-columns:38px minmax(0,1fr) auto;gap:10px;align-items:center;padding:11px 14px;border-top:1px solid var(--gold-rule)}
+.p-await{list-style:none;margin:0;padding:0}
+.p-await li:first-child{border-top:0}
+.p-await b{display:block;font-weight:500;font-size:14px}
+.p-await small{display:block;font-size:13px;color:var(--muted)}
+.p-link{background:none;border:0;padding:0;color:var(--accent);cursor:pointer;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.04em}
+.p-link:hover{color:var(--gold-hi)}
+
+/* ---------- A: The Month. A month grid on gilded leather; the chosen day's sessions as parchment below. ---------- */
+.va-cal{padding:6px;container-type:inline-size}
+.va-head{display:flex;align-items:center;gap:8px;padding:8px 10px 10px}
+.va-head h2{margin:0;flex:1;min-width:0;font-family:var(--font-display);font-weight:400;font-size:22px;letter-spacing:.02em;color:var(--text)}
+.va-nav{background:transparent;border:1px solid var(--line);color:var(--text);border-radius:var(--radius);height:32px;min-width:32px;padding:0 10px;cursor:pointer;
+  font-family:var(--font-label);font-weight:500;letter-spacing:.04em}
+.va-nav:hover{border-color:var(--gold);color:var(--gold-hi)}
+.va-wd,.va-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr))}
+.va-wd{border-top:1px solid var(--gold-rule)}
+.va-wd span{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.06em;color:var(--muted);text-align:center;padding:6px 0}
+.va-cell{min-height:100px;padding:4px 4px 6px;border:0;border-top:1px solid var(--gold-rule);border-left:1px solid var(--gold-rule);cursor:pointer;
+  display:flex;flex-direction:column;gap:3px;min-width:0;background:none;color:inherit;text-align:left;font:inherit}
+.va-cell:nth-child(7n+1){border-left:0}
+.va-cell:hover{background:rgba(229,161,58,.06)}
+.va-cell.is-sel{background:rgba(229,161,58,.13);box-shadow:inset 0 0 0 1px var(--gold)}
+.va-cell.is-out > *{opacity:.45}
+.va-num{font-family:var(--font-label);font-size:13px;font-weight:500;color:var(--muted);width:24px;height:24px;display:grid;place-items:center;border-radius:50%;font-variant-numeric:tabular-nums}
+.va-cell.is-today .va-num{background:var(--accent);color:var(--accent-ink);font-weight:700}
+.va-items{display:flex;flex-direction:column;gap:3px;min-width:0}
+.va-sess{display:flex;flex-wrap:wrap;align-items:center;gap:2px 4px;min-width:0;padding:2px 4px 3px 2px;border-radius:var(--radius);background:var(--surface);border:1px solid var(--gold-line);
+  font-size:12px;line-height:1.25;overflow:hidden}
+.va-sess span{flex-basis:100%;padding-left:2px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere}
+.va-sess b{font-family:var(--font-label);font-weight:500;color:var(--accent);font-size:11.5px;flex:none}
+.va-sess em{font-style:normal;color:var(--accent);flex:none}
+.va-av{flex:none;width:16px;height:16px;border-radius:3px;background:var(--verdigris);color:#fff;font:500 9.5px/16px var(--font-label);text-align:center;font-style:normal;letter-spacing:.02em}
+.va-sess.is-cancelled{background:transparent;border-style:dashed;border-color:var(--line);color:var(--muted)}
+.va-sess.is-cancelled span{text-decoration:line-through}
+.va-sess.is-completed{background:transparent;color:var(--muted)}
+.va-q{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;min-width:0;padding-left:3px}
+.va-q span{overflow:hidden;text-overflow:ellipsis}
+.va-q i{flex:none;width:9px;height:9px;border:1.2px solid var(--muted);border-radius:2px}
+.va-q.is-done{color:var(--muted)}
+.va-q.is-done span{text-decoration:line-through}
+.va-q.is-done i{background:var(--moss);border-color:var(--moss)}
+.va-more{font-size:11.5px;color:var(--muted);padding-left:3px}
+.va-dots{display:none;gap:3px;flex-wrap:wrap;padding-left:4px}
+.va-dots i{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+.va-dots i.q{border-radius:1px;transform:rotate(45deg);background:transparent;border:1.2px solid var(--muted);width:6px;height:6px}
+.va-dots i.x{background:transparent;border:1px dashed var(--muted)}
+@container (max-width:520px){
+  .va-cell{min-height:54px;align-items:center}
+  .va-items{display:none}
+  .va-dots{display:flex;justify-content:center;padding:0}
+}
+.va-legend{display:flex;flex-wrap:wrap;gap:4px 14px;padding:8px 12px 6px;border-top:1px solid var(--gold-rule);font-size:12px;color:var(--muted)}
+
+/* ---------- B: Chronicle. No grid: a running list by week, each session a pinned sheet beside its date. ---------- */
+.vb-tabs{padding:6px}
+.vb-tabs .hs-tabs{border-bottom:0;padding:0 8px}
+.vb-tabs button span{color:var(--muted);font-family:var(--font-body);font-size:12px;margin-left:4px}
+.vb-week{display:flex;flex-direction:column;gap:22px}
+.vb-week-h{display:flex;align-items:center;gap:12px;margin:6px 0 0;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;
+  color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow)}
+.vb-week-h::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--gold-line),rgba(226,184,98,0))}
+.vb-entry{display:grid;grid-template-columns:62px minmax(0,1fr);gap:16px;align-items:start}
+.vb-leaf{text-align:center;color:var(--on-wood-text);text-shadow:var(--on-wood-shadow);padding-top:12px}
+.vb-leaf b{display:block;font-family:var(--font-display);font-size:36px;line-height:1;font-weight:400}
+.vb-leaf span{display:block;font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.08em;color:var(--on-wood-muted)}
+.vb-leaf.is-today b{color:var(--accent)}
+.vb-day{display:flex;flex-direction:column;gap:18px;min-width:0}
+.vb-off{padding:12px 16px;display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;color:var(--muted)}
+.vb-off b{font-weight:500;color:var(--muted);text-decoration:line-through}
+.vb-past li{display:grid;grid-template-columns:72px minmax(0,1fr) auto;gap:12px;align-items:baseline;padding:11px 14px;border-top:1px solid var(--gold-rule)}
+.vb-past{list-style:none;margin:0;padding:0}
+.vb-past li:first-child{border-top:0}
+.vb-past time{font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.04em;color:var(--accent)}
+.vb-past b{display:block;font-weight:500;font-size:14px}
+.vb-past small{display:block;font-size:13px;color:var(--muted)}
+@media (max-width:620px){.vb-entry{grid-template-columns:44px minmax(0,1fr);gap:10px}.vb-leaf b{font-size:28px}}
+
+/* ---------- C: Campaign lanes. A timeline: one lane per campaign, sessions as seals, quests leading up to them. ---------- */
+.vc{padding:6px;--col:30px;--lab:164px}
+.vc-scroll{overflow-x:auto;overscroll-behavior-x:contain;scrollbar-color:var(--line) transparent}
+.vc-board{position:relative;width:calc(var(--lab) + var(--n) * var(--col))}
+.vc-row{display:flex;border-top:1px solid var(--gold-rule)}
+.vc-row.is-hdr{border-top:0}
+.vc-lab{position:sticky;left:0;z-index:3;flex:none;width:var(--lab);display:flex;align-items:center;gap:8px;padding:0 10px;
+  background:linear-gradient(90deg,var(--leather) 88%,rgba(34,24,16,0));min-width:0}
+.vc-lab b{font-weight:500;font-size:13.5px;line-height:1.25;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.vc-track{position:relative;flex:none;width:calc(var(--n) * var(--col));height:72px;
+  background:
+    repeating-linear-gradient(90deg,var(--gold-rule) 0 1px,transparent 1px var(--col)),
+    repeating-linear-gradient(90deg,transparent 0 calc(var(--col) * 5),rgba(229,161,58,.05) calc(var(--col) * 5) calc(var(--col) * 7))}
+.vc-row.is-hdr .vc-track{height:46px;background:repeating-linear-gradient(90deg,transparent 0 calc(var(--col) * 5),rgba(229,161,58,.05) calc(var(--col) * 5) calc(var(--col) * 7))}
+.vc-mon{position:absolute;top:4px;font-family:var(--font-display);font-size:15px;color:var(--text);white-space:nowrap;padding-left:4px}
+.vc-dn{position:absolute;top:24px;width:var(--col);text-align:center;font-family:var(--font-label);font-size:12px;font-weight:500;color:var(--muted);font-variant-numeric:tabular-nums}
+.vc-dn.is-mon{color:var(--text)}
+.vc-today{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--firelight);box-shadow:0 0 8px var(--firelight);z-index:1;pointer-events:none}
+.vc-today span{position:absolute;top:2px;left:5px;font-family:var(--font-label);font-size:11px;font-weight:500;letter-spacing:.08em;color:var(--firelight);white-space:nowrap}
+.vc-seal{position:absolute;top:9px;height:26px;min-width:26px;border-radius:var(--radius-full);display:flex;align-items:center;justify-content:center;gap:4px;
+  background:var(--accent);color:var(--accent-ink);border:0;padding:0 6px;cursor:pointer;font:500 13px/1 var(--font-display);z-index:2;box-shadow:0 2px 4px rgba(0,0,0,.5)}
+.vc-seal.is-completed{background:var(--moss)}
+.vc-seal.is-cancelled{background:transparent;color:var(--muted);border:1px dashed var(--muted);box-shadow:none;text-decoration:line-through}
+.vc-seal[aria-pressed="true"]{outline:2px solid var(--gold-hi);outline-offset:2px}
+.vc-seal sup{position:absolute;top:-6px;right:-6px;min-width:16px;height:16px;border-radius:8px;background:var(--seal);color:#fff;font:700 10px/16px var(--font-body);text-align:center;padding:0 3px}
+.vc-cap{position:absolute;top:13px;font-size:12px;color:var(--muted);white-space:nowrap;pointer-events:none;z-index:1}
+.vc-q{position:absolute;top:47px;width:12px;height:12px;margin-left:-6px;transform:rotate(45deg);border:1.5px solid var(--accent);background:var(--leather);padding:0;cursor:pointer;z-index:2}
+.vc-q.is-done{background:var(--moss);border-color:var(--moss)}
+.vc-q[aria-pressed="true"]{outline:2px solid var(--gold-hi);outline-offset:2px}
+.vc-lead{position:absolute;top:52px;height:0;border-top:1.5px dotted rgba(229,161,58,.5);z-index:1;pointer-events:none}
+.vc-legend{display:flex;flex-wrap:wrap;gap:4px 16px;padding:8px 12px 6px;border-top:1px solid var(--gold-rule);font-size:12px;color:var(--muted);align-items:center}
+.vc-legend i{display:inline-block;vertical-align:-1px;margin-right:5px}
+@media (max-width:620px){.vc{--lab:58px}.vc-lab b{display:none}}
+
+/* ---------- prototype switcher (not part of any design) ---------- */
+.proto-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:50;
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:center;max-width:calc(100vw - 24px);
+  background:var(--proto-bg);color:var(--proto-fg);border-radius:14px;padding:6px 8px;box-shadow:0 8px 30px rgba(0,0,0,.6);
+  font:13px/1.3 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+.proto-bar button{font:inherit;color:inherit;background:#e9e9e9;border:0;border-radius:8px;padding:6px 10px;cursor:pointer}
+.proto-bar button:hover{background:#dcdcdc}
+.proto-bar .lbl{min-width:180px;text-align:center;font-weight:600;padding:0 4px}
+@media (max-width:520px){.proto-bar .lbl{min-width:0;flex:1 1 0}.proto-bar .sep{display:none}}
+.proto-bar .lbl small{display:block;font-weight:400;color:var(--proto-dim);font-size:11px}
+.proto-bar .sep{width:1px;height:26px;background:#ccc;margin:0 2px}
+.proto-bar :focus-visible{outline:2px solid #2563eb;outline-offset:2px}
+.proto-toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:50;background:var(--proto-bg);color:var(--proto-fg);
+  font:13px/1.3 ui-sans-serif,system-ui,sans-serif;padding:8px 12px;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.5);max-width:calc(100vw - 32px)}
+</style>
+
+<canvas class="hs-floor" id="floor" aria-hidden="true"></canvas>
+<div class="hs-glow" aria-hidden="true"></div>
+<div class="hs-shell-wrap">
+  <div class="hs-shell">
+    <aside class="hs-rail">
+      <div class="hs-bar"><div class="hs-brand">Hearthside<small>The Party Gathers</small></div>
+        <nav class="hs-nav hs-gilded" aria-label="Main">
+          <a data-stub="The Hearth">The Hearth</a>
+          <a data-stub="Campaigns">Campaigns</a>
+          <a aria-current="page">Almanac</a>
+          <a data-stub="Adventurers">Adventurers</a>
+        </nav>
+      </div>
+      <section class="hs-quests-sec"><h2 class="hs-sec"><span>Your Quests</span><span class="hs-aside" id="qc"></span></h2>
+        <div class="hs-gilded" id="rail-quests"></div></section>
+    </aside>
+
+    <main class="hs-page" id="page"></main>
+
+    <aside class="hs-letters-col"><h2 class="hs-sec"><span>Letters</span><span class="hs-aside">4 unread</span></h2><div class="hs-gilded"><div class="hs-tabs" role="tablist">
+      <button role="tab" aria-selected="true">All</button><button role="tab" aria-selected="false">Campaigns</button><button role="tab" aria-selected="false">Friends</button>
+    </div>
+    <ul class="hs-threads">
+      <li tabindex="0" role="button"><span class="hs-avatar is-campaign">AC</span><div style="min-width:0"><div class="hs-thread-name">Curse of the Ashen Crown</div><div class="hs-thread-sub">Campaign · 5 in the party</div></div><div class="hs-thread-when">now<span class="hs-dot" aria-label="3 unread"></span></div></li>
+      <li tabindex="0" role="button"><span class="hs-avatar">P</span><div style="min-width:0"><div class="hs-thread-name">Priya</div><div class="hs-thread-sub">Friend</div></div><div class="hs-thread-when">7:02 pm<span class="hs-dot" aria-label="1 unread"></span></div></li>
+      <li tabindex="0" role="button"><span class="hs-avatar is-campaign">SS</span><div style="min-width:0"><div class="hs-thread-name">Starfall Salvage</div><div class="hs-thread-sub">Campaign · 4 in the party</div></div><div class="hs-thread-when">Tue</div></li>
+    </ul></div></aside>
+  </div>
+</div>
+
+<div class="proto-bar" role="toolbar" aria-label="Prototype controls">
+  <button type="button" id="prev" aria-label="Previous layout">←</button>
+  <div class="lbl" id="lbl" aria-live="polite"></div>
+  <button type="button" id="next" aria-label="Next layout">→</button>
+  <span class="sep" aria-hidden="true"></span>
+  <button type="button" id="place"></button>
+  <button type="button" id="busy"></button>
+</div>
+<div class="proto-toast" id="toast" hidden></div>
+
+<script src="bundle.js"></script>
+<script>
+document.body.classList.add('hs-app');
+
+/* ---------------- data (made up, in memory). Shapes follow AlmanacSession / Quest in frontend/src/lib/quests.ts ---------------- */
+const D = (m, d, h = 0, min = 0) => new Date(2026, m - 1, d, h, min);
+const TODAY = D(10, 26, 12);
+const CAMPS = {
+  ac: { title: 'Curse of the Ashen Crown', init: 'AC' },
+  ss: { title: 'Starfall Salvage', init: 'SS' },
+  bb: { title: 'Bones of the Brinewood', init: 'BB' },
+};
+const SESSIONS = [
+  { id: 'ac-13', camp: 'ac', n: 13, title: 'Session 13: The Ash Market', date: D(10, 17, 18, 30), end: D(10, 17, 22, 30), status: 'completed', location: "Geoff's place" },
+  { id: 'ac-14', camp: 'ac', n: 14, title: 'Session 14: The Drowned Chapel', date: D(10, 31, 18, 30), end: D(10, 31, 22, 30), status: 'scheduled', location: "Geoff's place" },
+  { id: 'ss-7', camp: 'ss', n: 7, title: 'Session 7: Into the Hold', date: D(11, 3, 19, 30), end: D(11, 3, 22), status: 'scheduled', online: true },
+  { id: 'bb-1', camp: 'bb', n: 1, title: 'The Drowned Wood', date: D(11, 7, 13), end: D(11, 7, 17), status: 'scheduled', location: 'The Gilded Flagon' },
+  { id: 'ss-8', camp: 'ss', n: 8, title: 'Session 8', date: D(11, 10, 19, 30), end: D(11, 10, 22), status: 'cancelled', online: true, note: 'Theo is away' },
+  { id: 'ac-15', camp: 'ac', n: 15, title: 'Session 15: Beneath Vel Harrow', date: D(11, 14, 18, 30), end: D(11, 14, 22, 30), status: 'scheduled', location: "Priya's place" },
+  { id: 'ss-9', camp: 'ss', n: 9, title: 'Session 9: The Calling', date: D(11, 17, 19, 30), end: D(11, 17, 22), status: 'scheduled', online: true },
+  { id: 'ss-10', camp: 'ss', n: 10, title: 'A Weekend in the Glass Wastes', date: D(11, 27, 18), end: D(11, 29, 14), status: 'scheduled', location: "Marco's cabin" },
+  { id: 'ac-16', camp: 'ac', n: 16, title: 'Session 16', date: null, end: null, status: 'planning', stage: 'Picking a night' },
+];
+const QUESTS = [
+  { id: 'q1', s: 'ac-13', kind: 'food', title: 'Pick up two pizzas', due: D(10, 17, 18), status: 'done' },
+  { id: 'q2', s: 'ac-14', kind: 'host_prep', title: 'Prep the table', notes: 'Clear the dining room, set out the battle map and minis.', due: D(10, 31, 17, 30), status: 'open', tag: 'Host' },
+  { id: 'q3', s: 'ac-14', kind: 'custom', title: 'Print the chapel handout', notes: 'Map of the flooded nave, player version.', due: D(10, 30, 20), status: 'done', tag: 'DM' },
+  { id: 'q4', s: 'ac-14', kind: 'food', title: 'Bring the cider', due: D(10, 31, 18, 30), status: 'open' },
+  { id: 'q5', s: 'ss-7', kind: 'custom', title: 'Level Kestrel up to 6', notes: 'Pick the new feat before the session.', due: D(11, 2, 21), status: 'open' },
+  { id: 'q6', s: 'bb-1', kind: 'custom', title: "Paint the witch's teeth prop", due: D(11, 6, 20), status: 'open', tag: 'DM' },
+  { id: 'q7', s: 'bb-1', kind: 'food', title: 'Bring chips and dip', due: null, status: 'open' },
+  { id: 'q8', s: 'ac-15', kind: 'food', title: 'Bring a dessert', due: D(11, 14, 18, 30), status: 'open' },
+  { id: 'q9', s: 'ss-10', kind: 'custom', title: 'Book the cabin', notes: 'Two nights. Marco has the link.', due: D(11, 13, 17), status: 'open', tag: 'Favor' },
+  { id: 'q10', s: 'ss-10', kind: 'food', title: 'Saturday breakfast', due: D(11, 28, 8), status: 'open' },
+  { id: 'q11', s: 'ac-16', kind: 'host_prep', title: 'Prep the table', due: null, status: 'open', tag: 'Host' },
+];
+
+/* ---------------- prototype state ---------------- */
+const VARIANTS = [
+  { key: 'A', name: 'The Month', note: 'Month grid on leather, the day on parchment' },
+  { key: 'B', name: 'Chronicle', note: 'A running list by week, no grid' },
+  { key: 'C', name: 'Campaign lanes', note: 'A timeline with one lane per campaign' },
+];
+const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+let variant = Math.max(0, VARIANTS.findIndex(v => v.key === (new URLSearchParams(location.search).get('variant') || location.hash.slice(1) || store.get('hs-alm-variant'))));
+let byDue = store.get('hs-alm-place') !== 'session';   // quests on their due day, or folded into their session
+let quiet = store.get('hs-alm-busy') === 'quiet';      // a quiet month: one session, no quests
+let aMonth = new Date(2026, 9, 1), aSel = null;
+let bTab = 'up';
+let cSel = null, cQuest = null, cScrolled = false;
+
+const data = () => quiet
+  ? { sessions: SESSIONS.filter(s => s.id === 'ac-14'), quests: [] }
+  : { sessions: SESSIONS, quests: QUESTS };
+
+/* ---------------- helpers ---------------- */
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const DAY = 864e5;
+const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const WDL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const sod = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const same = (a, b) => a && b && sod(a).getTime() === sod(b).getTime();
+const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+const key = d => `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+const fromKey = k => { const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d); };
+const tm = d => { const h = d.getHours(), m = d.getMinutes(); return `${h % 12 || 12}${m ? ':' + String(m).padStart(2, '0') : ''} ${h < 12 ? 'am' : 'pm'}`; };
+const dayLabel = d => `${WD[d.getDay()]} ${MON[d.getMonth()]} ${d.getDate()}`;
+const longDay = d => `${WDL[d.getDay()]}, ${MONL[d.getMonth()]} ${d.getDate()}`;
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+
+const sessionOf = q => SESSIONS.find(s => s.id === q.s);
+const questsOf = s => data().quests.filter(q => q.s === s.id);
+const openOf = s => questsOf(s).filter(q => q.status === 'open').length;
+const dated = () => data().sessions.filter(s => s.date).sort((a, b) => a.date - b.date);
+const undated = () => data().sessions.filter(s => !s.date);
+const sessionDays = s => { if (!s.date) return []; const out = []; for (let d = sod(s.date); d <= sod(s.end || s.date); d = addDays(d, 1)) out.push(d); return out; };
+const sessionsOn = day => dated().filter(s => sessionDays(s).some(d => same(d, day)));
+// "due mode" places a quest on its own day; quests due on their session's day stay with the session either way
+const questsDueOn = day => byDue ? data().quests.filter(q => q.due && same(q.due, day) && !sessionDays(sessionOf(q)).some(d => same(d, q.due))) : [];
+const isLive = s => s.status === 'scheduled' || s.status === 'planning';
+
+const where = s => s.online ? 'Online' : s.location;
+function whenSession(s) {
+  if (!s.date) return 'The night is not set yet';
+  if (s.end && !same(s.date, s.end)) return `${dayLabel(s.date)}, ${tm(s.date)} – ${dayLabel(s.end)}, ${tm(s.end)}`;
+  return `${dayLabel(s.date)} · ${tm(s.date)}${s.end ? ' – ' + tm(s.end) : ''}`;
+}
+function questDue(q) {
+  if (q.due) return `Due ${dayLabel(q.due)}, ${tm(q.due)}`;
+  return sessionOf(q).status === 'planning' ? 'Due when the night is set' : 'No due time';
+}
+function seal(s) {
+  if (s.status === 'cancelled') return '<span class="hs-seal p-seal-off">Cancelled</span>';
+  if (s.status === 'planning') return `<span class="hs-seal">${esc(s.stage)}</span>`;
+  if (s.status === 'completed') return '<span class="hs-seal is-ok">Played</span>';
+  return '<span class="hs-seal is-ok">Night set</span>';
+}
+const box = q => `<button class="hs-box" role="checkbox" aria-checked="${q.status === 'done'}" data-q="${q.id}" aria-label="${esc(q.title)}: mark ${q.status === 'done' ? 'not done' : 'done'}"></button>`;
+const tag = q => q.tag ? `<span class="hs-tag">${esc(q.tag)}</span>` : '';
+
+/* one session's parchment: its facts, then your quests on it */
+function sessionSheet(s, { hl = null } = {}) {
+  const qs = questsOf(s), open = qs.filter(q => q.status === 'open').length;
+  const byline = s.status === 'cancelled' ? `${whenSession(s)} · ${esc(s.note || 'Called off')}` : `${whenSession(s)} · ${esc(where(s) || 'Place to be decided')}`;
+  return `<article class="hs-sheet" data-seed="${s.camp}/${s.id}">
+    <header class="hs-sheet-head"><div><div class="hs-kicker">${esc(CAMPS[s.camp].title)}</div>
+      <h3 class="hs-sheet-title">${esc(s.title)}</h3><div class="hs-byline">${byline}</div></div>${seal(s)}</header>
+    ${qs.length ? `<div class="pq-h">Your quests · ${open ? `${open} open` : 'all done'}</div><ul class="pq">${qs.map(q => `
+      <li class="${q.status === 'done' ? 'is-done' : ''} ${q.id === hl ? 'is-hl' : ''}">${box(q)}
+        <div><div class="pq-name">${esc(q.title)}${tag(q)}</div><div class="pq-time">${questDue(q)}</div>${q.notes ? `<div class="pq-desc">${esc(q.notes)}</div>` : ''}</div></li>`).join('')}</ul>`
+      : `<p class="pq-none">${s.status === 'cancelled' ? 'No quests: the session is off.' : 'No quests for you this session.'}</p>`}
+    <div class="hs-btn-row"><button type="button" class="hs-btn ${s.status === 'cancelled' ? '' : 'is-primary'}" data-open="${s.id}">Open the session</button></div>
+  </article>`;
+}
+/* quests on leather (not on a session's own sheet): each says which session it's for */
+const leatherQuests = qs => `<ul class="hs-quests">${qs.map(q => { const s = sessionOf(q); return `
+  <li class="${q.status === 'done' ? 'is-done' : ''}">${box(q)}
+    <div><div class="hs-quest-name">${esc(q.title)}${tag(q)}</div><div class="hs-quest-time">${q.due ? `${dayLabel(q.due)}, ${tm(q.due)}` : questDue(q)}</div>
+      <div class="hs-quest-for">For ${esc(s.title.replace(/:.*/, ''))} · ${esc(CAMPS[s.camp].title)}</div></div></li>`; }).join('')}</ul>`;
+
+function awaitingNight() {
+  const list = undated();
+  if (!list.length) return '';
+  return `<section><h2 class="hs-sec"><span>Awaiting a night</span><span class="hs-aside">${plural(list.length, 'session')}</span></h2>
+    <div class="hs-gilded"><ul class="p-await">${list.map(s => `<li><span class="hs-avatar is-campaign">${CAMPS[s.camp].init}</span>
+      <div style="min-width:0"><b>${esc(s.title)}</b><small>${esc(CAMPS[s.camp].title)} · ${esc(s.stage)} · ${plural(questsOf(s).length, 'quest')} waiting on the date</small></div>
+      <button type="button" class="p-link" data-open="${s.id}">Vote</button></li>`).join('')}</ul></div></section>`;
+}
+
+function head() {
+  const soon = dated().filter(s => isLive(s) && s.date >= TODAY && s.date < +TODAY + 28 * DAY).length;
+  const open = data().quests.filter(q => q.status === 'open' && isLive(sessionOf(q))).length;
+  return `<header class="hs-page-head"><h1>The Almanac</h1>
+    <p><b>${plural(soon, 'session')}</b> in the next four weeks · ${plural(open, 'quest')} open</p></header>`;
+}
+
+/* ---------------- A: The Month ---------------- */
+function VariantA() {
+  const y = aMonth.getFullYear(), m = aMonth.getMonth();
+  const first = new Date(y, m, 1), lead = (first.getDay() + 6) % 7, days = new Date(y, m + 1, 0).getDate();
+  const weeks = Math.ceil((lead + days) / 7), start = addDays(first, -lead);
+  if (!aSel) {   // the next day with something on it, from today; else today
+    const next = [...Array(42)].map((_, i) => addDays(sod(TODAY), i)).find(d => sessionsOn(d).length || questsDueOn(d).length);
+    aSel = key(next && next.getMonth() === m ? next : (TODAY.getMonth() === m ? TODAY : first));
+  }
+  const cells = [...Array(weeks * 7)].map((_, i) => {
+    const d = addDays(start, i), ss = sessionsOn(d), qs = questsDueOn(d);
+    const items = [
+      ...ss.map(s => {
+        const first = same(d, s.date), open = openOf(s);
+        return `<span class="va-sess is-${s.status}"><i class="va-av">${CAMPS[s.camp].init}</i>${first ? `<b>${tm(s.date)}</b>` : '<b>cont.</b>'}<span>${esc(s.title)}</span>${!byDue && open && first ? `<em>· ${open}</em>` : ''}</span>`;
+      }),
+      ...qs.map(q => `<span class="va-q ${q.status === 'done' ? 'is-done' : ''}"><i></i><span>${esc(q.title)}</span></span>`),
+    ];
+    const dots = [...ss.map(s => `<i class="${s.status === 'cancelled' ? 'x' : ''}"></i>`), ...qs.map(() => '<i class="q"></i>')].join('');
+    const label = `${longDay(d)}${ss.length ? ', ' + plural(ss.length, 'session') : ''}${qs.length ? ', ' + plural(qs.length, 'quest') : ''}`;
+    return `<button type="button" class="va-cell ${d.getMonth() !== m ? 'is-out' : ''} ${same(d, TODAY) ? 'is-today' : ''} ${key(d) === aSel ? 'is-sel' : ''}"
+      data-day="${key(d)}" aria-label="${label}" aria-pressed="${key(d) === aSel}"><span class="va-num">${d.getDate()}</span>
+      <span class="va-items">${items.slice(0, 3).join('')}${items.length > 3 ? `<span class="va-more">+${items.length - 3} more</span>` : ''}</span>
+      <span class="va-dots">${dots}</span></button>`;
+  }).join('');
+
+  const sel = fromKey(aSel), ss = sessionsOn(sel), qs = questsDueOn(sel);
+  const bits = [ss.length && plural(ss.length, 'session'), qs.length && plural(qs.length, 'quest') + ' due'].filter(Boolean);
+  return head() + `<section aria-label="${MONL[m]} ${y}"><div class="hs-gilded va-cal">
+      <div class="va-head"><button type="button" class="va-nav" data-amonth="-1" aria-label="Previous month">‹</button>
+        <h2>${MONL[m]} ${y}</h2>
+        <button type="button" class="va-nav" data-amonth="0">Today</button>
+        <button type="button" class="va-nav" data-amonth="1" aria-label="Next month">›</button></div>
+      <div class="va-wd" aria-hidden="true">${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(w => `<span>${w}</span>`).join('')}</div>
+      <div class="va-grid">${cells}</div>
+      <div class="va-legend"><span>Times in amber are sessions</span>${byDue ? '<span>Boxes are your quests, on the day they are due</span>' : '<span>“· 2” is how many quests you have open for it</span>'}</div>
+    </div></section>
+    <section><h2 class="hs-sec"><span>${longDay(sel)}</span><span class="hs-aside">${bits.join(' · ') || 'Nothing on'}</span></h2>
+      ${ss.length ? `<div class="p-sheets">${ss.map(s => sessionSheet(s)).join('')}</div>` : ''}
+      ${qs.length ? `<div class="hs-gilded" style="margin-top:${ss.length ? 26 : 0}px"><div class="p-panel-h"><span>Due this day</span></div>${leatherQuests(qs)}</div>` : ''}
+      ${!ss.length && !qs.length ? '<p class="hs-note">No sessions or quests on this day. Pick another day on the calendar.</p>' : ''}
+    </section>` + awaitingNight();
+}
+
+/* ---------------- B: Chronicle ---------------- */
+function VariantB() {
+  const up = dated().filter(s => sod(s.end || s.date) >= sod(TODAY));
+  const past = dated().filter(s => sod(s.end || s.date) < sod(TODAY)).reverse();
+  const tabs = `<div class="hs-gilded vb-tabs"><div class="hs-tabs" role="tablist" aria-label="Which sessions">
+      <button role="tab" type="button" aria-selected="${bTab === 'up'}" data-tab="up">Coming up<span>${up.length}</span></button>
+      <button role="tab" type="button" aria-selected="${bTab === 'past'}" data-tab="past">Played<span>${past.length}</span></button></div></div>`;
+
+  if (bTab === 'past') {
+    return head() + tabs + (past.length ? `<div class="hs-gilded"><ul class="vb-past">${past.map(s => {
+      const qs = questsOf(s), done = qs.filter(q => q.status === 'done').length;
+      return `<li><time>${dayLabel(s.date)}</time><div style="min-width:0"><b>${esc(s.title)}</b><small>${esc(CAMPS[s.camp].title)} · ${esc(where(s))}${qs.length ? ` · ${done} of ${plural(qs.length, 'quest')} done` : ''}</small></div>
+        <button type="button" class="p-link" data-open="${s.id}">Recap</button></li>`; }).join('')}</ul></div>` : '<p class="hs-note">Nothing played yet.</p>');
+  }
+
+  // every day from today with a session start or (due mode) a quest of its own, grouped by week
+  const dayKeys = new Set();
+  up.forEach(s => dayKeys.add(key(sod(s.date) < sod(TODAY) ? sod(TODAY) : sod(s.date))));
+  if (byDue) data().quests.forEach(q => { if (q.due && sod(q.due) >= sod(TODAY) && questsDueOn(q.due).includes(q)) dayKeys.add(key(q.due)); });
+  const days = [...dayKeys].map(fromKey).sort((a, b) => a - b);
+  const monday = d => addDays(d, -((d.getDay() + 6) % 7));
+  const thisWeek = monday(sod(TODAY));
+  const weekName = w => { const diff = Math.round((w - thisWeek) / (7 * DAY)), e = addDays(w, 6);
+    const span = `${MON[w.getMonth()]} ${w.getDate()} – ${w.getMonth() === e.getMonth() ? '' : MON[e.getMonth()] + ' '}${e.getDate()}`;
+    return diff === 0 ? `This week · ${span}` : diff === 1 ? `Next week · ${span}` : `Week of ${span}`; };
+  const weeks = [];
+  days.forEach(d => { const w = monday(d); let g = weeks.find(x => same(x.w, w)); if (!g) weeks.push(g = { w, days: [] }); g.days.push(d); });
+
+  const entry = d => {
+    const ss = up.filter(s => same(s.date, d) || (same(d, TODAY) && sod(s.date) < d)), qs = questsDueOn(d);
+    return `<div class="vb-entry"><div class="vb-leaf ${same(d, TODAY) ? 'is-today' : ''}"><b>${d.getDate()}</b><span>${WD[d.getDay()]}</span></div>
+      <div class="vb-day">${ss.map(s => s.status === 'cancelled'
+        ? `<div class="hs-gilded vb-off"><b>${esc(s.title)}</b><span>${esc(CAMPS[s.camp].title)} · Cancelled${s.note ? ': ' + esc(s.note) : ''}</span></div>`
+        : sessionSheet(s)).join('')}
+        ${qs.length ? `<div class="hs-gilded"><div class="p-panel-h"><span>Due ${dayLabel(d)}</span><span>${plural(qs.length, 'quest')}</span></div>${leatherQuests(qs)}</div>` : ''}</div></div>`;
+  };
+  return head() + tabs + awaitingNight() + (weeks.length ? weeks.map(g => `<section class="vb-week" aria-label="${esc(weekName(g.w))}">
+      <h2 class="vb-week-h">${weekName(g.w)}</h2>${g.days.map(entry).join('')}</section>`).join('') : '<p class="hs-note">Nothing coming up. When a session gets a night, it shows here.</p>');
+}
+
+/* ---------------- C: Campaign lanes ---------------- */
+const C_START = D(10, 12), C_DAYS = 56;   // Mon Oct 12 to Sun Dec 6
+const cIdx = d => Math.round((sod(d) - C_START) / DAY);
+function VariantC() {
+  const live = dated();
+  if (!cSel || !live.find(s => s.id === cSel)) cSel = (live.find(s => isLive(s) && s.date >= sod(TODAY)) || live[0] || {}).id || null;
+  const camps = Object.keys(CAMPS).filter(c => data().sessions.some(s => s.camp === c));
+  const COLX = i => `calc(var(--col) * ${i})`;
+
+  let hdr = '';
+  for (let i = 0; i < C_DAYS; i++) {
+    const d = addDays(C_START, i);
+    if (i === 0 || d.getDate() === 1) hdr += `<span class="vc-mon" style="left:${COLX(i)}">${MONL[d.getMonth()]}</span>`;
+    hdr += `<span class="vc-dn ${d.getDay() === 1 ? 'is-mon' : ''}" style="left:${COLX(i)}">${d.getDate()}</span>`;
+  }
+  const lane = c => {
+    let h = '';
+    live.filter(s => s.camp === c).forEach(s => {
+      const i = cIdx(s.date), span = sessionDays(s).length, open = openOf(s);
+      if (byDue) questsOf(s).forEach(q => {
+        if (!q.due) return;
+        const qi = cIdx(q.due);
+        if (qi !== i) h += `<span class="vc-lead" style="left:calc(${COLX(Math.min(qi, i))} + var(--col) / 2);width:${COLX(Math.abs(i - qi))}"></span>`;
+        h += `<button type="button" class="vc-q ${q.status === 'done' ? 'is-done' : ''}" style="left:calc(${COLX(qi)} + var(--col) / 2)" data-cq="${q.id}" aria-pressed="${q.id === cQuest}"
+          aria-label="${esc(q.title)}, ${questDue(q)}, for ${esc(s.title)}" title="${esc(q.title)} · ${questDue(q)}"></button>`;
+      });
+      h += `<button type="button" class="vc-seal is-${s.status}" style="left:calc(${COLX(i)} + 2px);width:calc(${COLX(span)} - 4px)" data-cs="${s.id}" aria-pressed="${s.id === cSel}"
+        aria-label="${esc(s.title)}, ${whenSession(s)}${s.status === 'cancelled' ? ', cancelled' : ''}" title="${esc(s.title)} · ${whenSession(s)}">${s.n}${!byDue && open ? `<sup>${open}</sup>` : ''}</button>`;
+      h += `<span class="vc-cap" style="left:calc(${COLX(i + span)} + 4px)">${esc(s.title.replace(/^Session \d+: /, ''))}</span>`;
+    });
+    return `<div class="vc-row"><div class="vc-lab"><span class="hs-avatar is-campaign" style="width:30px;height:30px;font-size:13px">${CAMPS[c].init}</span><b>${esc(CAMPS[c].title)}</b></div>
+      <div class="vc-track">${h}</div></div>`;
+  };
+  const sel = SESSIONS.find(s => s.id === cSel);
+  return head() + `<section aria-label="Campaign timeline"><div class="hs-gilded vc">
+      <div class="vc-scroll" id="vc-scroll"><div class="vc-board" style="--n:${C_DAYS}">
+        <div class="vc-row is-hdr"><div class="vc-lab"></div><div class="vc-track">${hdr}</div></div>
+        ${camps.map(lane).join('')}
+        <span class="vc-today" style="left:calc(var(--lab) + var(--col) * ${cIdx(TODAY)} + var(--col) / 2)"><span>Today</span></span>
+      </div></div>
+      <div class="vc-legend"><span><i style="width:12px;height:12px;border-radius:50%;background:var(--accent)"></i>Session (its number)</span>
+        ${byDue ? '<span><i style="width:9px;height:9px;transform:rotate(45deg);border:1.5px solid var(--accent)"></i>Your quest, on its due day, dotted to its session</span>'
+                : '<span><i style="width:12px;height:12px;border-radius:50%;background:var(--seal)"></i>Quests you have open for it</span>'}
+        <span>Scroll sideways for more weeks</span></div>
+    </div></section>
+    ${sel ? `<section><h2 class="hs-sec"><span>${sel.status === 'completed' ? 'Played' : same(sel.date, TODAY) ? 'Tonight' : 'Up next'}</span><span class="hs-aside">${esc(dayLabel(sel.date))}</span></h2>
+      <div class="p-sheets">${sessionSheet(sel, { hl: cQuest })}</div></section>` : ''}` + awaitingNight();
+}
+
+/* ---------------- the rail's Your Quests (shell; same data, so checking one updates both) ---------------- */
+function renderRail() {
+  const qs = data().quests.filter(q => isLive(sessionOf(q)))
+    .sort((a, b) => (a.due ? +a.due : Infinity) - (b.due ? +b.due : Infinity));
+  const open = qs.filter(q => q.status === 'open').length;
+  document.getElementById('qc').textContent = `${open} open`;
+  const el = document.getElementById('rail-quests');
+  el.innerHTML = qs.length ? `<ul class="hs-quests">${qs.slice(0, 4).map(q => `
+    <li class="${q.status === 'done' ? 'is-done' : ''}">${box(q)}
+      <div><div class="hs-quest-name">${esc(q.title)}${tag(q)}</div><div class="hs-quest-time">${q.due ? `${WD[q.due.getDay()]} ${MON[q.due.getMonth()]} ${q.due.getDate()}, ${tm(q.due)}` : questDue(q)}</div>
+        ${q.notes ? `<div class="hs-quest-desc">${esc(q.notes)}</div>` : ''}</div></li>`).join('')}</ul>
+    ${qs.length > 4 ? `<div class="p-empty" style="padding-top:4px">${qs.length - 4} more in the Almanac</div>` : ''}`
+    : '<div class="p-empty">No quests. Enjoy the quiet.</div>';
+  Hearthside.GildedPanel.decorate(el.parentNode);
+}
+
+/* ---------------- render + wiring ---------------- */
+const page = document.getElementById('page');
+const RENDER = [VariantA, VariantB, VariantC];
+function render() {
+  const keepScroll = document.getElementById('vc-scroll')?.scrollLeft;
+  page.innerHTML = RENDER[variant]();
+  Hearthside.GildedPanel.decorate(page);
+  page.querySelectorAll('.hs-sheet').forEach(el => Hearthside.NoticeSheet.mount(el));
+  const sc = document.getElementById('vc-scroll');
+  if (sc) sc.scrollLeft = keepScroll ?? Math.max(0, cIdx(TODAY) * 30 - (sc.clientWidth - sc.querySelector('.vc-lab').offsetWidth) / 4);
+  renderRail();
+  const v = VARIANTS[variant];
+  document.getElementById('lbl').innerHTML = `${v.key} — ${v.name}<small>${v.note}</small>`;
+  document.getElementById('place').textContent = byDue ? 'Quests: on their due day' : 'Quests: with their session';
+  document.getElementById('busy').textContent = quiet ? 'Data: a quiet month' : 'Data: a busy month';
+  store.set('hs-alm-variant', v.key);
+  try { const u = new URL(location.href); u.searchParams.set('variant', v.key); history.replaceState(null, '', u); } catch {}
+}
+function go(d) { variant = (variant + d + VARIANTS.length) % VARIANTS.length; render(); }
+document.getElementById('prev').onclick = () => go(-1);
+document.getElementById('next').onclick = () => go(1);
+document.getElementById('place').onclick = () => { byDue = !byDue; store.set('hs-alm-place', byDue ? 'due' : 'session'); aSel = null; render(); };
+document.getElementById('busy').onclick = () => { quiet = !quiet; store.set('hs-alm-busy', quiet ? 'quiet' : 'busy'); aSel = null; cSel = null; cQuest = null; render(); };
+addEventListener('keydown', e => {
+  if (e.target.closest('input,textarea,select,[contenteditable]')) return;
+  if (e.key === 'ArrowLeft') go(-1); else if (e.key === 'ArrowRight') go(1);
+});
+
+let toastTimer;
+function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 2600); }
+
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-q],[data-open],[data-stub],[data-day],[data-amonth],[data-tab],[data-cs],[data-cq]');
+  if (!el) return;
+  e.preventDefault();
+  const d = el.dataset;
+  if (d.q) { const q = QUESTS.find(x => x.id === d.q); q.status = q.status === 'done' ? 'open' : 'done'; render(); }
+  else if (d.open) toast(`Prototype: this opens ${SESSIONS.find(s => s.id === d.open).title}'s page.`);
+  else if (d.stub) toast(`Prototype: this goes to ${d.stub}.`);
+  else if (d.day) { aSel = d.day; const day = fromKey(d.day); if (day.getMonth() !== aMonth.getMonth()) aMonth = new Date(day.getFullYear(), day.getMonth(), 1); render(); }
+  else if (d.amonth) { const n = +d.amonth; aMonth = n ? new Date(aMonth.getFullYear(), aMonth.getMonth() + n, 1) : new Date(TODAY.getFullYear(), TODAY.getMonth(), 1); aSel = n ? key(aMonth) : key(TODAY); render(); }
+  else if (d.tab) { bTab = d.tab; render(); }
+  else if (d.cs) { cSel = d.cs; cQuest = null; render(); }
+  else if (d.cq) { cQuest = d.cq; cSel = QUESTS.find(q => q.id === d.cq).s; render(); }
+});
+
+render();
+Hearthside.GildedPanel.decorate();
+const floor = Hearthside.Floor.mount(document.getElementById('floor'));
+if (floor && floor.page) floor.page(2, false);
+</script>

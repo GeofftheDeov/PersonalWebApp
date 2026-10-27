@@ -162,6 +162,19 @@ body{margin:0;background:var(--ground);color:var(--text)}
 .p-seg button:hover{color:var(--text)}
 .p-seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
 
+/* filters: one campaign (or all) and where it's played */
+.p-filters{padding:10px 14px;display:flex;flex-direction:column;gap:8px}
+.p-frow{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.p-flab{width:78px;flex:none;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--muted)}
+.p-chip{display:inline-flex;align-items:center;gap:6px;padding:3px 10px 3px 8px;border-radius:var(--radius-full);border:1px solid var(--line);background:transparent;
+  color:var(--text);cursor:pointer;font-size:13px;line-height:1.3;max-width:100%}
+.p-chip:hover{border-color:var(--gold)}
+.p-chip span{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.p-chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.p-chip[aria-pressed="true"] span{color:var(--accent-ink);opacity:.75}
+.p-fclear{margin-left:auto}
+@media (max-width:620px){.p-flab{width:100%}}
+
 /* ---------- B: Chronicle. No grid: a running list by week, each session a pinned sheet beside its date. ---------- */
 .vb-tabs{padding:6px}
 .vb-tabs .hs-tabs{border-bottom:0;padding:0 8px}
@@ -331,9 +344,19 @@ let calMode = store.get('hs-alm-cal') === 'week' ? 'week' : 'month';
 let bTab = 'up';
 let cSel = null, cQuest = null, cScrolled = false;
 
-const data = () => quiet
+let fCamp = 'all', fWhere = 'all';   // B's filters: a campaign, and online / in person
+
+const base = () => quiet
   ? { sessions: SESSIONS.filter(s => s.id === 'ac-14'), quests: [] }
   : { sessions: SESSIONS, quests: QUESTS };
+const matches = (s, camp = fCamp, where = fWhere) => (camp === 'all' || s.camp === camp) && (where === 'all' || (where === 'online') === !!s.online);
+/* what the page shows: B applies its filters; the rail's Your Quests always uses base() */
+const data = () => {
+  const b = base();
+  if (variant !== 1) return b;
+  const sessions = b.sessions.filter(s => matches(s));
+  return { sessions, quests: b.quests.filter(q => sessions.some(s => s.id === q.s)) };
+};
 
 /* ---------------- helpers ---------------- */
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -533,14 +556,32 @@ function chronicle() {
         : sessionSheet(s)).join('')}</div></div>`;
   };
   return tabs + awaitingNight() + (weeks.length ? weeks.map(g => `<section class="vb-week" aria-label="${esc(weekName(g.w))}">
-      <h2 class="vb-week-h">${weekName(g.w)}</h2>${g.days.map(entry).join('')}</section>`).join('') : '<p class="hs-note">Nothing coming up. When a session gets a night, it shows here.</p>');
+      <h2 class="vb-week-h">${weekName(g.w)}</h2>${g.days.map(entry).join('')}</section>`).join('') : (fCamp !== 'all' || fWhere !== 'all'
+      ? '<p class="hs-note">No sessions coming up match these filters.</p>'
+      : '<p class="hs-note">Nothing coming up. When a session gets a night, it shows here.</p>'));
 }
 function VariantB() {
   const toggle = `<div class="p-seg" role="group" aria-label="Show the Almanac as">
       <button type="button" data-view="list" aria-pressed="${view === 'list'}">List</button>
       <button type="button" data-view="calendar" aria-pressed="${view === 'calendar'}">Calendar</button></div>`;
-  if (view === 'list') return head(toggle) + chronicle();
-  return head(toggle) + (calMode === 'week' ? weekPanel() : monthPanel(true)) + dayDetail() + awaitingNight();
+  if (view === 'list') return head(toggle) + filters() + chronicle();
+  return head(toggle) + filters() + (calMode === 'week' ? weekPanel() : monthPanel(true)) + dayDetail() + awaitingNight();
+}
+/* one campaign or all, and online / in person / both. Counts are the sessions the list would show (coming up or undated). */
+function filters() {
+  const ahead = s => !s.date || sod(s.end || s.date) >= sod(TODAY);
+  const count = (camp, where) => base().sessions.filter(s => ahead(s) && matches(s, camp, where)).length;
+  const camps = Object.keys(CAMPS).filter(c => base().sessions.some(s => s.camp === c));
+  const chip = (attr, val, cur, label, n, av = '') => `<button type="button" class="p-chip" data-${attr}="${val}" aria-pressed="${val === cur}">${av}${label}<span>${n}</span></button>`;
+  const on = fCamp !== 'all' || fWhere !== 'all';
+  return `<div class="hs-gilded p-filters" role="group" aria-label="Filter sessions">
+      <div class="p-frow"><span class="p-flab">Campaign</span>
+        ${chip('fcamp', 'all', fCamp, 'All', count('all', fWhere))}
+        ${camps.map(c => chip('fcamp', c, fCamp, esc(CAMPS[c].title), count(c, fWhere), `<i class="va-av">${CAMPS[c].init}</i>`)).join('')}</div>
+      <div class="p-frow"><span class="p-flab">Where</span>
+        ${[['all', 'Anywhere'], ['person', 'In person'], ['online', 'Online']].map(([v, l]) => chip('fwhere', v, fWhere, l, count(fCamp, v))).join('')}
+        ${on ? '<button type="button" class="p-link p-fclear" data-fclear="1">Clear filters</button>' : ''}</div>
+    </div>`;
 }
 
 /* ---------------- C: Campaign lanes ---------------- */
@@ -594,7 +635,7 @@ function VariantC() {
 
 /* ---------------- the rail's Your Quests (shell; same data, so checking one updates both) ---------------- */
 function renderRail() {
-  const qs = data().quests.filter(q => isLive(sessionOf(q)))
+  const qs = base().quests.filter(q => isLive(sessionOf(q)))
     .sort((a, b) => (a.due ? +a.due : Infinity) - (b.due ? +b.due : Infinity));
   const open = qs.filter(q => q.status === 'open').length;
   document.getElementById('qc').textContent = `${open} open`;
@@ -640,7 +681,7 @@ let toastTimer;
 function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 2600); }
 
 document.addEventListener('click', e => {
-  const el = e.target.closest('[data-q],[data-open],[data-stub],[data-day],[data-amonth],[data-aweek],[data-view],[data-cal],[data-tab],[data-cs],[data-cq]');
+  const el = e.target.closest('[data-q],[data-open],[data-stub],[data-day],[data-amonth],[data-aweek],[data-view],[data-cal],[data-fcamp],[data-fwhere],[data-fclear],[data-tab],[data-cs],[data-cq]');
   if (!el) return;
   e.preventDefault();
   const d = el.dataset;
@@ -650,6 +691,9 @@ document.addEventListener('click', e => {
   else if (d.day) { aSel = d.day; const day = fromKey(d.day); if (day.getMonth() !== aMonth.getMonth()) aMonth = new Date(day.getFullYear(), day.getMonth(), 1); render(); }
   else if (d.amonth) { const n = +d.amonth; aMonth = n ? new Date(aMonth.getFullYear(), aMonth.getMonth() + n, 1) : new Date(TODAY.getFullYear(), TODAY.getMonth(), 1); aSel = n ? null : key(TODAY); render(); }
   else if (d.aweek) { const n = +d.aweek; aWeek = n ? addDays(aWeek, 7 * n) : mondayOf(TODAY); aSel = n ? null : key(TODAY); render(); }
+  else if (d.fcamp) { fCamp = d.fcamp; render(); }
+  else if (d.fwhere) { fWhere = d.fwhere; render(); }
+  else if (d.fclear) { fCamp = fWhere = 'all'; render(); }
   else if (d.view) { view = d.view; store.set('hs-alm-view', view); render(); }
   else if (d.cal) {   // keep the chosen day when switching between month and week
     calMode = d.cal; store.set('hs-alm-cal', calMode);

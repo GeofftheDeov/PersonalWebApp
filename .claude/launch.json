@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--prefix", "frontend"],
       "port": 3000
+    },
+    {
+      "name": "session-prototype",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "4175", "--bind", "127.0.0.1", "--directory", "prototypes/hearthside-session-details"],
+      "port": 4175
     }
   ]
 }

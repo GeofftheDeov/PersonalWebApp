@@ -1,0 +1,1064 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hearthside Session Prototype</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alegreya+Sans+SC:wght@500;700&family=Alegreya+Sans:wght@400;500;700&family=IM+Fell+English+SC&family=IM+Fell+English:ital@0;1&display=swap">
+<link rel="stylesheet" href="bundle.css">
+<style>
+/* PROTOTYPE — throwaway. Three layouts of a session's own page in the Hearthside design system, switchable from the
+   bar at the bottom (or ← →). Keeps what the PWA's session page has (frontend/src/app/game-night/sessions/[id]/page.tsx:
+   when and where, the torch, the ready check, prep notes, the summary, quests, attendance, calendar events, the
+   recording, edit) and adds: which adventurers were there, room for the tale (the summary), accounts anyone in the party
+   uploads, and a slot for an AI-painted reel of the session's scenes. Data is made up, "today" is Mon Oct 26 2026,
+   and everything lives in memory. Only .hs-page changes per layout; the AppShell around it is the design system's. */
+:root{
+  color-scheme:dark;
+  /* Hearthside tokens (from the design system's tokens.json; one theme, Tavern) */
+  --ground:#1a130e;--ground-2:#241a13;--surface:#2c2119;--line:#4a3726;--text:#f1e6d0;--muted:#b8a487;
+  --on-wood-text:#fbf1dc;--on-wood-muted:#d4c2a2;--accent:#e5a13a;--accent-ink:#1a130e;--seal:#b4462c;--moss:#7c9a55;
+  --verdigris:#5aa396;--paper:#eadbb9;--paper-hi:#f0e3c4;--paper-lo:#e2cea5;--paper-ink:#2b1d12;--paper-muted:#6b5337;
+  --paper-line:#c9b28a;--leather-hi:#37281c;--leather:#221810;--gold-hi:#f6dd96;--gold:#d6a84e;--gold-lo:#8a5c1c;
+  --gold-line:rgba(226,184,98,0.38);--gold-rule:rgba(226,184,98,0.14);
+  --heat-0:rgba(43,29,18,0.06);--heat-1:#d8c092;--heat-2:#c49a5c;--heat-3:#9c6c32;--heat-4:#5a3a1a;--firelight:#ffb36b;
+  --font-display:"IM Fell English SC","IM Fell English",Georgia,serif;
+  --font-story:"IM Fell English",Georgia,serif;
+  --font-body:"Alegreya Sans",system-ui,sans-serif;
+  --font-label:"Alegreya Sans SC","Alegreya Sans",system-ui,sans-serif;
+  --space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;--space-5:20px;--space-6:24px;--sheet-foot:44px;
+  --radius-sheet:3px;--radius:4px;--radius-panel:5px;--radius-full:999px;
+  --shadow-panel:0 14px 30px rgba(0,0,0,0.55),0 2px 4px rgba(0,0,0,0.5);
+  --shadow-panel-inset:inset 0 0 0 1px rgba(0,0,0,0.55),inset 0 0 26px rgba(0,0,0,0.5);
+  --shadow-paper:0 16px 34px rgba(0,0,0,0.6),0 2px 4px rgba(0,0,0,0.45);
+  --shadow-pin:0 2px 3px rgba(0,0,0,0.5);
+  --on-wood-shadow:0 1px 2px rgba(0,0,0,0.9),0 0 14px rgba(0,0,0,0.6);
+  --gild:linear-gradient(135deg,#f6dd96 0%,#b07c2c 22%,#f0cf7a 45%,#7c5318 68%,#e7c06a 88%,#a87228 100%);
+  /* the prototype switcher only: deliberately not Hearthside */
+  --proto-bg:#fafafa;--proto-fg:#111;--proto-dim:#555;
+}
+body{margin:0;background:var(--ground);color:var(--text)}
+.hs-shell-wrap{padding-block:16px 120px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.hs-nav a{cursor:pointer}
+.hs-page > *{align-self:stretch;min-width:0}
+.hs-app textarea,.hs-app select{font:inherit;color:inherit}
+
+/* ---------- material context: shared pieces read these, so they sit on parchment or leather alike ---------- */
+.hs-sheet,.k-paper{--k-ink:var(--paper-ink);--k-muted:var(--paper-muted);--k-line:var(--paper-line);--k-hi:var(--seal);--k-pri:var(--paper-ink);--k-pri-ink:var(--paper);
+  --k-field:rgba(255,250,235,.55);--k-torch:#9a4a12;--k-ok:#4d6a2c}
+.hs-gilded,.k-leather{--k-ink:var(--text);--k-muted:var(--muted);--k-line:var(--gold-rule);--k-hi:var(--accent);--k-pri:var(--accent);--k-pri-ink:var(--accent-ink);
+  --k-field:var(--surface);--k-torch:#f07b2c;--k-ok:var(--moss)}
+
+/* ---------- shared bits ---------- */
+.p-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+.p-head > div{min-width:0}
+.p-back{height:32px;font-size:14px}
+.p-link{background:none;border:0;padding:0;color:var(--k-hi,var(--accent));cursor:pointer;font-family:var(--font-label);font-size:13.5px;font-weight:500;letter-spacing:.04em;text-decoration:none}
+.p-link:hover{text-decoration:underline}
+.ext::after{content:" ↗";font-family:var(--font-body)}
+.k-btn{display:inline-flex;align-items:center;gap:6px;border:1.5px solid var(--k-ink);background:transparent;color:var(--k-ink);border-radius:var(--radius);padding:4px 12px;
+  font-family:var(--font-label);font-size:14px;font-weight:500;letter-spacing:.04em;cursor:pointer;white-space:nowrap;text-decoration:none;line-height:1.4}
+.hs-gilded .k-btn,.k-leather .k-btn{border-color:var(--gold-line);border-width:1px}
+.hs-gilded .k-btn:hover,.k-leather .k-btn:hover{border-color:var(--gold)}
+.k-btn.is-primary{background:var(--k-pri);color:var(--k-pri-ink);border-color:var(--k-pri)}
+.k-btn:disabled{opacity:.55;cursor:default}
+.k-btn.is-torch{border-color:var(--k-torch);color:var(--k-torch)}
+.k-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.k-h{margin:0 0 8px;font-family:var(--font-label);font-size:13.5px;font-weight:500;letter-spacing:.1em;color:var(--k-muted);display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.k-h .k-aside{font-family:var(--font-body);letter-spacing:0;font-size:13px}
+.k-muted{color:var(--k-muted)}
+.k-fine{font-size:13px;color:var(--k-muted);line-height:1.45;margin:6px 0 0}
+.k-empty{font-size:14.5px;color:var(--k-muted);margin:0;line-height:1.5}
+.k-slot{border:1.5px dashed var(--k-line);border-radius:var(--radius);padding:14px 16px}
+.hs-sheet .k-slot{border-color:rgba(107,83,55,.45)}
+.k-up{position:relative;display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+.k-up input{position:absolute;width:1px;height:1px;opacity:0}
+.k-up:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+.k-ta{width:100%;min-height:150px;background:var(--k-field);border:1px solid var(--k-line);border-radius:var(--radius);padding:10px 12px;color:var(--k-ink);
+  font-family:var(--font-story);font-size:16.5px;line-height:1.5;resize:vertical}
+.hs-sheet .k-ta{border-color:var(--paper-line)}
+.k-ta:focus{outline:2px solid var(--k-hi);outline-offset:1px}
+/* a definition list that works on both materials */
+.k-dl{margin:0;display:flex;flex-direction:column}
+.k-dl > div{display:grid;grid-template-columns:minmax(84px,30%) minmax(0,1fr);gap:10px;padding:7px 0;border-top:1px dotted var(--k-line);align-items:baseline}
+.hs-gilded .k-dl > div{border-top-style:solid}
+.k-dl > div:first-child{border-top:0}
+.k-dl dt{font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.06em;color:var(--k-muted)}
+.k-dl dd{margin:0;font-size:14.5px;overflow-wrap:anywhere}
+.k-dl dd small{display:block;color:var(--k-muted);font-size:13px}
+.k-pill{display:inline-block;font-family:var(--font-label);font-size:12px;font-weight:500;letter-spacing:.06em;padding:1px 8px;border-radius:var(--radius-full);border:1px solid currentColor;color:var(--k-muted);white-space:nowrap}
+.k-pill.is-ok{color:var(--k-ok)}
+.k-pill.is-hi{color:var(--k-hi)}
+.k-pill.is-torch{color:var(--k-torch)}
+
+/* portraits: a face in a gilded medallion. Stand-ins are painted by the page; no art = initials on dyed cloth. */
+.art{position:absolute;inset:0;background-size:cover;background-position:center}
+.pt{position:relative;display:block;aspect-ratio:1;overflow:hidden;background:var(--leather);border-radius:50%;container-type:inline-size}
+.pt .art{background-size:170% auto;background-position:50% 45%}
+.pt-none{position:absolute;inset:0;display:grid;place-items:center;background:radial-gradient(120% 90% at 15% 100%,rgba(255,179,107,.2),transparent 55%),linear-gradient(160deg,#4a3324,#1c120b)}
+.pt-none span{font-family:var(--font-display);font-size:38cqw;color:var(--gold-hi);opacity:.85}
+.pt-none.is-gm{background:radial-gradient(90% 90% at 50% 80%,rgba(240,123,44,.45),transparent 70%),linear-gradient(160deg,#4a2a18,#1c0f08)}
+.medal{position:relative;display:block;flex:none;border-radius:50%;overflow:hidden;border:2px solid transparent;
+  background:linear-gradient(var(--leather),var(--leather)) padding-box,var(--gild) border-box;box-shadow:0 3px 8px rgba(0,0,0,.55)}
+.flame{display:inline-block;width:1em;height:1em;vertical-align:-.12em;color:var(--k-torch,#f07b2c)}
+
+/* the torch line: orange and a flame wherever the Game Master's role changes hands (from the campaign prototype) */
+.torch{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;font-size:14.5px;color:var(--k-ink)}
+.torch b{color:var(--k-torch);font-weight:500}
+.torch select{background:var(--k-field);border:1px solid var(--k-line);border-radius:var(--radius);padding:4px 8px;color:var(--k-ink);font-size:14px;max-width:100%}
+
+/* the tale (the summary). Story face, a seal-red drop cap. */
+.tale{font-family:var(--font-story);font-size:17px;line-height:1.55;color:var(--k-ink);max-width:66ch}
+.tale p{margin:0 0 .75em}
+.tale p:first-child::first-letter{float:left;font-family:var(--font-display);font-size:3.3em;line-height:.82;padding:6px 7px 0 0;color:var(--k-hi)}
+.tale-by{font-family:var(--font-story);font-style:italic;font-size:15px;color:var(--k-muted);margin:0}
+
+/* accounts: summaries anyone in the party uploads, kept as files */
+.accts{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.acct{display:grid;grid-template-columns:40px minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px 10px;border-radius:var(--radius);border:1px solid var(--k-line)}
+.hs-sheet .acct{background:rgba(255,250,235,.35);border-color:rgba(107,83,55,.3);box-shadow:0 1px 2px rgba(60,40,20,.15)}
+.hs-gilded .acct{background:rgba(0,0,0,.18)}
+.acct-ic{position:relative;width:40px;height:50px;border-radius:2px;display:grid;place-items:end center;padding-bottom:5px;overflow:hidden;
+  background:linear-gradient(160deg,#f3e7cc,#c9ad7c);box-shadow:0 1px 3px rgba(0,0,0,.4);font:700 10px/1 var(--font-label);letter-spacing:.06em;color:#5a3d22}
+.acct-ic::before{content:"";position:absolute;left:7px;right:7px;top:9px;height:18px;background:repeating-linear-gradient(transparent 0 3px,rgba(90,61,34,.35) 3px 4px)}
+.acct-ic.is-img{background-size:cover;background-position:center}
+.acct-ic.is-img::before{display:none}
+.acct-ic.is-audio::before{height:14px;top:14px;background:repeating-linear-gradient(90deg,rgba(90,61,34,.55) 0 2px,transparent 2px 4px);clip-path:polygon(0 50%,10% 20%,20% 70%,30% 0,40% 90%,50% 30%,60% 80%,70% 10%,80% 60%,90% 35%,100% 50%,100% 100%,0 100%)}
+.acct-n{font-weight:500;font-size:14.5px;overflow-wrap:anywhere;line-height:1.3}
+.acct-n button{all:unset;cursor:pointer;color:var(--k-ink)}
+.acct-n button:hover{text-decoration:underline}
+.acct-m{font-size:12.5px;color:var(--k-muted)}
+.acct-x{background:none;border:0;color:var(--k-muted);cursor:pointer;font-size:18px;padding:4px 6px;line-height:1}
+.acct-x:hover{color:var(--k-hi)}
+.acct details{grid-column:2 / -1;font-size:14px}
+.acct summary{cursor:pointer;color:var(--k-hi);font-family:var(--font-label);font-size:13px;letter-spacing:.04em}
+.acct pre{margin:6px 0 0;white-space:pre-wrap;font:inherit;font-family:var(--font-story);font-size:15px;line-height:1.45;color:var(--k-ink);max-height:240px;overflow:auto}
+
+/* the reel: an AI-painted film of the session's scenes, 16:9, in a gilded frame */
+.reel-frame{position:relative;border:3px solid transparent;border-radius:var(--radius-panel);background:linear-gradient(#0b0806,#0b0806) padding-box,var(--gild) border-box;box-shadow:var(--shadow-panel)}
+.reel{position:relative;aspect-ratio:16/9;overflow:hidden;border-radius:2px;background:#0b0806;container-type:inline-size;color:#fff}
+.reel .art{opacity:0;transition:opacity .9s;transform:scale(1.03)}
+.reel .art.is-on{opacity:1;animation:hs-kb 8s linear forwards;animation-play-state:paused}
+.reel.is-playing .art.is-on{animation-play-state:running}
+@keyframes hs-kb{from{transform:scale(1.03) translate(0,0)}to{transform:scale(1.16) translate(-2.5%,-1.5%)}}
+.reel-cap{position:absolute;left:7%;right:7%;bottom:15%;margin:0;text-align:center;font-family:var(--font-story);font-size:clamp(13px,3.6cqw,22px);line-height:1.3;
+  text-shadow:0 1px 3px #000,0 0 18px rgba(0,0,0,.9);transition:opacity .4s}
+.reel-big{position:absolute;inset:0;margin:auto;width:clamp(48px,13cqw,78px);height:clamp(48px,13cqw,78px);border-radius:50%;border:2px solid rgba(246,221,150,.8);
+  background:rgba(20,13,8,.6);color:var(--gold-hi);cursor:pointer;display:grid;place-items:center;box-shadow:0 0 30px rgba(0,0,0,.6)}
+.reel-big svg{width:38%;height:38%;margin-left:6%}
+.reel.is-playing .reel-big,.reel.is-started .reel-big{display:none}
+.reel-title{position:absolute;left:0;right:0;top:0;padding:12px 16px 30px;background:linear-gradient(rgba(0,0,0,.7),transparent);font-family:var(--font-label);font-size:clamp(11px,2.4cqw,14px);letter-spacing:.08em;color:var(--gold-hi)}
+.reel.is-started .reel-title{opacity:0;transition:opacity .6s}
+.reel-ctl{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:10px;padding:8px 12px;background:linear-gradient(transparent,rgba(0,0,0,.78))}
+.reel-ctl button.pp{background:none;border:0;color:#fff;cursor:pointer;width:26px;height:26px;padding:0;display:grid;place-items:center}
+.reel-ctl button.pp svg{width:16px;height:16px}
+.reel-ticks{flex:1;display:flex;gap:3px;min-width:0}
+.reel-ticks button{flex:1;height:14px;padding:5px 0;background:none;border:0;cursor:pointer;min-width:0}
+.reel-ticks i{display:block;height:4px;border-radius:2px;background:rgba(255,255,255,.28);overflow:hidden}
+.reel-ticks i b{display:block;height:100%;width:0;background:var(--accent)}
+.reel-time{font:500 12px/1 var(--font-label);letter-spacing:.05em;font-variant-numeric:tabular-nums;color:rgba(255,255,255,.85);white-space:nowrap}
+.reel-under{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 12px;align-items:center;margin-top:8px;font-size:13px;color:var(--k-muted)}
+/* painting, and the empty slot */
+.reel-wait{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:6% 10%;text-align:center}
+.reel-wait .bn{position:absolute;inset:-20px;background-size:cover;background-position:center;filter:blur(10px) brightness(.4) saturate(.8)}
+.reel-wait > :not(.bn){position:relative}
+.reel-wait b{font-family:var(--font-story);font-weight:400;font-size:clamp(16px,4cqw,24px);color:var(--on-wood-text)}
+.reel-wait p{margin:0;font-size:clamp(12px,2.6cqw,15px);color:var(--on-wood-muted);max-width:46ch}
+.reel-prog{width:min(320px,70%);height:6px;border-radius:3px;background:rgba(255,255,255,.18);overflow:hidden}
+.reel-prog i{display:block;height:100%;background:linear-gradient(90deg,var(--gold-lo),var(--accent),var(--gold-hi));transition:width .2s}
+.reel-wait .k-btn{border-color:var(--gold-line);color:var(--text)}
+.reel-wait .k-btn.is-primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.reel-ai{font-family:var(--font-label);letter-spacing:.06em}
+
+/* quests, on either material */
+.kq{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.kq li{display:grid;grid-template-columns:20px minmax(0,1fr);gap:10px;align-items:start;padding:8px 0;border-top:1px dotted var(--k-line)}
+.hs-gilded .kq li{border-top-style:solid;padding:9px 0}
+.kq li:first-child{border-top:0}
+.kq .hs-box{margin-top:2px;border-color:var(--k-muted)}
+.kq .hs-box:disabled{cursor:default;opacity:.6}
+.kq b{font-weight:500;font-size:14.5px;line-height:1.3}
+.kq small{display:block;font-size:12.5px;color:var(--k-muted);line-height:1.4}
+.kq .is-done b{text-decoration:line-through;color:var(--k-muted)}
+.kq .t{font-family:var(--font-label);letter-spacing:.04em;color:var(--k-hi)}
+
+/* the ready check */
+.rc{display:flex;flex-direction:column;gap:10px}
+.rc ul{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}
+.rc li{display:flex;align-items:center;gap:8px;font-size:14px;min-width:0}
+.rc li span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rc-dot{flex:none;width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700;border:1.5px solid var(--k-muted);color:var(--k-muted)}
+.rc-dot.is-yes{background:var(--k-ok);border-color:var(--k-ok);color:#fff}
+.rc-dot.is-no{background:var(--seal);border-color:var(--seal);color:#fff}
+
+/* attendance, as the GM takes it */
+.att-ed{display:flex;flex-direction:column;gap:6px}
+.att-ed label{display:flex;align-items:center;gap:8px;font-size:14.5px;cursor:pointer}
+.att-ed input[type=checkbox]{width:16px;height:16px;accent-color:var(--moss)}
+.att-ed .said{font-size:12.5px;color:var(--k-muted)}
+.att-q{margin:2px 0 4px 24px;padding:8px 10px;border-left:2px solid var(--k-hi);font-size:14px;display:flex;flex-direction:column;gap:6px}
+.att-q .k-btn{font-size:13px;padding:2px 10px}
+.att-q .k-btn[aria-pressed="true"]{background:var(--k-pri);color:var(--k-pri-ink);border-color:var(--k-pri)}
+
+/* status lines (planning, cancelled) */
+.k-banner{padding:10px 12px;border-radius:var(--radius);border:1.5px solid var(--k-hi);font-size:14.5px;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;justify-content:space-between}
+
+/* ---------- A: The session sheet. One parchment page, read top to bottom. ---------- */
+.va-top{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.va-steps{display:flex;gap:6px}
+.va-steps button{height:32px;font-size:13.5px}
+.va-sheet{padding-top:30px}
+.va-sheet h1{margin:2px 0 0;font-family:var(--font-story);font-weight:400;font-size:clamp(28px,4vw,36px);line-height:1.1;text-wrap:balance}
+.va-when{margin:6px 0 0;font-size:15.5px;color:var(--paper-ink)}
+.va-when small{display:block;color:var(--paper-muted);font-size:14px}
+.va-sec{margin-top:22px;padding-top:16px;border-top:1px solid var(--paper-line)}
+.va-sec.is-first{border-top:0;padding-top:0;margin-top:18px}
+.va-roll{list-style:none;margin:4px 0 0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:16px 10px}
+.va-roll li{display:flex;flex-direction:column;align-items:center;text-align:center;gap:3px;min-width:0}
+.va-roll .medal{width:66px;margin-bottom:4px}
+.va-roll b{font-family:var(--font-story);font-weight:400;font-size:16.5px;line-height:1.15;overflow-wrap:anywhere}
+.va-roll small{font-size:12.5px;color:var(--paper-muted);line-height:1.3}
+.va-roll .note{font-style:italic;color:var(--seal)}
+.va-roll .is-away .medal{filter:grayscale(1);opacity:.5}
+.va-roll .is-away b{text-decoration:line-through;text-decoration-color:var(--paper-muted)}
+.va-roll .is-played .medal{outline:2px dashed var(--seal);outline-offset:3px}
+.va-roll .is-gm .medal{outline:2px solid #9a4a12;outline-offset:3px}
+.va-roll .lv{font-family:var(--font-label);font-size:12px;letter-spacing:.06em;color:var(--k-ok)}
+.va-two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:22px}
+@media (max-width:640px){.va-two{grid-template-columns:minmax(0,1fr)}}
+.va-foot{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px 16px;margin-top:22px;padding-top:12px;border-top:1px solid var(--paper-line);font-size:13.5px;color:var(--paper-muted)}
+
+/* ---------- B: The reel. Pictures first: the reel up top, the tale on parchment beside the table on leather. ---------- */
+.vb-sub{display:flex;flex-wrap:wrap;gap:4px 14px;align-items:center}
+.vb-hero .reel-frame{border-width:3px}
+.vb-count{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:flex-end;padding:5% 6%;gap:6px}
+.vb-count .bn{position:absolute;inset:0;background-size:cover;background-position:center}
+.vb-count::before{content:"";position:absolute;inset:0;z-index:1;background:linear-gradient(0deg,rgba(15,10,6,.92),rgba(15,10,6,.25) 65%,rgba(15,10,6,.1))}
+.vb-count > :not(.bn){position:relative;z-index:2}
+.vb-count .big{font-family:var(--font-display);font-size:clamp(28px,8cqw,56px);line-height:1;color:var(--gold-hi);text-shadow:var(--on-wood-shadow)}
+.vb-count p{margin:0;color:var(--on-wood-text);font-size:clamp(13px,2.8cqw,17px);text-shadow:var(--on-wood-shadow)}
+.vb-count .k-row{margin-top:6px}
+.vb-count .k-btn{border-color:var(--gold-line);color:var(--text);background:rgba(20,13,8,.5)}
+.vb-count .k-btn.is-primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.vb-scenes{display:flex;gap:8px;margin-top:10px;overflow-x:auto;padding-bottom:4px;scrollbar-width:thin}
+.vb-scenes button{position:relative;flex:0 0 132px;aspect-ratio:16/9;border:0;padding:0;border-radius:3px;overflow:hidden;cursor:pointer;box-shadow:0 0 0 1px rgba(0,0,0,.7),0 2px 6px rgba(0,0,0,.6);opacity:.75}
+.vb-scenes button.is-on{opacity:1;box-shadow:0 0 0 2px var(--accent),0 2px 6px rgba(0,0,0,.6)}
+.vb-scenes button span.n{position:absolute;left:5px;top:3px;z-index:1;font:500 11px/1 var(--font-label);color:#fff;text-shadow:0 1px 2px #000}
+/* the shell's page column is ~680px at most, so the leather panels sit under the tale, two across where they fit */
+.vb-cols{display:flex;flex-direction:column;gap:var(--space-5)}
+.vb-side{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:var(--space-5);align-items:start}
+.vb-side > *{min-width:0}
+.vb-pan{padding:12px 16px 14px}
+.vb-pan > .k-h{padding-top:4px}
+.vb-roll{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.vb-roll li{display:grid;grid-template-columns:38px minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--gold-rule)}
+.vb-roll li:first-child{border-top:0}
+.vb-roll .medal{width:38px}
+.vb-roll b{display:block;font-family:var(--font-story);font-weight:400;font-size:16px;line-height:1.15;overflow-wrap:anywhere}
+.vb-roll small{display:block;font-size:12.5px;color:var(--muted);line-height:1.3}
+.vb-roll .is-away .medal{filter:grayscale(1);opacity:.45}
+.vb-roll .is-away b{color:var(--muted)}
+.vb-roll .is-played .medal{outline:2px dashed var(--accent);outline-offset:2px}
+.vb-sheet h2{margin:0 0 10px;font-family:var(--font-story);font-weight:400;font-size:24px}
+
+/* ---------- C: Around the table. Who sat where, drawn from above; then the session's things in tabs. ---------- */
+.vc-ring{position:relative;width:100%;max-width:560px;margin:0 auto;aspect-ratio:1;container-type:inline-size}
+.vc-top{position:absolute;inset:14%;border-radius:50%;
+  background:repeating-radial-gradient(circle at 50% 50%,rgba(0,0,0,0) 0 9px,rgba(0,0,0,.1) 9px 10px),radial-gradient(circle at 40% 35%,#7a5130,#4c3019 60%,#2e1c0e);
+  box-shadow:0 0 0 6px #2a190c,0 0 0 8px rgba(214,168,78,.5),0 20px 40px rgba(0,0,0,.7),inset 0 0 50px rgba(0,0,0,.55)}
+.vc-glow{position:absolute;inset:14%;border-radius:50%;pointer-events:none;background:radial-gradient(circle at 50% 50%,rgba(255,179,107,.28),rgba(255,179,107,0) 60%)}
+.vc-card{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) rotate(-1.5deg);width:46%;padding:4.2cqw 3.6cqw 3.8cqw;text-align:center;color:var(--paper-ink);border-radius:var(--radius-sheet);
+  background:radial-gradient(120% 90% at 50% 40%,rgba(120,80,30,0) 60%,rgba(120,80,30,.22)),linear-gradient(170deg,var(--paper-hi),var(--paper-lo));box-shadow:var(--shadow-paper)}
+.vc-card .kk{font:500 clamp(10px,2.3cqw,13px)/1.2 var(--font-label);letter-spacing:.1em;color:var(--paper-muted)}
+.vc-card h1{margin:1.2cqw 0;font-family:var(--font-story);font-weight:400;font-size:clamp(17px,5.2cqw,30px);line-height:1.05}
+.vc-card p{margin:0;font-size:clamp(11px,2.6cqw,14.5px);line-height:1.35}
+.vc-card .hs-seal{margin-top:1.6cqw;font-size:clamp(10px,2.3cqw,13px);padding:2px 9px}
+.vc-seat{position:absolute;width:23%;transform:translate(-50%,-38%);display:flex;flex-direction:column;align-items:center;text-align:center;background:none;border:0;padding:0;color:inherit;font:inherit}
+button.vc-seat{cursor:pointer}
+.vc-seat .medal{width:62%;border-width:2px;transition:box-shadow .2s,filter .2s,opacity .2s}
+.vc-seat .pl{margin-top:-1.4cqw;position:relative;z-index:2;max-width:118%;padding:.6cqw 1.6cqw .8cqw;border-radius:2px;background:linear-gradient(180deg,#f4d98e,#d7ab55 55%,#b88834);
+  box-shadow:0 2px 5px rgba(0,0,0,.6);color:var(--accent-ink)}
+.vc-seat .pl b{display:block;font-family:var(--font-story);font-weight:400;font-size:clamp(11px,2.9cqw,16px);line-height:1.1;overflow-wrap:anywhere}
+.vc-seat .pl small{display:block;font:500 clamp(9.5px,2.2cqw,12.5px)/1.2 var(--font-label);letter-spacing:.04em;color:#4a3112}
+.vc-seat .st{margin-top:.8cqw;font:500 clamp(9.5px,2.3cqw,13px)/1.2 var(--font-label);letter-spacing:.04em;color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow)}
+.vc-seat.is-away .medal{filter:grayscale(1) brightness(.55);opacity:.55}
+.vc-seat.is-away .pl{filter:grayscale(.8) brightness(.8)}
+.vc-seat.is-played .medal{outline:2px dashed var(--accent);outline-offset:3px;opacity:.85}
+.vc-seat.is-yes .medal{box-shadow:0 0 0 3px var(--moss),0 0 18px 4px rgba(124,154,85,.6)}
+.vc-seat.is-no .medal{box-shadow:0 0 0 3px var(--seal),0 0 14px 2px rgba(180,70,44,.5);filter:grayscale(.6)}
+.vc-seat.is-gm .medal{box-shadow:0 0 0 3px #f07b2c,0 0 22px 5px rgba(240,123,44,.5)}
+.vc-seat.is-me .pl::after{content:"you";position:absolute;right:-6px;top:-8px;font:700 9.5px/1 var(--font-label);letter-spacing:.06em;background:var(--accent);color:var(--accent-ink);padding:2px 5px;border-radius:8px}
+button.vc-seat:hover .medal,button.vc-seat:focus-visible .medal{box-shadow:0 0 0 2px rgba(246,221,150,.9),0 0 22px 6px rgba(255,179,107,.5)}
+.vc-under{max-width:560px;margin:-6px auto 0;width:100%}
+.vc-strip{padding:12px 16px}
+.vc-tabs{display:flex;overflow-x:auto;border-bottom:1px solid rgba(226,184,98,.22);scrollbar-width:none}
+.vc-tabs button{flex:1 0 auto;background:transparent;border:0;padding:11px 12px;cursor:pointer;color:var(--muted);font-family:var(--font-label);font-weight:500;letter-spacing:.05em;font-size:14.5px;border-bottom:2px solid transparent;white-space:nowrap}
+.vc-tabs button[aria-selected="true"]{color:var(--text);border-bottom-color:var(--accent)}
+.vc-tabs button small{font-size:12px;color:var(--muted);margin-left:3px}
+.vc-tab{padding:16px}
+
+/* ---------- dialogs (edit, paint the reel). Gilded; fields follow the message composer. ---------- */
+.dlg-back{position:fixed;inset:0;z-index:60;background:rgba(10,7,4,.74);display:flex;align-items:center;justify-content:center;padding:16px;overflow:hidden}
+.dlg{width:min(560px,100%);max-height:calc(100dvh - 32px);display:flex;flex-direction:column;padding:6px}
+.dlg-h{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px 10px;border-bottom:1px solid var(--gold-rule)}
+.dlg-h h2{margin:0;font-family:var(--font-story);font-weight:400;font-size:24px;line-height:1.15}
+.dlg-body{overflow-y:auto;overscroll-behavior:contain;padding:4px 12px;min-height:0}
+.dlg-body > p{font-size:14.5px;line-height:1.5;margin:12px 0 0}
+.dlg-body ul{margin:8px 0 0;padding-left:18px;font-size:14.5px;line-height:1.5}
+.fld{display:flex;flex-direction:column;gap:5px;margin:14px 0 0;min-width:0}
+.fld > label,.fld .lab{font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.08em;color:var(--muted)}
+.fld input,.fld textarea{width:100%;min-width:0;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:8px 10px;color:var(--text);font-size:15px}
+.fld input:focus,.fld textarea:focus{border-color:var(--gold);outline:0}
+.fld textarea{resize:vertical;line-height:1.45}
+.fld-2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.fld-2 .fld{margin-top:14px}
+.fld-chk{display:flex;align-items:center;gap:8px;margin-top:14px;font-size:14.5px}
+.dlg-f{display:flex;justify-content:flex-end;gap:8px;padding:12px 10px 8px;border-top:1px solid var(--gold-rule);margin-top:14px}
+.dlg-f .k-btn{height:36px;font-size:15px}
+.x-btn{background:transparent;border:1px solid var(--line);border-radius:var(--radius);width:32px;height:32px;cursor:pointer;color:var(--text);flex:none}
+
+/* ---------- prototype switcher (not part of any design) ---------- */
+.proto-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:50;
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:center;max-width:calc(100vw - 24px);
+  background:var(--proto-bg);color:var(--proto-fg);border-radius:14px;padding:6px 8px;box-shadow:0 8px 30px rgba(0,0,0,.6);
+  font:13px/1.3 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+.proto-bar button{font:inherit;color:inherit;background:#e9e9e9;border:0;border-radius:8px;padding:6px 10px;cursor:pointer}
+.proto-bar button:hover{background:#dcdcdc}
+.proto-bar .lbl{min-width:180px;text-align:center;font-weight:600;padding:0 4px}
+.proto-bar .lbl small{display:block;font-weight:400;color:var(--proto-dim);font-size:11px}
+.proto-bar .sep{width:1px;height:26px;background:#ccc;margin:0 2px}
+.proto-bar #state small{display:block;font-size:11px;color:var(--proto-dim);text-align:left}
+.proto-bar #state{text-align:left;max-width:250px}
+@media (max-width:620px){.proto-bar .lbl{min-width:0;flex:1 1 0}.proto-bar .sep{display:none}.proto-bar small{display:none!important}}
+.proto-bar :focus-visible{outline:2px solid #2563eb;outline-offset:2px}
+.proto-toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(96px + env(safe-area-inset-bottom,0px));z-index:70;background:var(--proto-bg);color:var(--proto-fg);
+  font:13px/1.3 ui-sans-serif,system-ui,sans-serif;padding:8px 12px;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.5);max-width:calc(100vw - 32px)}
+@media (prefers-reduced-motion:reduce){.reel .art.is-on{animation:none}.reel .art{transition:none}}
+</style>
+
+<canvas class="hs-floor" id="floor" aria-hidden="true"></canvas>
+<div class="hs-glow" aria-hidden="true"></div>
+<div class="hs-shell-wrap">
+  <div class="hs-shell">
+    <aside class="hs-rail">
+      <div class="hs-bar"><div class="hs-brand">Hearthside<small>The Party Gathers</small></div>
+        <nav class="hs-nav hs-gilded" aria-label="Main">
+          <a data-stub="The Hearth">The Hearth</a>
+          <a aria-current="page" data-stub="Campaigns">Campaigns</a>
+          <a data-stub="the Almanac">Almanac</a>
+          <a data-stub="Adventurers">Adventurers</a>
+        </nav>
+      </div>
+      <section class="hs-quests-sec"><h2 class="hs-sec"><span>Your Quests</span><span class="hs-aside" id="qc"></span></h2>
+        <div class="hs-gilded" id="rail-quests"></div></section>
+    </aside>
+
+    <main class="hs-page" id="page"></main>
+
+    <aside class="hs-letters-col"><h2 class="hs-sec"><span>Letters</span><span class="hs-aside">4 unread</span></h2><div class="hs-gilded"><div class="hs-tabs" role="tablist">
+      <button role="tab" aria-selected="true">All</button><button role="tab" aria-selected="false">Campaigns</button><button role="tab" aria-selected="false">Friends</button>
+    </div>
+    <ul class="hs-threads">
+      <li tabindex="0" role="button"><span class="hs-avatar is-campaign">SS</span><div style="min-width:0"><div class="hs-thread-name">Starfall Salvage</div><div class="hs-thread-sub">Campaign · 5 in the party</div></div><div class="hs-thread-when">now<span class="hs-dot" aria-label="3 unread"></span></div></li>
+      <li tabindex="0" role="button"><span class="hs-avatar">P</span><div style="min-width:0"><div class="hs-thread-name">Priya</div><div class="hs-thread-sub">Friend</div></div><div class="hs-thread-when">7:02 pm<span class="hs-dot" aria-label="1 unread"></span></div></li>
+      <li tabindex="0" role="button"><span class="hs-avatar is-campaign">AC</span><div style="min-width:0"><div class="hs-thread-name">Curse of the Ashen Crown</div><div class="hs-thread-sub">Campaign · 5 in the party</div></div><div class="hs-thread-when">Tue</div></li>
+    </ul></div></aside>
+  </div>
+</div>
+<div id="ov" hidden></div>
+
+<div class="proto-bar" role="toolbar" aria-label="Prototype controls">
+  <button type="button" id="prev" aria-label="Previous layout">←</button>
+  <div class="lbl" id="lbl" aria-live="polite"></div>
+  <button type="button" id="next" aria-label="Next layout">→</button>
+  <span class="sep" aria-hidden="true"></span>
+  <button type="button" id="state"></button>
+  <button type="button" id="who"></button>
+</div>
+<div class="proto-toast" id="toast" hidden></div>
+
+<script src="bundle.js"></script>
+<script>
+document.body.classList.add('hs-app');
+
+/* ---------------- stand-in art: portraits (as in the Adventurers prototype), the banner, and the reel's scenes ---------------- */
+function rng(seed) { let h = 2166136261; for (const c of seed) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return () => ((h = Math.imul(h ^ (h >>> 15), 2246822507) ^ Math.imul(h ^ (h >>> 13), 3266489909)) >>> 0) / 4294967296; }
+function ridge(ctx, r, W, y0, amp, step, color, H) {
+  ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(0, H);
+  let y = y0; for (let x = 0; x <= W + step; x += step) { y = Math.max(y0 - amp, Math.min(y0 + amp, y + (r() - .5) * amp)); ctx.lineTo(x, y); }
+  ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
+}
+const canvas = (W, H) => { const c = document.createElement('canvas'); c.width = W; c.height = H; return [c, c.getContext('2d')]; };
+const sky = (ctx, W, H, stops) => { const g = ctx.createLinearGradient(0, 0, 0, H); stops.forEach(([o, col]) => g.addColorStop(o, col)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); };
+const stars = (ctx, r, W, H, n, top = .8) => { for (let i = 0; i < n; i++) { const s = r(); ctx.fillStyle = `rgba(255,255,240,${.25 + s * .7})`; const z = s > .93 ? 3 : 1.5; ctx.fillRect(r() * W, r() * H * top, z, z); } };
+function ship(ctx, x, y, s, rot, glow) {   // the Gull's Wager: a wedge with two engines
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.scale(s, s);
+  if (glow) { ctx.shadowColor = '#8fe3ff'; ctx.shadowBlur = 30; ctx.fillStyle = 'rgba(160,235,255,.9)'; [-14, 14].forEach(o => { ctx.beginPath(); ctx.ellipse(-62, o, 10, 6, 0, 0, 7); ctx.fill(); }); ctx.shadowBlur = 0; }
+  ctx.fillStyle = '#0d0f1a'; ctx.beginPath(); ctx.moveTo(70, 0); ctx.lineTo(-50, -34); ctx.lineTo(-62, -20); ctx.lineTo(-62, 20); ctx.lineTo(-50, 34); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = 'rgba(255,200,120,.9)'; ctx.fillRect(20, -3, 8, 6);
+  ctx.restore();
+}
+function paintBanner() {   // Starfall Salvage's banner (4:1), as on the Campaigns page
+  const W = 1600, H = 400, [c, ctx] = canvas(W, H), r = rng('starfall');
+  sky(ctx, W, H, [[0, '#060a1c'], [.6, '#13294a'], [1, '#2f6a74']]); stars(ctx, r, W, H, 380, .75);
+  const g = ctx.createLinearGradient(300, 40, 760, 220); g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(1, 'rgba(255,236,190,.95)');
+  ctx.strokeStyle = g; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(300, 40); ctx.lineTo(760, 220); ctx.stroke();
+  ridge(ctx, r, W, 300, 26, 60, '#3a3550', H);
+  ctx.fillStyle = '#16142a'; ctx.beginPath(); ctx.moveTo(380, 330); ctx.quadraticCurveTo(520, 200, 720, 300); ctx.lineTo(700, 330); ctx.closePath(); ctx.fill();
+  for (let i = 0; i < 6; i++) ctx.fillRect(430 + i * 45, 250 - Math.sin(i / 5 * Math.PI) * 30, 7, 90);
+  ridge(ctx, r, W, 350, 18, 50, '#0b0a18', H);
+  return c.toDataURL('image/jpeg', .85);
+}
+/* The reel's scenes, 16:9: stand-ins for what an AI video model would paint from the tale */
+function paintScene(kind) {
+  const W = 1280, H = 720, [c, ctx] = canvas(W, H), r = rng(kind);
+  if (kind === 'drift') {
+    sky(ctx, W, H, [[0, '#04050f'], [1, '#161c3a']]);
+    ctx.lineWidth = 2; for (let i = 0; i < 70; i++) { const a = r() * 7, d0 = 60 + r() * 200, d1 = d0 + 80 + r() * 260; ctx.strokeStyle = `rgba(170,200,255,${.08 + r() * .25})`;
+      ctx.beginPath(); ctx.moveTo(420 + Math.cos(a) * d0, 300 + Math.sin(a) * d0); ctx.lineTo(420 + Math.cos(a) * d1, 300 + Math.sin(a) * d1); ctx.stroke(); }
+    stars(ctx, r, W, H, 160, 1);
+    let g = ctx.createRadialGradient(1000, 760, 40, 1040, 820, 520); g.addColorStop(0, '#9a9488'); g.addColorStop(.7, '#4a4640'); g.addColorStop(1, '#141210');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(1040, 880, 470, 0, 7); ctx.fill();
+    for (let i = 0; i < 18; i++) { ctx.fillStyle = `rgba(20,18,16,${.2 + r() * .3})`; ctx.beginPath(); ctx.ellipse(700 + r() * 600, 470 + r() * 250, 10 + r() * 34, 6 + r() * 14, 0, 0, 7); ctx.fill(); }
+    ship(ctx, 430, 300, 1.4, .25, true);
+  } else if (kind === 'signal') {
+    sky(ctx, W, H, [[0, '#050812'], [.7, '#0f2a32'], [1, '#1b4a4a']]); stars(ctx, r, W, H, 200, .6);
+    ridge(ctx, r, W, 560, 40, 40, '#141c22', H);
+    ctx.fillStyle = '#0a0e12'; ctx.fillRect(626, 300, 28, 270); ctx.beginPath(); ctx.moveTo(600, 570); ctx.lineTo(640, 420); ctx.lineTo(680, 570); ctx.fill();
+    ctx.shadowColor = '#7ff2df'; ctx.shadowBlur = 40; ctx.fillStyle = '#c8fff4'; ctx.beginPath(); ctx.arc(640, 296, 12, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
+    for (let k = 1; k <= 7; k++) { ctx.strokeStyle = `rgba(127,242,223,${.55 - k * .07})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(640, 296, k * 62, Math.PI * 1.05, Math.PI * 1.95); ctx.stroke(); }
+    ridge(ctx, r, W, 640, 20, 30, '#06080a', H);
+  } else if (kind === 'hold') {
+    ctx.fillStyle = '#07080a'; ctx.fillRect(0, 0, W, H);
+    const vx = 700, vy = 330;
+    for (let k = 0; k < 9; k++) { const t = k / 9, x0 = vx - (vx + 40) * (1 - t), x1 = vx + (W - vx + 40) * (1 - t), y0 = vy - (vy + 40) * (1 - t), y1 = vy + (H - vy + 40) * (1 - t);
+      ctx.strokeStyle = `rgba(120,140,150,${.12 + t * .1})`; ctx.lineWidth = 3; ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+      ctx.fillStyle = `rgba(255,70,40,${.5 - t * .4})`; ctx.fillRect(x0 + 6, y0 + 6, 18 * (1 - t) + 3, 6 * (1 - t) + 2); }
+    const g = ctx.createRadialGradient(vx, vy, 4, vx, vy, 160); g.addColorStop(0, 'rgba(200,240,255,.8)'); g.addColorStop(1, 'rgba(200,240,255,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#020203';
+    [[520, 470, 1.15], [860, 490, 1.25]].forEach(([x, y, s]) => { ctx.beginPath(); ctx.arc(x, y - 120 * s, 26 * s, 0, 7); ctx.fill(); ctx.beginPath(); ctx.ellipse(x, y + 40 * s, 52 * s, 150 * s, 0, Math.PI, 0); ctx.fill(); ctx.fillRect(x - 40 * s, y - 100 * s, 80 * s, 200 * s); });
+    for (let i = 0; i < 40; i++) { ctx.fillStyle = `rgba(255,${150 + r() * 90 | 0},60,${r()})`; ctx.fillRect(860 + (r() - .5) * 160, 330 + r() * 120, 2, 2); }
+  } else if (kind === 'beacon') {
+    sky(ctx, W, H, [[0, '#0a0606'], [1, '#1a0c0a']]);
+    ctx.fillStyle = '#120a08'; for (let i = 0; i < 14; i++) { ctx.save(); ctx.translate(640, 380); ctx.rotate(i / 14 * Math.PI * 2 + r() * .2); ctx.fillRect(90, -14, 260 + r() * 200, 28); ctx.restore(); }
+    let g = ctx.createRadialGradient(640, 380, 10, 640, 380, 300); g.addColorStop(0, 'rgba(180,255,240,1)'); g.addColorStop(.18, 'rgba(90,200,190,.8)'); g.addColorStop(1, 'rgba(90,200,190,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(30,20,16,.95)'; ctx.lineWidth = 16; ctx.beginPath(); ctx.arc(640, 380, 120, 0, 7); ctx.stroke();
+    for (let i = 0; i < 120; i++) { const a = r() * 7, d = 120 + r() * 380; ctx.fillStyle = `rgba(255,${160 + r() * 80 | 0},70,${r() * .9})`; ctx.fillRect(640 + Math.cos(a) * d, 380 + Math.sin(a) * d, 3, 3); }
+    ctx.fillStyle = '#030202'; ctx.beginPath(); ctx.ellipse(170, 760, 210, 360, .1, Math.PI, 0); ctx.fill(); ctx.beginPath(); ctx.arc(190, 420, 64, 0, 7); ctx.fill();
+  } else if (kind === 'escape') {
+    sky(ctx, W, H, [[0, '#03040b'], [1, '#101634']]); stars(ctx, r, W, H, 260, 1);
+    for (let i = 0; i < 46; i++) { ctx.save(); ctx.translate(r() * W, r() * H); ctx.rotate(r() * 7); ctx.fillStyle = `rgba(${40 + r() * 40 | 0},${36 + r() * 30 | 0},${40 + r() * 30 | 0},.95)`;
+      const s = 8 + r() * 46; ctx.fillRect(-s, -s / 2, s * 2, s); ctx.restore(); }
+    const g = ctx.createLinearGradient(0, 600, 820, 330); g.addColorStop(0, 'rgba(143,227,255,0)'); g.addColorStop(1, 'rgba(143,227,255,.9)');
+    ctx.strokeStyle = g; ctx.lineWidth = 12; ctx.beginPath(); ctx.moveTo(0, 640); ctx.quadraticCurveTo(420, 520, 800, 340); ctx.stroke();
+    ship(ctx, 860, 312, 1.5, -.42, true);
+    for (let k = 1; k <= 4; k++) { ctx.strokeStyle = `rgba(127,242,223,${.35 - k * .07})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(110, 690, k * 70, Math.PI * 1.5, Math.PI * 2); ctx.stroke(); }
+  }
+  const v = ctx.createRadialGradient(W / 2, H / 2, H * .35, W / 2, H / 2, H); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,.55)'); ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+  return c.toDataURL('image/jpeg', .84);
+}
+function paintPortrait(p) {
+  const W = 480, H = 640, [c, ctx] = canvas(W, H), r = rng(p.seed);
+  let g = ctx.createRadialGradient(W * .38, H * .32, 20, W * .5, H * .5, H * .8); g.addColorStop(0, p.bg[0]); g.addColorStop(1, p.bg[1]); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  stars(ctx, r, W, H, 120);
+  figure(ctx, p.gear, -7, -2, p.rim || '#ffb36b'); figure(ctx, p.gear, 0, 0, '#140d09');
+  (p.glow || []).forEach(([x, y, rad, col]) => { ctx.shadowColor = col; ctx.shadowBlur = 18; ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x, y, rad, 0, 7); ctx.fill(); });
+  ctx.shadowBlur = 0;
+  return c.toDataURL('image/jpeg', .86);
+}
+function figure(ctx, gear = '', dx, dy, col) {
+  const cx = 240; ctx.save(); ctx.translate(dx, dy); ctx.fillStyle = col;
+  if (gear.includes('long')) { ctx.beginPath(); ctx.ellipse(cx, 360, 118, 175, 0, 0, 7); ctx.fill(); }
+  ctx.beginPath(); ctx.ellipse(cx, 730, 228, 260, 0, Math.PI, 0); ctx.fill(); ctx.fillRect(cx - 34, 380, 68, 120);
+  ctx.beginPath(); ctx.ellipse(cx, 300, 82, 104, 0, 0, 7); ctx.fill();
+  if (gear.includes('ears')) [-1, 1].forEach(s => { ctx.beginPath(); ctx.ellipse(cx + s * 92, 200, 46, 56, s * .4, 0, 7); ctx.fill(); });
+  if (gear.includes('helm')) { ctx.fillRect(cx - 92, 226, 184, 110); [-1, 1].forEach(s => { ctx.beginPath(); ctx.ellipse(cx + s * 165, 505, 78, 50, s * .25, 0, 7); ctx.fill(); }); }
+  if (gear.includes('wide')) { ctx.beginPath(); ctx.ellipse(cx, 218, 172, 26, -.06, 0, 7); ctx.fill(); ctx.beginPath(); ctx.moveTo(cx - 82, 218); ctx.lineTo(cx - 62, 128); ctx.quadraticCurveTo(cx, 96, cx + 70, 130); ctx.lineTo(cx + 84, 218); ctx.fill(); }
+  ctx.restore();
+}
+function paintNotes() {   // a photo of handwritten notes, for an uploaded account
+  const [c, ctx] = canvas(160, 200), r = rng('notes');
+  ctx.fillStyle = '#efe6cf'; ctx.fillRect(0, 0, 160, 200);
+  ctx.strokeStyle = 'rgba(80,120,170,.35)'; for (let y = 24; y < 200; y += 12) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(160, y); ctx.stroke(); }
+  ctx.strokeStyle = 'rgba(30,30,60,.75)'; ctx.lineWidth = 1.4;
+  for (let y = 22; y < 190; y += 12) { let x = 10 + r() * 8; ctx.beginPath(); ctx.moveTo(x, y); while (x < 140 - r() * 40) { x += 4 + r() * 6; ctx.lineTo(x, y - 2 - r() * 5); } ctx.stroke(); }
+  return c.toDataURL('image/jpeg', .8);
+}
+
+// every picture becomes a class (.art-<id>), so re-rendering never repeats a data URL
+const ARTSTYLE = document.createElement('style'); document.head.appendChild(ARTSTYLE);
+let artN = 0;
+function addArt(url) { const id = 'a' + (++artN); ARTSTYLE.sheet.insertRule(`.art-${id}{background-image:url(${url})}`, ARTSTYLE.sheet.cssRules.length); return id; }
+const ART = {
+  banner: addArt(paintBanner()),
+  kestrel: addArt(paintPortrait({ seed: 'kestrel', bg: ['#1d3a5a', '#070b18'], rim: '#8fe3ff', gear: 'ears', glow: [[202, 286, 15, 'rgba(150,235,255,.95)'], [278, 286, 15, 'rgba(150,235,255,.95)']] })),
+  juno: addArt(paintPortrait({ seed: 'juno', bg: ['#3a2a5a', '#0c0818'], rim: '#ffd0f0', gear: 'long' })),
+  brass: addArt(paintPortrait({ seed: 'brass', bg: ['#4a3a1a', '#120c04'], gear: 'helm', glow: [[240, 290, 12, 'rgba(255,80,40,.95)']] })),
+  sable: addArt(paintPortrait({ seed: 'sable', bg: ['#1a2a2a', '#050909'], gear: 'wide' })),
+  notes: addArt(paintNotes()),
+};
+const SCENES = [
+  ['drift', "The Gull's Wager drops out of the Drift above a moon with no name."],
+  ['signal', "A signal from the surface: three notes, and then Juno's name."],
+  ['hold', 'Brass gets the airlock open, and then argues with it.'],
+  ['beacon', "Sable cuts the beacon's power. It keeps singing."],
+  ['escape', 'Kestrel flies them out through the debris, the signal following.'],
+].map(([k, cap]) => ({ art: addArt(paintScene(k)), cap }));
+
+/* ---------------- data (made up, in memory) ---------------- */
+const D = (y, m, d, h = 19, min = 0) => new Date(y, m - 1, d, h, min);
+const TODAY = D(2026, 10, 26, 12);
+const CAMP = { title: 'Starfall Salvage', game: 'Starfinder', gmTitle: 'Game Master', tableLink: 'https://foundry.starfall.example/join' };
+const GM = { id: 'avery', name: 'Avery' };
+// the party: players and their adventurers in this campaign (one each, per the Adventurers prototype)
+const PARTY = [
+  { id: 'geoff', name: 'Geoff', ch: { name: 'Kestrel Vane', cls: 'Void Pilot', art: ART.kestrel } },
+  { id: 'priya', name: 'Priya', ch: { name: 'Juno Okafor', cls: 'Medic', art: ART.juno } },
+  { id: 'theo', name: 'Theo', ch: { name: 'Brass', cls: 'Mechanic', art: ART.brass } },
+  { id: 'marco', name: 'Marco', ch: { name: 'Sable', cls: 'Smuggler', art: ART.sable } },
+];
+const PEOPLE = [GM, ...PARTY];
+const TALE = `The Gull's Wager dropped out of the Drift above a moon with no name, chasing the salvage claim Kestrel won off the Ferro Syndicate. It wasn't empty. Something on the surface was repeating a signal: three notes, and then a name. Juno's. Nobody aboard had ever told anyone her name.
+
+Theo was away, so the party flew Brass for him. Brass got the hulk's airlock open and then argued with it for longer than anyone would like, and Juno spent most of her medpatches on the result. Below the airlock they found the beacon, wired into something much older than the hulk around it.
+
+Sable cut the beacon's power. It kept singing. Kestrel got them out through the debris ring on two engines and one shield, with the signal following them all the way to the jump point. Everyone reached level 5. Next time: into the hold.`;
+const KLOG = `Ship's log, the Gull's Wager.
+
+0300: Out of the Drift above the nameless moon. Signal on every band, same three notes.
+0340: It said Juno's name. Juno says she's never been here. I believe her. Mostly.
+0610: Lost the port shield to debris. Got everyone home anyway. Owe Brass a new hand.`;
+
+const s6Quests = () => [
+  { id: 'q1', title: 'Level Kestrel up to 5', who: 'geoff', due: D(2026, 10, 12, 21), done: true, kind: 'Level up' },
+  { id: 'q2', title: "Send everyone the hulk's map", who: 'avery', due: D(2026, 10, 13, 18), done: true },
+];
+const s7Quests = () => [
+  { id: 'q5', title: 'Level Kestrel up to 6', notes: 'Pick the new feat before the session.', who: 'geoff', due: D(2026, 11, 2, 21), done: false, kind: 'Level up' },
+  { id: 'q6', title: 'Level Juno up to 6', who: 'priya', due: D(2026, 11, 2, 21), done: true, kind: 'Level up' },
+  { id: 'q7', title: 'Catch Theo up on Session 6', who: 'marco', due: D(2026, 11, 3, 19, 30), done: true },
+  { id: 'q8', title: "Print the hold's deck plan", who: 'avery', due: D(2026, 11, 3, 18), done: false, kind: 'Prep' },
+];
+const accounts6 = () => [
+  { id: 'f1', name: "Juno's field journal, Session 6.pdf", type: 'application/pdf', size: 312000, by: 'priya', at: D(2026, 10, 14, 10, 12) },
+  { id: 'f2', name: 'sable-notes.jpg', type: 'image/jpeg', size: 1800000, by: 'marco', at: D(2026, 10, 15, 8, 40), thumb: ART.notes },
+  { id: 'f3', name: 'kestrel-log-session-6.txt', type: 'text/plain', size: 412, by: 'geoff', at: D(2026, 10, 15, 22, 5), text: KLOG },
+];
+const readyReel = () => ({ state: 'ready', scenes: SCENES, at: D(2026, 10, 14, 21, 30) });
+const base6 = () => ({ id: 'ss-6', n: 6, title: 'The Signal', date: D(2026, 10, 13, 19, 30), end: D(2026, 10, 13, 23), status: 'completed', online: true, location: '',
+  agenda: "The Gull's Wager reaches the claim. The signal puzzle (handout 3). If they open the beacon, roll on the Drift table. Level 5 at the end.",
+  created: D(2026, 9, 29), quests: s6Quests(), levelled: ['geoff', 'priya', 'theo', 'marco'], gcal: true, discord: true,
+  ready: { sent: true, r: { avery: true, geoff: true, priya: true, marco: true, theo: false } }, standIn: null, accounts: [], tale: null, reel: null, vod: '',
+  att: { taken: false, came: new Set(), stood: new Set() } });
+const base7 = () => ({ id: 'ss-7', n: 7, title: 'Into the Hold', date: D(2026, 11, 3, 19, 30), end: D(2026, 11, 3, 23), status: 'scheduled', online: true, location: '',
+  agenda: 'Into the hold of the hulk. Bring your level 6 sheets; ten minutes of shopping at the start. Handout: the deck plan.',
+  created: D(2026, 10, 14), quests: s7Quests(), levelled: [], gcal: true, discord: true, ready: null, standIn: null, accounts: [], tale: null, reel: null, vod: '',
+  att: { taken: false, came: new Set(), stood: new Set() } });
+
+/* Session states, switchable from the bar. Each builds a fresh copy, so switching resets what you changed. */
+const STATES = [
+  { key: 'told', name: 'Played and told', note: 'Session 6: attendance, the tale, accounts, the reel', make() {
+      const s = base6(); s.att = { taken: true, came: new Set(['avery', 'geoff', 'priya', 'marco']), stood: new Set(['theo']) };
+      s.tale = { text: TALE, by: 'avery', at: D(2026, 10, 14, 21) }; s.accounts = accounts6(); s.reel = readyReel(); s.vod = 'https://www.youtube.com/watch?v=starfall-s6'; return s; } },
+  { key: 'fresh', name: 'Just played', note: 'Session 6, before anything is written up', make() { return base6(); } },
+  { key: 'painting', name: 'Reel being painted', note: 'Session 6: the tale is in, the reel is on its way', make() {
+      const s = STATES[0].make(); s.reel = { state: 'painting', p: .3 }; s.accounts = s.accounts.slice(0, 1); s.vod = ''; return s; } },
+  { key: 'upcoming', name: 'Coming up', note: 'Session 7 next Tuesday: prep notes, quests, the torch', make() { return base7(); } },
+  { key: 'ready', name: 'Ready check out', note: 'Session 7 starts in 22 minutes', now: D(2026, 11, 3, 19, 8), make() {
+      const s = base7(); s.ready = { sent: true, r: { avery: true, priya: true, marco: true, theo: false } }; return s; } },
+  { key: 'planning', name: 'Being planned', note: 'Session 10: no night yet', make() {
+      return { ...base7(), id: 'ss-10', n: 10, title: '', date: null, end: null, status: 'planning', agenda: '', quests: [], gcal: false, discord: false, created: D(2026, 10, 24) }; } },
+  { key: 'cancelled', name: 'Cancelled', note: 'Session 8', make() {
+      return { ...base7(), id: 'ss-8', n: 8, title: '', date: D(2026, 11, 10, 19, 30), end: D(2026, 11, 10, 23), status: 'cancelled', agenda: '', quests: [], gcal: false, discord: false }; } },
+];
+// the rail's Your Quests, per viewer
+const RAIL = {
+  geoff: [{ title: 'Level Kestrel up to 6', due: D(2026, 11, 2, 21), for: 'Session 7 · Starfall Salvage', link: 'q5' }, { title: 'Prep the table', tag: 'Host', due: D(2026, 10, 31, 17, 30), for: 'Session 14 · Curse of the Ashen Crown' },
+    { title: 'Bring the cider', due: D(2026, 10, 31, 18, 30), for: 'Session 14 · Curse of the Ashen Crown' }],
+  avery: [{ title: "Print the hold's deck plan", tag: 'Prep', due: D(2026, 11, 3, 18), for: 'Session 7 · Starfall Salvage', link: 'q8' }, { title: 'Bring the dice bag back to Theo', due: D(2026, 10, 30, 12), for: 'Starfall Salvage' }],
+};
+
+/* ---------------- prototype state ---------------- */
+const VARIANTS = [
+  { key: 'A', name: 'The session sheet', note: 'Words first: one parchment page, top to bottom' },
+  { key: 'B', name: 'The reel', note: 'Pictures first: the reel up top, the tale and the table below' },
+  { key: 'C', name: 'Around the table', note: 'People first: who sat where, then tabs' },
+];
+const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+const qs0 = new URLSearchParams(location.search);
+let variant = Math.max(0, VARIANTS.findIndex(v => v.key === (qs0.get('variant') || store.get('hs-sess-variant') || 'A')));
+let stateI = Math.max(0, STATES.findIndex(s => s.key === (qs0.get('state') || store.get('hs-sess-state') || 'told')));
+let viewer = (qs0.get('as') || store.get('hs-sess-as')) === 'avery' ? 'avery' : 'geoff';
+let cur = STATES[stateI].make();
+let attDraft = null;   // the GM's working attendance: { came: Set, stood: Set }, or null
+let taleDraft = null;  // the tale being written in place, or null
+let cTab = null;       // C's open tab (null = the default for the session's status)
+let ov = null;         // a dialog: { kind: 'edit', f } or { kind: 'paint' }
+
+/* ---------------- helpers ---------------- */
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], WDL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const tm = d => { const h = d.getHours(), m = d.getMinutes(); return `${h % 12 || 12}${m ? ':' + String(m).padStart(2, '0') : ''} ${h < 12 ? 'am' : 'pm'}`; };
+const dayLabel = d => `${WD[d.getDay()]} ${MON[d.getMonth()]} ${d.getDate()}`;
+const longDay = d => `${WDL[d.getDay()]}, ${MONL[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+const span = s => s.date ? `${tm(s.date)}${s.end ? '–' + tm(s.end) : ''}` : '';
+const now = () => STATES[stateI].now || TODAY;
+const nameOf = id => PEOPLE.find(p => p.id === id)?.name || 'someone';
+const you = id => id === viewer ? 'You' : nameOf(id);
+const isCampGM = () => viewer === 'avery';
+const isGM = () => isCampGM() || cur.standIn === viewer;
+const gmLabel = () => cur.standIn ? `${nameOf(cur.standIn)} (standing in)` : GM.name;
+const sTitle = s => s.title ? s.title : `Session ${s.n}`;
+const kicker = s => `${CAMP.title} · Session ${s.n}`;
+const kb = n => n > 1e6 ? (n / 1e6).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1e3)) + ' KB';
+const words = t => (t || '').trim().split(/\s+/).filter(Boolean).length;
+const flame = '<svg class="flame" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3c1 3.5 5 5.5 5 10a5 5 0 0 1-10 0c0-2.4 1.2-3.8 2.4-5 .2 1.8 1 2.8 2.1 3.2C11 9 11 5.5 12 3z"/></svg>';
+const playIc = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l13-7.5z"/></svg>';
+const pauseIc = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>';
+const face = (art, init, gm) => `<span class="pt">${art ? `<span class="art art-${art}"></span>` : `<span class="pt-none ${gm ? 'is-gm' : ''}"><span>${esc(init)}</span></span>`}</span>`;
+const medal = p => `<span class="medal">${p.ch ? face(p.ch.art, p.ch.name[0]) : face(null, p.name[0], true)}</span>`;
+const daysTo = d => Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - new Date(now().getFullYear(), now().getMonth(), now().getDate())) / 864e5);
+const when = s => { const n = daysTo(s.date); return n === 0 ? 'Tonight' : n === 1 ? 'Tomorrow' : n < 7 ? WDL[s.date.getDay()] : n < 14 ? `Next ${WDL[s.date.getDay()]}` : `In ${n} days`; };
+const minsTo = s => Math.round((s.date - now()) / 6e4);
+const statusSeal = s => s.status === 'completed' ? '<span class="hs-seal is-ok">Played</span>' : s.status === 'cancelled' ? '<span class="hs-seal" style="background:#5a4a3a">Cancelled</span>'
+  : s.status === 'planning' ? '<span class="hs-seal" style="background:var(--verdigris)">Being planned</span>' : '<span class="hs-seal">Coming up</span>';
+
+/* who was at the table: each player, their adventurer, and what happened to them */
+function roll(s) {
+  const a = attDraft || s.att;
+  return PARTY.map(p => {
+    let k = 'expected', note = '';
+    if (s.status === 'completed') {
+      if (!s.att.taken && !attDraft) { k = 'open'; note = s.ready?.r[p.id] === true ? 'Said ready' : s.ready?.r[p.id] === false ? "Said can't make it" : ''; }
+      else if (a.came.has(p.id)) k = 'came';
+      else if (a.stood.has(p.id)) { k = 'played'; note = `${p.name} was away; the party played ${p.ch.name}`; }
+      else { k = 'away'; note = `${p.name} was away; ${p.ch.name} sat it out`; }
+    } else if (s.status === 'scheduled' && s.ready?.sent) {
+      const r = s.ready.r[p.id]; k = r === true ? 'yes' : r === false ? 'no' : 'wait'; note = r === true ? 'Ready' : r === false ? "Can't make it" : 'Not answered';
+    } else if (s.status === 'cancelled') { k = 'off'; }
+    return { ...p, k, note, lv: s.status === 'completed' && (s.att.taken || attDraft) && k !== 'away' && s.levelled.includes(p.id) };
+  });
+}
+const gmCame = s => s.status !== 'completed' || !s.att.taken || s.att.came.has('avery');
+const cameCount = s => PARTY.filter(p => s.att.came.has(p.id)).length;
+const attSummary = s => {
+  if (s.status !== 'completed') return '';
+  if (!s.att.taken) return 'Not taken yet';
+  const st = PARTY.filter(p => !s.att.came.has(p.id) && s.att.stood.has(p.id)).length;
+  return `${cameCount(s)} of ${PARTY.length} came${st ? ` · ${st} played by the party` : ''}`;
+};
+const canAttend = s => isGM() && s.status === 'completed';
+const showAttEditor = s => canAttend(s) && (!s.att.taken || attDraft);
+const startAtt = s => { attDraft = s.att.taken ? { came: new Set(s.att.came), stood: new Set(s.att.stood) }
+  : { came: new Set(PEOPLE.filter(p => s.ready?.r[p.id] === true).map(p => p.id)), stood: new Set() }; };
+
+/* ---------------- shared pieces (each layout places them its own way) ---------------- */
+function statusNote(s) {
+  if (s.status === 'planning') return `<div class="k-banner"><span>Still being planned: no night yet.</span><button type="button" class="p-link" data-stub="the Notice Board">Vote on the Notice Board →</button></div>`;
+  if (s.status === 'cancelled') return `<div class="k-banner"><span>This session was cancelled.</span></div>`;
+  return '';
+}
+function torchHTML(s) {
+  const open = s.status === 'planning' || s.status === 'scheduled';
+  if (!open || (!s.standIn && !isCampGM())) return '';
+  if (s.standIn) return `<div class="torch">${flame}<span><b>${esc(you(s.standIn) === 'You' ? 'You are' : nameOf(s.standIn) + ' is')}</b> running this session as ${CAMP.gmTitle}.</span>
+    ${isCampGM() || s.standIn === viewer ? `<button type="button" class="k-btn is-torch" data-torchback="1">${s.standIn === viewer ? 'Hand it back' : 'Take it back'}</button>` : ''}</div>`;
+  return `<div class="torch">${flame}<label for="torch-to">Pass the torch for this session</label><select id="torch-to" data-torch="1"><option value="">Choose who runs it</option>
+    ${PARTY.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></div>`;
+}
+function readyHTML(s) {
+  if (s.status !== 'scheduled' || !s.ready?.sent) return '';
+  const mine = s.ready.r[viewer], n = PEOPLE.filter(p => s.ready.r[p.id] === true).length;
+  return `<div class="rc"><div class="k-h" style="margin:0"><span>Ready check</span><span class="k-aside">${n} of ${PEOPLE.length} ready · starts in ${minsTo(s)} min</span></div>
+    <div class="k-row"><button type="button" class="k-btn ${mine === true ? 'is-primary' : ''}" data-ready="1" ${mine === true ? 'disabled' : ''}>${mine === true ? "You're ready" : 'Ready up'}</button>
+      <button type="button" class="k-btn" data-ready="0" ${mine === false ? 'disabled' : ''}>Can't make it</button></div>
+    <ul>${PEOPLE.map(p => { const r = s.ready.r[p.id]; return `<li><span class="rc-dot ${r === true ? 'is-yes' : r === false ? 'is-no' : ''}" aria-hidden="true">${r === true ? '✓' : r === false ? '✕' : '…'}</span>
+      <span>${esc(p.id === viewer ? `${p.name} (you)` : p.name)}${p.ch ? ` · ${esc(p.ch.name)}` : ` · ${CAMP.gmTitle}`}</span></li>`; }).join('')}</ul></div>`;
+}
+function detailsDL(s, { compact } = {}) {
+  const rows = [];
+  if (s.date) rows.push(['When', `${esc(longDay(s.date))}<small>${esc(span(s))}</small>`]);
+  else rows.push(['When', '<span class="k-muted">No night yet</span>']);
+  rows.push(['Where', s.online ? `Online${s.status !== 'completed' && CAMP.tableLink ? `<small><a class="p-link ext" href="#" data-stub="the table (${esc(CAMP.tableLink)})">Join the table</a></small>` : ''}` : esc(s.location || 'Place to be decided')]);
+  rows.push([CAMP.gmTitle, s.standIn ? `${esc(nameOf(s.standIn))} <span class="k-pill is-torch">standing in</span>` : esc(GM.name)]);
+  if (s.vod) rows.push(['Recording', `<a class="p-link ext" href="#" data-stub="the recording">Watch the recording</a>`]);
+  if (s.status === 'scheduled' && (s.gcal || s.discord)) rows.push(['Calendar', `${s.gcal ? '<a class="p-link ext" href="#" data-stub="Google Calendar">Add to Google Calendar</a>' : ''}${s.discord ? '<small>Discord event made · On your Google Calendar</small>' : ''}`]);
+  if (!compact) rows.push(['Logged', esc(`${MONL[s.created.getMonth()]} ${s.created.getDate()}, ${s.created.getFullYear()}`)]);
+  return `<dl class="k-dl">${rows.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>`;
+}
+function agendaHTML(s, label = true) {
+  if (!s.agenda) return isGM() && s.status !== 'cancelled' ? '<p class="k-empty">No prep notes. <button type="button" class="p-link" data-edit="agenda">Add them</button></p>' : '';
+  return `${label ? '' : ''}<p style="margin:0;font-size:15px;line-height:1.5;max-width:66ch">${esc(s.agenda)}</p>`;
+}
+function questsHTML(s) {
+  if (!s.quests.length) return `<p class="k-empty">No quests for this session.</p>`;
+  return `<ul class="kq">${s.quests.map(q => { const can = q.who === viewer || isGM();
+    return `<li class="${q.done ? 'is-done' : ''}"><button class="hs-box" role="checkbox" aria-checked="${q.done}" data-q="${q.id}" ${can ? '' : 'disabled'} aria-label="${esc(q.title)}"></button>
+      <div><b>${esc(q.title)}</b>${q.notes ? `<small>${esc(q.notes)}</small>` : ''}<small><span class="t">${q.kind ? esc(q.kind) + ' · ' : ''}${esc(you(q.who))}</span> · ${q.done ? 'Done' : `Due ${dayLabel(q.due)}, ${tm(q.due)}`}</small></div></li>`; }).join('')}</ul>`;
+}
+function addQuestBtn(s) { return isGM() && (s.status === 'scheduled' || s.status === 'planning') ? '<button type="button" class="p-link" data-stub="the new quest form">+ Add quest</button>' : ''; }
+
+/* the tale: the GM's summary, written in place */
+function taleHTML(s, { sign = true } = {}) {
+  if (s.status !== 'completed') return `<div class="k-slot"><p class="k-empty">${s.status === 'cancelled' ? 'No tale: the session was cancelled.' : `After the session, ${esc(gmLabel())} writes up what happened here, and anyone in the party can add their own account.`}</p></div>`;
+  if (taleDraft !== null) return `<textarea class="k-ta" id="tale-ta" aria-label="The tale" placeholder="What happened? Write it like you'd tell it at the next session.">${esc(taleDraft)}</textarea>
+    <div class="k-row" style="margin-top:8px"><button type="button" class="k-btn is-primary" data-talesave="1">Save the tale</button><button type="button" class="k-btn" data-talecancel="1">Cancel</button>
+    <span class="k-fine" style="margin:0">Everyone in the party can read it. Blank lines start a new paragraph.</span></div>`;
+  if (!s.tale) return `<div class="k-slot"><p class="k-empty">${isGM() ? "Nobody's told this one yet. Write up what happened while it's fresh: it's what the party reads before the next session, and what the reel is painted from." : `${esc(GM.name)} hasn't written this one up yet. You can add your own account below.`}</p>
+    ${isGM() ? '<div class="k-row" style="margin-top:10px"><button type="button" class="k-btn is-primary" data-talewrite="1">Write the tale</button></div>' : ''}</div>`;
+  return `<div class="tale">${s.tale.text.split(/\n\s*\n/).map(p => `<p>${esc(p)}</p>`).join('')}</div>
+    ${sign ? `<p class="tale-by">Told by ${esc(you(s.tale.by) === 'You' ? 'you' : nameOf(s.tale.by))}, ${CAMP.gmTitle}, ${dayLabel(s.tale.at)}${isGM() ? ` · <button type="button" class="p-link" data-talewrite="1">Edit</button>` : ''}</p>` : ''}`;
+}
+/* accounts: summaries anyone in the party uploads. Kept as files: a PDF, a doc, a photo of notes, a voice memo. */
+const kindOf = f => /pdf/.test(f.type) ? 'PDF' : /^image/.test(f.type) ? 'IMG' : /^audio/.test(f.type) ? 'AUDIO' : /text\/(plain|markdown)|\.md$|\.txt$/.test(f.type + f.name) ? 'TXT' : 'DOC';
+function accountsHTML(s) {
+  if (s.status !== 'completed') return '';
+  const list = s.accounts.map(f => { const k = kindOf(f);
+    return `<li class="acct"><span class="acct-ic ${k === 'IMG' ? 'is-img' : k === 'AUDIO' ? 'is-audio' : ''} ${f.thumb ? 'art-' + f.thumb : ''}" ${f.url && k === 'IMG' ? `style="background-image:url(${f.url})"` : ''}>${k === 'IMG' ? '' : k}</span>
+      <div style="min-width:0"><div class="acct-n"><button type="button" data-fopen="${f.id}">${esc(f.name)}</button></div><div class="acct-m">${esc(you(f.by))} · ${dayLabel(f.at)} · ${kb(f.size)}</div></div>
+      ${f.by === viewer || isGM() ? `<button type="button" class="acct-x" data-fdel="${f.id}" aria-label="Remove ${esc(f.name)}" title="Remove">×</button>` : '<span></span>'}
+      ${f.text ? `<details><summary>Read it here</summary><pre>${esc(f.text)}</pre></details>` : ''}</li>`; }).join('');
+  return `${list ? `<ul class="accts">${list}</ul>` : `<p class="k-empty">No accounts yet. Journals, notes, a photo of your scribbles, a voice memo: anyone in the party can add one.</p>`}
+    <div class="k-row" style="margin-top:10px"><label class="k-btn k-up">Add your account<input type="file" data-acct="1" accept=".pdf,.doc,.docx,.odt,.rtf,.txt,.md,image/*,audio/*"></label>
+    <span class="k-fine" style="margin:0">PDF, a document, text, a picture or audio. Kept as it is.</span></div>`;
+}
+/* the reel: an AI-painted film of the session's scenes, made from the tale */
+const SCENE_MS = 8000;
+let reelT = 0, reelPlaying = false, reelTimer = null;
+function reelHTML(s, { hero = false } = {}) {
+  const r = s.reel;
+  const wait = (inner) => `<div class="reel-frame"><div class="reel"><div class="reel-wait"><span class="bn art-${ART.banner}"></span>${inner}</div></div></div>`;
+  if (s.status === 'cancelled') return '';
+  if (s.status !== 'completed') return hero ? '' : `<div class="k-slot"><p class="k-empty">After the session, a reel of its scenes can be painted from the tale.</p></div>`;
+  if (r?.state === 'ready') {
+    const total = r.scenes.length * SCENE_MS;
+    return `<div class="reel-frame"><div class="reel" data-reel="1">
+      ${r.scenes.map((sc, i) => `<span class="art art-${sc.art} ${i === 0 ? 'is-on' : ''}"></span>`).join('')}
+      <div class="reel-title">${esc(kicker(s))} · ${esc(sTitle(s))}</div>
+      <p class="reel-cap"></p>
+      <button type="button" class="reel-big" data-reelplay="1" aria-label="Play the reel">${playIc}</button>
+      <div class="reel-ctl"><button type="button" class="pp" data-reelplay="1" aria-label="Play or pause">${playIc}</button>
+        <div class="reel-ticks">${r.scenes.map((sc, i) => `<button type="button" data-reelgo="${i}" aria-label="Scene ${i + 1}: ${esc(sc.cap)}"><i><b></b></i></button>`).join('')}</div>
+        <span class="reel-time">0:00 / ${fmtT(total)}</span></div></div></div>
+      <div class="reel-under"><span class="reel-ai">Painted by AI from the tale · ${r.scenes.length} scenes · ${dayLabel(r.at)}</span>
+        ${isGM() ? '<span class="k-row"><button type="button" class="p-link" data-paint="1">Paint it again</button><button type="button" class="p-link" data-reeldel="1">Remove it</button></span>' : ''}</div>`;
+  }
+  if (r?.state === 'painting') {
+    const n = Math.min(SCENES.length, Math.floor(r.p * SCENES.length) + 1);
+    return wait(`<b>Painting the reel</b><div class="reel-prog"><i style="width:${Math.round(r.p * 100)}%"></i></div>
+      <p class="reel-stage">Scene ${n} of ${SCENES.length}: ${esc(SCENES[n - 1].cap)}</p><p style="opacity:.8">The party gets a letter when it's ready.</p>`);
+  }
+  if (!s.tale) return wait(`<b>The reel</b><p>Once the tale is written, ${isGM() ? 'you can' : esc(GM.name) + ' can'} have Hearthside paint a short film of this session's scenes from it.</p>`);
+  return wait(isGM() ? `<b>Paint the reel?</b><p>About ${SCENES.length} scenes and 40 seconds, painted by AI from the tale (${words(s.tale.text)} words) and the party's portraits.</p>
+      <div class="k-row" style="justify-content:center"><button type="button" class="k-btn is-primary" data-paint="1">Paint the reel</button></div>`
+    : `<b>No reel yet</b><p>${esc(GM.name)} can have Hearthside paint a short film of this session's scenes from the tale.</p>`);
+}
+const fmtT = ms => { const t = Math.round(ms / 1000); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
+function reelSync() {
+  const r = cur.reel; if (r?.state !== 'ready') return;
+  const total = r.scenes.length * SCENE_MS, i = Math.min(r.scenes.length - 1, Math.floor(reelT / SCENE_MS)), started = reelPlaying || reelT > 0;
+  document.querySelectorAll('[data-reel]').forEach(el => {
+    el.classList.toggle('is-playing', reelPlaying); el.classList.toggle('is-started', started);
+    el.querySelectorAll(':scope > .art').forEach((a, j) => a.classList.toggle('is-on', j === i));
+    el.querySelector('.reel-cap').textContent = started ? r.scenes[i].cap : '';
+    el.querySelectorAll('.reel-ticks b').forEach((b, j) => b.style.width = `${Math.max(0, Math.min(1, (reelT - j * SCENE_MS) / SCENE_MS)) * 100}%`);
+    el.querySelector('.reel-time').textContent = `${fmtT(reelT)} / ${fmtT(total)}`;
+    el.querySelector('.pp').innerHTML = reelPlaying ? pauseIc : playIc;
+  });
+  document.querySelectorAll('[data-reelgo].vb-sc').forEach((b, j) => b.classList.toggle('is-on', started && j === i));
+}
+function reelToggle(force) {
+  reelPlaying = force ?? !reelPlaying; clearInterval(reelTimer);
+  const total = () => cur.reel.scenes.length * SCENE_MS;
+  if (reelPlaying) { if (reelT >= total()) reelT = 0;
+    reelTimer = setInterval(() => { reelT += 100; if (reelT >= total()) { reelT = total(); reelPlaying = false; clearInterval(reelTimer); } reelSync(); }, 100); }
+  reelSync();
+}
+function reelGo(i) {
+  reelT = i * SCENE_MS + 1;
+  document.querySelectorAll('[data-reel] > .art').forEach(a => { a.style.animation = 'none'; void a.offsetWidth; a.style.animation = ''; });
+  if (!reelPlaying) reelToggle(true); else reelSync();
+}
+let paintTimer = null;
+function paint(s) {
+  clearInterval(paintTimer); reelToggle(false); reelT = 0;
+  if (s.reel?.state !== 'painting') s.reel = { state: 'painting', p: 0 };
+  paintTimer = setInterval(() => {
+    if (cur !== s || s.reel?.state !== 'painting') { clearInterval(paintTimer); return; }
+    s.reel.p += .02;
+    if (s.reel.p >= 1) { clearInterval(paintTimer); s.reel = readyReel(); s.reel.at = now(); render(); toast('Prototype: the reel is painted. The party would get a letter.'); return; }
+    const n = Math.min(SCENES.length, Math.floor(s.reel.p * SCENES.length) + 1);
+    document.querySelectorAll('.reel-prog i').forEach(i => i.style.width = Math.round(s.reel.p * 100) + '%');
+    document.querySelectorAll('.reel-stage').forEach(p => p.textContent = `Scene ${n} of ${SCENES.length}: ${SCENES[n - 1].cap}`);
+  }, 150);
+}
+/* attendance, as the GM takes it: ticked from the ready check until it's confirmed. A player who didn't come gets
+   one more question: was their adventurer there anyway? (The rule from the Adventurers prototype.) */
+const attQ = p => `<div class="att-q"><span>${esc(p.name)} wasn't there. Was ${esc(p.ch.name)}?</span>
+    <span class="k-row"><button type="button" class="k-btn" data-stood="${p.id}" data-v="0" aria-pressed="${!attDraft.stood.has(p.id)}">No, sat it out</button>
+    <button type="button" class="k-btn" data-stood="${p.id}" data-v="1" aria-pressed="${attDraft.stood.has(p.id)}">Yes, the party played them</button></span></div>`;
+const attQuestions = () => PARTY.filter(p => !attDraft.came.has(p.id)).map(attQ).join('');
+function attSave(s) {
+  const n = PARTY.filter(p => attDraft.came.has(p.id)).length;
+  return `<div class="k-row" style="margin-top:6px"><button type="button" class="k-btn is-primary" data-attsave="1">Confirm: ${n} of ${PARTY.length} came</button>${s.att.taken ? '<button type="button" class="k-btn" data-attcancel="1">Cancel</button>' : ''}</div>`;
+}
+function attEditorHTML(s) {
+  return `<div class="att-ed"><p class="k-fine" style="margin:0 0 4px">${s.att.taken ? 'Who was there?' : 'Who was there? Ticked from the ready check: confirm it or change it.'}</p>
+    ${PEOPLE.map(p => { const r = s.ready?.r[p.id]; return `<label><input type="checkbox" data-attp="${p.id}" ${attDraft.came.has(p.id) ? 'checked' : ''}>
+      <span>${esc(p.name)}${p.ch ? ` <span class="k-muted">· ${esc(p.ch.name)}</span>` : ` <span class="k-muted">· ${CAMP.gmTitle}</span>`}</span>
+      ${r != null ? `<span class="said">${r ? 'said ready' : "said can't make it"}</span>` : ''}</label>
+      ${p.ch && !attDraft.came.has(p.id) ? attQ(p) : ''}`; }).join('')}
+    ${attSave(s)}</div>`;
+}
+const editAttLink = s => canAttend(s) && s.att.taken && !attDraft ? '<button type="button" class="p-link" data-attedit="1">Edit</button>' : '';
+const prevNext = s => `<span class="va-steps"><button type="button" class="k-btn" data-stub="Session ${s.n - 1}">← Session ${s.n - 1}</button>${s.status === 'completed' ? `<button type="button" class="k-btn" data-stub="Session ${s.n + 1}">Session ${s.n + 1} →</button>` : ''}</span>`;
+const backBtn = () => `<button type="button" class="hs-btn-amber p-back" data-stub="Starfall Salvage's page">← ${esc(CAMP.title)}</button>`;
+const editBtn = (cls = 'k-btn') => isGM() && !attDraft ? `<button type="button" class="${cls}" data-edit="1">Edit</button>` : '';
+
+/* ---------------- A: The session sheet ---------------- */
+function VariantA() {
+  const s = cur, done = s.status === 'completed', people = roll(s);
+  const rollItems = [...(gmCame(s) ? [`<li class="is-gm">${medal(GM)}<b>${esc(gmLabel())}</b><small>${CAMP.gmTitle}</small></li>`] : []),
+    ...people.map(p => `<li class="is-${p.k}">${medal(p)}<b>${esc(p.ch.name)}</b><small>${esc(p.id === viewer ? 'You' : p.name)} · ${esc(p.ch.cls)}</small>
+      ${p.k === 'played' ? '<small class="note">Played by the party</small>' : p.k === 'away' ? '<small class="note">Sat it out</small>' : p.k === 'open' && p.note ? `<small>${esc(p.note)}</small>`
+        : (p.k === 'yes' || p.k === 'no' || p.k === 'wait') ? `<small class="${p.k === 'no' ? 'note' : ''}">${esc(p.note)}</small>` : ''}
+      ${p.lv ? '<small class="lv">Reached level 5</small>' : ''}</li>`)];
+  const whoH = done ? 'Who came' : s.status === 'cancelled' ? 'The party' : 'Who’s coming';
+  const whoSec = `<section class="va-sec ${done ? 'is-first' : ''}"><h3 class="k-h"><span>${whoH}</span><span class="k-aside">${esc(attSummary(s))} ${editAttLink(s)}</span></h3>
+    ${showAttEditor(s) ? (attDraft ? attEditorHTML(s) : `<p class="k-empty">Attendance isn't taken yet. The ready check said who was coming; confirm it so the adventurers' records are right.</p><div class="k-row" style="margin-top:8px"><button type="button" class="k-btn is-primary" data-attedit="1">Take attendance</button></div>`)
+      : `<ul class="va-roll">${rollItems.join('')}</ul>`}
+    ${done && s.att.taken && PARTY.some(p => !s.att.came.has(p.id) && s.att.stood.has(p.id)) ? `<p class="k-fine">${esc(people.filter(p => p.k === 'played').map(p => p.note).join('. '))}.</p>` : ''}</section>`;
+  const taleSec = `<section class="va-sec"><h3 class="k-h"><span>The tale</span></h3>${taleHTML(s)}</section>`;
+  const acctSec = done ? `<section class="va-sec"><h3 class="k-h"><span>Accounts from the table</span><span class="k-aside">${s.accounts.length ? s.accounts.length + ' added' : ''}</span></h3>${accountsHTML(s)}</section>` : '';
+  const reelSec = s.status === 'cancelled' ? '' : `<section class="va-sec"><h3 class="k-h"><span>The reel</span></h3>${reelHTML(s)}</section>`;
+  const prepSec = `<section class="va-sec"><h3 class="k-h"><span>${done ? `${esc(GM.name)}'s prep notes` : 'Prep notes'}</span></h3>${agendaHTML(s) || '<p class="k-empty">None.</p>'}</section>`;
+  const questSec = s.status === 'cancelled' ? '' : `<section class="va-sec"><h3 class="k-h"><span>Quests</span>${addQuestBtn(s)}</h3>${questsHTML(s)}</section>`;
+  const order = done ? [whoSec, taleSec, acctSec, reelSec, `<div class="va-two">${questSec.replace('va-sec', 'va-sec')}${prepSec}</div>`]
+    : [prepSec.replace('va-sec', 'va-sec is-first'), questSec, whoSec, taleSec, reelSec];
+  return `<div class="va-top">${backBtn()}${s.status !== 'planning' ? prevNext(s) : ''}</div>
+  <article class="hs-sheet va-sheet">
+    <div class="hs-sheet-head"><div style="min-width:0"><div class="hs-kicker">${esc(kicker(s))}</div><h1>${esc(sTitle(s))}</h1>
+      <p class="va-when">${s.date ? `${esc(longDay(s.date))}<small>${esc(span(s))} · ${s.online ? 'Online' : esc(s.location || 'Place to be decided')}${s.status === 'scheduled' ? ' · ' + esc(when(s)) : ''}</small>` : '<small>No night yet</small>'}</p></div>
+      <div class="k-row" style="flex-direction:column;align-items:flex-end">${statusSeal(s)}${editBtn('hs-btn')}</div></div>
+    ${statusNote(s) ? `<div style="margin-top:14px">${statusNote(s)}</div>` : ''}
+    ${torchHTML(s) ? `<div style="margin-top:14px">${torchHTML(s)}</div>` : ''}
+    ${readyHTML(s) ? `<section class="va-sec">${readyHTML(s)}</section>` : ''}
+    ${s.status === 'scheduled' ? `<section class="va-sec is-first" style="margin-top:14px">${detailsDL(s, { compact: true })}</section>` : ''}
+    ${order.join('')}
+    <div class="va-foot"><span>${s.vod ? '<a class="p-link ext" href="#" data-stub="the recording">The recording</a>' : 'No recording'}${s.status === 'scheduled' && s.gcal ? ' · <a class="p-link ext" href="#" data-stub="Google Calendar">Add to Google Calendar</a>' : ''}</span>
+      <span>Logged ${MON[s.created.getMonth()]} ${s.created.getDate()}, ${s.created.getFullYear()}</span></div>
+  </article>`;
+}
+
+/* ---------------- B: The reel ---------------- */
+function VariantB() {
+  const s = cur, done = s.status === 'completed', people = roll(s);
+  let hero;
+  if (done) hero = reelHTML(s, { hero: true });
+  else if (s.status === 'scheduled') hero = `<div class="reel-frame"><div class="reel"><div class="vb-count"><span class="bn art-${ART.banner}"></span>
+      <span class="big">${s.ready?.sent ? `In ${minsTo(s)} minutes` : esc(when(s))}</span><p>${esc(longDay(s.date))} · ${esc(span(s))} · ${s.online ? 'Online' : esc(s.location)}</p>
+      <p style="opacity:.8;font-size:13.5px">After the session, its reel plays here.</p>
+      <div class="k-row">${s.online ? '<button type="button" class="k-btn is-primary" data-stub="the table">Join the table</button>' : ''}${s.gcal ? '<button type="button" class="k-btn" data-stub="Google Calendar">Add to Google Calendar</button>' : ''}</div></div></div></div>`;
+  else hero = `<div class="reel-frame"><div class="reel"><div class="vb-count" style="${s.status === 'cancelled' ? 'filter:grayscale(.8)' : ''}"><span class="bn art-${ART.banner}"></span>
+      <span class="big">${s.status === 'cancelled' ? 'Cancelled' : 'No night yet'}</span><p>${s.status === 'cancelled' ? esc(longDay(s.date)) : 'The party is still choosing a night on the Notice Board.'}</p>
+      ${s.status === 'planning' ? '<div class="k-row"><button type="button" class="k-btn is-primary" data-stub="the Notice Board">Vote on the Notice Board</button></div>' : ''}</div></div></div>`;
+  const scenes = done && s.reel?.state === 'ready' ? `<div class="vb-scenes">${s.reel.scenes.map((sc, i) => `<button type="button" class="vb-sc" data-reelgo="${i}" aria-label="Scene ${i + 1}: ${esc(sc.cap)}"><span class="art art-${sc.art}"></span><span class="n">${i + 1}</span></button>`).join('')}</div>` : '';
+  const rollRows = [`<li><span class="medal">${face(null, 'A', true)}</span><div><b>${esc(gmLabel())}</b><small>${CAMP.gmTitle}</small></div><span class="k-pill is-torch">${flame} runs it</span></li>`,
+    ...people.map(p => `<li class="is-${p.k}">${medal(p)}<div><b>${esc(p.ch.name)}</b><small>${esc(p.id === viewer ? 'You' : p.name)} · ${esc(p.ch.cls)}${p.k === 'played' || p.k === 'away' ? ` · ${esc(p.name)} was away` : ''}</small></div>
+      ${p.k === 'came' ? `<span class="k-pill is-ok">${p.lv ? 'Came · Lvl 5' : 'Came'}</span>` : p.k === 'played' ? '<span class="k-pill is-hi">Party played</span>' : p.k === 'away' ? '<span class="k-pill">Sat out</span>'
+        : p.k === 'yes' ? '<span class="k-pill is-ok">Ready</span>' : p.k === 'no' ? '<span class="k-pill is-hi">Can’t</span>' : p.k === 'wait' ? '<span class="k-pill">…</span>' : p.k === 'open' && p.note ? `<span class="k-pill">${esc(p.note)}</span>` : '<span></span>'}</li>`)];
+  const table = `<section class="hs-gilded vb-pan"><h2 class="k-h"><span>${done ? 'At the table' : s.status === 'scheduled' ? 'Who’s coming' : 'The party'}</span><span class="k-aside">${esc(attSummary(s))} ${editAttLink(s)}</span></h2>
+    ${readyHTML(s) ? `<div style="margin-bottom:12px">${readyHTML(s)}</div>` : ''}
+    ${showAttEditor(s) ? (attDraft ? attEditorHTML(s) : `<p class="k-empty" style="font-size:14px">Not taken yet. Confirm who came so each adventurer's road is right.</p><div class="k-row" style="margin:8px 0 10px"><button type="button" class="k-btn is-primary" data-attedit="1">Take attendance</button></div><ul class="vb-roll">${rollRows.join('')}</ul>`)
+      : `<ul class="vb-roll">${rollRows.join('')}</ul>`}</section>`;
+  const left = done
+    ? `<article class="hs-sheet vb-sheet"><h2>The tale</h2>${taleHTML(s)}<div style="margin-top:20px;padding-top:14px;border-top:1px solid var(--paper-line)"><h3 class="k-h"><span>Accounts from the table</span></h3>${accountsHTML(s)}</div></article>`
+    : `<article class="hs-sheet vb-sheet"><h2>Prep notes</h2>${agendaHTML(s) || '<p class="k-empty">None yet.</p>'}<div style="margin-top:18px">${taleHTML(s)}</div></article>`;
+  const right = [torchHTML(s) ? `<section class="hs-gilded vb-pan">${torchHTML(s)}</section>` : '', table,
+    s.status === 'cancelled' ? '' : `<section class="hs-gilded vb-pan"><h2 class="k-h"><span>Quests</span>${addQuestBtn(s)}</h2>${questsHTML(s)}</section>`,
+    `<section class="hs-gilded vb-pan"><h2 class="k-h"><span>Details</span></h2>${detailsDL(s)}${done && s.agenda ? `<details style="margin-top:8px"><summary class="p-link" style="cursor:pointer">${esc(GM.name)}'s prep notes</summary><p style="margin:6px 0 0;font-size:14px;color:var(--muted)">${esc(s.agenda)}</p></details>` : ''}</section>`];
+  return `<header class="hs-page-head p-head"><div>${backBtn()}<h1 style="margin-top:12px">${esc(sTitle(s))}</h1><p class="vb-sub"><span>${esc(kicker(s))}${s.date ? ' · ' + esc(dayLabel(s.date)) : ''}</span>${statusSeal(s)}</p></div>
+    <div class="k-row k-leather">${editBtn('k-btn')}</div></header>
+  <section class="vb-hero">${hero}${scenes}</section>
+  <div class="vb-cols">${left}<div class="vb-side">${right.join('')}</div></div>`;
+}
+
+/* ---------------- C: Around the table ---------------- */
+function VariantC() {
+  const s = cur, done = s.status === 'completed', people = roll(s), editing = showAttEditor(s) && attDraft;
+  const n = PEOPLE.length, R = 39;
+  const seat = (p, i) => {
+    const a = -Math.PI / 2 + i * 2 * Math.PI / n, x = 50 + R * Math.cos(a), y = 50 + R * Math.sin(a);
+    const isGmSeat = !p.ch, k = isGmSeat ? (gmCame(s) ? 'gm' : 'away') : p.k;
+    const cls = ['vc-seat', `is-${k}`, p.id === viewer ? 'is-me' : '', s.standIn === p.id ? 'is-gm' : ''].join(' ');
+    const label = isGmSeat ? `${esc(gmLabel())}` : esc(p.ch.name);
+    const sub = isGmSeat ? CAMP.gmTitle : p.name;
+    const st = isGmSeat ? (s.standIn ? '' : `${flame}`) : k === 'played' ? 'party played' : k === 'away' ? 'sat out' : k === 'yes' ? 'ready' : k === 'no' ? 'can’t make it' : k === 'wait' ? '…' : p.lv ? 'level 5' : '';
+    const tag = editing ? 'button' : 'div';
+    return `<${tag} ${editing ? `type="button" data-attp="${p.id}" aria-pressed="${attDraft.came.has(p.id)}" aria-label="${esc(p.name)} ${attDraft.came.has(p.id) ? 'came' : 'was away'}"` : ''} class="${cls}" style="left:${x.toFixed(1)}%;top:${y.toFixed(1)}%">
+      ${isGmSeat ? `<span class="medal">${face(null, 'A', true)}</span>` : medal(p)}<span class="pl"><b>${label}</b><small>${esc(p.id === viewer ? 'You' : sub)}</small></span>${st ? `<span class="st">${st}</span>` : ''}</${tag}>`;
+  };
+  const seats = [{ ...GM }, ...people].map((p, i) => {
+    if (editing) { const c = attDraft.came.has(p.id); return seat({ ...p, k: p.ch ? (c ? 'came' : attDraft.stood.has(p.id) ? 'played' : 'away') : (c ? 'gm' : 'away') }, i); }
+    return seat(p, i);
+  }).join('');
+  const centre = `<div class="vc-card"><div class="kk">${esc(kicker(s))}</div><h1>${esc(sTitle(s))}</h1>
+    <p>${s.date ? `${esc(dayLabel(s.date))} · ${esc(span(s))}` : 'No night yet'}</p><p>${s.online ? 'Online' : esc(s.location || '')}</p>${statusSeal(s)}</div>`;
+  // the strip under the table: the GM's attendance, the ready check, or a line about who came
+  let strip = '';
+  if (editing) strip = `<p class="k-fine" style="margin:0 0 6px">Tap a seat to mark who came. ${s.att.taken ? '' : 'Ticked from the ready check.'}</p>${attQuestions(s)}${attSave(s)}`;
+  else if (showAttEditor(s)) strip = `<div class="k-row" style="justify-content:space-between"><span style="font-size:14.5px">Attendance isn't taken yet. The seats show the ready check.</span><button type="button" class="k-btn is-primary" data-attedit="1">Take attendance</button></div>`;
+  else if (readyHTML(s)) strip = readyHTML(s);
+  else if (done && s.att.taken) strip = `<div class="k-row" style="justify-content:space-between"><span style="font-size:14.5px">${esc(attSummary(s))}.${people.filter(p => p.k === 'played').map(p => ' ' + esc(p.note) + '.').join('')}</span>${editAttLink(s)}</div>`;
+  const tabs = done ? [['tale', 'The tale', ''], ['accounts', 'Accounts', s.accounts.length || ''], ['reel', 'The reel', s.reel?.state === 'painting' ? '…' : ''], ['quests', 'Quests', s.quests.length || ''], ['prep', 'Prep notes', ''], ['details', 'Details', '']]
+    : s.status === 'cancelled' ? [['details', 'Details', '']] : [['prep', 'Prep notes', ''], ['quests', 'Quests', s.quests.length || ''], ['details', 'Details', ''], ['tale', 'The tale', '']];
+  const tab = tabs.some(t => t[0] === cTab) ? cTab : tabs[0][0];
+  const body = { tale: () => taleHTML(s), accounts: () => accountsHTML(s), reel: () => reelHTML(s), quests: () => `${addQuestBtn(s) ? `<div style="text-align:right;margin:-4px 0 6px">${addQuestBtn(s)}</div>` : ''}${questsHTML(s)}`,
+    prep: () => agendaHTML(s) || '<p class="k-empty">None.</p>', details: () => detailsDL(s) }[tab]();
+  return `<header class="hs-page-head p-head"><div>${backBtn()}</div><div class="k-row k-leather">${editBtn('k-btn')}</div></header>
+    ${statusNote(s) ? `<div class="k-leather hs-gilded vc-strip">${statusNote(s)}</div>` : ''}
+    ${torchHTML(s) ? `<div class="hs-gilded vc-strip">${torchHTML(s)}</div>` : ''}
+    <section aria-label="Around the table"><div class="vc-ring"><div class="vc-top"></div><div class="vc-glow"></div>${centre}${seats}</div>
+      ${strip ? `<div class="vc-under"><div class="hs-gilded vc-strip">${strip}</div></div>` : ''}</section>
+    <section class="hs-gilded"><div class="vc-tabs" role="tablist">${tabs.map(([k, l, c]) => `<button role="tab" aria-selected="${k === tab}" data-ctab="${k}">${l}${c !== '' ? `<small>${c}</small>` : ''}</button>`).join('')}</div>
+      <div class="vc-tab" role="tabpanel">${body}</div></section>`;
+}
+
+/* ---------------- dialogs ---------------- */
+const toLocal = d => { if (!d) return ''; const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; };
+function openEdit(focus) {
+  const s = cur; ov = { kind: 'edit', focus, f: { title: s.title, date: toLocal(s.date), end: toLocal(s.end), location: s.location, online: s.online, agenda: s.agenda, vod: s.vod } }; renderOv();
+}
+function renderOv() {
+  const el = document.getElementById('ov');
+  if (!ov) { el.hidden = true; el.innerHTML = ''; return; }
+  el.hidden = false;
+  if (ov.kind === 'edit') {
+    const f = ov.f;
+    el.innerHTML = `<div class="dlg-back"><form class="hs-gilded dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-t" id="edit-form">
+      <div class="dlg-h"><h2 id="dlg-t">Edit ${esc(sTitle(cur))}</h2><button type="button" class="x-btn" data-ovclose="1" aria-label="Close">×</button></div>
+      <div class="dlg-body">
+        <div class="fld"><label for="e-title">Title</label><input id="e-title" name="title" value="${esc(f.title)}" placeholder="Session ${cur.n}"></div>
+        <div class="fld-2"><div class="fld"><label for="e-date">Starts</label><input id="e-date" name="date" type="datetime-local" value="${f.date}"></div>
+          <div class="fld"><label for="e-end">Ends</label><input id="e-end" name="end" type="datetime-local" value="${f.end}"></div></div>
+        <label class="fld-chk"><input type="checkbox" name="online" ${f.online ? 'checked' : ''}> Online session (the campaign's table link shows here)</label>
+        <div class="fld"><label for="e-loc">Location</label><input id="e-loc" name="location" value="${esc(f.location)}" placeholder="Geoff's place"></div>
+        <div class="fld"><label for="e-agenda">Prep notes</label><textarea id="e-agenda" name="agenda" rows="3">${esc(f.agenda)}</textarea></div>
+        <div class="fld"><label for="e-vod">Recording link</label><input id="e-vod" name="vod" value="${esc(f.vod)}" placeholder="https://"></div>
+        <p class="k-fine">The tale is written on the page itself, and the reel is painted from it.</p>
+      </div>
+      <div class="dlg-f k-leather"><button type="button" class="k-btn" data-ovclose="1">Cancel</button><button type="submit" class="k-btn is-primary">Save</button></div></form></div>`;
+    Hearthside.GildedPanel.decorate(el);
+    (ov.focus === 'agenda' ? el.querySelector('#e-agenda') : el.querySelector('#e-title')).focus();
+  } else if (ov.kind === 'paint') {
+    el.innerHTML = `<div class="dlg-back"><div class="hs-gilded dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-t">
+      <div class="dlg-h"><h2 id="dlg-t">Paint the reel</h2><button type="button" class="x-btn" data-ovclose="1" aria-label="Close">×</button></div>
+      <div class="dlg-body"><p>Hearthside reads the tale and paints a short film of its scenes: about ${SCENES.length} scenes and 40 seconds.</p>
+        <ul><li>It works from the tale (${words(cur.tale.text)} words), not the accounts.</li><li>Faces come from the party's portraits: ${PARTY.map(p => esc(p.ch.name)).join(', ')}.</li>
+        <li>It takes a couple of minutes. The party gets a letter when it's ready.</li><li>AI gets things wrong. You can paint it again or remove it.</li></ul>
+        <p class="k-fine">Prototype: this takes about 7 seconds and paints stand-ins.</p></div>
+      <div class="dlg-f k-leather"><button type="button" class="k-btn" data-ovclose="1">Not now</button><button type="button" class="k-btn is-primary" data-paintgo="1">Paint it</button></div></div></div>`;
+    Hearthside.GildedPanel.decorate(el);
+  }
+}
+
+/* ---------------- the rail's Your Quests (shell) ---------------- */
+function renderRail() {
+  const qs = RAIL[viewer].map(q => { const sq = q.link && cur.quests.find(x => x.id === q.link); return { ...q, done: sq ? sq.done : false }; });
+  document.getElementById('qc').textContent = `${qs.filter(q => !q.done).length} open`;
+  const el = document.getElementById('rail-quests');
+  el.innerHTML = `<ul class="hs-quests">${qs.map(q => `<li class="${q.done ? 'is-done' : ''}"><span class="hs-box" aria-hidden="true" style="${q.done ? 'background:var(--moss);border-color:var(--moss)' : ''}"></span>
+      <div><div class="hs-quest-name">${esc(q.title)}${q.tag ? `<span class="hs-tag">${esc(q.tag)}</span>` : ''}</div><div class="hs-quest-time">${dayLabel(q.due)}, ${tm(q.due)}</div>
+        <div class="hs-quest-desc">For ${esc(q.for)}</div></div></li>`).join('')}</ul>`;
+  Hearthside.GildedPanel.decorate(el.parentNode);
+}
+
+/* ---------------- render + wiring ---------------- */
+const page = document.getElementById('page');
+const RENDER = [VariantA, VariantB, VariantC];
+function render() {
+  page.innerHTML = RENDER[variant]();
+  Hearthside.GildedPanel.decorate(page);
+  page.querySelectorAll('.hs-sheet').forEach(el => Hearthside.NoticeSheet.mount(el));
+  renderRail();
+  reelSync();
+  const v = VARIANTS[variant], st = STATES[stateI];
+  document.getElementById('lbl').innerHTML = `${v.key} — ${v.name}<small>${v.note}</small>`;
+  document.getElementById('state').innerHTML = `Session: ${st.name}<small>${st.note}</small>`;
+  document.getElementById('who').textContent = viewer === 'avery' ? 'As Avery, the GM' : 'As Geoff, a player';
+  store.set('hs-sess-variant', v.key); store.set('hs-sess-state', st.key); store.set('hs-sess-as', viewer);
+  try { const u = new URL(location.href); u.searchParams.set('variant', v.key); u.searchParams.set('state', st.key); u.searchParams.set('as', viewer); history.replaceState(null, '', u); } catch {}
+}
+function reset() { clearInterval(paintTimer); reelToggle(false); reelT = 0; attDraft = null; taleDraft = null; cTab = null; ov = null; renderOv(); cur = STATES[stateI].make(); if (cur.reel?.state === 'painting') paint(cur); }
+function go(d) { variant = (variant + d + VARIANTS.length) % VARIANTS.length; render(); }
+document.getElementById('prev').onclick = () => go(-1);
+document.getElementById('next').onclick = () => go(1);
+document.getElementById('state').onclick = () => { stateI = (stateI + 1) % STATES.length; reset(); render(); };
+document.getElementById('who').onclick = () => { viewer = viewer === 'avery' ? 'geoff' : 'avery'; attDraft = null; taleDraft = null; render(); };
+addEventListener('keydown', e => {
+  if (e.key === 'Escape' && ov) { ov = null; renderOv(); return; }
+  if (ov || e.target.closest('input,textarea,select,[contenteditable]')) return;
+  if (e.key === 'ArrowLeft') go(-1); else if (e.key === 'ArrowRight') go(1);
+});
+let toastTimer;
+function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 3000); }
+
+document.addEventListener('click', e => {
+  if (e.target.matches('.dlg-back')) { ov = null; renderOv(); return; }
+  const el = e.target.closest('[data-q],[data-stub],[data-edit],[data-ready],[data-torchback],[data-talewrite],[data-talesave],[data-talecancel],[data-fopen],[data-fdel],[data-reelplay],[data-reelgo],[data-paint],[data-paintgo],[data-reeldel],[data-attedit],[data-attp],[data-stood],[data-attsave],[data-attcancel],[data-ctab],[data-ovclose]');
+  if (!el || el.matches('input[type=checkbox]') && !el.dataset.attp) return;
+  const d = el.dataset, s = cur;
+  if (el.matches('input[type=checkbox]')) { /* attendance checkbox: let it toggle, then mirror it */ }
+  else e.preventDefault();
+  if (d.q) { const q = s.quests.find(x => x.id === d.q); q.done = !q.done; render(); }
+  else if (d.stub) toast(`Prototype: this goes to ${d.stub}.`);
+  else if (d.edit) openEdit(d.edit);
+  else if (d.ready) { s.ready.r[viewer] = d.ready === '1'; render(); }
+  else if (d.torchback) { s.standIn = null; render(); toast('The torch is back with Avery for this session.'); }
+  else if (d.talewrite) { taleDraft = s.tale?.text || ''; cTab = 'tale'; render(); const t = document.getElementById('tale-ta'); t?.focus(); t?.scrollIntoView({ block: 'center' }); }
+  else if (d.talesave) { const t = (taleDraft || '').trim(); s.tale = t ? { text: t, by: viewer, at: now() } : null; if (!t) s.reel = null; taleDraft = null; render(); }
+  else if (d.talecancel) { taleDraft = null; render(); }
+  else if (d.fopen) { const f = s.accounts.find(x => x.id === d.fopen); f.url ? open(f.url, '_blank') : toast(`Prototype: this opens ${f.name}.`); }
+  else if (d.fdel) { s.accounts = s.accounts.filter(x => x.id !== d.fdel); render(); }
+  else if (d.reelplay) reelToggle();
+  else if (d.reelgo) reelGo(+d.reelgo);
+  else if (d.paint) { ov = { kind: 'paint' }; renderOv(); }
+  else if (d.paintgo) { ov = null; renderOv(); s.reel = { state: 'painting', p: 0 }; cTab = 'reel'; render(); paint(s); }
+  else if (d.reeldel) { reelToggle(false); reelT = 0; s.reel = null; render(); }
+  else if (d.attedit) { startAtt(s); render(); }
+  else if (d.attp) { attDraft.came.has(d.attp) ? attDraft.came.delete(d.attp) : attDraft.came.add(d.attp); render(); }
+  else if (d.stood) { d.v === '1' ? attDraft.stood.add(d.stood) : attDraft.stood.delete(d.stood); render(); }
+  else if (d.attsave) { s.att = { taken: true, came: attDraft.came, stood: new Set([...attDraft.stood].filter(id => !attDraft.came.has(id))) }; attDraft = null; render(); toast('Prototype: attendance saved in memory. Each adventurer’s road would update.'); }
+  else if (d.attcancel) { attDraft = null; render(); }
+  else if (d.ctab) { cTab = d.ctab; render(); }
+  else if (d.ovclose) { ov = null; renderOv(); }
+});
+document.addEventListener('input', e => { if (e.target.id === 'tale-ta') taleDraft = e.target.value; });
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (t.dataset.torch && t.value) { cur.standIn = t.value; render(); toast(`${nameOf(t.value)} runs this session as ${CAMP.gmTitle}.`); }
+  else if (t.dataset.acct && t.files[0]) {
+    const file = t.files[0], f = { id: 'u' + Date.now(), name: file.name, type: file.type, size: file.size, by: viewer, at: now(), url: URL.createObjectURL(file) };
+    if (kindOf(f) === 'TXT') file.text().then(x => { f.text = x.slice(0, 20000); cur.accounts.push(f); render(); });
+    else { cur.accounts.push(f); render(); }
+    toast('Prototype: kept in memory only.');
+  }
+});
+document.addEventListener('submit', e => {
+  if (e.target.id !== 'edit-form') return;
+  e.preventDefault();
+  const fd = new FormData(e.target), s = cur;
+  s.title = fd.get('title').trim(); s.location = fd.get('location').trim(); s.online = fd.get('online') === 'on'; s.agenda = fd.get('agenda').trim(); s.vod = fd.get('vod').trim();
+  if (fd.get('date')) s.date = new Date(fd.get('date')); if (fd.get('end')) s.end = new Date(fd.get('end'));
+  ov = null; renderOv(); render();
+});
+
+if (cur.reel?.state === 'painting') paint(cur);
+render();
+Hearthside.GildedPanel.decorate();
+const floor = Hearthside.Floor.mount(document.getElementById('floor'));
+if (floor && floor.page) floor.page(1, false);
+</script>

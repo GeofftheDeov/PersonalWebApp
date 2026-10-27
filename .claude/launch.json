@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--prefix", "frontend"],
       "port": 3000
+    },
+    {
+      "name": "characters-prototype",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "4174", "--bind", "127.0.0.1", "--directory", "prototypes/hearthside-characters"],
+      "port": 4174
     }
   ]
 }

@@ -1,0 +1,973 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hearthside Adventurers Prototype</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alegreya+Sans+SC:wght@500;700&family=Alegreya+Sans:wght@400;500;700&family=IM+Fell+English+SC&family=IM+Fell+English:ital@0;1&display=swap">
+<link rel="stylesheet" href="bundle.css">
+<style>
+/* PROTOTYPE — throwaway. Three layouts of Hearthside's Characters page ("Adventurers" in the nav): your roster and
+   one adventurer's own page, switchable from the bar at the bottom (or ← →). Game-system agnostic on purpose: a
+   character is a name, art, a class and level in the player's own words, links to the campaign and sessions they
+   played, and whatever else the player wants to say. The real sheet stays wherever it lives; Hearthside links to it.
+   Data is made up, "today" is fixed at Mon Oct 26 2026, and everything lives in memory.
+   Layout: the Hearthside AppShell (rail | page | letters over the lit floor); only .hs-page changes per variant. */
+:root{
+  color-scheme:dark;
+  /* Hearthside tokens (from the design system's tokens.json; one theme, Tavern) */
+  --ground:#1a130e;--ground-2:#241a13;--surface:#2c2119;--line:#4a3726;--text:#f1e6d0;--muted:#b8a487;
+  --on-wood-text:#fbf1dc;--on-wood-muted:#d4c2a2;--accent:#e5a13a;--accent-ink:#1a130e;--seal:#b4462c;--moss:#7c9a55;
+  --verdigris:#5aa396;--paper:#eadbb9;--paper-hi:#f0e3c4;--paper-lo:#e2cea5;--paper-ink:#2b1d12;--paper-muted:#6b5337;
+  --paper-line:#c9b28a;--leather-hi:#37281c;--leather:#221810;--gold-hi:#f6dd96;--gold:#d6a84e;--gold-lo:#8a5c1c;
+  --gold-line:rgba(226,184,98,0.38);--gold-rule:rgba(226,184,98,0.14);
+  --heat-0:rgba(43,29,18,0.06);--heat-1:#d8c092;--heat-2:#c49a5c;--heat-3:#9c6c32;--heat-4:#5a3a1a;--firelight:#ffb36b;
+  --font-display:"IM Fell English SC","IM Fell English",Georgia,serif;
+  --font-story:"IM Fell English",Georgia,serif;
+  --font-body:"Alegreya Sans",system-ui,sans-serif;
+  --font-label:"Alegreya Sans SC","Alegreya Sans",system-ui,sans-serif;
+  --space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;--space-5:20px;--space-6:24px;--sheet-foot:44px;
+  --radius-sheet:3px;--radius:4px;--radius-panel:5px;--radius-full:999px;
+  --shadow-panel:0 14px 30px rgba(0,0,0,0.55),0 2px 4px rgba(0,0,0,0.5);
+  --shadow-panel-inset:inset 0 0 0 1px rgba(0,0,0,0.55),inset 0 0 26px rgba(0,0,0,0.5);
+  --shadow-paper:0 16px 34px rgba(0,0,0,0.6),0 2px 4px rgba(0,0,0,0.45);
+  --shadow-pin:0 2px 3px rgba(0,0,0,0.5);
+  --on-wood-shadow:0 1px 2px rgba(0,0,0,0.9),0 0 14px rgba(0,0,0,0.6);
+  /* the gilded panel's six-stop frame, for frames drawn here (portraits, medallions) */
+  --gild:linear-gradient(135deg,#f6dd96 0%,#b07c2c 22%,#f0cf7a 45%,#7c5318 68%,#e7c06a 88%,#a87228 100%);
+  /* the prototype switcher only: deliberately not Hearthside */
+  --proto-bg:#fafafa;--proto-fg:#111;--proto-dim:#555;
+}
+body{margin:0;background:var(--ground);color:var(--text)}
+.hs-shell-wrap{padding-block:16px 110px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.hs-nav a{cursor:pointer}
+/* on phones .hs-page is display:contents, so its sections are flex items of the shell: make them full width */
+.hs-page > *{align-self:stretch;min-width:0}
+.hs-app textarea,.hs-app select{font:inherit;color:inherit}
+
+/* ---------- shared bits ---------- */
+.p-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+.p-head > div{min-width:0}
+.p-new{height:36px;font-size:15px}
+.p-back{height:32px;margin-bottom:12px;font-size:14px}
+.p-link{background:none;border:0;padding:0;color:var(--accent);cursor:pointer;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.04em;text-decoration:none}
+.p-link:hover{color:var(--gold-hi)}
+.p-panel-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:10px 14px 6px;
+  font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--muted)}
+.p-empty{padding:14px;color:var(--muted);font-size:14px}
+.p-sheets{display:flex;flex-direction:column;gap:30px;padding-top:6px}
+.hs-quests .hs-quest-for{font-size:13px;color:var(--muted);margin-top:2px}
+.p-seg{display:inline-flex;gap:2px;padding:3px;border-radius:var(--radius);background:rgba(26,19,14,.82);border:1px solid var(--gold-line)}
+.p-seg button{background:transparent;border:0;padding:5px 12px;border-radius:3px;cursor:pointer;color:var(--muted);
+  font-family:var(--font-label);font-size:14px;font-weight:500;letter-spacing:.04em}
+.p-seg button:hover{color:var(--text)}
+.p-seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+
+/* a picture: fills its positioned parent. Painted stand-ins and uploads both become an .art-<id> class. */
+.art{position:absolute;inset:0;background-size:cover;background-position:center}
+/* a portrait, 3:4. No art yet: dyed cloth with the initials stitched on, like a campaign with no banner. */
+.pt{position:relative;display:block;aspect-ratio:3/4;overflow:hidden;background:var(--leather);container-type:inline-size}
+.pt-none{position:absolute;inset:0;display:grid;place-items:center;
+  background:repeating-linear-gradient(45deg,rgba(0,0,0,.12) 0 1px,transparent 1px 5px),repeating-linear-gradient(-45deg,rgba(255,255,255,.035) 0 1px,transparent 1px 5px),
+    radial-gradient(120% 90% at 15% 100%,rgba(255,179,107,.2),transparent 55%),linear-gradient(160deg,#4a3324,#1c120b)}
+.pt-none::after{content:"";position:absolute;inset:5%;border:1px dashed rgba(246,221,150,.4);border-radius:2px}
+.pt-none span{font-family:var(--font-display);font-size:30cqw;letter-spacing:.06em;color:var(--gold-hi);opacity:.85;text-shadow:0 1px 0 rgba(0,0,0,.6)}
+/* a face: the portrait zoomed onto the head, for round medallions and cameos */
+.pt.is-face{aspect-ratio:1}
+.pt.is-face .art{background-size:170% auto;background-position:50% 45%}
+.pt.is-face .pt-none::after{inset:9%;border-radius:50%}
+.pt.is-face .pt-none span{font-size:36cqw}
+/* retired portraits fade toward sepia; fallen ones lose their colour */
+.is-retired .art{filter:grayscale(.55) sepia(.3) brightness(.85)}
+.is-fallen .art{filter:grayscale(1) brightness(.7) contrast(1.05)}
+/* a portrait frame: the gilded panel's gold, a hairline inside */
+.gframe{position:relative;display:block;border:3px solid transparent;border-radius:var(--radius-panel);overflow:hidden;
+  background:linear-gradient(var(--leather),var(--leather)) padding-box,var(--gild) border-box;box-shadow:var(--shadow-panel)}
+.gframe::after{content:"";position:absolute;inset:4px;border:1px solid rgba(246,221,150,.45);border-radius:2px;pointer-events:none;z-index:3}
+.medal{position:relative;display:block;flex:none;border-radius:50%;overflow:hidden;border:2px solid transparent;
+  background:linear-gradient(var(--leather),var(--leather)) padding-box,var(--gild) border-box;box-shadow:0 3px 8px rgba(0,0,0,.6)}
+.medal .pt{border-radius:50%}
+/* the level, as an amber seal. A game without levels gets none. */
+.lvl{flex:none;width:58px;height:58px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+  background:radial-gradient(circle at 35% 30%,#f3c070,var(--accent) 45%,#a8661c);color:var(--accent-ink);
+  box-shadow:0 2px 6px rgba(0,0,0,.6),inset 0 0 0 2px rgba(255,230,170,.35)}
+.lvl small{font:500 10px/1 var(--font-label);letter-spacing:.12em}
+.lvl b{font:400 26px/1 var(--font-display)}
+.is-fallen .lvl,.lvl.is-fallen,.is-retired .lvl,.lvl.is-retired{filter:grayscale(.7) brightness(.8)}
+/* a campaign banner (4:1), as on the Campaigns page; cloth = no banner set */
+.bn{position:absolute;inset:0;background-size:cover;background-position:center}
+.bn.is-cloth{display:grid;place-items:center end;padding-right:8%;
+  background:repeating-linear-gradient(45deg,rgba(0,0,0,.12) 0 1px,transparent 1px 5px),repeating-linear-gradient(-45deg,rgba(255,255,255,.035) 0 1px,transparent 1px 5px),
+    radial-gradient(120% 140% at 15% 100%,rgba(255,179,107,.18),transparent 55%),linear-gradient(160deg,var(--c1),var(--c2))}
+.bn.is-cloth::after{content:"";position:absolute;inset:4px;border:1px dashed rgba(246,221,150,.4);border-radius:2px}
+.bn.is-cloth span{font-family:var(--font-display);font-size:20px;letter-spacing:.12em;color:var(--gold-hi);opacity:.85;text-shadow:0 1px 0 rgba(0,0,0,.6)}
+.thumb{position:relative;display:inline-block;flex:none;width:40px;height:22px;border-radius:2px;overflow:hidden;vertical-align:-6px;box-shadow:0 0 0 1px rgba(0,0,0,.7),0 1px 3px rgba(0,0,0,.6)}
+.thumb .bn.is-cloth span{display:none}
+/* a definition list on leather: facts and the player's own details */
+.dl{margin:0;display:flex;flex-direction:column}
+.dl > div{display:grid;grid-template-columns:minmax(90px,38%) minmax(0,1fr);gap:10px;padding:8px 14px;border-top:1px solid var(--gold-rule);align-items:baseline}
+.dl > div:first-child{border-top:0}
+.dl dt{font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.06em;color:var(--muted);overflow-wrap:anywhere}
+.dl dd{margin:0;font-size:14.5px;overflow-wrap:anywhere}
+.dl .is-own dt{color:var(--on-wood-muted)}
+.story{margin:0;padding:10px 14px 12px;font-family:var(--font-story);font-size:16px;line-height:1.45;color:var(--text);white-space:pre-line}
+.ext{display:inline-flex;align-items:center;gap:6px}
+.ext::after{content:"↗";font-family:var(--font-body)}
+/* the next session's quests for this adventurer, on leather */
+.nq{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:4px}
+.nq li{display:grid;grid-template-columns:20px minmax(0,1fr);gap:8px;align-items:start;font-size:13.5px}
+.nq li.is-done span{text-decoration:line-through;color:var(--muted)}
+.nq .hs-box{width:16px;height:16px;margin-top:1px}
+.nq small{display:block;font-family:var(--font-label);font-size:12px;letter-spacing:.04em;color:var(--accent)}
+.empty{display:grid;grid-template-columns:150px minmax(0,1fr);gap:22px;align-items:center;max-width:560px}
+.empty .gframe{opacity:.9}
+.empty h2{margin:0 0 4px;font-family:var(--font-story);font-weight:400;font-size:24px;color:var(--on-wood-text);text-shadow:var(--on-wood-shadow)}
+.empty p{margin:0 0 12px;color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow);font-size:15px}
+@media (max-width:520px){.empty{grid-template-columns:96px minmax(0,1fr);gap:14px}}
+
+/* ---------- A: Portrait gallery. Portraits hung on the floor; an adventurer's page leads with their art. ---------- */
+.va-wall{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:30px 22px;padding-top:4px}
+.va-card{display:flex;flex-direction:column;align-items:center;background:none;border:0;padding:0;cursor:pointer;color:inherit;text-align:center;font:inherit;min-width:0}
+.va-card .gframe{width:100%}
+.va-card:hover .gframe{box-shadow:var(--shadow-panel),0 0 0 2px rgba(246,221,150,.35)}
+/* the brass name plate, screwed to the frame's foot */
+.va-plate{position:relative;z-index:4;margin-top:-14px;max-width:92%;min-width:66%;padding:6px 12px 7px;border-radius:2px;
+  background:linear-gradient(180deg,#f4d98e,#d7ab55 55%,#b88834);box-shadow:0 3px 6px rgba(0,0,0,.65),inset 0 1px 0 rgba(255,255,255,.4);color:var(--accent-ink)}
+.va-plate::before,.va-plate::after{content:"";position:absolute;top:50%;margin-top:-2.5px;width:5px;height:5px;border-radius:50%;background:#7c5318;box-shadow:inset 0 1px 0 rgba(255,255,255,.35)}
+.va-plate::before{left:4px}.va-plate::after{right:4px}
+.va-plate b{display:block;font-family:var(--font-story);font-weight:400;font-size:17px;line-height:1.15;text-shadow:0 1px 0 rgba(255,240,200,.5);overflow-wrap:anywhere}
+.va-plate small{display:block;font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.05em;color:#4a3112}
+.va-under{margin-top:8px;font-size:13px;color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow);max-width:100%;overflow-wrap:anywhere}
+.va-under b{display:block;font-family:var(--font-label);font-weight:500;font-size:12.5px;letter-spacing:.05em;color:var(--accent)}
+/* fallen: a black ribbon across the frame's corner */
+.va-ribbon{position:absolute;z-index:4;top:16px;right:-34px;width:130px;transform:rotate(45deg);text-align:center;padding:3px 0;
+  background:#120c08;color:var(--muted);font:500 11.5px/1.2 var(--font-label);letter-spacing:.14em;box-shadow:0 2px 4px rgba(0,0,0,.6)}
+.va-new{display:flex;flex-direction:column;align-items:center;gap:8px;width:100%;aspect-ratio:3/4;justify-content:center;border:1.5px dashed var(--gold-line);border-radius:var(--radius-panel);
+  background:rgba(26,19,14,.45);color:var(--on-wood-text);font-family:var(--font-label);font-size:15px;font-weight:500;letter-spacing:.04em;text-shadow:var(--on-wood-shadow)}
+.va-new i{font-style:normal;font-family:var(--font-display);font-size:40px;line-height:1;color:var(--accent)}
+.va-card:hover .va-new{border-color:var(--gold)}
+@media (max-width:520px){.va-wall{grid-template-columns:repeat(2,minmax(0,1fr));gap:26px 14px}.va-plate{min-width:0;padding:5px 9px 6px}.va-plate b{font-size:15.5px}}
+/* an adventurer's page */
+.ad{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:var(--space-6);align-items:start}
+.ad-art{display:flex;flex-direction:column;gap:12px;min-width:0}
+.ad-main .pt{aspect-ratio:3/4}
+.ad-strip{display:flex;flex-wrap:wrap;gap:8px}
+.ad-th{position:relative;width:54px;height:72px;padding:0;border:2px solid transparent;border-radius:3px;overflow:hidden;cursor:pointer;
+  background:linear-gradient(var(--leather),var(--leather)) padding-box,linear-gradient(var(--line),var(--line)) border-box;box-shadow:0 2px 5px rgba(0,0,0,.6)}
+.ad-th.is-on{background:linear-gradient(var(--leather),var(--leather)) padding-box,var(--gild) border-box}
+.ad-add{display:grid;place-items:center;color:var(--accent);font:400 26px/1 var(--font-display);border-style:dashed;border-color:var(--gold-line);background:rgba(26,19,14,.6)}
+.ad-artnote{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:13px;color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow)}
+.ad-info{display:flex;flex-direction:column;gap:var(--space-5);min-width:0}
+.ad-id{display:flex;align-items:center;gap:14px;padding:12px 14px 10px;border-bottom:1px solid var(--gold-rule)}
+.ad-id b{display:block;font-family:var(--font-story);font-weight:400;font-size:22px;line-height:1.15}
+.ad-id small{display:block;font-size:13.5px;color:var(--muted)}
+.ad-foot{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;padding:10px 14px 12px;border-top:1px solid var(--gold-rule)}
+.ad-foot .hs-btn-amber{height:32px}
+.ad-sess{list-style:none;margin:0;padding:0}
+.ad-sess > li{display:grid;grid-template-columns:86px minmax(0,1fr) auto;gap:12px;align-items:baseline;padding:11px 14px;border-top:1px solid var(--gold-rule)}
+.ad-sess > li:first-child{border-top:0}
+.ad-sess time{font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.04em;color:var(--muted);font-variant-numeric:tabular-nums}
+.ad-sess > li.is-next{background:linear-gradient(90deg,rgba(229,161,58,.14),rgba(229,161,58,0))}
+.ad-sess > li.is-next time{color:var(--accent)}
+.ad-sess b{display:block;font-weight:500;font-size:14.5px}
+.ad-sess small{display:block;font-size:13px;color:var(--muted)}
+.ad-sess .hs-tag{margin-left:0}
+.ad-sess .is-up{border-color:var(--gold);color:var(--gold-hi)}
+.ad-camp{display:grid;grid-template-columns:minmax(0,1fr);gap:0}
+.ad-bn{position:relative;display:block;aspect-ratio:4/1;border:0;padding:0;cursor:pointer;width:100%;overflow:hidden;border-radius:3px 3px 0 0}
+.ad-bn::before{content:"";position:absolute;inset:0;z-index:1;background:linear-gradient(90deg,rgba(20,13,8,.9) 0%,rgba(20,13,8,.5) 50%,rgba(20,13,8,0) 80%)}
+.ad-bn span.t{position:absolute;z-index:2;left:14px;top:50%;transform:translateY(-50%);text-align:left;max-width:70%}
+.ad-bn b{display:block;font-family:var(--font-story);font-weight:400;font-size:21px;line-height:1.1;color:var(--on-wood-text);text-shadow:var(--on-wood-shadow)}
+.ad-bn small{display:block;font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.05em;color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow)}
+.mates{display:flex;flex-wrap:wrap;gap:10px 16px;padding:10px 14px 12px}
+.mate{display:flex;align-items:center;gap:8px;background:none;border:0;padding:0;cursor:pointer;color:inherit;text-align:left;font:inherit;min-width:0}
+.mate .medal{width:38px}
+.mate b{display:block;font-weight:500;font-size:14px;line-height:1.2}
+.mate small{display:block;font-size:12.5px;color:var(--muted)}
+@media (max-width:759px){.ad{grid-template-columns:minmax(0,1fr)}.ad-art{max-width:380px;width:100%;margin:0 auto}}
+@media (max-width:520px){.ad-sess > li{grid-template-columns:60px minmax(0,1fr)}.ad-sess > li > :last-child:not(:nth-child(2)){grid-column:2;justify-self:start}}
+
+/* ---------- B: Ledger and sheet. A roster on leather; the chosen adventurer's sheet is parchment below. ---------- */
+.vb-ledger{padding:6px}
+.vb-ledger .hs-tabs{padding:0 8px}
+.vb-ledger .hs-tabs button span{color:var(--muted);font-family:var(--font-body);font-size:12px;margin-left:4px}
+.vb-rows{list-style:none;margin:0;padding:0}
+.vb-rows li{border-top:1px solid var(--gold-rule)}
+.vb-rows li:first-child{border-top:0}
+.vb-row{display:grid;grid-template-columns:46px minmax(0,1.3fr) minmax(0,1fr) auto;gap:12px;align-items:center;width:100%;padding:10px 12px;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer;border-radius:3px}
+.vb-row:hover{background:rgba(229,161,58,.06)}
+.vb-row[aria-pressed="true"]{background:rgba(229,161,58,.13);box-shadow:inset 0 0 0 1px var(--gold)}
+.vb-row .medal{width:46px}
+.vb-n b{display:block;font-weight:500;font-size:15px;line-height:1.25}
+.vb-n small,.vb-c small{display:block;font-size:13px;color:var(--muted)}
+.vb-c{display:flex;align-items:center;gap:8px;min-width:0;font-size:13.5px}
+.vb-c span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vb-s{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.04em;color:var(--accent);text-align:right;white-space:nowrap}
+.vb-s.is-off{color:var(--muted)}
+.vb-addrow{display:flex;justify-content:flex-end;padding:8px 12px 6px;border-top:1px solid var(--gold-rule)}
+@media (max-width:620px){.vb-row{grid-template-columns:42px minmax(0,1fr) auto}.vb-row .medal{width:42px}.vb-c{display:none}}
+/* the sheet */
+.vb-top{display:grid;grid-template-columns:minmax(0,1fr) 148px;gap:20px;align-items:start}
+.vb-photo{position:relative;display:block;padding:6px 6px 22px;background:#f6eedb;transform:rotate(2.2deg);box-shadow:0 3px 8px rgba(43,29,18,.45);margin-top:-6px}
+.vb-photo .pt{box-shadow:inset 0 0 0 1px rgba(43,29,18,.3)}
+/* two strips of tape hold the picture on */
+.vb-photo::before,.vb-photo::after{content:"";position:absolute;z-index:2;width:46px;height:16px;background:rgba(240,226,190,.75);box-shadow:0 1px 2px rgba(43,29,18,.25)}
+.vb-photo::before{top:-7px;left:-12px;transform:rotate(-38deg)}
+.vb-photo::after{top:-7px;right:-12px;transform:rotate(38deg)}
+.vb-cap{position:absolute;left:0;right:0;bottom:3px;text-align:center;font-family:var(--font-story);font-style:italic;font-size:13px;color:var(--paper-muted)}
+.vb-sheet .hs-ledger li span:first-child{font-family:var(--font-label);font-weight:500;letter-spacing:.05em;color:var(--paper-muted)}
+.vb-sheet .hs-ledger li span:last-child{text-align:right;overflow-wrap:anywhere}
+.vb-sheet .hs-ledger{margin-top:14px}
+.vb-h{margin:20px 0 4px;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--paper-muted)}
+.vb-story{margin:0;font-family:var(--font-story);font-size:16px;line-height:1.5;white-space:pre-line;max-width:62ch}
+.vb-kept{margin:12px 0 0;font-size:14px;color:var(--paper-muted)}
+.vb-kept a{color:var(--paper-ink);font-weight:500}
+.vb-sess{list-style:none;margin:0;padding:0}
+.vb-sess > li{display:grid;grid-template-columns:74px minmax(0,1fr);gap:10px;padding:8px 0;border-top:1px solid var(--paper-line);font-size:14px}
+.vb-sess > li:first-child{border-top:0}
+.vb-sess time{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.04em;color:var(--paper-muted);font-variant-numeric:tabular-nums}
+.vb-sess b{font-weight:500}
+.vb-sess small{display:block;font-size:13px;color:var(--paper-muted)}
+.vb-sess .is-next time{color:var(--seal)}
+.vb-sess .hs-tag{border-color:var(--paper-line);color:var(--paper-muted)}
+.vb-sess .nq small{color:var(--paper-muted)}
+.vb-sess .nq .hs-box{border-color:var(--paper-ink)}
+.vb-sess .nq .hs-box[aria-checked="true"]{border-color:var(--moss)}
+.vb-sess .nq li.is-done span{color:var(--paper-muted)}
+.vb-sess .p-link,.vb-sheet .p-link{color:var(--paper-ink);text-decoration:underline;text-underline-offset:2px}
+.vb-arts{display:flex;flex-wrap:wrap;gap:16px;padding-top:6px}
+.vb-arts .vb-photo{width:84px;padding:4px 4px 12px;cursor:pointer;border:0}
+.vb-arts .vb-photo:nth-child(even){transform:rotate(-2deg)}
+.vb-arts .vb-photo::before,.vb-arts .vb-photo::after{width:28px;height:11px;top:-5px}
+.vb-arts .vb-photo::before{left:-8px}.vb-arts .vb-photo::after{right:-8px}
+@media (max-width:620px){.vb-top{grid-template-columns:minmax(0,1fr) 92px;gap:12px}.vb-cap{display:none}.vb-photo{padding:4px 4px 10px}}
+
+/* ---------- C: The road so far. Grouped by campaign; an adventurer's page is a road through their sessions. ---------- */
+.vc-group{display:flex;flex-direction:column;gap:18px}
+.vc-camp{padding:6px}
+.vc-bn{position:relative;display:block;width:100%;aspect-ratio:4/1;max-height:150px;border:0;padding:0;cursor:pointer;overflow:hidden;border-radius:3px}
+.vc-bn::before{content:"";position:absolute;inset:0;z-index:1;background:linear-gradient(90deg,rgba(20,13,8,.88) 0%,rgba(20,13,8,.45) 55%,rgba(20,13,8,0) 85%)}
+.vc-bn .t{position:absolute;z-index:2;left:14px;top:50%;transform:translateY(-50%);text-align:left;max-width:72%}
+.vc-bn b{display:block;font-family:var(--font-story);font-weight:400;font-size:23px;line-height:1.1;color:var(--on-wood-text);text-shadow:var(--on-wood-shadow)}
+.vc-bn small{display:block;font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.05em;color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow)}
+.vc-bn.is-done .bn{filter:grayscale(.6) brightness(.75)}
+.vc-party{display:flex;flex-wrap:wrap;align-items:center;gap:14px 26px;padding:12px 10px 8px}
+.vc-you{display:flex;align-items:center;gap:12px;background:none;border:0;padding:0;cursor:pointer;color:inherit;text-align:left;font:inherit;min-width:0}
+.vc-you .medal{width:76px;border-width:3px;margin-top:-34px;position:relative;z-index:3}
+.vc-you b{display:block;font-family:var(--font-story);font-weight:400;font-size:20px;line-height:1.15}
+.vc-you small{display:block;font-size:13px;color:var(--muted)}
+.vc-you small.st{font-family:var(--font-label);letter-spacing:.04em;color:var(--accent)}
+.vc-you:hover b{color:var(--gold-hi)}
+.vc-with{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin-left:auto;min-width:0}
+.vc-with-h{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.08em;color:var(--muted)}
+.vc-with .mate .medal{width:34px}
+.vc-dm{padding:12px 14px;display:flex;gap:12px;align-items:center;color:var(--muted);font-size:14px}
+.vc-dm .thumb{width:64px;height:16px}
+@media (max-width:620px){.vc-with{margin-left:0}.vc-you .medal{width:64px;margin-top:-28px}.vc-bn b{font-size:19px}}
+/* an adventurer's page: a hero with their art behind it, then the road and the facts side by side */
+.vc-hero{padding:0;overflow:hidden}
+.vc-hero-bg{position:absolute;inset:0;overflow:hidden;border-radius:3px}
+.vc-hero-bg .art{inset:-30px;filter:blur(14px) brightness(.55) saturate(1.1)}
+.vc-hero-bg::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(20,13,8,.7),rgba(20,13,8,.2) 70%,rgba(20,13,8,.5))}
+.vc-hero-in{position:relative;z-index:1;display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:20px;align-items:center;padding:22px 22px 20px}
+.vc-hero .medal{width:150px;border-width:3px}
+.vc-hero h1{margin:0;font-family:var(--font-story);font-weight:400;font-size:clamp(28px,3.4vw,38px);line-height:1.1;color:var(--on-wood-text);text-shadow:var(--on-wood-shadow);overflow-wrap:anywhere}
+.vc-hero p{margin:4px 0 0;color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow);font-size:15px}
+.vc-hero p.k{font-family:var(--font-label);font-weight:500;letter-spacing:.05em;color:var(--accent);font-size:14px}
+.vc-hero p.e{font-family:var(--font-story);font-style:italic;font-size:16.5px;max-width:52ch}
+@media (max-width:620px){.vc-hero-in{grid-template-columns:auto minmax(0,1fr);gap:14px;padding:16px}.vc-hero .medal{width:92px}.vc-hero .lvl{grid-column:1;grid-row:2;justify-self:center}.vc-hero-in > div{grid-row:1 / span 2;grid-column:2}}
+.vc-cols{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:var(--space-6);align-items:start}
+.vc-cols > *{min-width:0}
+@media (max-width:899px){.vc-cols{grid-template-columns:minmax(0,1fr)}}
+.vc-road{list-style:none;margin:0;padding:12px 14px 14px 14px;position:relative}
+.vc-road > li{position:relative;display:grid;grid-template-columns:22px minmax(0,1fr);gap:12px;padding:7px 0}
+/* the road: a gold line through every stop */
+.vc-road > li::before{content:"";position:absolute;left:10px;top:0;bottom:0;width:2px;background:linear-gradient(var(--gold-lo),var(--gold),var(--gold-lo))}
+.vc-road > li:first-child::before{top:16px}
+.vc-road > li:last-child::before{bottom:calc(100% - 16px)}
+.vc-node{position:relative;z-index:1;justify-self:center;margin-top:4px;width:12px;height:12px;border-radius:50%;background:var(--leather);border:2px solid var(--gold)}
+.vc-road time{display:block;font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.05em;color:var(--muted);font-variant-numeric:tabular-nums}
+.vc-road b{display:block;font-weight:500;font-size:14.5px;line-height:1.3}
+.vc-road small{display:block;font-size:13px;color:var(--muted)}
+.vc-road .is-next .vc-node{width:18px;height:18px;margin-top:2px;background:var(--accent);border-color:var(--gold-hi);box-shadow:0 0 10px rgba(229,161,58,.6)}
+.vc-road .is-next time{color:var(--accent)}
+.vc-road .is-next > div{padding:8px 10px 10px;border-radius:3px;background:rgba(229,161,58,.1);box-shadow:inset 0 0 0 1px var(--gold-line)}
+.vc-road .is-lvl .vc-node{width:13px;height:13px;border-radius:1px;transform:rotate(45deg);background:linear-gradient(135deg,var(--gold-hi),var(--gold-lo));border:0;margin-top:5px}
+.vc-road .is-lvl b{font-family:var(--font-label);font-weight:500;letter-spacing:.05em;color:var(--gold-hi);font-size:14px}
+.vc-road .is-fell .vc-node{background:#120c08;border-color:var(--muted)}
+.vc-road .is-fell b{font-family:var(--font-story);font-weight:400;font-size:17px}
+.vc-road .is-mark .vc-node{background:var(--gold);width:10px;height:10px;margin-top:5px;border:0}
+.vc-road .is-mark b{font-weight:400;color:var(--muted);font-size:13.5px}
+.vc-road .p-link{font-size:12.5px}
+.vc-arts{display:flex;flex-wrap:wrap;gap:8px;padding:10px 14px 12px}
+.vc-arts .ad-th{width:50px;height:66px}
+
+/* ---------- the editor: a gilded dialog. Hearthside has no form styles yet; fields follow its message composer. ---------- */
+.dlg-back{position:fixed;inset:0;z-index:60;background:rgba(10,7,4,.74);display:flex;align-items:center;justify-content:center;padding:16px;overflow:hidden}
+.dlg{width:min(600px,100%);max-height:calc(100dvh - 32px);display:flex;flex-direction:column;padding:6px}
+.dlg-h{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px 10px;border-bottom:1px solid var(--gold-rule)}
+.dlg-h h2{margin:0;font-family:var(--font-story);font-weight:400;font-size:24px;line-height:1.15;min-width:0;overflow-wrap:anywhere}
+.dlg-body{overflow-y:auto;overscroll-behavior:contain;padding:4px 12px 4px;min-height:0;scrollbar-color:var(--line) transparent}
+.dlg-top{display:grid;grid-template-columns:112px minmax(0,1fr);gap:16px;align-items:start;margin-top:14px}
+.dlg-top .gframe{border-width:2px}
+.fld{display:flex;flex-direction:column;gap:5px;margin:14px 0 0;min-width:0;border:0;padding:0}
+.dlg-top .fld:first-child{margin-top:0}
+.fld > label,.fld > legend,.fld .lab{font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.08em;color:var(--muted);padding:0}
+.fld > legend{margin-bottom:5px}
+.fld input,.fld textarea,.fld select{width:100%;min-width:0;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:8px 10px;color:var(--text);font-size:15px}
+.fld input::placeholder,.fld textarea::placeholder{color:#8f7c62}
+.fld input:focus,.fld textarea:focus,.fld select:focus{border-color:var(--gold);outline:0}
+.fld textarea{resize:vertical;line-height:1.45}
+.fld small,.dlg small.h{font-size:13px;color:var(--muted);line-height:1.4}
+.fld-row{display:grid;grid-template-columns:minmax(0,1fr) 96px;gap:10px}
+.fld-row .fld{margin-top:0}
+.fld-row + small{display:block;margin-top:5px}
+.fld-wrap{margin-top:14px}
+.up{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;margin-top:10px;border-radius:var(--radius);border:1px solid var(--gold-line);color:var(--text);cursor:pointer;
+  font-family:var(--font-label);font-size:14px;font-weight:500;letter-spacing:.04em;background:var(--surface)}
+.up:hover{border-color:var(--gold)}
+.up:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+.up input{position:absolute;width:1px;height:1px;opacity:0}
+.trs{display:flex;flex-direction:column;gap:6px}
+.tr-row{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr) 32px;gap:6px}
+.tr-row button{background:transparent;border:1px solid var(--line);border-radius:var(--radius);color:var(--muted);cursor:pointer;font-size:16px}
+.tr-row button:hover{color:var(--text);border-color:var(--gold)}
+.dlg-f{display:flex;justify-content:flex-end;gap:8px;padding:12px 10px 8px;border-top:1px solid var(--gold-rule);margin-top:14px}
+.dlg-f .hs-btn-amber{height:36px;font-size:15px}
+.p-ghost{background:transparent;border:1px solid var(--line);border-radius:var(--radius);color:var(--text);padding:0 14px;height:36px;cursor:pointer;font-family:var(--font-label);font-weight:500;letter-spacing:.04em;font-size:15px}
+.p-ghost:hover{border-color:var(--gold)}
+@media (max-width:520px){.dlg-top{grid-template-columns:84px minmax(0,1fr);gap:12px}.fld-row{grid-template-columns:minmax(0,1fr) 78px}}
+
+/* ---------- prototype switcher (not part of any design) ---------- */
+.proto-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:50;
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:center;max-width:calc(100vw - 24px);
+  background:var(--proto-bg);color:var(--proto-fg);border-radius:14px;padding:6px 8px;box-shadow:0 8px 30px rgba(0,0,0,.6);
+  font:13px/1.3 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+.proto-bar button{font:inherit;color:inherit;background:#e9e9e9;border:0;border-radius:8px;padding:6px 10px;cursor:pointer}
+.proto-bar button:hover{background:#dcdcdc}
+.proto-bar .lbl{min-width:190px;text-align:center;font-weight:600;padding:0 4px}
+@media (max-width:520px){.proto-bar .lbl{min-width:0;flex:1 1 0}.proto-bar .sep{display:none}}
+.proto-bar .lbl small{display:block;font-weight:400;color:var(--proto-dim);font-size:11px}
+.proto-bar .sep{width:1px;height:26px;background:#ccc;margin:0 2px}
+.proto-bar :focus-visible{outline:2px solid #2563eb;outline-offset:2px}
+.proto-toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:70;background:var(--proto-bg);color:var(--proto-fg);
+  font:13px/1.3 ui-sans-serif,system-ui,sans-serif;padding:8px 12px;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.5);max-width:calc(100vw - 32px)}
+</style>
+
+<canvas class="hs-floor" id="floor" aria-hidden="true"></canvas>
+<div class="hs-glow" aria-hidden="true"></div>
+<div class="hs-shell-wrap">
+  <div class="hs-shell">
+    <aside class="hs-rail">
+      <div class="hs-bar"><div class="hs-brand">Hearthside<small>The Party Gathers</small></div>
+        <nav class="hs-nav hs-gilded" aria-label="Main">
+          <a data-stub="The Hearth">The Hearth</a>
+          <a data-stub="Campaigns">Campaigns</a>
+          <a data-stub="the Almanac">Almanac</a>
+          <a aria-current="page" data-home="1">Adventurers</a>
+        </nav>
+      </div>
+      <section class="hs-quests-sec"><h2 class="hs-sec"><span>Your Quests</span><span class="hs-aside" id="qc"></span></h2>
+        <div class="hs-gilded" id="rail-quests"></div></section>
+    </aside>
+
+    <main class="hs-page" id="page"></main>
+
+    <aside class="hs-letters-col"><h2 class="hs-sec"><span>Letters</span><span class="hs-aside">4 unread</span></h2><div class="hs-gilded"><div class="hs-tabs" role="tablist">
+      <button role="tab" aria-selected="true">All</button><button role="tab" aria-selected="false">Campaigns</button><button role="tab" aria-selected="false">Friends</button>
+    </div>
+    <ul class="hs-threads">
+      <li tabindex="0" role="button"><span class="hs-avatar is-campaign">AC</span><div style="min-width:0"><div class="hs-thread-name">Curse of the Ashen Crown</div><div class="hs-thread-sub">Campaign · 5 in the party</div></div><div class="hs-thread-when">now<span class="hs-dot" aria-label="3 unread"></span></div></li>
+      <li tabindex="0" role="button"><span class="hs-avatar">P</span><div style="min-width:0"><div class="hs-thread-name">Priya</div><div class="hs-thread-sub">Friend</div></div><div class="hs-thread-when">7:02 pm<span class="hs-dot" aria-label="1 unread"></span></div></li>
+      <li tabindex="0" role="button"><span class="hs-avatar is-campaign">SS</span><div style="min-width:0"><div class="hs-thread-name">Starfall Salvage</div><div class="hs-thread-sub">Campaign · 4 in the party</div></div><div class="hs-thread-when">Tue</div></li>
+    </ul></div></aside>
+  </div>
+</div>
+<div id="dlg" hidden></div>
+
+<div class="proto-bar" role="toolbar" aria-label="Prototype controls">
+  <button type="button" id="prev" aria-label="Previous layout">←</button>
+  <div class="lbl" id="lbl" aria-live="polite"></div>
+  <button type="button" id="next" aria-label="Next layout">→</button>
+  <span class="sep" aria-hidden="true"></span>
+  <button type="button" id="data"></button>
+</div>
+<div class="proto-toast" id="toast" hidden></div>
+
+<script src="bundle.js"></script>
+<script>
+document.body.classList.add('hs-app');
+
+/* ---------------- stand-in art: banners as in the Campaigns prototype, and painted portraits for uploads ---------------- */
+function rng(seed) { let h = 2166136261; for (const c of seed) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return () => ((h = Math.imul(h ^ (h >>> 15), 2246822507) ^ Math.imul(h ^ (h >>> 13), 3266489909)) >>> 0) / 4294967296; }
+function ridge(ctx, r, W, y0, amp, step, color, H = 400) {
+  ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(0, H);
+  let y = y0; for (let x = 0; x <= W + step; x += step) { y = Math.max(y0 - amp, Math.min(y0 + amp, y + (r() - .5) * amp)); ctx.lineTo(x, y); }
+  ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
+}
+function paintBanner(kind) {
+  const W = 1600, H = 400, c = document.createElement('canvas'); c.width = W; c.height = H;
+  const ctx = c.getContext('2d'), r = rng(kind);
+  const sky = (stops) => { const g = ctx.createLinearGradient(0, 0, 0, H); stops.forEach(([o, col]) => g.addColorStop(o, col)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); };
+  if (kind === 'ashen') {
+    sky([[0, '#2a0f0c'], [.55, '#7a2a14'], [.8, '#d0652a'], [1, '#f2a24a']]);
+    for (let i = 0; i < 220; i++) { ctx.fillStyle = `rgba(230,200,180,${r() * .35})`; ctx.fillRect(r() * W, r() * H * .8, 2, 2); }
+    ridge(ctx, r, W, 250, 60, 40, '#3a1710');
+    ridge(ctx, r, W, 300, 30, 30, '#1c0b08');
+    ctx.fillStyle = '#0e0605';
+    const kx = 1060; ctx.fillRect(kx, 170, 160, 140);
+    [[kx - 30, 140, 40, 170], [kx + 60, 110, 40, 200], [kx + 150, 140, 40, 170]].forEach(([x, y, w, h]) => {
+      ctx.fillRect(x, y, w, h); for (let i = 0; i < 3; i++) ctx.fillRect(x + i * 15, y - 12, 9, 12);
+    });
+    ctx.fillStyle = 'rgba(255,170,80,.8)'; [[kx + 76, 140], [kx + 20, 210], [kx + 120, 230]].forEach(([x, y]) => ctx.fillRect(x, y, 6, 10));
+    ridge(ctx, r, W, 360, 14, 24, '#070303');
+  } else if (kind === 'starfall') {
+    sky([[0, '#060a1c'], [.6, '#13294a'], [1, '#2f6a74']]);
+    for (let i = 0; i < 380; i++) { const s = r(); ctx.fillStyle = `rgba(255,255,240,${.3 + s * .7})`; ctx.fillRect(r() * W, r() * H * .75, s > .93 ? 3 : 1.5, s > .93 ? 3 : 1.5); }
+    const g = ctx.createLinearGradient(300, 40, 760, 220); g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(1, 'rgba(255,236,190,.95)');
+    ctx.strokeStyle = g; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(300, 40); ctx.lineTo(760, 220); ctx.stroke();
+    ctx.fillStyle = '#fff6d8'; ctx.beginPath(); ctx.arc(762, 221, 6, 0, 7); ctx.fill();
+    ridge(ctx, r, W, 300, 26, 60, '#3a3550');
+    ctx.fillStyle = '#16142a'; ctx.beginPath();
+    ctx.moveTo(380, 330); ctx.quadraticCurveTo(520, 200, 720, 300); ctx.lineTo(700, 330); ctx.closePath(); ctx.fill();
+    for (let i = 0; i < 6; i++) { ctx.fillRect(430 + i * 45, 250 - Math.sin(i / 5 * Math.PI) * 30, 7, 90); }
+    ridge(ctx, r, W, 350, 18, 50, '#0b0a18');
+  } else if (kind === 'lantern') {   // a road at dusk, lanterns along it
+    sky([[0, '#15122a'], [.5, '#3b2a4a'], [.82, '#a0553a'], [1, '#e3954c']]);
+    for (let i = 0; i < 90; i++) { ctx.fillStyle = `rgba(255,240,220,${r() * .6})`; ctx.fillRect(r() * W, r() * H * .45, 1.5, 1.5); }
+    ridge(ctx, r, W, 250, 50, 50, '#2c1f2e');
+    ridge(ctx, r, W, 305, 26, 36, '#180f19');
+    ctx.fillStyle = 'rgba(236,180,110,.32)'; ctx.beginPath();
+    ctx.moveTo(560, 400); ctx.quadraticCurveTo(760, 330, 980, 300); ctx.lineTo(1000, 300); ctx.quadraticCurveTo(820, 340, 760, 400); ctx.closePath(); ctx.fill();
+    ctx.shadowColor = '#ffb36b'; ctx.shadowBlur = 18; ctx.fillStyle = '#ffd08a';
+    [[640, 372], [730, 345], [810, 326], [880, 313], [940, 305], [985, 300]].forEach(([x, y], i) => { ctx.beginPath(); ctx.arc(x, y - 8, 5 - i * .6, 0, 7); ctx.fill(); });
+    ctx.shadowBlur = 0;
+  }
+  return c.toDataURL('image/jpeg', .85);
+}
+
+/* A portrait stand-in: a silhouette against a painted backdrop, rim-lit from the left (where the hearth is), with
+   a few glints. What an uploaded commission, sketch or token would sit in. p: bg, body, rim, gear, motif, glow. */
+function paintPortrait(p) {
+  const W = 480, H = 640, c = document.createElement('canvas'); c.width = W; c.height = H;
+  const ctx = c.getContext('2d'), r = rng(p.seed);
+  let g = ctx.createRadialGradient(W * .38, H * .32, 20, W * .5, H * .5, H * .8);
+  g.addColorStop(0, p.bg[0]); g.addColorStop(1, p.bg[1]); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  motif(ctx, r, p.motif, W, H);
+  figure(ctx, p, -7, -2, p.rim || '#ffb36b');
+  figure(ctx, p, 0, 0, p.body || '#140d09');
+  (p.glow || []).forEach(([x, y, rad, col]) => { ctx.shadowColor = col; ctx.shadowBlur = 18; ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x, y, rad, 0, 7); ctx.fill(); });
+  ctx.shadowBlur = 0;
+  g = ctx.createRadialGradient(W / 2, H * .45, H * .28, W / 2, H * .5, H * .78);
+  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.6)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  return c.toDataURL('image/jpeg', .86);
+}
+function motif(ctx, r, kind, W, H) {
+  if (kind === 'stars') for (let i = 0; i < 170; i++) { const s = r(); ctx.fillStyle = `rgba(255,255,240,${.25 + s * .7})`; ctx.fillRect(r() * W, r() * H * .8, s > .92 ? 3 : 1.5, s > .92 ? 3 : 1.5); }
+  if (kind === 'waves') { ctx.lineWidth = 2; for (let k = 0; k < 9; k++) { ctx.strokeStyle = `rgba(150,215,205,${.12 + r() * .14})`; ctx.beginPath(); const y0 = H * .45 + k * 30, ph = r() * 6;
+    for (let x = 0; x <= W; x += 8) ctx.lineTo(x, y0 + Math.sin(x / 38 + ph) * 8); ctx.stroke(); } }
+  if (kind === 'embers') for (let i = 0; i < 90; i++) { const y = H * (1 - Math.pow(r(), 1.6)); ctx.fillStyle = `rgba(255,${120 + r() * 80 | 0},50,${r() * .8})`; ctx.beginPath(); ctx.arc(r() * W, y, 1 + r() * 2.5, 0, 7); ctx.fill(); }
+  if (kind === 'leaves') for (let i = 0; i < 46; i++) { ctx.save(); ctx.translate(r() * W, r() * H); ctx.rotate(r() * 6); ctx.fillStyle = `rgba(${120 + r() * 70 | 0},${110 + r() * 50 | 0},50,${.25 + r() * .3})`; ctx.beginPath(); ctx.ellipse(0, 0, 9, 4, 0, 0, 7); ctx.fill(); ctx.restore(); }
+  if (kind === 'rain') { ctx.lineWidth = 1.2; for (let i = 0; i < 150; i++) { const x = r() * W, y = r() * H; ctx.strokeStyle = `rgba(200,212,235,${.08 + r() * .16})`; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 9, y + 26); ctx.stroke(); } }
+  if (kind === 'mist') for (let i = 0; i < 14; i++) { const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 120); g.addColorStop(0, 'rgba(220,210,255,.12)'); g.addColorStop(1, 'rgba(220,210,255,0)');
+    ctx.save(); ctx.translate(r() * W, H * .3 + r() * H * .7); ctx.fillStyle = g; ctx.fillRect(-120, -120, 240, 240); ctx.restore(); }
+}
+function figure(ctx, p, dx, dy, col) {
+  const cx = 240; ctx.save(); ctx.translate(dx, dy); ctx.fillStyle = col;
+  const gear = p.gear || '';
+  if (gear.includes('long')) { ctx.beginPath(); ctx.ellipse(cx, 360, 118, 175, 0, 0, 7); ctx.fill(); }
+  ctx.beginPath(); ctx.ellipse(cx, 730, 228, 260, 0, Math.PI, 0); ctx.fill();                       // shoulders
+  ctx.fillRect(cx - 34, 380, 68, 120);                                                            // neck
+  ctx.beginPath(); ctx.ellipse(cx, 300, 82, 104, 0, 0, 7); ctx.fill();                           // head
+  if (gear.includes('ears')) [-1, 1].forEach(s => { ctx.beginPath(); ctx.ellipse(cx + s * 92, 200, 46, 56, s * .4, 0, 7); ctx.fill(); });
+  if (gear.includes('hood')) { ctx.beginPath(); ctx.moveTo(cx - 160, 540); ctx.quadraticCurveTo(cx - 150, 220, cx, 150); ctx.quadraticCurveTo(cx + 150, 220, cx + 160, 540); ctx.closePath(); ctx.fill(); }
+  if (gear.includes('helm')) {
+    ctx.fillRect(cx - 92, 226, 184, 110);
+    if (gear.includes('horns')) [-1, 1].forEach(s => { ctx.beginPath(); ctx.moveTo(cx + s * 78, 250); ctx.quadraticCurveTo(cx + s * 185, 210, cx + s * 160, 100); ctx.quadraticCurveTo(cx + s * 130, 200, cx + s * 58, 222); ctx.closePath(); ctx.fill(); });
+    [-1, 1].forEach(s => { ctx.beginPath(); ctx.ellipse(cx + s * 165, 505, 78, 50, s * .25, 0, 7); ctx.fill(); });
+  }
+  if (gear.includes('wide')) { ctx.beginPath(); ctx.ellipse(cx, 218, 172, 26, -.06, 0, 7); ctx.fill(); ctx.beginPath(); ctx.moveTo(cx - 82, 218); ctx.lineTo(cx - 62, 128); ctx.quadraticCurveTo(cx, 96, cx + 70, 130); ctx.lineTo(cx + 84, 218); ctx.fill(); }
+  if (gear.includes('witch')) { ctx.beginPath(); ctx.ellipse(cx, 222, 165, 24, .05, 0, 7); ctx.fill(); ctx.beginPath(); ctx.moveTo(cx - 86, 222); ctx.quadraticCurveTo(cx - 20, 120, cx + 70, 22); ctx.quadraticCurveTo(cx + 40, 130, cx + 88, 222); ctx.fill(); }
+  if (gear.includes('cloche')) { ctx.beginPath(); ctx.ellipse(cx, 238, 112, 22, 0, 0, 7); ctx.fill(); ctx.beginPath(); ctx.ellipse(cx, 236, 92, 70, 0, Math.PI, 0); ctx.fill(); }
+  if (gear.includes('curls')) for (let i = 0; i < 9; i++) { ctx.beginPath(); ctx.arc(cx - 88 + i * 22, 214 + Math.abs(i - 4) * 9, 22, 0, 7); ctx.fill(); }
+  ctx.restore();
+}
+
+/* ---------------- data (made up, in memory) ---------------- */
+const D = (y, m, d, h = 19, min = 0) => new Date(y, m - 1, d, h, min);
+const TODAY = D(2026, 10, 26, 12);
+// the viewer is Geoff. art: a stand-in for an uploaded 4:1 banner; null = no banner set (the dyed-cloth fallback)
+const CAMPS = {
+  ss: { title: 'Starfall Salvage', init: 'SS', art: 'starfall', cloth: ['#1f4a44', '#0f2422'], game: 'Starfinder', you: 'player' },
+  bb: { title: 'Bones of the Brinewood', init: 'BB', art: null, cloth: ['#2c3a24', '#141c10'], game: 'D&D 5e', you: 'player' },
+  ac: { title: 'Curse of the Ashen Crown', init: 'AC', art: 'ashen', cloth: ['#5a2416', '#2a0f0a'], you: 'dm' },
+  lr: { title: 'The Lantern Road', init: 'LR', art: 'lantern', cloth: ['#3a2a4a', '#1a1222'], game: 'D&D 5e', you: 'player', ended: D(2026, 7, 18) },
+  bw: { title: 'Night at Blackwater Manor', init: 'BW', art: null, cloth: ['#24303a', '#10161c'], game: 'Call of Cthulhu 7e', you: 'player', ended: D(2025, 10, 31), oneShot: true },
+};
+document.head.insertAdjacentHTML('beforeend', `<style>${Object.entries(CAMPS).filter(([, c]) => c.art)
+  .map(([k, c]) => `.bn-${k}{background-image:url(${paintBanner(c.art)})}`).join('\n')}</style>`);
+const banner = c => CAMPS[c].art ? `<span class="bn bn-${c}" aria-hidden="true"></span>`
+  : `<span class="bn is-cloth" aria-hidden="true" style="--c1:${CAMPS[c].cloth[0]};--c2:${CAMPS[c].cloth[1]}"><span>${CAMPS[c].init}</span></span>`;
+
+// every picture becomes a class (.art-<id>), so re-rendering never repeats a data URL. Uploads join the same way.
+const ARTSTYLE = document.createElement('style'); document.head.appendChild(ARTSTYLE);
+let artN = 0;
+function addArt(url, extra = '') { const id = 'a' + (++artN); ARTSTYLE.sheet.insertRule(`.art-${id}{background-image:url(${url});${extra}}`, ARTSTYLE.sheet.cssRules.length); return id; }
+const P = p => addArt(paintPortrait(p));
+const ART = {
+  kestrel: P({ seed: 'kestrel', bg: ['#1d3a5a', '#070b18'], rim: '#8fe3ff', gear: 'ears', motif: 'stars', glow: [[202, 286, 15, 'rgba(150,235,255,.95)'], [278, 286, 15, 'rgba(150,235,255,.95)']] }),
+  odran: P({ seed: 'odran', bg: ['#21423f', '#08130f'], rim: '#a7e0d2', gear: 'hood', motif: 'waves', glow: [[240, 575, 10, 'rgba(120,230,210,.95)']] }),
+  mags: P({ seed: 'mags', bg: ['#6a2c14', '#160805'], gear: 'helm horns', motif: 'embers', glow: [[214, 292, 5, 'rgba(255,190,110,.9)'], [266, 292, 5, 'rgba(255,190,110,.9)']] }),
+  pip: P({ seed: 'pip', bg: ['#4b5a2a', '#121807'], gear: 'wide curls', motif: 'leaves' }),
+  ada: P({ seed: 'ada', bg: ['#33405a', '#0a0e18'], rim: '#d7def0', gear: 'long cloche', motif: 'rain', glow: [[208, 300, 7, 'rgba(235,240,255,.7)'], [272, 300, 7, 'rgba(235,240,255,.7)']] }),
+  // more pieces in a gallery: a scene (the banner art, cropped) and a "sketch" of the portrait
+  kestrelShip: null, kestrelSketch: null, magsSketch: null,
+  // party members' adventurers
+  juno: P({ seed: 'juno', bg: ['#3a2a5a', '#0c0818'], rim: '#ffd0f0', gear: 'long', motif: 'stars' }),
+  brass: P({ seed: 'brass', bg: ['#4a3a1a', '#120c04'], gear: 'helm', motif: 'stars', glow: [[240, 290, 12, 'rgba(255,80,40,.95)']] }),
+  sable: P({ seed: 'sable', bg: ['#1a2a2a', '#050909'], gear: 'wide', motif: 'stars' }),
+  fen: P({ seed: 'fen', bg: ['#2d4a24', '#0b1407'], gear: 'hood', motif: 'leaves' }),
+  maud: P({ seed: 'maud', bg: ['#2a2440', '#0a0812'], rim: '#c8b6ff', gear: 'witch long', motif: 'mist' }),
+  ilse: P({ seed: 'ilse', bg: ['#2a2a50', '#090914'], rim: '#c8d0ff', gear: 'long', motif: 'mist', glow: [[240, 232, 8, 'rgba(160,190,255,.95)']] }),
+  garrick: P({ seed: 'garrick', bg: ['#5a4a22', '#141005'], gear: 'helm', motif: 'embers' }),
+  crane: P({ seed: 'crane', bg: ['#2a3038', '#0a0c10'], rim: '#d7def0', gear: 'wide', motif: 'rain' }),
+};
+ART.kestrelShip = addArt(paintBanner('starfall'), 'background-position:30% 50%');
+ART.kestrelSketch = addArt(paintPortrait({ seed: 'kestrel-2', bg: ['#e6d6b0', '#a88f62'], body: '#3a2a1a', rim: '#f6ecd2', gear: 'ears', motif: 'none' }));
+ART.magsSketch = addArt(paintBanner('lantern'), 'background-position:62% 50%');
+
+const SESSIONS = [];
+const sess = (camp, n, title, date, status = 'completed', extra = {}) => SESSIONS.push({ id: `${camp}-${n}`, camp, n, title: title ? `Session ${n}: ${title}` : `Session ${n}`, date, status, ...extra });
+['Salvage Rights', 'The Cold Hulk', 'Dock Fees', 'Pirates of the Belt', 'A Debt Called In', 'The Signal'].forEach((t, i) => sess('ss', i + 1, t, D(2026, 8, 4 + i * 14, 19, 30), 'completed', { online: true }));
+sess('ss', 7, 'Into the Hold', D(2026, 11, 3, 19, 30), 'scheduled', { online: true });
+sess('ss', 8, '', D(2026, 11, 10, 19, 30), 'cancelled', { online: true });
+sess('ss', 9, 'The Calling', D(2026, 11, 17, 19, 30), 'scheduled', { online: true });
+SESSIONS.push({ id: 'bb-1', camp: 'bb', n: 1, title: 'The Drowned Wood', date: D(2026, 11, 7, 13), status: 'scheduled', location: 'The Gilded Flagon' });
+['Lanterns Lit', 'The Toll Bridge', 'Wolves at Merrow', 'The Hollow Inn', 'A Fair at Dunmere', 'The Pale Ferryman', 'Bandit Country', 'The Old Mill', 'The Bridge at Carrow',
+  'A New Lantern', 'The Ashwater', 'The Monastery', 'Fog on the Moor', 'The Witch of Hale', 'Ransom', 'The Long Night', 'The Gates of Carrow', 'The Last Nine Miles']
+  .forEach((t, i) => sess('lr', i + 1, t, new Date(2025, 10, 8 + i * 14, 18, 30), 'completed', { location: i % 2 ? "Priya's place" : "Geoff's place" }));
+SESSIONS.push({ id: 'bw-1', camp: 'bw', n: 1, title: 'Night at Blackwater Manor', date: D(2025, 10, 31, 20), status: 'completed', location: "Theo's place" });
+
+// levels: [after which session (null = made at), level]. No level at all: a game without them.
+const CHARS = [
+  { id: 'kestrel', name: 'Kestrel Vane', cls: 'Void Pilot', level: 5, system: 'Starfinder', camp: 'ss', status: 'active', made: D(2026, 8, 1),
+    epithet: 'Flies anything with an engine, and owes money to most of the people who built them.',
+    link: 'https://app.demiplane.com/nexus/starfinder/character-sheet/kestrel', linkName: 'Demiplane',
+    traits: [['Ancestry', 'Ysoki'], ['Ship', "The Gull's Wager"], ['Owes', '4,000 credits to the Ferro Syndicate']],
+    story: 'Grew up in the ducts of Absalom Station. Won the Gull\'s Wager in a card game she is fairly sure was rigged in her favour, which worries her more than if it hadn\'t been.',
+    art: [ART.kestrel, ART.kestrelShip, ART.kestrelSketch], artCaps: ['Portrait by Priya', 'The Gull\'s Wager', 'First sketch'],
+    played: ['ss-1', 'ss-2', 'ss-3', 'ss-4', 'ss-5', 'ss-6'], levels: [[null, 2], ['ss-2', 3], ['ss-4', 4], ['ss-6', 5]] },
+  { id: 'odran', name: 'Brother Odran', cls: 'Cleric', level: 3, system: 'D&D 5e', camp: 'bb', status: 'active', made: D(2026, 10, 19),
+    epithet: 'A drowned man the sea gave back. He hasn\'t said what it asked for in return.',
+    link: 'https://www.dndbeyond.com/characters/odran', linkName: 'D&D Beyond',
+    traits: [['Ancestry', 'Human'], ['God', 'The Drowned Saint']], story: '',
+    art: [ART.odran], artCaps: [''], played: [], levels: [[null, 3]] },
+  { id: 'wren', name: 'Wren Ashdown', cls: 'Bard', level: 1, system: 'D&D 5e', camp: null, status: 'active', made: D(2026, 10, 24),
+    epithet: '', link: '', traits: [], story: '', art: [], artCaps: [], played: [], levels: [[null, 1]] },
+  { id: 'mags', name: 'Mags Ironhollow', cls: 'Fighter', level: 11, system: 'D&D 5e', camp: 'lr', status: 'retired', made: D(2026, 3, 20),
+    epithet: 'Carried the lantern the last nine miles. Keeps an inn at Carrow now.',
+    link: 'https://www.dndbeyond.com/characters/mags', linkName: 'D&D Beyond',
+    traits: [['Ancestry', 'Dwarf'], ['Inn', 'The Ninth Mile, Carrow']],
+    story: 'Joined the road at the Ashwater when the party needed someone who would stand on a bridge and not move. Retired when the road ended.',
+    art: [ART.mags, ART.magsSketch], artCaps: ['Portrait', 'The last nine miles'],
+    played: ['lr-10', 'lr-11', 'lr-12', 'lr-13', 'lr-14', 'lr-15', 'lr-16', 'lr-17', 'lr-18'], levels: [[null, 7], ['lr-11', 8], ['lr-13', 9], ['lr-15', 10], ['lr-17', 11]] },
+  { id: 'ada', name: 'Dr. Ada Marsh', cls: 'Antiquarian', level: null, system: 'Call of Cthulhu 7e', camp: 'bw', status: 'retired', made: D(2025, 10, 25),
+    epithet: 'Survived Blackwater Manor. Doesn\'t talk about the cellar.', link: '', traits: [['Sanity', '31, from 65'], ['Era', '1920s Boston']],
+    story: '', art: [ART.ada], artCaps: [''], played: ['bw-1'], levels: [] },
+  { id: 'pip', name: 'Pip Thistlewick', cls: 'Rogue', level: 6, system: 'D&D 5e', camp: 'lr', status: 'fallen', fellIn: 'lr-9', made: D(2025, 11, 1),
+    epithet: 'Never met a lock he liked. Met a bridge he didn\'t.', link: 'https://www.dndbeyond.com/characters/pip', linkName: 'D&D Beyond',
+    traits: [['Ancestry', 'Halfling'], ['Last words', '"It\'ll hold."']], story: '',
+    art: [ART.pip], artCaps: [''], played: ['lr-1', 'lr-2', 'lr-3', 'lr-4', 'lr-5', 'lr-6', 'lr-7', 'lr-8', 'lr-9'], levels: [[null, 1], ['lr-2', 2], ['lr-3', 3], ['lr-5', 4], ['lr-7', 5], ['lr-8', 6]] },
+];
+// the rest of each party: other players' adventurers (read-only here)
+const PARTY = {
+  ss: [{ name: 'Juno Okafor', cls: 'Medic · Level 5', player: 'Priya', art: ART.juno }, { name: 'Brass', cls: 'Mechanic · Level 5', player: 'Theo', art: ART.brass }, { name: 'Sable', cls: 'Smuggler · Level 5', player: 'Marco', art: ART.sable }],
+  bb: [{ name: 'Fen', cls: 'Ranger · Level 3', player: 'Priya', art: ART.fen }, { name: 'Old Maud', cls: 'Warlock · Level 3', player: 'Avery', art: ART.maud }],
+  lr: [{ name: 'Ilse of Dunmere', cls: 'Wizard · Level 11', player: 'Priya', art: ART.ilse }, { name: 'Garrick', cls: 'Paladin · Level 11', player: 'Theo', art: ART.garrick }],
+  bw: [{ name: 'Father Crane', cls: 'Priest', player: 'Theo', art: ART.crane }, { name: 'Dot Hale', cls: 'Journalist', player: 'Priya', art: null }],
+};
+// your quests (the rail's Your Quests); some are for an adventurer's next session
+const QUESTS = [
+  { id: 'q2', title: 'Prep the table', tag: 'Host', due: D(2026, 10, 31, 17, 30), for: 'Session 14 · Curse of the Ashen Crown', status: 'open' },
+  { id: 'q5', title: 'Level Kestrel up to 6', notes: 'Pick the new feat before the session.', due: D(2026, 11, 2, 21), for: 'Session 7 · Starfall Salvage', session: 'ss-7', status: 'open' },
+  { id: 'q4', title: 'Bring the cider', due: D(2026, 10, 31, 18, 30), for: 'Session 14 · Curse of the Ashen Crown', status: 'open' },
+  { id: 'q7', title: 'Bring chips and dip', due: null, for: 'The Drowned Wood · Bones of the Brinewood', session: 'bb-1', status: 'open' },
+];
+
+/* ---------------- prototype state ---------------- */
+const VARIANTS = [
+  { key: 'A', name: 'Portrait gallery', note: 'Art first: portraits hung on the floor' },
+  { key: 'B', name: 'Ledger and sheet', note: 'Words first: a roster, and a parchment sheet' },
+  { key: 'C', name: 'The road so far', note: 'History first: by campaign, and a timeline' },
+];
+const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+const qs0 = new URLSearchParams(location.search);
+let variant = VARIANTS.findIndex(v => v.key === (qs0.get('variant') || store.get('hs-adv-variant')));
+if (variant < 0) variant = 0;
+let sel = qs0.get('adventurer');              // an adventurer's own page (A, C) or sheet (B); null = the roster
+let empty = store.get('hs-adv-data') === 'empty';   // a new player with no adventurers yet
+let aArt = 0;          // A: which piece of art is in the big frame
+let bTab = 'active';   // B: Adventuring | Retired & fallen
+let draft = null;      // the editor's working copy
+
+/* ---------------- helpers ---------------- */
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const tm = d => { const h = d.getHours(), m = d.getMinutes(); return `${h % 12 || 12}${m ? ':' + String(m).padStart(2, '0') : ''} ${h < 12 ? 'am' : 'pm'}`; };
+const dayLabel = d => `${WD[d.getDay()]} ${MON[d.getMonth()]} ${d.getDate()}`;
+const shortDate = d => `${MON[d.getMonth()]} ${d.getDate()}${d.getFullYear() !== TODAY.getFullYear() ? ', ' + d.getFullYear() : ''}`;
+const monthYear = d => `${MONL[d.getMonth()]} ${d.getFullYear()}`;
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+
+const mine = () => empty ? [] : CHARS;
+const C = id => mine().find(c => c.id === id);
+const S = id => SESSIONS.find(s => s.id === id);
+const isActive = c => c.status === 'active';
+const shortS = s => s.title.replace(/:.*/, '');
+const where = s => s.online ? 'Online' : s.location || 'Place to be decided';
+const playedOf = c => c.played.map(S).sort((a, b) => b.date - a.date);    // newest first
+const nextOf = c => isActive(c) && c.camp ? SESSIONS.filter(s => s.camp === c.camp && s.status === 'scheduled' && s.date >= TODAY).sort((a, b) => a.date - b.date)[0] : null;
+const clsLine = c => [c.cls, c.level != null && c.level !== '' ? `Level ${c.level}` : ''].filter(Boolean).join(' · ') || 'No class set';
+const statusLine = c => c.status === 'fallen' ? (c.fellIn ? `Fell in ${shortS(S(c.fellIn))}` : 'Fallen') : c.status === 'retired' ? 'Retired' : 'Adventuring';
+const initials = n => n.split(/\s+/).filter(w => /^[A-Za-z]/.test(w) && !/^(Dr|Mr|Mrs|Ms|Sir|Brother|Sister|Father)\.?$/.test(w)).map(w => w[0]).slice(0, 2).join('').toUpperCase() || n.slice(0, 1);
+const levelUps = c => c.levels.filter(([s]) => s).length;
+const questsFor = s => s ? QUESTS.filter(q => q.session === s.id) : [];
+const host = c => c.linkName || (() => { try { return new URL(c.link).hostname.replace(/^www\./, ''); } catch { return 'the web'; } })();
+const counts = () => { const l = mine(); return { act: l.filter(isActive).length, ret: l.filter(c => c.status === 'retired').length, fell: l.filter(c => c.status === 'fallen').length }; };
+
+/* a portrait: the first piece of art, or the cloth with the initials stitched on */
+const pt = (c, face = false, i = 0) => `<span class="pt ${face ? 'is-face' : ''}">${c.art.length ? `<span class="art art-${c.art[Math.min(i, c.art.length - 1)]}"></span>` : `<span class="pt-none"><span>${esc(initials(c.name))}</span></span>`}</span>`;
+const matePt = m => pt({ name: m.name, art: m.art ? [m.art] : [] }, true);
+const lvl = c => c.level != null && c.level !== '' ? `<span class="lvl is-${c.status}" aria-label="Level ${c.level}"><small>Level</small><b>${esc(c.level)}</b></span>` : '';
+const box = q => `<button class="hs-box" role="checkbox" aria-checked="${q.status === 'done'}" data-q="${q.id}" aria-label="${esc(q.title)}: mark ${q.status === 'done' ? 'not done' : 'done'}"></button>`;
+const nextQuests = s => { const qs = questsFor(s); return qs.length ? `<ul class="nq">${qs.map(q => `<li class="${q.status === 'done' ? 'is-done' : ''}">${box(q)}<span>${esc(q.title)}<small>${q.due ? `Due ${dayLabel(q.due)}, ${tm(q.due)}` : 'Your quest'}</small></span></li>`).join('')}</ul>` : ''; };
+/* the level they reached after a session, if they did */
+const reachedAfter = (c, s) => (c.levels.find(([id]) => id === s.id) || [])[1];
+const campLink = k => k ? `<button type="button" class="p-link" data-camp="${k}" style="display:inline-flex;align-items:center;gap:7px;text-align:left;font-size:14.5px;font-family:var(--font-body);letter-spacing:0"><span class="thumb">${banner(k)}</span> ${esc(CAMPS[k].title)}</button>` : '<span style="color:var(--muted)">Not in a campaign yet</span>';
+const sheetLink = c => c.link ? `<a class="p-link ext" href="#" data-ext="${esc(c.id)}">The full sheet, on ${esc(host(c))}</a>` : '';
+const newBtn = () => '<button type="button" class="hs-btn-amber p-new" data-new="1">New adventurer</button>';
+const backBtn = () => '<button type="button" class="hs-btn-amber p-back" data-back="1">← All adventurers</button>';
+function head(controls = newBtn()) {
+  const n = counts(), bits = [n.ret && `${n.ret} retired`, n.fell && `${n.fell} fallen`].filter(Boolean);
+  const sub = mine().length ? `<b>${n.act} adventuring</b>${bits.length ? ' · ' + bits.join(' · ') : ''}` : 'Nobody yet';
+  return `<header class="hs-page-head p-head"><div><h1>Adventurers</h1><p>${sub}</p></div>${controls}</header>`;
+}
+function emptyState() {
+  return `<section class="empty"><span class="gframe"><span class="pt"><span class="pt-none"><span>?</span></span></span></span>
+    <div><h2>Your first adventurer</h2><p>Give them a name and a picture, and say what they are in your game's own words. Everything else can wait.</p>${newBtn()}</div></section>`;
+}
+/* the player's own details, then the facts every adventurer has */
+const facts = c => [
+  ['Campaign', campLink(c.camp)],
+  ['Game', c.system ? esc(c.system) : '<span style="color:var(--muted)">Not set</span>'],
+  ['Status', esc(statusLine(c))],
+  ...c.traits.filter(([k, v]) => k || v).map(([k, v]) => [esc(k), esc(v), 'is-own']),
+];
+const dl = rows => `<dl class="dl">${rows.map(([k, v, cls]) => `<div class="${cls || ''}"><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>`;
+const mates = k => PARTY[k] ? `<div class="mates">${PARTY[k].map((m, i) => `<button type="button" class="mate" data-mate="${k}/${i}"><span class="medal">${matePt(m)}</span>
+  <span><b>${esc(m.name)}</b><small>${esc(m.cls)} · ${esc(m.player)}</small></span></button>`).join('')}</div>` : '';
+
+/* ---------------- A: Portrait gallery ---------------- */
+function VariantA() {
+  const c = sel && C(sel);
+  if (c) return aPage(c);
+  const list = mine();
+  if (!list.length) return head('') + emptyState();
+  const act = list.filter(isActive), past = list.filter(c => !isActive(c));
+  const card = c => { const nx = nextOf(c);
+    return `<button type="button" class="va-card is-${c.status}" data-sel="${c.id}">
+      <span class="gframe">${pt(c)}${c.status === 'fallen' ? '<span class="va-ribbon">Fallen</span>' : ''}</span>
+      <span class="va-plate"><b>${esc(c.name)}</b><small>${esc(clsLine(c))}</small></span>
+      <span class="va-under">${nx ? `<b>Next: ${dayLabel(nx.date)}</b>` : ''}${c.camp ? esc(CAMPS[c.camp].title) : 'Not in a campaign yet'}</span></button>`; };
+  const n = counts();
+  return head() + `<section aria-label="Adventuring"><div class="va-wall">${act.map(card).join('')}</div></section>
+    ${past.length ? `<section><h2 class="hs-sec"><span>The Hall of Heroes</span><span class="hs-aside">${[n.ret && `${n.ret} retired`, n.fell && `${n.fell} fallen`].filter(Boolean).join(' · ')}</span></h2>
+      <div class="va-wall">${past.map(card).join('')}</div></section>` : ''}`;
+}
+function aPage(c) {
+  const i = Math.min(aArt, Math.max(0, c.art.length - 1));
+  const nx = nextOf(c), pl = playedOf(c);
+  const sessRow = (s, next) => { const up = reachedAfter(c, s);
+    return `<li class="${next ? 'is-next' : ''}"><time>${next ? 'Next · ' : ''}${shortDate(s.date)}</time>
+      <div style="min-width:0"><b>${esc(s.title)}</b><small>${esc(CAMPS[s.camp].title)} · ${next ? `${tm(s.date)} · ` : ''}${esc(where(s))}</small>${next ? nextQuests(s) : ''}</div>
+      ${c.fellIn === s.id ? '<span class="hs-tag">Fell here</span>' : up ? `<span class="hs-tag is-up">Level ${up}</span>` : next ? '' : '<span></span>'}</li>`; };
+  return `<header class="hs-page-head">${backBtn()}<h1>${esc(c.name)}</h1>${c.epithet ? `<p>${esc(c.epithet)}</p>` : ''}</header>
+    <div class="ad is-${c.status}">
+      <div class="ad-art">
+        <span class="gframe ad-main">${pt(c, false, i)}${c.status === 'fallen' ? '<span class="va-ribbon">Fallen</span>' : ''}</span>
+        <div class="ad-strip">${c.art.map((a, j) => `<button type="button" class="ad-th ${j === i ? 'is-on' : ''}" data-art="${j}" aria-label="Show art ${j + 1}${c.artCaps[j] ? ': ' + esc(c.artCaps[j]) : ''}" aria-pressed="${j === i}"><span class="art art-${a}"></span></button>`).join('')}
+          <label class="ad-th ad-add" title="Add art">+<input type="file" accept="image/*" data-addart="${c.id}" style="position:absolute;width:1px;height:1px;opacity:0"></label></div>
+        <div class="ad-artnote"><span>${c.art.length ? esc(c.artCaps[i] || `Art ${i + 1} of ${c.art.length}`) : 'No art yet: add a portrait'}</span>
+          ${i > 0 ? '<button type="button" class="p-link" data-mkpt="1">Make this the portrait</button>' : ''}</div>
+      </div>
+      <div class="ad-info">
+        <div class="hs-gilded">
+          <div class="ad-id">${lvl(c)}<div><b>${esc(c.cls || 'No class set')}</b><small>${esc(c.system || 'No game set')} · played by you</small></div></div>
+          ${dl(facts(c))}
+          ${c.story ? `<div class="p-panel-h" style="border-top:1px solid var(--gold-rule)"><span>Their story</span></div><p class="story">${esc(c.story)}</p>` : ''}
+          <div class="ad-foot">${sheetLink(c) || '<span></span>'}<button type="button" class="hs-btn-amber" data-edit="${c.id}">Edit</button></div>
+        </div>
+        ${c.camp ? `<section><h2 class="hs-sec"><span>The party</span><span class="hs-aside">${CAMPS[c.camp].ended ? 'Finished ' + monthYear(CAMPS[c.camp].ended) : plural((PARTY[c.camp] || []).length + 1, 'adventurer')}</span></h2>
+          <div class="hs-gilded ad-camp"><button type="button" class="ad-bn" data-camp="${c.camp}">${banner(c.camp)}<span class="t"><b>${esc(CAMPS[c.camp].title)}</b><small>${plural(pl.length, 'session')} played${pl.length ? ` · since ${monthYear(pl[pl.length - 1].date)}` : ''}</small></span></button>${mates(c.camp)}</div></section>` : ''}
+      </div>
+    </div>
+    <section><h2 class="hs-sec"><span>Sessions</span><span class="hs-aside">${`${pl.length} played`}${nx ? ` · next ${dayLabel(nx.date)}` : ''}</span></h2>
+      <div class="hs-gilded">${nx || pl.length ? `<ul class="ad-sess">${nx ? sessRow(nx, true) : ''}${pl.map(s => sessRow(s)).join('')}</ul>`
+        : `<div class="p-empty">${c.camp ? 'No sessions yet.' : 'Not in a campaign yet. Join one, and the sessions they play show up here.'}</div>`}</div></section>`;
+}
+
+/* ---------------- B: Ledger and sheet ---------------- */
+function VariantB() {
+  const list = mine();
+  if (!list.length) return head('') + emptyState();
+  let c = sel && C(sel);
+  if (c) bTab = isActive(c) ? 'active' : 'past';
+  const inTab = list.filter(x => (bTab === 'active') === isActive(x));
+  if (!c) c = inTab[0] || list[0];
+  const n = counts();
+  const row = x => { const nx = nextOf(x);
+    return `<li><button type="button" class="vb-row is-${x.status}" data-pick="${x.id}" aria-pressed="${x.id === c.id}">
+      <span class="medal">${pt(x, true)}</span>
+      <span class="vb-n"><b>${esc(x.name)}</b><small>${esc(clsLine(x))}${x.system ? ' · ' + esc(x.system) : ''}</small></span>
+      <span class="vb-c">${x.camp ? `<span class="thumb">${banner(x.camp)}</span><span>${esc(CAMPS[x.camp].title)}</span>` : '<span style="color:var(--muted)">Not in a campaign yet</span>'}</span>
+      <span class="vb-s ${nx ? '' : 'is-off'}">${nx ? `Next ${dayLabel(nx.date)}` : isActive(x) ? 'No session set' : esc(statusLine(x))}</span></button></li>`; };
+  return head() + `<div class="hs-gilded vb-ledger">
+      <div class="hs-tabs" role="tablist" aria-label="Which adventurers">
+        <button role="tab" type="button" aria-selected="${bTab === 'active'}" data-btab="active">Adventuring<span>${n.act}</span></button>
+        <button role="tab" type="button" aria-selected="${bTab === 'past'}" data-btab="past">Retired and fallen<span>${n.ret + n.fell}</span></button></div>
+      <ul class="vb-rows">${inTab.map(row).join('') || '<li class="p-empty">Nobody here.</li>'}</ul></div>
+    <section aria-label="${esc(c.name)}'s sheet"><div class="p-sheets">${bSheet(c)}</div></section>`;
+}
+function bSheet(c) {
+  const nx = nextOf(c), pl = playedOf(c);
+  const ledger = [['Class', c.cls || '—'], ['Level', c.level != null && c.level !== '' ? c.level : 'No levels in this game'], ['Campaign', c.camp ? CAMPS[c.camp].title : 'Not in a campaign yet'],
+    ['Played by', 'You'], ['Status', statusLine(c)], ...c.traits.filter(([k, v]) => k || v)];
+  return `<article class="hs-sheet vb-sheet is-${c.status}" data-seed="adventurer/${c.id}">
+    <div class="vb-top">
+      <header><div class="hs-kicker">Adventurer${c.system ? ' · ' + esc(c.system) : ''}</div>
+        <h3 class="hs-sheet-title">${esc(c.name)}</h3>${c.epithet ? `<div class="hs-byline">${esc(c.epithet)}</div>` : ''}</header>
+      <span class="vb-photo">${pt(c)}<span class="vb-cap">${esc(c.art.length ? c.artCaps[0] || '' : 'No portrait yet')}</span></span>
+    </div>
+    <ul class="hs-ledger">${ledger.map(([k, v]) => `<li><span>${esc(k)}</span><span>${esc(v)}</span></li>`).join('')}</ul>
+    ${c.link ? `<p class="vb-kept">The full sheet is kept on <a href="#" data-ext="${c.id}" class="ext">${esc(host(c))}</a>.</p>` : ''}
+    ${c.story ? `<div class="vb-h">Their story</div><p class="vb-story">${esc(c.story)}</p>` : ''}
+    <div class="vb-h">Sessions · ${`${pl.length} played`}</div>
+    ${nx || pl.length ? `<ul class="vb-sess">${nx ? `<li class="is-next"><time>Next · ${shortDate(nx.date)}</time><div><b>${esc(nx.title)}</b><small>${esc(CAMPS[nx.camp].title)} · ${tm(nx.date)} · ${esc(where(nx))}</small>${nextQuests(nx)}</div></li>` : ''}
+      ${pl.map(s => { const up = reachedAfter(c, s); return `<li><time>${shortDate(s.date)}</time><div><b>${esc(s.title)}</b>${c.fellIn === s.id ? '<span class="hs-tag">Fell here</span>' : up ? `<span class="hs-tag">Level ${up}</span>` : ''}<small>${esc(CAMPS[s.camp].title)} · ${esc(where(s))}</small></div></li>`; }).join('')}</ul>`
+      : `<p class="vb-kept" style="margin-top:4px">${c.camp ? 'None yet.' : 'Not in a campaign yet. Join one, and the sessions they play are written here.'}</p>`}
+    ${c.art.length > 1 ? `<div class="vb-h">Art · ${c.art.length}</div><div class="vb-arts">${c.art.map((a, j) => `<button type="button" class="vb-photo" data-zoom="${j}" aria-label="${esc(c.artCaps[j] || 'Art ' + (j + 1))}"><span class="pt"><span class="art art-${a}"></span></span></button>`).join('')}</div>` : ''}
+    <div class="hs-btn-row"><button type="button" class="hs-btn is-primary" data-edit="${c.id}">Edit the sheet</button>
+      <label class="hs-btn" style="display:inline-flex;align-items:center">Add art<input type="file" accept="image/*" data-addart="${c.id}" style="position:absolute;width:1px;height:1px;opacity:0"></label></div>
+  </article>`;
+}
+
+/* ---------------- C: The road so far ---------------- */
+function VariantC() {
+  const c = sel && C(sel);
+  if (c) return cPage(c);
+  const list = mine();
+  if (!list.length) return head('') + emptyState();
+  const you = x => `<button type="button" class="vc-you is-${x.status}" data-sel="${x.id}"><span class="medal">${pt(x, true)}</span>
+      <span><b>${esc(x.name)}</b><small>${esc(clsLine(x))}</small><small class="st">${nextOf(x) ? `Next ${dayLabel(nextOf(x).date)}` : esc(statusLine(x))}</small></span></button>`;
+  const camp = k => { const yours = list.filter(x => x.camp === k), cm = CAMPS[k], nx = yours.map(nextOf).filter(Boolean)[0];
+    const sub = cm.ended ? `${cm.oneShot ? 'One-shot' : 'Finished'} · ${monthYear(cm.ended)}` : nx ? `Next: ${dayLabel(nx.date)}, ${tm(nx.date)}` : 'No session set';
+    return `<div class="hs-gilded vc-camp"><button type="button" class="vc-bn ${cm.ended ? 'is-done' : ''}" data-camp="${k}">${banner(k)}<span class="t"><b>${esc(cm.title)}</b><small>${sub}</small></span></button>
+      <div class="vc-party">${yours.map(you).join('')}
+        ${PARTY[k] ? `<div class="vc-with"><span class="vc-with-h">${cm.ended ? 'Travelled with' : 'Travels with'}</span>${PARTY[k].map((m, i) => `<button type="button" class="mate" data-mate="${k}/${i}"><span class="medal">${matePt(m)}</span><span><b>${esc(m.name)}</b><small>${esc(m.player)}</small></span></button>`).join('')}</div>` : ''}</div></div>`; };
+  const live = Object.keys(CAMPS).filter(k => !CAMPS[k].ended && list.some(x => x.camp === k));
+  const done = Object.keys(CAMPS).filter(k => CAMPS[k].ended && list.some(x => x.camp === k));
+  const loose = list.filter(x => !x.camp);
+  const dm = Object.keys(CAMPS).filter(k => CAMPS[k].you === 'dm');
+  return head() + `<section class="vc-group"><h2 class="hs-sec" style="margin:0"><span>On the road</span><span class="hs-aside">${plural(live.length, 'campaign')}</span></h2>
+      ${live.map(camp).join('')}
+      ${dm.map(k => `<div class="hs-gilded vc-dm"><span class="thumb">${banner(k)}</span><span>You run <b style="color:var(--text);font-weight:500">${esc(CAMPS[k].title)}</b>, so you have no adventurer in it.</span></div>`).join('')}</section>
+    ${loose.length ? `<section><h2 class="hs-sec"><span>Between adventures</span><span class="hs-aside">not in a campaign yet</span></h2>
+      <div class="hs-gilded"><div class="vc-party" style="padding:14px">${loose.map(x => you(x).replace('class="medal"', 'class="medal" style="margin-top:0"')).join('')}</div></div></section>` : ''}
+    ${done.length ? `<section class="vc-group"><h2 class="hs-sec" style="margin:0"><span>Tales told</span><span class="hs-aside">${plural(done.length, 'campaign')} finished</span></h2>${done.map(camp).join('')}</section>` : ''}`;
+}
+function cPage(c) {
+  const nx = nextOf(c), pl = playedOf(c);
+  // the road, newest first: the next session, then each one played with the levels reached after it, back to the start
+  const stops = [];
+  if (nx) stops.push(`<li class="is-next"><span class="vc-node"></span><div><time>Next · ${dayLabel(nx.date)}, ${tm(nx.date)}</time><b>${esc(nx.title)}</b><small>${esc(where(nx))}</small>${nextQuests(nx)}</div></li>`);
+  if (c.status === 'fallen' && c.fellIn) stops.push(`<li class="is-fell"><span class="vc-node"></span><div><time>${shortDate(S(c.fellIn).date)}</time><b>Fell at ${esc(S(c.fellIn).title.replace(/^Session \d+: /, ''))}</b><small>${esc(c.traits.find(([k]) => k === 'Last words')?.[1] || '')}</small></div></li>`);
+  if (c.status === 'retired') stops.push(`<li class="is-mark"><span class="vc-node"></span><div><b>Retired${CAMPS[c.camp]?.ended ? ` when ${esc(CAMPS[c.camp].title)} ended, ${monthYear(CAMPS[c.camp].ended)}` : ''}</b></div></li>`);
+  pl.forEach(s => {
+    const up = reachedAfter(c, s);
+    if (up) stops.push(`<li class="is-lvl"><span class="vc-node"></span><div><b>Reached level ${up}</b></div></li>`);
+    stops.push(`<li><span class="vc-node"></span><div><time>${dayLabel(s.date)}${s.date.getFullYear() !== TODAY.getFullYear() ? ', ' + s.date.getFullYear() : ''}</time><b>${esc(s.title)}</b>
+      <button type="button" class="p-link" data-session="${s.id}">Recap</button></div></li>`);
+  });
+  if (c.camp) stops.push(`<li class="is-mark"><span class="vc-node"></span><div><b>${pl.length ? 'Joined' : 'Will join'} ${esc(CAMPS[c.camp].title)}${c.levels[0] ? ` at level ${c.levels[0][1]}` : ''}</b></div></li>`);
+  stops.push(`<li class="is-mark"><span class="vc-node"></span><div><b>Made ${shortDate(c.made)}</b></div></li>`);
+  return `<header class="hs-page-head">${backBtn()}</header>
+    <div class="hs-gilded vc-hero is-${c.status}"><span class="vc-hero-bg">${c.art.length ? `<span class="art art-${c.art[0]}"></span>` : ''}</span>
+      <div class="vc-hero-in"><span class="medal">${pt(c, true)}</span>
+        <div style="min-width:0"><h1>${esc(c.name)}</h1><p class="k">${esc(clsLine(c))}${c.system ? ' · ' + esc(c.system) : ''}</p>${c.epithet ? `<p class="e">${esc(c.epithet)}</p>` : ''}</div>${lvl(c)}</div></div>
+    <div class="vc-cols">
+      <section><h2 class="hs-sec"><span>The road so far</span><span class="hs-aside">${plural(pl.length, 'session')}${levelUps(c) ? ` · ${plural(levelUps(c), 'level')} gained` : ''}</span></h2>
+        <div class="hs-gilded"><ol class="vc-road">${stops.join('')}</ol></div></section>
+      <section><h2 class="hs-sec"><span>Their sheet</span></h2>
+        <div class="hs-gilded">${dl([['Played by', 'You'], ...facts(c)])}
+          ${c.story ? `<div class="p-panel-h" style="border-top:1px solid var(--gold-rule)"><span>Their story</span></div><p class="story">${esc(c.story)}</p>` : ''}
+          <div class="p-panel-h" style="border-top:1px solid var(--gold-rule)"><span>Art · ${c.art.length}</span></div>
+          <div class="vc-arts">${c.art.map((a, j) => `<button type="button" class="ad-th ${j === 0 ? 'is-on' : ''}" data-zoom="${j}" aria-label="${esc(c.artCaps[j] || 'Art ' + (j + 1))}"><span class="art art-${a}"></span></button>`).join('')}
+            <label class="ad-th ad-add" title="Add art">+<input type="file" accept="image/*" data-addart="${c.id}" style="position:absolute;width:1px;height:1px;opacity:0"></label></div>
+          <div class="ad-foot">${sheetLink(c) || '<span></span>'}<button type="button" class="hs-btn-amber" data-edit="${c.id}">Edit</button></div></div>
+        ${c.camp ? `<h2 class="hs-sec" style="margin-top:var(--space-5)"><span>${CAMPS[c.camp].ended ? 'Travelled with' : 'Travels with'}</span></h2><div class="hs-gilded">${mates(c.camp) || '<div class="p-empty">Nobody else yet.</div>'}</div>` : ''}
+      </section>
+    </div>`;
+}
+
+/* ---------------- the editor (shared by every layout). Only a name is required. ---------------- */
+const SYSTEMS = () => [...new Set(CHARS.map(c => c.system).filter(Boolean).concat(['Pathfinder 2e', 'Blades in the Dark', 'Mothership', 'Cyberpunk RED']))];
+function openEditor(id) {
+  const c = id ? CHARS.find(x => x.id === id) : null;
+  draft = c ? { ...c, traits: c.traits.map(t => [...t]), art: [...c.art], artCaps: [...c.artCaps] }
+    : { id: null, name: '', cls: '', level: '', system: '', camp: '', status: 'active', epithet: '', link: '', traits: [['', '']], story: '', art: [], artCaps: [] };
+  renderDlg(); document.getElementById('f-name')?.focus();
+}
+function renderDlg() {
+  const el = document.getElementById('dlg'), d = draft;
+  if (!d) { el.hidden = true; el.innerHTML = ''; return; }
+  const v = k => esc(d[k] ?? '');
+  const campPlayed = d.camp ? SESSIONS.filter(s => s.camp === d.camp && s.status === 'completed') : [];
+  el.hidden = false;
+  el.innerHTML = `<div class="dlg-back" data-dlgbg="1"><div class="hs-gilded dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-t">
+    <div class="dlg-h"><h2 id="dlg-t">${d.id ? 'Edit ' + esc(d.name || 'adventurer') : 'A new adventurer'}</h2><button type="button" class="hs-back" data-dlgclose="1" aria-label="Close">×</button></div>
+    <form class="dlg-body" id="dlg-form" novalidate>
+      <div class="dlg-top"><span class="gframe">${pt({ name: d.name || '?', art: d.art })}</span>
+        <div><div class="fld"><label for="f-name">Name</label><input id="f-name" name="name" required autocomplete="off" value="${v('name')}" placeholder="What the party calls them"></div>
+          <label class="up">${d.art.length ? 'Change the portrait' : 'Add a portrait'}<input type="file" accept="image/*" id="f-art"></label>
+          <small class="h" style="display:block;margin-top:6px">Any picture: a commission, a sketch, a token. It shows 3 by 4.</small></div></div>
+      <div class="fld-wrap"><div class="fld-row"><div class="fld"><label for="f-cls">Class, role or calling</label><input id="f-cls" name="cls" value="${v('cls')}" placeholder="Paladin, Netrunner, Investigator"></div>
+        <div class="fld"><label for="f-lv">Level</label><input id="f-lv" name="level" type="number" min="0" max="99" inputmode="numeric" value="${v('level')}" placeholder="None"></div></div>
+        <small class="h">In your game's own words. Leave the level empty if your game has no levels.</small></div>
+      <div class="fld"><label for="f-sys">Game</label><input id="f-sys" name="system" list="f-systems" value="${v('system')}" placeholder="D&D 5e, Starfinder, Call of Cthulhu">
+        <datalist id="f-systems">${SYSTEMS().map(s => `<option value="${esc(s)}">`).join('')}</datalist></div>
+      <div class="fld"><label for="f-camp">Campaign</label><select id="f-camp" name="camp"><option value="">Not in a campaign yet</option>
+        ${Object.entries(CAMPS).filter(([, c]) => c.you === 'player').map(([k, c]) => `<option value="${k}" ${d.camp === k ? 'selected' : ''}>${esc(c.title)}</option>`).join('')}</select></div>
+      <div class="fld"><label for="f-ep">In a line</label><input id="f-ep" name="epithet" value="${v('epithet')}" placeholder="Never met a lock he liked."></div>
+      <div class="fld"><label for="f-link">Where the full sheet lives</label><input id="f-link" name="link" type="url" value="${v('link')}" placeholder="https://">
+        <small>D&D Beyond, Demiplane, a PDF in Drive. Hearthside links to it; nothing is copied.</small></div>
+      <fieldset class="fld"><legend>Details</legend><small style="margin-top:-2px;margin-bottom:4px">Anything the party should see at a glance, named your way.</small>
+        <div class="trs">${d.traits.map(([k, t], i) => `<div class="tr-row"><input aria-label="Detail ${i + 1} name" data-tk="${i}" value="${esc(k)}" placeholder="Ancestry"><input aria-label="Detail ${i + 1}" data-tv="${i}" value="${esc(t)}" placeholder="Dwarf">
+          <button type="button" data-trdel="${i}" aria-label="Remove detail ${i + 1}">×</button></div>`).join('')}</div>
+        <div><button type="button" class="p-link" data-tradd="1" style="margin-top:4px">+ Add a detail</button></div></fieldset>
+      <div class="fld"><label for="f-story">Their story</label><textarea id="f-story" name="story" rows="3" placeholder="As much or as little as you like.">${v('story')}</textarea></div>
+      <div class="fld"><span class="lab">Status</span><div><div class="p-seg" role="group" aria-label="Status">
+        ${[['active', 'Adventuring'], ['retired', 'Retired'], ['fallen', 'Fallen']].map(([k, l]) => `<button type="button" data-dstatus="${k}" aria-pressed="${d.status === k}">${l}</button>`).join('')}</div></div></div>
+      ${d.status === 'fallen' && campPlayed.length ? `<div class="fld"><label for="f-fell">Fell in</label><select id="f-fell" name="fellIn"><option value="">Not saying</option>
+        ${campPlayed.map(s => `<option value="${s.id}" ${d.fellIn === s.id ? 'selected' : ''}>${esc(s.title)} · ${shortDate(s.date)}</option>`).join('')}</select></div>` : ''}
+    </form>
+    <div class="dlg-f"><button type="button" class="p-ghost" data-dlgclose="1">Cancel</button><button type="submit" form="dlg-form" class="hs-btn-amber">${d.id ? 'Save' : 'Add to the roster'}</button></div>
+  </div></div>`;
+  Hearthside.GildedPanel.decorate(el);
+}
+function saveDraft() {
+  const d = draft;
+  if (!d.name.trim()) { toast('Prototype: a name is the one thing every adventurer needs.'); document.getElementById('f-name')?.focus(); return; }
+  const level = d.level === '' || d.level == null ? null : Number(d.level);
+  const clean = { ...d, name: d.name.trim(), level, camp: d.camp || null, traits: d.traits.filter(([k, v]) => k.trim() || v.trim()), fellIn: d.status === 'fallen' ? d.fellIn || null : null };
+  if (d.id) {
+    const c = CHARS.find(x => x.id === d.id);
+    if (c.level !== level && level != null) c.levels.push([null, level]);   // a level change would be dated in the real thing
+    Object.assign(c, clean, { levels: c.levels });
+  } else {
+    const id = 'new' + Date.now();
+    CHARS.unshift({ ...clean, id, made: new Date(TODAY), played: [], levels: level != null ? [[null, level]] : [] });
+    empty = false; store.set('hs-adv-data', 'full');
+    sel = id;
+  }
+  draft = null; renderDlg(); aArt = 0; render();
+  toast('Prototype: saved in memory only.');
+}
+const readImage = (file, done) => { const fr = new FileReader(); fr.onload = () => done(fr.result); fr.readAsDataURL(file); };
+
+/* ---------------- the rail's Your Quests (shell) ---------------- */
+function renderRail() {
+  const qs = QUESTS.slice().sort((a, b) => (a.due ? +a.due : Infinity) - (b.due ? +b.due : Infinity));
+  document.getElementById('qc').textContent = `${qs.filter(q => q.status === 'open').length} open`;
+  const el = document.getElementById('rail-quests');
+  el.innerHTML = `<ul class="hs-quests">${qs.map(q => `<li class="${q.status === 'done' ? 'is-done' : ''}">${box(q)}
+      <div><div class="hs-quest-name">${esc(q.title)}${q.tag ? `<span class="hs-tag">${esc(q.tag)}</span>` : ''}</div><div class="hs-quest-time">${q.due ? `${dayLabel(q.due)}, ${tm(q.due)}` : 'No due time'}</div>
+        <div class="hs-quest-for">For ${esc(q.for)}</div></div></li>`).join('')}</ul>`;
+  Hearthside.GildedPanel.decorate(el.parentNode);
+}
+
+/* ---------------- render + wiring ---------------- */
+const page = document.getElementById('page');
+const RENDER = [VariantA, VariantB, VariantC];
+function render() {
+  if (sel && !C(sel)) sel = null;
+  page.innerHTML = RENDER[variant]();
+  Hearthside.GildedPanel.decorate(page);
+  page.querySelectorAll('.hs-sheet').forEach(el => Hearthside.NoticeSheet.mount(el));
+  renderRail();
+  const v = VARIANTS[variant];
+  document.getElementById('lbl').innerHTML = `${v.key} — ${v.name}<small>${v.note}</small>`;
+  document.getElementById('data').textContent = empty ? 'Data: no adventurers yet' : "Data: Geoff's adventurers";
+  store.set('hs-adv-variant', v.key);
+  try { const u = new URL(location.href); u.searchParams.set('variant', v.key); sel ? u.searchParams.set('adventurer', sel) : u.searchParams.delete('adventurer'); history.replaceState(null, '', u); } catch {}
+}
+const goTo = id => { sel = id; aArt = 0; render(); scrollTo({ top: 0 }); };
+function go(d) { variant = (variant + d + VARIANTS.length) % VARIANTS.length; render(); }
+document.getElementById('prev').onclick = () => go(-1);
+document.getElementById('next').onclick = () => go(1);
+document.getElementById('data').onclick = () => { empty = !empty; store.set('hs-adv-data', empty ? 'empty' : 'full'); sel = null; render(); };
+addEventListener('keydown', e => {
+  if (e.key === 'Escape' && draft) { draft = null; renderDlg(); return; }
+  if (draft || e.target.closest('input,textarea,select,[contenteditable]')) return;
+  if (e.key === 'ArrowLeft') go(-1); else if (e.key === 'ArrowRight') go(1);
+});
+
+let toastTimer;
+function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 2800); }
+
+document.addEventListener('click', e => {
+  if (e.target.matches('.dlg-back')) { draft = null; renderDlg(); return; }   // a click on the dimmed floor closes the editor
+  const el = e.target.closest('[data-q],[data-sel],[data-pick],[data-back],[data-home],[data-new],[data-edit],[data-art],[data-mkpt],[data-zoom],[data-btab],[data-camp],[data-mate],[data-session],[data-ext],[data-stub],[data-dlgclose],[data-dstatus],[data-tradd],[data-trdel]');
+  if (!el) return;
+  e.preventDefault();
+  const d = el.dataset;
+  if (d.q) { const q = QUESTS.find(x => x.id === d.q); q.status = q.status === 'done' ? 'open' : 'done'; render(); }
+  else if (d.sel) goTo(d.sel);
+  else if (d.pick) { sel = d.pick; render(); }
+  else if (d.back || d.home) goTo(null);
+  else if (d.new) openEditor(null);
+  else if (d.edit) openEditor(d.edit);
+  else if (d.art) { aArt = +d.art; render(); }
+  else if (d.mkpt) { const c = C(sel), [a] = c.art.splice(aArt, 1), [cap] = c.artCaps.splice(aArt, 1); c.art.unshift(a); c.artCaps.unshift(cap); aArt = 0; render(); }
+  else if (d.zoom) { if (variant === 2 || variant === 1) { variant = 0; aArt = +d.zoom; sel = sel || C(page.querySelector('[data-edit]').dataset.edit).id; render(); toast('Prototype: opened in layout A, which shows art large.'); } }
+  else if (d.btab) { bTab = d.btab; sel = null; render(); }
+  else if (d.camp) toast(`Prototype: this opens ${CAMPS[d.camp].title}'s page.`);
+  else if (d.mate) { const [k, i] = d.mate.split('/'); const m = PARTY[k][+i]; toast(`Prototype: this opens ${m.name}, ${m.player}'s adventurer (read only).`); }
+  else if (d.session) toast(`Prototype: this opens ${S(d.session).title}'s recap.`);
+  else if (d.ext) toast(`Prototype: this opens ${C(d.ext).link} in a new tab.`);
+  else if (d.stub) toast(`Prototype: this goes to ${d.stub}.`);
+  else if (d.dlgclose) { draft = null; renderDlg(); }
+  else if (d.dstatus) { draft.status = d.dstatus; renderDlg(); }
+  else if (d.tradd) { draft.traits.push(['', '']); renderDlg(); document.querySelector(`[data-tk="${draft.traits.length - 1}"]`)?.focus(); }
+  else if (d.trdel) { draft.traits.splice(+d.trdel, 1); renderDlg(); }
+});
+// the editor keeps its working copy as you type; nothing re-renders until a button changes its shape
+document.getElementById('dlg').addEventListener('input', e => {
+  const t = e.target;
+  if (t.dataset.tk) draft.traits[+t.dataset.tk][0] = t.value;
+  else if (t.dataset.tv) draft.traits[+t.dataset.tv][1] = t.value;
+  else if (t.name && t.name in draft || t.name === 'fellIn') { draft[t.name] = t.value; if (t.name === 'name') document.getElementById('dlg-t').textContent = draft.id ? 'Edit ' + (t.value || 'adventurer') : 'A new adventurer'; if (t.name === 'camp') renderDlg(); }
+});
+document.getElementById('dlg').addEventListener('submit', e => { e.preventDefault(); saveDraft(); });
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (t.id === 'f-art' && t.files[0]) readImage(t.files[0], url => { draft.art = [addArt(url), ...draft.art]; draft.artCaps = ['Uploaded just now', ...draft.artCaps]; renderDlg(); });
+  else if (t.dataset.addart && t.files[0]) readImage(t.files[0], url => { const c = C(t.dataset.addart); c.art.push(addArt(url)); c.artCaps.push('Uploaded just now'); aArt = c.art.length - 1; render(); toast('Prototype: added in memory only.'); });
+});
+
+render();
+Hearthside.GildedPanel.decorate();
+const floor = Hearthside.Floor.mount(document.getElementById('floor'));
+if (floor && floor.page) floor.page(3, false);
+</script>

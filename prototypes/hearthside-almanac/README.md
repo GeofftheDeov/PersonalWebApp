@@ -26,7 +26,7 @@ From the repo root:
 python -m http.server 4173 --bind 127.0.0.1 --directory prototypes/hearthside-almanac
 ```
 
-Then open http://127.0.0.1:4173/hearthside-almanac-prototype.html (or start `almanac-prototype` from `.claude/launch.json`). It needs a server rather than a double-click because it loads `bundle.css` and `bundle.js`, copies of the Hearthside design system's components (https://claude.ai/artifact/4X4uHuC4vyx4Qk6mLR8KoR).
+Then open http://127.0.0.1:4173/hearthside-almanac-prototype.html (or start `almanac-prototype` from `.claude/launch.json`). It needs a server rather than a double-click because it loads `bundle.css` and `bundle.js`, copies of the Hearthside design system's components (https://claude.ai/artifact/4X4uHuC4vyx4Qk6mLR8KoR). The published version is https://claude.ai/artifact/Suk8ZxCB2DJ4JqiRgfrsfd.
 
 Use the bar at the bottom or the arrow keys to switch layouts; `?variant=A|B|C` picks one. The bar also switches:
 

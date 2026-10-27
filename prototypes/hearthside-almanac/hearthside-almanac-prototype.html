@@ -99,16 +99,29 @@ body{margin:0;background:var(--ground);color:var(--text)}
 .va-sess.is-cancelled{background:transparent;border-style:dashed;border-color:var(--line);color:var(--muted)}
 .va-sess.is-cancelled span{text-decoration:line-through}
 .va-sess.is-completed{background:transparent;color:var(--muted)}
-.va-q{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;min-width:0;padding-left:3px}
-.va-q span{overflow:hidden;text-overflow:ellipsis}
-.va-q i{flex:none;width:9px;height:9px;border:1.2px solid var(--muted);border-radius:2px}
-.va-q.is-done{color:var(--muted)}
-.va-q.is-done span{text-decoration:line-through}
-.va-q.is-done i{background:var(--moss);border-color:var(--moss)}
+.va-num{border:0;background:none;padding:0;cursor:pointer}
+/* a quest slip: torn paper on the leather, tilted a touch, its own checkbox and a mark for its kind */
+.cq{display:block;margin:1px 2px 2px;filter:drop-shadow(0 1.5px 1.5px rgba(0,0,0,.6));transform:rotate(-.9deg)}
+.cq:nth-child(even){transform:rotate(.8deg)}
+.cq-in{display:flex;flex-direction:column;gap:2px;padding:4px 5px 7px;color:var(--paper-ink);font-size:12px;line-height:1.25;
+  background:radial-gradient(120% 90% at 50% 30%,rgba(120,80,30,0) 55%,rgba(120,80,30,.2)),linear-gradient(170deg,var(--paper-hi),var(--paper-lo));
+  clip-path:polygon(0 0,100% 0,100% calc(100% - 3px),90% 100%,77% calc(100% - 2px),61% 100%,46% calc(100% - 3px),30% 100%,15% calc(100% - 1.5px),0 100%)}
+.cq-top{display:flex;align-items:center;gap:4px;min-width:0}
+.cq-top small{min-width:0;font-family:var(--font-label);font-size:11px;font-weight:500;letter-spacing:.05em;color:var(--paper-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cq .hs-box{flex:none;width:13px;height:13px;margin:0 1px 0 0;border-color:var(--paper-ink);border-radius:2px}
+.cq .hs-box[aria-checked="true"]{border-color:var(--moss)}
+.cq .hs-box:focus-visible{outline-color:var(--paper-ink)}
+.cq-t{min-width:0;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere}
+.cq-k{flex:none;width:13px;height:13px;vertical-align:-2px;fill:none;stroke:var(--paper-muted);stroke-width:1.3;stroke-linecap:round;stroke-linejoin:round}
+.cq.is-done .cq-in{background:linear-gradient(170deg,var(--paper-lo),#d6c094)}
+.cq.is-done .cq-t{text-decoration:line-through;color:var(--paper-muted)}
+.va-kinds{display:inline-flex;gap:10px;align-items:center}
+.va-kinds .cq-k{stroke:var(--muted);margin-right:3px}
 .va-more{font-size:11.5px;color:var(--muted);padding-left:3px}
 .va-dots{display:none;gap:3px;flex-wrap:wrap;padding-left:4px}
 .va-dots i{width:7px;height:7px;border-radius:50%;background:var(--accent)}
-.va-dots i.q{border-radius:1px;transform:rotate(45deg);background:transparent;border:1.2px solid var(--muted);width:6px;height:6px}
+.va-dots i.q{border-radius:1px;transform:rotate(-8deg);background:var(--paper);width:7px;height:8px}
+.va-dots i.q.is-done{background:var(--moss)}
 .va-dots i.x{background:transparent;border:1px dashed var(--muted)}
 @container (max-width:520px){
   .va-cell{min-height:54px;align-items:center}
@@ -126,7 +139,7 @@ body{margin:0;background:var(--ground);color:var(--text)}
 .vw-day:first-child{border-left:0}
 .vw-day:hover{background:rgba(229,161,58,.06)}
 .vw-day.is-sel{background:rgba(229,161,58,.13);box-shadow:inset 0 0 0 1px var(--gold)}
-.vw-dh{display:flex;align-items:baseline;gap:6px;padding-left:2px;font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.06em;color:var(--muted)}
+.vw-dh{border:0;background:none;cursor:pointer;text-align:left;display:flex;align-items:baseline;gap:6px;padding:0 0 0 2px;font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.06em;color:var(--muted)}
 .vw-dh b{font-family:var(--font-display);font-weight:400;font-size:24px;line-height:1;letter-spacing:0;color:var(--text)}
 .vw-day.is-today .vw-dh b{color:var(--accent)}
 .vw-items{display:flex;flex-direction:column;gap:6px;min-width:0}
@@ -139,13 +152,8 @@ body{margin:0;background:var(--ground);color:var(--text)}
 .vw-sess.is-cancelled b{text-decoration:line-through;color:var(--muted)}
 .vw-sess.is-cancelled .t{color:var(--muted)}
 .vw-sess.is-completed{background:transparent}
-.vw-q{display:flex;align-items:flex-start;gap:6px;font-size:12.5px;line-height:1.3;color:var(--text);padding-left:3px;overflow-wrap:anywhere;min-width:0}
-.vw-q i{flex:none;width:10px;height:10px;margin-top:2px;border:1.2px solid var(--muted);border-radius:2px}
-.vw-q small{display:block;font-family:var(--font-label);font-size:11.5px;font-weight:500;letter-spacing:.04em;color:var(--accent)}
-.vw-q.is-done{color:var(--muted)}
-.vw-q.is-done > span{text-decoration:line-through}
-.vw-q.is-done i{background:var(--moss);border-color:var(--moss)}
-.vw-q.is-done small{color:var(--muted)}
+.vw .cq-t{display:block}
+.vw .cq-in{font-size:12.5px}
 .vw-none{font-size:12px;color:var(--muted);opacity:.55;padding-left:2px}
 @container (max-width:560px){
   .vw-grid{grid-template-columns:1fr}
@@ -453,7 +461,22 @@ const calHead = (title, nav, prev, next) => `<div class="va-head"><button type="
     <h2>${title}</h2>
     <button type="button" class="va-nav" data-${nav}="0">Today</button>
     <button type="button" class="va-nav" data-${nav}="1" aria-label="${next}">›</button></div>`;
-const calLegend = () => `<div class="va-legend"><span>Times in amber are sessions</span>${byDue ? '<span>Boxes are your quests, on the day they are due</span>' : '<span>“· 2” is how many quests you have open for it</span>'}</div>`;
+const calLegend = () => `<div class="va-legend"><span>Times in amber are sessions</span>${byDue
+  ? `<span>Paper slips are your quests, on the day they are due: tick one to mark it done</span><span class="va-kinds">${Object.keys(KIND_ICON).map(k => `${kindMark(k)}${KIND_LABEL[k]}`).join(' ')}</span>`
+  : '<span>“· 2” is how many quests you have open for it</span>'}</div>`;
+
+/* a quest on the calendar: a torn slip of paper with its checkbox and a hairline mark for its kind
+   (no icon set yet, so these three are drawn here in the filigree's weight) */
+const KIND_ICON = {
+  host_prep: '<path d="M2.5 8 8 3l5.5 5"/><path d="M4 7v6.5h8V7"/><path d="M7 13.5v-3h2v3"/>',   // the house you're hosting in
+  food: '<path d="M3.5 5h6.5v8.5H3.5z"/><path d="M10 7h1.4A1.6 1.6 0 0 1 13 8.6v1.3a1.6 1.6 0 0 1-1.6 1.6H10"/><path d="M3.5 5c.4-1.5 2.1-1.9 3.3-1.1 1.2-.8 2.9-.4 3.2 1.1"/>',   // a tankard
+  custom: '<path d="M13.5 2.5C9 3 5.6 6.4 4.2 10.8L2.5 13.5"/><path d="M13.5 2.5c-.6 3.6-3.1 6.4-7 7.4"/><path d="M6.2 8.2l1.9 1.9"/>',   // a quill
+};
+const KIND_LABEL = { host_prep: 'Host prep', food: 'Food', custom: 'Quest' };
+const kindMark = k => `<svg class="cq-k" viewBox="0 0 16 16" aria-hidden="true">${KIND_ICON[k]}</svg>`;
+const questSlip = (q, { time = false } = {}) => `<span class="cq ${q.status === 'done' ? 'is-done' : ''}" title="${KIND_LABEL[q.kind]}: ${esc(q.title)} · ${questDue(q)}">
+  <span class="cq-in"><span class="cq-top">${box(q)}${kindMark(q.kind)}<small>${time && q.due ? tm(q.due) : KIND_LABEL[q.kind]}</small></span>
+    <span class="cq-t">${esc(q.title)}</span></span></span>`;
 
 function monthPanel(tabs) {
   const y = aMonth.getFullYear(), m = aMonth.getMonth();
@@ -467,14 +490,15 @@ function monthPanel(tabs) {
         const first = same(d, s.date), open = openOf(s);
         return `<span class="va-sess is-${s.status}"><i class="va-av">${CAMPS[s.camp].init}</i>${first ? `<b>${tm(s.date)}</b>` : '<b>cont.</b>'}<span>${esc(s.title)}</span>${!byDue && open && first ? `<em>· ${open}</em>` : ''}</span>`;
       }),
-      ...qs.map(q => `<span class="va-q ${q.status === 'done' ? 'is-done' : ''}"><i></i><span>${esc(q.title)}</span></span>`),
+      ...qs.map(q => questSlip(q)),
     ];
-    const dots = [...ss.map(s => `<i class="${s.status === 'cancelled' ? 'x' : ''}"></i>`), ...qs.map(() => '<i class="q"></i>')].join('');
+    const dots = [...ss.map(s => `<i class="${s.status === 'cancelled' ? 'x' : ''}"></i>`), ...qs.map(q => `<i class="q ${q.status === 'done' ? 'is-done' : ''}"></i>`)].join('');
     const label = `${longDay(d)}${ss.length ? ', ' + plural(ss.length, 'session') : ''}${qs.length ? ', ' + plural(qs.length, 'quest') : ''}`;
-    return `<button type="button" class="va-cell ${d.getMonth() !== m ? 'is-out' : ''} ${same(d, TODAY) ? 'is-today' : ''} ${key(d) === aSel ? 'is-sel' : ''}"
-      data-day="${key(d)}" aria-label="${label}" aria-pressed="${key(d) === aSel}"><span class="va-num">${d.getDate()}</span>
+    // a div, not a button, so the quest checkboxes inside are real buttons; the day number is the keyboard way in
+    return `<div class="va-cell ${d.getMonth() !== m ? 'is-out' : ''} ${same(d, TODAY) ? 'is-today' : ''} ${key(d) === aSel ? 'is-sel' : ''}" data-day="${key(d)}">
+      <button type="button" class="va-num" data-day="${key(d)}" aria-label="${label}" aria-pressed="${key(d) === aSel}">${d.getDate()}</button>
       <span class="va-items">${items.slice(0, 3).join('')}${items.length > 3 ? `<span class="va-more">+${items.length - 3} more</span>` : ''}</span>
-      <span class="va-dots">${dots}</span></button>`;
+      <span class="va-dots">${dots}</span></div>`;
   }).join('');
   return `<section aria-label="${MONL[m]} ${y}"><div class="hs-gilded va-cal">${tabs ? calTabs() : ''}
       ${calHead(`${MONL[m]} ${y}`, 'amonth', 'Previous month', 'Next month')}
@@ -496,12 +520,12 @@ function weekPanel() {
         return `<span class="vw-sess is-${s.status}"><span class="t"><i class="va-av">${CAMPS[s.camp].init}</i>${first ? `${tm(s.date)}${s.end && same(s.date, s.end) ? ' – ' + tm(s.end) : ' onward'}` : same(d, s.end) ? `Until ${tm(s.end)}` : 'All day'}</span>
           <b>${esc(s.title)}</b><small>${s.status === 'cancelled' ? 'Cancelled' : esc(where(s))}${!byDue && open ? ` · ${plural(open, 'quest')} open` : ''}</small></span>`;
       }),
-      ...qs.map(q => `<span class="vw-q ${q.status === 'done' ? 'is-done' : ''}"><i></i><span>${esc(q.title)}<small>${tm(q.due)}</small></span></span>`),
+      ...qs.map(q => questSlip(q, { time: true })),
     ];
     const label = `${longDay(d)}${ss.length ? ', ' + plural(ss.length, 'session') : ''}${qs.length ? ', ' + plural(qs.length, 'quest') : ''}`;
-    return `<button type="button" class="vw-day ${same(d, TODAY) ? 'is-today' : ''} ${key(d) === aSel ? 'is-sel' : ''}" data-day="${key(d)}" aria-label="${label}" aria-pressed="${key(d) === aSel}">
-      <span class="vw-dh"><span>${WD[d.getDay()]}</span><b>${d.getDate()}</b></span>
-      <span class="vw-items">${items.join('') || '<span class="vw-none">Nothing on</span>'}</span></button>`;
+    return `<div class="vw-day ${same(d, TODAY) ? 'is-today' : ''} ${key(d) === aSel ? 'is-sel' : ''}" data-day="${key(d)}">
+      <button type="button" class="vw-dh" data-day="${key(d)}" aria-label="${label}" aria-pressed="${key(d) === aSel}"><span>${WD[d.getDay()]}</span><b>${d.getDate()}</b></button>
+      <span class="vw-items">${items.join('') || '<span class="vw-none">Nothing on</span>'}</span></div>`;
   }).join('');
   return `<section aria-label="Week of ${title}"><div class="hs-gilded vw">${calTabs()}
       ${calHead(title, 'aweek', 'Previous week', 'Next week')}

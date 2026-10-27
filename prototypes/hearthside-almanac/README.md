@@ -22,8 +22,9 @@ All three show an "Awaiting a night" panel for sessions still picking a date. **
 - **List:** sessions by week, each a parchment sheet beside its date, with Coming up and Played tabs. Quests appear only on their session's sheet, not on their own due days.
 - **Filters**, under the heading, apply to both views: one campaign or all, and anywhere, in person or online. Each choice shows how many sessions coming up it would leave (cancelled and undated ones included), and Clear filters appears once one is set. Your Quests in the rail is shell, so it stays unfiltered.
 - **Calendar:** layout A's grid, with Month and Week tabs across the top of the panel. Week gives each day a tall column with every session (times, title, place) and quest written out in full; on phones it becomes a list of days. Picking a day in either shows that day's sessions as parchment below. Switching between Month and Week keeps the chosen day.
+- **Quests on the calendar** stay on their own due day (decided). Each is a small torn slip of parchment, tilted a touch, with a checkbox that marks it done right there, a hairline mark for its kind (a house for host prep, a tankard for food, a quill for anything else) and, in Week, its due time. Month cells clip the title to two lines; Week shows it whole. On phones the month cells show a paper chip per quest, which turns moss once done. The design system has no icon set yet, so the three marks are drawn in the prototype; they'd need adding to it.
 
-Still open: where an undated session counts for the online / in-person filter (here it counts as in person, since it has no venue yet); whether the calendar puts quests on their own due day or only counts them on their session (the bar's "Calendar quests" switch), and the "Awaiting a night" panel, which needs the API change above.
+Still open: where an undated session counts for the online / in-person filter (here it counts as in person, since it has no venue yet), and the "Awaiting a night" panel, which needs the API change above.
 
 Rejected: C, "Campaign lanes". Layout A as first shown (month only) is kept in the switcher for comparison.
 

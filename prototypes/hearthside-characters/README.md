@@ -35,6 +35,13 @@ Material is part of the question. The design system keeps parchment for "one ses
   - **The full sheet** can be a link (D&D Beyond, Demiplane, Drive), an **uploaded copy** (a PDF or a picture), or both. "Upload a sheet", "Replace the copy" and "Link to it" sit right there, and the editor has the same upload. Hearthside keeps the file as it is and never reads it into fields, so it stays game-system agnostic. Parsing an import from a particular system would break that, so it isn't offered.
 - **Sessions come from attendance (decided).** An adventurer was at a session if their player was. If the player wasn't, the GM says whether the adventurer was there anyway when confirming who came. The road shows all three cases: played; played while you were away ("the party brought Kestrel Vane along", dashed node); and sat out (struck through and faded, counted as "missed"). "As the GM: take attendance" on the bar opens the GM's dialog for the open adventurer's latest session. Unticking a player asks "Was Kestrel Vane there?", with the answers "No, they sat it out" and "Yes, the party played them". Saving updates the road. In the real app this belongs in the campaign page's attendance step.
 
+- **Who sees the campaign (decided 2026-10-27).** An adventurer's campaign and sessions show only to people in that adventurer's campaign. That matches the player-profile prototype's rule: a campaign-mate sees all your adventurers, but not campaigns they're not in. Anyone else, whether a friend or a campaign-mate from a different campaign, sees:
+  - **On the roster:** each adventurer's game, with no campaign and no next session. The page is titled "Geoff's adventurers", with no New adventurer button.
+  - **On an adventurer's page:** the hero, the art and their sheet. There's no road and no Campaign row. Status says "Fallen" without naming the session, and there's no Travels with. The art and the sheet then share the width.
+  - **Never, for anyone but the owner:** Edit, Add art, Make this the portrait, the sheet's upload, link and Remove buttons, or the owner's quests on the next session. The full sheet still opens for them, and it's left out when there's none.
+
+  A campaign-mate in the same campaign sees the road as it is, read only, with "Geoff was away" in place of "You were away".
+
 ## What the data would need
 
 The prototype shows more than the `characters` table holds today (`backend/db/schema.sql`: name, player, one campaign, game_type, class, level, is_dead).
@@ -48,11 +55,13 @@ The prototype shows more than the `characters` table holds today (`backend/db/sc
 - **Level history:** "Reached level 5 after Session 6" needs the level change to be dated or tied to a session. Today `level` is a single number.
 - **New columns:** art (several images, one of them the portrait), sheet link, epithet, story, details (label/value pairs), and status in place of `is_dead`. Status adds Retired, and Fallen can name a session.
 - **One campaign per adventurer** stays as it is. Nothing here needs more.
+- **Reading someone else's adventurer:** an endpoint that returns the adventurer to anyone allowed to see them. It includes the campaign, the road and Travels with only when the viewer is in the adventurer's campaign, which the server decides from `campaign_members` and doesn't leave to the page. Who may open them at all (friends, campaign-mates, or anyone with the link) isn't decided.
 
 ## Still open
 
 - Uploaded art is shown 3:4 for portraits and zoomed onto the head for round medallions. Real uploads would need a cropper, like the campaign banner's.
-- Other players' adventurers (in "the party" / "Travels with") open read-only. That page isn't drawn here.
+- Other players' adventurers (in "the party" / "Travels with") open read-only, the way "Viewing as" draws Geoff's for someone else.
+- When someone else is viewing, the rail still shows Geoff's quests and letters. In the app, the rail is the viewer's own.
 - The design system has no form styles yet. The editor follows the message composer (`surface`, `line`, `radius`), as the campaign page did.
 - The level seal, portrait frame, brass plate, medallion and taped photo are drawn in this prototype. Whichever survive should go into the design system.
 
@@ -69,7 +78,8 @@ Then open http://127.0.0.1:4174/hearthside-characters-prototype.html (or start `
 Use the bar at the bottom or the arrow keys to switch layouts. `?variant=A|B|C|D` picks a layout (D is the default) and `&adventurer=kestrel` opens one adventurer. The bar also has:
 
 - **Data: Geoff's adventurers / no adventurers yet.** Six adventurers across four games, or none, to see the empty state.
-- **As the GM: take attendance.** The GM's attendance dialog, for the open adventurer's latest session.
+- **Viewing as: you / Avery / Sam** (D only). Avery is in Bones of the Brinewood with you, so they see Brother Odran's road but not the others'. Sam is a friend with no campaigns in common. `&viewer=avery|sam` picks one.
+- **As the GM: take attendance.** The GM's attendance dialog, for the open adventurer's latest session. It's shown only while viewing as you.
 
 The sample attendance has Geoff away from Starfall Salvage's Session 3 (the party brought Kestrel along) and Session 5 (Kestrel sat it out), and from The Lantern Road's Sessions 6 (Pip sat it out) and 14 (Mags came anyway).
 

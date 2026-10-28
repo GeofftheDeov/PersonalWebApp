@@ -280,6 +280,10 @@ body{margin:0;background:var(--ground);color:var(--text)}
 .vc-cols{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:var(--space-6);align-items:start}
 .vc-cols > *{min-width:0}
 @media (max-width:899px){.vc-cols{grid-template-columns:minmax(0,1fr)}}
+/* someone outside the adventurer's campaign: no road, so the art and the sheet share the width */
+.vc-cols.is-bare{grid-template-columns:minmax(0,1fr)}
+.vc-cols.is-bare .vc-side{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:var(--space-6);align-items:start}
+@media (max-width:899px){.vc-cols.is-bare .vc-side{grid-template-columns:minmax(0,1fr);gap:var(--space-5)}}
 .vc-road{list-style:none;margin:0;padding:12px 14px 14px 14px;position:relative}
 .vc-road > li{position:relative;display:grid;grid-template-columns:22px minmax(0,1fr);gap:12px;padding:7px 0}
 /* the road: a gold line through every stop */
@@ -441,6 +445,7 @@ body{margin:0;background:var(--ground);color:var(--text)}
   <button type="button" id="next" aria-label="Next layout">→</button>
   <span class="sep" aria-hidden="true"></span>
   <button type="button" id="data"></button>
+  <button type="button" id="who"></button>
   <button type="button" id="att">As the GM: take attendance</button>
 </div>
 <div class="proto-toast" id="toast" hidden></div>
@@ -674,6 +679,14 @@ let empty = store.get('hs-adv-data') === 'empty';   // a new player with no adve
 let aArt = 0;          // A: which piece of art is in the big frame
 let bTab = 'active';   // B: Adventuring | Retired & fallen
 let draft = null;      // the editor's working copy
+/* who's looking at Geoff's adventurers (D only). Someone else sees an adventurer's campaign and sessions only if
+   they're in that adventurer's campaign too, and never the edit controls or Geoff's quests. */
+const VIEWERS = [
+  { key: 'you', label: 'Viewing as: you' },
+  { key: 'Avery', label: 'Viewing as: Avery', note: 'in Bones of the Brinewood with you' },
+  { key: 'Sam', label: 'Viewing as: Sam', note: 'a friend, no campaigns together' },
+];
+let viewer = Math.max(0, VIEWERS.findIndex(v => v.key.toLowerCase() === (qs0.get('viewer') || '').toLowerCase()));
 
 /* ---------------- helpers ---------------- */
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -706,6 +719,9 @@ const initials = n => n.split(/\s+/).filter(w => /^[A-Za-z]/.test(w) && !/^(Dr|M
 const levelUps = c => c.levels.filter(([s]) => s).length;
 const questsFor = s => s ? QUESTS.filter(q => q.session === s.id) : [];
 const host = c => c.linkName || (() => { try { return new URL(c.link).hostname.replace(/^www\./, ''); } catch { return 'the web'; } })();
+const own = () => viewer === 0 || variant !== 3;
+const seesCamp = c => own() || !!c.camp && PLAYERS[c.camp].includes(VIEWERS[viewer].key);
+const youWere = () => own() ? 'You were' : 'Geoff was';
 const counts = () => { const l = mine(); return { act: l.filter(isActive).length, ret: l.filter(c => c.status === 'retired').length, fell: l.filter(c => c.status === 'fallen').length }; };
 
 /* a portrait: the first piece of art, or the cloth with the initials stitched on */
@@ -719,11 +735,11 @@ const reachedAfter = (c, s) => (c.levels.find(([id]) => id === s.id) || [])[1];
 const campLink = k => k ? `<button type="button" class="p-link" data-camp="${k}" style="display:inline-flex;align-items:center;gap:7px;text-align:left;font-size:14.5px;font-family:var(--font-body);letter-spacing:0"><span class="thumb">${banner(k)}</span> ${esc(CAMPS[k].title)}</button>` : '<span style="color:var(--muted)">Not in a campaign yet</span>';
 const sheetLink = c => c.link ? `<a class="p-link ext" href="#" data-ext="${esc(c.id)}">The full sheet, on ${esc(host(c))}</a>` : '';
 const newBtn = () => '<button type="button" class="hs-btn-amber p-new" data-new="1">New adventurer</button>';
-const backBtn = () => '<button type="button" class="hs-btn-amber p-back" data-back="1">← All adventurers</button>';
-function head(controls = newBtn()) {
+const backBtn = () => `<button type="button" class="hs-btn-amber p-back" data-back="1">← ${own() ? 'All adventurers' : "Geoff's adventurers"}</button>`;
+function head(controls = own() ? newBtn() : '') {
   const n = counts(), bits = [n.ret && `${n.ret} retired`, n.fell && `${n.fell} fallen`].filter(Boolean);
   const sub = mine().length ? `<b>${n.act} adventuring</b>${bits.length ? ' · ' + bits.join(' · ') : ''}` : 'Nobody yet';
-  return `<header class="hs-page-head p-head"><div><h1>Adventurers</h1><p>${sub}</p></div>${controls}</header>`;
+  return `<header class="hs-page-head p-head"><div><h1>${own() ? 'Adventurers' : "Geoff's adventurers"}</h1><p>${sub}</p></div>${controls}</header>`;
 }
 function emptyState() {
   return `<section class="empty"><span class="gframe"><span class="pt"><span class="pt-none"><span>?</span></span></span></span>
@@ -731,9 +747,9 @@ function emptyState() {
 }
 /* the player's own details, then the facts every adventurer has */
 const facts = c => [
-  ['Campaign', campLink(c.camp)],
+  ...seesCamp(c) ? [['Campaign', campLink(c.camp)]] : [],
   ['Game', c.system ? esc(c.system) : '<span style="color:var(--muted)">Not set</span>'],
-  ['Status', esc(statusLine(c))],
+  ['Status', esc(seesCamp(c) ? statusLine(c) : statusLine(c).replace(/^Fell in .*/, 'Fallen'))],
   ...c.traits.filter(([k, v]) => k || v).map(([k, v]) => [esc(k), esc(v), 'is-own']),
 ];
 const dl = rows => `<dl class="dl">${rows.map(([k, v, cls]) => `<div class="${cls || ''}"><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>`;
@@ -758,7 +774,7 @@ function aRoster() {
     return `<button type="button" class="va-card is-${c.status}" data-sel="${c.id}">
       <span class="gframe">${pt(c)}${c.status === 'fallen' ? '<span class="va-ribbon">Fallen</span>' : ''}</span>
       <span class="va-plate"><b>${esc(c.name)}</b><small>${esc(clsLine(c))}</small></span>
-      <span class="va-under">${nx ? `<b>Next: ${dayLabel(nx.date)}</b>` : ''}${c.camp ? esc(CAMPS[c.camp].title) : 'Not in a campaign yet'}</span></button>`; };
+      <span class="va-under">${!seesCamp(c) ? esc(c.system || '') : `${nx ? `<b>Next: ${dayLabel(nx.date)}</b>` : ''}${c.camp ? esc(CAMPS[c.camp].title) : 'Not in a campaign yet'}`}</span></button>`; };
   const n = counts();
   return head() + `<section aria-label="Adventuring"><div class="va-wall">${act.map(card).join('')}</div></section>
     ${past.length ? `<section><h2 class="hs-sec"><span>The Hall of Heroes</span><span class="hs-aside">${[n.ret && `${n.ret} retired`, n.fell && `${n.fell} fallen`].filter(Boolean).join(' · ')}</span></h2>
@@ -866,21 +882,21 @@ function VariantC() {
     ${done.length ? `<section class="vc-group"><h2 class="hs-sec" style="margin:0"><span>Tales told</span><span class="hs-aside">${plural(done.length, 'campaign')} finished</span></h2>${done.map(camp).join('')}</section>` : ''}`;
 }
 function cPage(c) {
-  const nx = nextOf(c), pl = playedOf(c);
+  const nx = nextOf(c), pl = playedOf(c), mineToEdit = own(), road = seesCamp(c);
   // the road, newest first: the next session, then each one played with the levels reached after it, back to the start
   const stops = [];
-  if (nx) stops.push(`<li class="is-next"><span class="vc-node"></span><div><time>Next · ${dayLabel(nx.date)}, ${tm(nx.date)}</time><b>${esc(nx.title)}</b><small>${esc(where(nx))}</small>${nextQuests(nx)}</div></li>`);
+  if (nx) stops.push(`<li class="is-next"><span class="vc-node"></span><div><time>Next · ${dayLabel(nx.date)}, ${tm(nx.date)}</time><b>${esc(nx.title)}</b><small>${esc(where(nx))}</small>${mineToEdit ? nextQuests(nx) : ''}</div></li>`);
   if (c.status === 'fallen' && c.fellIn) stops.push(`<li class="is-fell"><span class="vc-node"></span><div><time>${shortDate(S(c.fellIn).date)}</time><b>Fell at ${esc(S(c.fellIn).title.replace(/^Session \d+: /, ''))}</b><small>${esc(c.traits.find(([k]) => k === 'Last words')?.[1] || '')}</small></div></li>`);
   if (c.status === 'retired') stops.push(`<li class="is-mark"><span class="vc-node"></span><div><b>Retired${CAMPS[c.camp]?.ended ? ` when ${esc(CAMPS[c.camp].title)} ended, ${monthYear(CAMPS[c.camp].ended)}` : ''}</b></div></li>`);
   // every session of their time in the campaign: played (with you, or brought along without you) or sat out
   const ten = tenure(c).sort((a, b) => b.date - a.date), missed = ten.length - pl.length;
   ten.forEach(s => {
     const when = `<time>${dayLabel(s.date)}${s.date.getFullYear() !== TODAY.getFullYear() ? ', ' + s.date.getFullYear() : ''}</time>`;
-    if (!wasThere(c, s)) { stops.push(`<li class="is-missed"><span class="vc-node"></span><div>${when}<b>${esc(s.title)}</b><small>You were away, and ${esc(c.name)} sat it out</small></div></li>`); return; }
+    if (!wasThere(c, s)) { stops.push(`<li class="is-missed"><span class="vc-node"></span><div>${when}<b>${esc(s.title)}</b><small>${youWere()} away, and ${esc(c.name)} sat it out</small></div></li>`); return; }
     const up = reachedAfter(c, s);
     if (up) stops.push(`<li class="is-lvl"><span class="vc-node"></span><div><b>Reached level ${up}</b></div></li>`);
     stops.push(`<li class="${youCame(s) ? '' : 'is-stood'}"><span class="vc-node"></span><div>${when}<b>${esc(s.title)}</b>
-      ${youCame(s) ? '' : `<small class="away">You were away; the party brought ${esc(c.name)} along</small>`}
+      ${youCame(s) ? '' : `<small class="away">${youWere()} away; the party brought ${esc(c.name)} along</small>`}
       <button type="button" class="p-link" data-session="${s.id}">Recap</button></div></li>`);
   });
   if (c.camp) stops.push(`<li class="is-mark"><span class="vc-node"></span><div><b>${pl.length ? 'Joined' : 'Will join'} ${esc(CAMPS[c.camp].title)}${c.levels[0] ? ` at level ${c.levels[0][1]}` : ''}</b></div></li>`);
@@ -889,19 +905,19 @@ function cPage(c) {
     <div class="hs-gilded vc-hero is-${c.status}"><span class="vc-hero-bg">${c.art.length ? `<span class="art art-${c.art[0]}"></span>` : ''}</span>
       <div class="vc-hero-in"><span class="medal">${pt(c, true)}</span>
         <div style="min-width:0"><h1>${esc(c.name)}</h1><p class="k">${esc(clsLine(c))}${c.system ? ' · ' + esc(c.system) : ''}</p>${c.epithet ? `<p class="e">${esc(c.epithet)}</p>` : ''}</div>${lvl(c)}</div></div>
-    <div class="vc-cols">
-      <section><h2 class="hs-sec"><span>The road so far</span><span class="hs-aside">${pl.length} played${missed ? ` · ${missed} missed` : ''}${levelUps(c) ? ` · ${plural(levelUps(c), 'level')} gained` : ''}</span></h2>
-        <div class="hs-gilded"><ol class="vc-road">${stops.join('')}</ol></div></section>
+    <div class="vc-cols ${road ? '' : 'is-bare'}">
+      ${road ? `<section><h2 class="hs-sec"><span>The road so far</span><span class="hs-aside">${pl.length} played${missed ? ` · ${missed} missed` : ''}${levelUps(c) ? ` · ${plural(levelUps(c), 'level')} gained` : ''}</span></h2>
+        <div class="hs-gilded"><ol class="vc-road">${stops.join('')}</ol></div></section>` : ''}
       <div class="vc-side">
         <section><h2 class="hs-sec"><span>Art</span><span class="hs-aside">${c.art.length ? plural(c.art.length, 'piece') : 'none yet'}</span></h2>
-          <div class="hs-gilded vc-art"><div class="vc-art-grid">${c.art.map((a, j) => `<button type="button" class="vc-art-t ${j === 0 ? 'is-pt' : ''}" data-zoom="${j}" data-zid="${c.id}" aria-label="${esc(c.artCaps[j] || 'Art ' + (j + 1))}${j === 0 ? ' (the portrait)' : ''}"><span class="art art-${a}"></span>${j === 0 ? '<span class="hs-tag">Portrait</span>' : ''}</button>`).join('')}
-            <label class="vc-art-t vc-art-add"><i>+</i>Add art<input type="file" accept="image/*" data-addart="${c.id}"></label></div></div></section>
+          <div class="hs-gilded vc-art">${c.art.length || mineToEdit ? `<div class="vc-art-grid">${c.art.map((a, j) => `<button type="button" class="vc-art-t ${j === 0 ? 'is-pt' : ''}" data-zoom="${j}" data-zid="${c.id}" aria-label="${esc(c.artCaps[j] || 'Art ' + (j + 1))}${j === 0 ? ' (the portrait)' : ''}"><span class="art art-${a}"></span>${j === 0 ? '<span class="hs-tag">Portrait</span>' : ''}</button>`).join('')}
+            ${mineToEdit ? `<label class="vc-art-t vc-art-add"><i>+</i>Add art<input type="file" accept="image/*" data-addart="${c.id}"></label>` : ''}</div>` : '<div class="p-empty">No art yet.</div>'}</div></section>
         <section><h2 class="hs-sec"><span>Their sheet</span></h2>
-          <div class="hs-gilded">${dl([['Played by', 'You'], ...facts(c)])}
+          <div class="hs-gilded">${dl([['Played by', mineToEdit ? 'You' : 'Geoff'], ...facts(c)])}
             ${c.story ? `<div class="p-panel-h p-hr"><span>Their story</span></div><p class="story">${esc(c.story)}</p>` : ''}
             ${fullSheet(c)}
-            ${c.camp ? `<div class="p-panel-h p-hr"><span>${CAMPS[c.camp].ended ? 'Travelled with' : 'Travels with'}</span></div>${mates(c.camp) || '<div class="p-empty">Nobody else yet.</div>'}` : ''}
-            <div class="ad-foot"><span></span><button type="button" class="hs-btn-amber" data-edit="${c.id}">Edit</button></div></div></section>
+            ${c.camp && road ? `<div class="p-panel-h p-hr"><span>${CAMPS[c.camp].ended ? 'Travelled with' : 'Travels with'}</span></div>${mates(c.camp) || '<div class="p-empty">Nobody else yet.</div>'}` : ''}
+            ${mineToEdit ? `<div class="ad-foot"><span></span><button type="button" class="hs-btn-amber" data-edit="${c.id}">Edit</button></div>` : ''}</div></section>
       </div>
     </div>`;
 }
@@ -909,15 +925,16 @@ function cPage(c) {
    Hearthside never reads either into fields, so it stays system-agnostic. */
 const fileSize = n => n < 1e6 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1e6).toFixed(1)} MB`;
 function fullSheet(c) {
-  const f = c.sheetFile;
+  const f = c.sheetFile, ed = own();
+  if (!ed && !c.link && !f) return '';
   return `<div class="p-panel-h p-hr"><span>The full sheet</span></div><div class="fs">
     ${c.link ? `<div class="hs-att"><span class="fs-ico" aria-hidden="true">↗</span><div><b>On ${esc(host(c))}</b><small>${esc(c.link)}</small></div>
       <button type="button" class="p-link" data-ext="${c.id}">Open</button></div>` : ''}
     ${f ? `<div class="hs-att"><span class="hs-att-icon" aria-hidden="true"></span><div><b>${esc(f.name)}</b><small>${f.type === 'application/pdf' ? 'PDF' : 'Picture'} · ${fileSize(f.size)} · uploaded ${shortDate(f.at)}</small></div>
-      <button type="button" class="p-link" data-fsopen="${c.id}">Open</button><button type="button" class="p-link" data-fsdel="${c.id}" style="color:var(--muted)">Remove</button></div>` : ''}
+      <button type="button" class="p-link" data-fsopen="${c.id}">Open</button>${ed ? `<button type="button" class="p-link" data-fsdel="${c.id}" style="color:var(--muted)">Remove</button>` : ''}</div>` : ''}
     ${!c.link && !f ? '<p>None yet. Link to wherever it lives (D&D Beyond, Demiplane, Drive), or upload a copy for the party to open.</p>' : ''}
-    <div class="fs-acts"><label class="up">${f ? 'Replace the copy' : 'Upload a sheet'}<input type="file" accept=".pdf,image/*" data-fsup="${c.id}"></label>
-      <button type="button" class="up" data-fslink="${c.id}">${c.link ? 'Change the link' : 'Link to it'}</button></div>
+    ${ed ? `<div class="fs-acts"><label class="up">${f ? 'Replace the copy' : 'Upload a sheet'}<input type="file" accept=".pdf,image/*" data-fsup="${c.id}"></label>
+      <button type="button" class="up" data-fslink="${c.id}">${c.link ? 'Change the link' : 'Link to it'}</button></div>` : ''}
   </div>`;
 }
 
@@ -1010,7 +1027,7 @@ function renderOv() {
       <div class="lb-img"><span class="art art-${c.art[i]}"></span></div>
       <div class="lb-f">${n > 1 ? '<button type="button" class="p-ghost" data-lbstep="-1" aria-label="Previous">‹</button>' : ''}
         <span>${esc(c.artCaps[i] || 'Art')} · ${i + 1} of ${n}${i === 0 ? ' · the portrait' : ''}</span>
-        ${i ? '<button type="button" class="p-ghost" data-lbpt="1">Make this the portrait</button>' : ''}
+        ${i && own() ? '<button type="button" class="p-ghost" data-lbpt="1">Make this the portrait</button>' : ''}
         ${n > 1 ? '<button type="button" class="p-ghost" data-lbstep="1" aria-label="Next">›</button>' : ''}<button type="button" class="hs-btn-amber" data-ovclose="1">Close</button></div></div></div>`;
   } else {
     const s = S(ov.sid), k = s.camp;
@@ -1055,14 +1072,19 @@ function render() {
   const v = VARIANTS[variant];
   document.getElementById('lbl').innerHTML = `${v.key} — ${v.name}<small>${v.note}</small>`;
   document.getElementById('data').textContent = empty ? 'Data: no adventurers yet' : "Data: Geoff's adventurers";
+  const w = VIEWERS[viewer], who = document.getElementById('who');
+  who.hidden = variant !== 3; who.textContent = w.label; who.title = w.note || '';
+  document.getElementById('att').hidden = !own();
   store.set('hs-adv-variant', v.key);
-  try { const u = new URL(location.href); u.searchParams.set('variant', v.key); sel ? u.searchParams.set('adventurer', sel) : u.searchParams.delete('adventurer'); history.replaceState(null, '', u); } catch {}
+  try { const u = new URL(location.href); u.searchParams.set('variant', v.key); sel ? u.searchParams.set('adventurer', sel) : u.searchParams.delete('adventurer');
+    viewer && variant === 3 ? u.searchParams.set('viewer', w.key.toLowerCase()) : u.searchParams.delete('viewer'); history.replaceState(null, '', u); } catch {}
 }
 const goTo = id => { sel = id; aArt = 0; render(); scrollTo({ top: 0 }); };
 function go(d) { variant = (variant + d + VARIANTS.length) % VARIANTS.length; render(); }
 document.getElementById('prev').onclick = () => go(-1);
 document.getElementById('next').onclick = () => go(1);
 document.getElementById('data').onclick = () => { empty = !empty; store.set('hs-adv-data', empty ? 'empty' : 'full'); sel = null; render(); };
+document.getElementById('who').onclick = () => { viewer = (viewer + 1) % VIEWERS.length; render(); };
 // the GM's attendance, for the open adventurer's latest session (or Starfall Salvage's)
 document.getElementById('att').onclick = () => { const c = sel && C(sel), t = c ? tenure(c) : []; openAttendance(t.length ? t[t.length - 1].id : 'ss-6'); };
 const lbStep = n => { const c = C(ov.id); ov.i = (ov.i + n + c.art.length) % c.art.length; renderOv(); };

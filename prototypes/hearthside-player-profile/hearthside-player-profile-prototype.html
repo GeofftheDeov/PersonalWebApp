@@ -512,7 +512,9 @@ const CAMPS = {
   bw: { title: 'Night at Blackwater Manor', init: 'BW', art: null, cloth: ['#24303a', '#10161c'], game: 'Call of Cthulhu 7e', status: 'Completed', role: 'player', gm: 'Avery', gmTitle: 'Keeper', party: 4, oneShot: true },
 };
 const CAMP_ORDER = ['ss', 'ac', 'bb', 'lr', 'bw'];
-const SHARED_WITH_AVERY = ['ss', 'bb', 'bw'];   // the campaigns Avery is also in: the only sessions a campaign-mate sees, and never listed as campaigns
+// the campaigns each other viewer is also in: the only sessions they see, and never listed as campaigns.
+// Avery is a campaign-mate; Sam is a friend who shares no campaign, so sees adventurers but no sessions.
+const SHARED = { avery: ['ss', 'bb', 'bw'], sam: [] };
 document.head.insertAdjacentHTML('beforeend', `<style>${Object.entries(CAMPS).filter(([, c]) => c.art)
   .map(([k, c]) => `.bn-${k}{background-image:url(${paintBanner(c.art)})}`).join('\n')}</style>`);
 const banner = k => CAMPS[k].art ? `<span class="bn bn-${k}" aria-hidden="true"></span>`
@@ -551,6 +553,7 @@ const S = id => SESSIONS.find(s => s.id === id);
 const RAIL = {
   geoff: [{ title: 'Prep the table', tag: 'Host', due: D(2026, 10, 31, 17, 30), for: 'Session 14 · Curse of the Ashen Crown' }, { title: 'Level Kestrel up to 6', due: D(2026, 11, 2, 21), for: 'Session 7 · Starfall Salvage' },
     { title: 'Bring the cider', due: D(2026, 10, 31, 18, 30), for: 'Session 14 · Curse of the Ashen Crown' }],
+  sam: [{ title: "Return Geoff's copy of Wingspan", due: D(2026, 10, 29, 18), for: 'board game night' }],
   avery: [{ title: "Print the hold's deck plan", tag: 'Prep', due: D(2026, 11, 3, 18), for: 'Session 7 · Starfall Salvage' }, { title: 'Bring the dice bag back to Theo', due: D(2026, 10, 30, 12), for: 'Starfall Salvage' }],
 };
 
@@ -612,7 +615,8 @@ const store = { get(k) { try { return localStorage.getItem(k); } catch { return 
 const qs0 = new URLSearchParams(location.search);
 let variant = Math.max(0, VARIANTS.findIndex(v => v.key === (qs0.get('variant') || store.get('hs-prof-variant') || 'A')));
 let stateI = Math.max(0, STATES.findIndex(s => s.key === (qs0.get('state') || store.get('hs-prof-state') || 'seasoned')));
-let viewer = (qs0.get('as') || store.get('hs-prof-as')) === 'avery' ? 'avery' : 'geoff';
+const VIEWERS = ['geoff', 'avery', 'sam'];
+let viewer = VIEWERS.find(v => v === (qs0.get('as') || store.get('hs-prof-as'))) || 'geoff';
 let cur = STATES[stateI].make();
 let aTab = 'record';       // A's open tab
 let cView = 'profile';     // C: 'profile' or 'settings'
@@ -648,7 +652,8 @@ const uniq = () => R().handle && R().userNumber ? `@${esc(R().handle)}#${esc(R()
 const sinceLabel = () => `${MONL[R().since.getMonth()]} ${R().since.getFullYear()}`;
 
 // what this viewer can see
-const campsSeen = () => cur.fresh ? [] : self() ? CAMP_ORDER : CAMP_ORDER.filter(k => SHARED_WITH_AVERY.includes(k));
+const campsSeen = () => cur.fresh ? [] : self() ? CAMP_ORDER : CAMP_ORDER.filter(k => SHARED[viewer].includes(k));
+const seesSessions = () => self() || SHARED[viewer].length > 0;
 const played = () => SESSIONS.filter(s => s.status === 'completed' && !s.away && campsSeen().includes(s.camp)).sort((a, b) => b.date - a.date);
 const upcoming = () => SESSIONS.filter(s => s.status === 'scheduled' && campsSeen().includes(s.camp)).sort((a, b) => a.date - b.date);
 // a campaign-mate sees all your adventurers, but not your campaigns: only sessions they were at, and no campaign list or count
@@ -663,7 +668,7 @@ function headHTML({ actions = true } = {}) {
   const r = R(), n = played().length, k = campsSeen().length;
   const sub = cur.fresh ? `Joined ${sinceLabel()} · no campaigns yet`
     : self() ? `${n} session${n === 1 ? '' : 's'} · ${k} campaign${k === 1 ? '' : 's'} · since ${sinceLabel()}`
-    : `${advsSeen().length} adventurers · ${n} session${n === 1 ? '' : 's'} together · since ${sinceLabel()}`;
+    : `${advsSeen().length} adventurers · ${seesSessions() ? `${n} session${n === 1 ? '' : 's'} together · ` : ''}since ${sinceLabel()}`;
   const acts = !actions ? '' : self() ? `<button type="button" class="k-btn floor-btn" data-edit>Edit</button>`
     : `<button type="button" class="k-btn floor-btn is-primary" data-stub="a letter to Geoff">Write a letter</button>${r.friend ? '<span class="k-pill is-ok" style="align-self:center;background:rgba(26,19,14,.7)">Friends</span>' : ''}`;
   return `<header class="pf-head hs-page-head">${photoHTML()}<div class="who"><h1>${esc(r.name)}</h1>
@@ -790,7 +795,7 @@ const integrationsHTML = () => `<div class="igs">${igCard('gcal')}${igCard('disc
 /* ---------------- A: The ledger ---------------- */
 function VariantA() {
   const tabs = self() ? [['record', 'Record'], ['sessions', 'Sessions', played().length], ['campaigns', 'Campaigns', campsSeen().length], ['notices', 'Notices'], ['integrations', 'Integrations']]
-    : [['record', 'Record'], ['sessions', 'Sessions together', played().length]];
+    : seesSessions() ? [['record', 'Record'], ['sessions', 'Sessions together', played().length]] : [['record', 'Record']];
   if (!tabs.some(t => t[0] === aTab)) aTab = 'record';
   let body = '';
   if (aTab === 'record') body = `<div class="a-sec">${recordDL()}</div>
@@ -807,9 +812,9 @@ function VariantA() {
   else if (aTab === 'notices') body = `<div class="a-sec" style="padding-bottom:0"><h3 class="k-h">Where each notice reaches you</h3></div>${noticesHTML()}`;
   else body = integrationsHTML();
   return `${headHTML()}
-    <div class="hs-gilded a-tabs"><div class="hs-tabs" role="tablist" aria-label="Profile">${tabs.map(([k, l, n]) =>
-      `<button type="button" role="tab" data-atab="${k}" aria-selected="${aTab === k}">${l}${n != null ? `<small>${n}</small>` : ''}</button>`).join('')}</div></div>
-    <section class="hs-gilded a-panel" role="tabpanel">${body}</section>`;
+    ${tabs.length < 2 ? '' : `<div class="hs-gilded a-tabs"><div class="hs-tabs" role="tablist" aria-label="Profile">${tabs.map(([k, l, n]) =>
+      `<button type="button" role="tab" data-atab="${k}" aria-selected="${aTab === k}">${l}${n != null ? `<small>${n}</small>` : ''}</button>`).join('')}</div></div>`}
+    <section class="hs-gilded a-panel" ${tabs.length < 2 ? '' : 'role="tabpanel"'}>${body}</section>`;
 }
 const awayLine = () => { const m = SESSIONS.filter(s => s.away && campsSeen().includes(s.camp)).length; return m ? `missed ${m}` : ''; };
 const sessEmpty = () => `<p class="k-empty">${self() ? 'No sessions yet. Sessions you play show here, with the adventurer you brought.' : 'No sessions together yet.'}</p>`;
@@ -823,7 +828,7 @@ function VariantB() {
       <div class="as">${c ? medal(c) : gmMedal()}<span>${c ? `As ${esc(c.name)}<small>${esc(c.cls)}${levelAt(s) ? ` · reached level ${levelAt(s)}` : ''}</small>` : `<span class="gm">Ran it as ${esc(camp.gmTitle)}</span>`}</span></div></button>`; }).join('');
   const acts = self() ? `<div class="k-row"><button type="button" class="k-btn floor-btn" data-edit>Edit</button></div>`
     : `<div class="k-row"><button type="button" class="k-btn floor-btn is-primary" data-stub="a letter to Geoff">Write a letter</button></div>`;
-  return `<header class="hs-page-head"><h1>${self() ? 'Your room' : esc(r.name.split(' ')[0]) + "'s room"}</h1><p>${self() ? 'Your record, your adventures, and how Hearthside reaches you.' : `${esc(r.name.split(' ')[0])}'s adventurers, and the sessions you have played together.`}</p></header>
+  return `<header class="hs-page-head"><h1>${self() ? 'Your room' : esc(r.name.split(' ')[0]) + "'s room"}</h1><p>${self() ? 'Your record, your adventures, and how Hearthside reaches you.' : `${esc(r.name.split(' ')[0])}'s adventurers${seesSessions() ? ', and the sessions you have played together' : ''}.`}</p></header>
     <div class="b-top">
       <div class="b-frame">${photoHTML()}<div class="plate"><b>${esc(r.name)}</b><small>${handle() || 'No handle yet'}</small></div>${acts}</div>
       <section class="hs-gilded b-rec">${recordDL()}<div class="pad rule"><h3 class="k-h">Favourite games</h3>${gamesHTML()}</div>
@@ -832,12 +837,12 @@ function VariantB() {
     ${self() ? `<section><h2 class="hs-sec"><span>Campaigns</span><span class="hs-aside">${campsSeen().length ? `${campsSeen().length} · ${campsSeen().filter(k => CAMPS[k].status === 'In progress').length} in progress` : ''}</span></h2>
       ${campsSeen().length ? `<div class="ccs">${campsSeen().map(k => campCard(k, 'hs-gilded')).join('')}</div>` : `<div class="hs-gilded pad">${campsEmpty()}</div>`}</section>` : ''}
     ${up.length ? `<section><h2 class="hs-sec"><span>Coming up</span><span class="hs-aside">${up.length}</span></h2><div class="hs-gilded" style="padding:6px 10px"><ul class="srs">${up.map(s => `<li>${sessRow(s, { up: true })}</li>`).join('')}</ul></div></section>` : ''}
-    <section><h2 class="hs-sec"><span>Sessions played</span><span class="hs-aside">${pl.length ? `${pl.length}${awayLine() ? ' · ' + awayLine() : ''}` : ''}</span></h2>
+    ${!seesSessions() ? '' : `<section><h2 class="hs-sec"><span>Sessions played</span><span class="hs-aside">${pl.length ? `${pl.length}${awayLine() ? ' · ' + awayLine() : ''}` : ''}</span></h2>
       ${pl.length ? `<div class="slips">${slips}</div>
         ${pl.length > 6 ? (showAll ? `<div class="hs-gilded b-all" style="margin-top:20px">${filterHTML()}<ul class="srs" style="padding:4px 8px">${filtered().map(s => `<li>${sessRow(s)}</li>`).join('')}</ul>
             <div class="pad rule"><button type="button" class="p-link" data-more>Show fewer</button></div></div>`
           : `<p class="hs-note" style="margin-top:14px"><button type="button" class="k-btn floor-btn" data-more>All ${pl.length} sessions</button></p>`) : ''}`
-        : `<div class="hs-gilded pad">${sessEmpty()}</div>`}</section>
+        : `<div class="hs-gilded pad">${sessEmpty()}</div>`}</section>`}
     ${self() ? `<section><h2 class="hs-sec"><span>Notices</span><span class="hs-aside">where each reaches you</span></h2><div class="hs-gilded" style="padding-top:8px">${noticesHTML()}</div></section>
       <section><h2 class="hs-sec"><span>Integrations</span><span class="hs-aside">${[cur.gcal, cur.discord].filter(x => x.connected).length} of 2 connected</span></h2><div class="hs-gilded">${integrationsHTML()}</div></section>` : ''}`;
 }
@@ -847,14 +852,14 @@ function VariantC() {
   if (!self()) cView = 'profile';
   const seg = self() ? `<div class="c-seg" role="group" aria-label="Show"><button type="button" data-cview="profile" aria-pressed="${cView === 'profile'}">Profile</button><button type="button" data-cview="settings" aria-pressed="${cView === 'settings'}">Settings</button></div>` : '';
   const head = `<header class="hs-page-head" style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap"><div><h1>${cView === 'settings' ? 'Settings' : self() ? 'Your profile' : esc(R().name.split(' ')[0])}</h1>
-    <p>${cView === 'settings' ? 'Only you see this page.' : self() ? 'This is what your party sees, plus your email and phone.' : 'Their adventurers, and the sessions you have played together.'}</p></div>${seg}</header>`;
+    <p>${cView === 'settings' ? 'Only you see this page.' : self() ? 'This is what your party sees, plus your email and phone.' : seesSessions() ? 'Their adventurers, and the sessions you have played together.' : 'Their adventurers.'}</p></div>${seg}</header>`;
   return head + (cView === 'settings' ? cSettings() : cProfile());
 }
 function cProfile() {
   const r = R(), pl = played(), up = upcoming();
   const hero = `<section class="hs-gilded c-hero">${r.photo ? `<span class="c-hero-bg art art-${r.photo}" aria-hidden="true"></span>` : ''}
     <div class="c-hero-in">${photoHTML()}<div style="min-width:0"><h2>${esc(r.name)}</h2><div class="handle">${handle() || '<span style="color:var(--muted)">No handle yet</span>'}${uniq() ? ` <span style="color:var(--muted);font-family:var(--font-body);font-size:13.5px">· ${uniq()}</span>` : ''}</div>
-      <div class="facts">${cur.fresh ? `Joined ${sinceLabel()}` : `<b>${pl.length}</b> sessions${self() ? '' : ' together'}${self() ? ` · <b>${campsSeen().length}</b> campaigns` : ''} · <b>${advsSeen().length}</b> adventurers · since ${sinceLabel()}`}${r.discordHandle ? ` · Discord <b>${esc(r.discordHandle)}</b>` : ''}</div>
+      <div class="facts">${cur.fresh ? `Joined ${sinceLabel()}` : `${seesSessions() ? `<b>${pl.length}</b> sessions${self() ? '' : ' together'} · ` : ''}${self() ? `<b>${campsSeen().length}</b> campaigns · ` : ''}<b>${advsSeen().length}</b> adventurers · since ${sinceLabel()}`}${r.discordHandle ? ` · Discord <b>${esc(r.discordHandle)}</b>` : ''}</div>
       <div class="k-row" style="margin-top:10px">${self() ? '<button type="button" class="k-btn" data-cview="settings">Edit in Settings</button>' : '<button type="button" class="k-btn is-primary" data-stub="a letter to Geoff">Write a letter</button>' + (r.friend ? '<span class="k-pill is-ok">Friends</span>' : '')}</div></div></div>
     <div class="c-hero-foot"><div><h3 class="k-h">Adventurers</h3>${advsHTML()}</div><div><h3 class="k-h">Favourite games</h3>${gamesHTML()}</div></div></section>`;
   const camps = campsListed().length ? `<section><h2 class="hs-sec"><span>Campaigns</span><span class="hs-aside">${sFilter === 'all' ? 'pick one to follow its road' : `<button type="button" class="p-link" data-sf="all">Show every campaign</button>`}</span></h2>
@@ -879,7 +884,7 @@ function cProfile() {
   });
   const road = `<section><h2 class="hs-sec"><span>The road so far</span><span class="hs-aside">${pl.length ? `${pl.filter(s => sFilter === 'all' || s.camp === sFilter).length} played${awayLine() ? ' · ' + awayLine() : ''}` : ''}</span></h2>
     <div class="hs-gilded">${all.length ? `<ol class="road">${out}</ol>${all.length > 14 ? `<div class="pad rule"><button type="button" class="p-link" data-more>${showAll ? 'Show less' : `Show the whole road (${all.length - 14} more)`}</button></div>` : ''}` : `<div class="pad">${sessEmpty()}</div>`}</div></section>`;
-  return hero + camps + road;
+  return hero + camps + (seesSessions() ? road : '');
 }
 function cSettings() {
   const r = R(), d = recDraft || (recDraft = { name: r.name, handle: r.handle, phone: r.phone, discordHandle: r.discordHandle, discordId: r.discordId });
@@ -945,7 +950,7 @@ function render() {
   const v = VARIANTS[variant], st = STATES[stateI];
   document.getElementById('lbl').innerHTML = `${v.key} — ${v.name}<small>${v.note}</small>`;
   document.getElementById('state').innerHTML = `State: ${st.name}<small>${st.note}</small>`;
-  document.getElementById('who').textContent = self() ? 'As Geoff (yourself)' : 'As Avery, a campaign-mate';
+  document.getElementById('who').textContent = { geoff: 'As Geoff (yourself)', avery: 'As Avery, a campaign-mate', sam: 'As Sam, a friend (no campaigns shared)' }[viewer];
   store.set('hs-prof-variant', v.key); store.set('hs-prof-state', st.key); store.set('hs-prof-as', viewer);
   try { const u = new URL(location.href); u.searchParams.set('variant', v.key); u.searchParams.set('state', st.key); u.searchParams.set('as', viewer); history.replaceState(null, '', u); } catch {}
   if (keep) document.getElementById(keep)?.focus();
@@ -955,7 +960,7 @@ function go(d) { variant = (variant + d + VARIANTS.length) % VARIANTS.length; re
 document.getElementById('prev').onclick = () => go(-1);
 document.getElementById('next').onclick = () => go(1);
 document.getElementById('state').onclick = () => { stateI = (stateI + 1) % STATES.length; reset(); render(); };
-document.getElementById('who').onclick = () => { viewer = self() ? 'avery' : 'geoff'; sFilter = 'all'; showAll = false; recDraft = null; render(); };
+document.getElementById('who').onclick = () => { viewer = VIEWERS[(VIEWERS.indexOf(viewer) + 1) % VIEWERS.length]; sFilter = 'all'; showAll = false; recDraft = null; render(); };
 addEventListener('keydown', e => {
   if (e.key === 'Escape' && ov) { ov = null; renderOv(); return; }
   if (ov || e.target.closest('input,textarea,select,[contenteditable]')) return;

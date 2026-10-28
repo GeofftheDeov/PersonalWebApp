@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--prefix", "frontend"],
       "port": 3000
+    },
+    {
+      "name": "profile-prototype",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "4176", "--bind", "127.0.0.1", "--directory", "prototypes/hearthside-player-profile"],
+      "port": 4176
     }
   ]
 }

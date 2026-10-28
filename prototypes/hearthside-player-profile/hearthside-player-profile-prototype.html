@@ -1,0 +1,1036 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hearthside Profile Prototype</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alegreya+Sans+SC:wght@500;700&family=Alegreya+Sans:wght@400;500;700&family=IM+Fell+English+SC&family=IM+Fell+English:ital@0;1&display=swap">
+<link rel="stylesheet" href="bundle.css">
+<style>
+/* PROTOTYPE — throwaway. Three layouts of a player's profile page in the Hearthside design system, switchable from the
+   bar at the bottom (or ← →). Keeps every record field the PWA's profile shows (frontend/src/app/profile/page.tsx:
+   photo, name, handle, unique ID, internal ID, email, record type, phone, Discord handle and user ID, favourite games,
+   characters, campaigns, sessions attended, the Google Calendar integration) and adds: which adventurer played each
+   session, notification settings, and Discord beside Google Calendar under Integrations. Data is made up, "today" is
+   Tue Oct 27 2026, and everything lives in memory. Only .hs-page changes per layout; the AppShell is the design system's. */
+:root{
+  color-scheme:dark;
+  /* Hearthside tokens (from the design system's tokens.json; one theme, Tavern) */
+  --ground:#1a130e;--ground-2:#241a13;--surface:#2c2119;--line:#4a3726;--text:#f1e6d0;--muted:#b8a487;
+  --on-wood-text:#fbf1dc;--on-wood-muted:#d4c2a2;--accent:#e5a13a;--accent-ink:#1a130e;--seal:#b4462c;--moss:#7c9a55;
+  --verdigris:#5aa396;--paper:#eadbb9;--paper-hi:#f0e3c4;--paper-lo:#e2cea5;--paper-ink:#2b1d12;--paper-muted:#6b5337;
+  --paper-line:#c9b28a;--leather-hi:#37281c;--leather:#221810;--gold-hi:#f6dd96;--gold:#d6a84e;--gold-lo:#8a5c1c;
+  --gold-line:rgba(226,184,98,0.38);--gold-rule:rgba(226,184,98,0.14);
+  --heat-0:rgba(43,29,18,0.06);--heat-1:#d8c092;--heat-2:#c49a5c;--heat-3:#9c6c32;--heat-4:#5a3a1a;--firelight:#ffb36b;
+  --font-display:"IM Fell English SC","IM Fell English",Georgia,serif;
+  --font-story:"IM Fell English",Georgia,serif;
+  --font-body:"Alegreya Sans",system-ui,sans-serif;
+  --font-label:"Alegreya Sans SC","Alegreya Sans",system-ui,sans-serif;
+  --space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;--space-5:20px;--space-6:24px;--sheet-foot:44px;
+  --radius-sheet:3px;--radius:4px;--radius-panel:5px;--radius-full:999px;
+  --shadow-panel:0 14px 30px rgba(0,0,0,0.55),0 2px 4px rgba(0,0,0,0.5);
+  --shadow-panel-inset:inset 0 0 0 1px rgba(0,0,0,0.55),inset 0 0 26px rgba(0,0,0,0.5);
+  --shadow-paper:0 16px 34px rgba(0,0,0,0.6),0 2px 4px rgba(0,0,0,0.45);
+  --shadow-pin:0 2px 3px rgba(0,0,0,0.5);
+  --on-wood-shadow:0 1px 2px rgba(0,0,0,0.9),0 0 14px rgba(0,0,0,0.6);
+  --gild:linear-gradient(135deg,#f6dd96 0%,#b07c2c 22%,#f0cf7a 45%,#7c5318 68%,#e7c06a 88%,#a87228 100%);
+  --torch:#f07b2c;
+  /* the prototype switcher only: deliberately not Hearthside */
+  --proto-bg:#fafafa;--proto-fg:#111;--proto-dim:#555;
+}
+body{margin:0;background:var(--ground);color:var(--text)}
+.hs-shell-wrap{padding-block:16px 120px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.hs-nav a{cursor:pointer}
+.hs-page > *{align-self:stretch;min-width:0}
+.hs-app select,.hs-app textarea{font:inherit;color:inherit}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* ---------- material context: shared pieces read these, so they sit on parchment or leather alike ---------- */
+.hs-sheet{--k-ink:var(--paper-ink);--k-muted:var(--paper-muted);--k-line:var(--paper-line);--k-hi:var(--seal);--k-pri:var(--paper-ink);--k-pri-ink:var(--paper);--k-ok:#4d6a2c}
+.hs-gilded{--k-ink:var(--text);--k-muted:var(--muted);--k-line:var(--gold-rule);--k-hi:var(--accent);--k-pri:var(--accent);--k-pri-ink:var(--accent-ink);--k-ok:var(--moss)}
+
+/* ---------- shared bits ---------- */
+.p-link{background:none;border:0;padding:0;color:var(--k-hi,var(--accent));cursor:pointer;font-family:var(--font-label);font-size:13.5px;font-weight:500;letter-spacing:.04em;text-decoration:none}
+.p-link:hover{text-decoration:underline}
+.ext::after{content:" ↗";font-family:var(--font-body)}
+.k-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--gold-line);background:transparent;color:var(--k-ink,var(--text));border-radius:var(--radius);padding:4px 12px;
+  font-family:var(--font-label);font-size:14px;font-weight:500;letter-spacing:.04em;cursor:pointer;white-space:nowrap;text-decoration:none;line-height:1.4}
+.k-btn:hover{border-color:var(--gold)}
+.hs-sheet .k-btn{border:1.5px solid var(--paper-ink)}
+.k-btn.is-primary{background:var(--k-pri,var(--accent));color:var(--k-pri-ink,var(--accent-ink));border-color:var(--k-pri,var(--accent))}
+.k-btn.is-danger{color:#e88a6e;border-color:rgba(232,138,110,.5)}
+.k-btn:disabled{opacity:.55;cursor:default}
+.k-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.k-h{margin:0 0 8px;font-family:var(--font-label);font-size:13.5px;font-weight:500;letter-spacing:.1em;color:var(--k-muted);display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.k-h .k-aside{font-family:var(--font-body);letter-spacing:0;font-size:13px}
+.k-fine{font-size:13px;color:var(--k-muted);line-height:1.45;margin:6px 0 0}
+.k-empty{font-size:14.5px;color:var(--k-muted);margin:0;line-height:1.5}
+.k-pill{display:inline-block;font-family:var(--font-label);font-size:12px;font-weight:500;letter-spacing:.06em;padding:1px 8px;border-radius:var(--radius-full);border:1px solid currentColor;color:var(--k-muted);white-space:nowrap;vertical-align:1px}
+.k-pill.is-ok{color:var(--k-ok)}
+.k-pill.is-hi{color:var(--k-hi)}
+.k-pill.is-seal{color:#fff;background:var(--seal);border-color:var(--seal)}
+.k-pill.is-torch{color:var(--torch)}
+.pad{padding:10px 14px}
+.rule{border-top:1px solid var(--gold-rule)}
+/* a definition list that works on both materials */
+.k-dl{margin:0;display:flex;flex-direction:column}
+.k-dl > div{display:grid;grid-template-columns:minmax(96px,32%) minmax(0,1fr);gap:10px;padding:7px 0;border-top:1px solid var(--k-line);align-items:baseline}
+.k-dl > div:first-child{border-top:0}
+.k-dl dt{font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.06em;color:var(--k-muted)}
+.k-dl dd{margin:0;font-size:14.5px;overflow-wrap:anywhere}
+.k-dl dd small{display:block;color:var(--k-muted);font-size:12.5px}
+.k-dl .is-none{color:var(--k-muted);font-style:italic}
+.k-dl .lock{font-size:12px;color:var(--k-muted);font-family:var(--font-label);letter-spacing:.05em;margin-left:6px}
+.mono{font-variant-numeric:tabular-nums;letter-spacing:.02em}
+
+/* portraits: a face in a gilded medallion. Stand-ins are painted by the page; no art = initials on dyed cloth. */
+.art{position:absolute;inset:0;background-size:cover;background-position:center}
+.pt{position:relative;display:block;aspect-ratio:1;overflow:hidden;background:var(--leather);container-type:inline-size;border-radius:50%}
+.pt .art{background-size:170% auto;background-position:50% 45%}
+.pt.is-photo .art{background-size:135% auto;background-position:50% 40%}
+.pt-none{position:absolute;inset:0;display:grid;place-items:center;background:radial-gradient(120% 90% at 15% 100%,rgba(255,179,107,.2),transparent 55%),linear-gradient(160deg,#4a3324,#1c120b)}
+.pt-none span{font-family:var(--font-display);font-size:42cqw;color:var(--gold-hi);opacity:.85;line-height:1}
+.pt-none.is-gm{background:radial-gradient(90% 90% at 50% 80%,rgba(240,123,44,.45),transparent 70%),linear-gradient(160deg,#4a2a18,#1c0f08)}
+.pt-none.is-gm svg{width:48cqw;height:48cqw;color:var(--torch)}
+.medal{position:relative;display:block;flex:none;border-radius:50%;overflow:hidden;border:2px solid transparent;
+  background:linear-gradient(var(--leather),var(--leather)) padding-box,var(--gild) border-box;box-shadow:0 3px 8px rgba(0,0,0,.55)}
+.medal.is-gm{background:linear-gradient(var(--leather),var(--leather)) padding-box,linear-gradient(135deg,#ffb36b,#a8461a) border-box}
+.medal.is-gone .art{filter:grayscale(1) brightness(.75)}
+.flame{display:inline-block;width:1em;height:1em;vertical-align:-.12em;color:var(--torch)}
+/* the photo: clicking it (yourself) changes it, as on the PWA */
+.photo{position:relative;display:block;cursor:default}
+.photo.is-mine{cursor:pointer}
+.photo input{position:absolute;width:1px;height:1px;opacity:0}
+.photo .ph-hint{position:absolute;inset:0;border-radius:50%;display:grid;place-items:center;background:rgba(10,7,4,.62);opacity:0;transition:opacity .15s;
+  font-family:var(--font-label);font-size:13px;letter-spacing:.06em;color:var(--text);text-align:center;line-height:1.2;padding:8px}
+.photo.is-mine:hover .ph-hint,.photo.is-mine:focus-within .ph-hint{opacity:1}
+.photo:focus-within{outline:2px solid var(--accent);outline-offset:3px;border-radius:50%}
+
+/* banners, as on the Campaigns page */
+.bn{position:absolute;inset:0;background-size:cover;background-position:center}
+.bn.is-cloth{display:grid;place-items:center end;padding-right:8%;background:repeating-linear-gradient(45deg,rgba(255,255,255,.03) 0 2px,transparent 2px 6px),linear-gradient(160deg,var(--c1),var(--c2))}
+.bn.is-cloth::after{content:"";position:absolute;inset:4px;border:1px dashed rgba(246,221,150,.4);border-radius:2px}
+.bn.is-cloth span{font-family:var(--font-display);font-size:20px;letter-spacing:.12em;color:var(--gold-hi);opacity:.85;text-shadow:0 1px 0 rgba(0,0,0,.6)}
+.thumb{position:relative;display:inline-block;flex:none;width:40px;height:22px;border-radius:2px;overflow:hidden;vertical-align:-6px;box-shadow:0 0 0 1px rgba(0,0,0,.7),0 1px 3px rgba(0,0,0,.6)}
+.thumb .bn.is-cloth span{display:none}
+.thumb .bn.is-cloth::after{display:none}
+
+/* the head of the page, on the floor */
+.pf-head{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.pf-head .photo{width:96px}
+.pf-head .who{min-width:0;flex:1 1 220px}
+.pf-head h1{margin:0;font-family:var(--font-story);font-weight:400;font-size:clamp(28px,3.4vw,38px);line-height:1.1;color:var(--on-wood-text);text-shadow:var(--on-wood-shadow)}
+.pf-head .handle{font-family:var(--font-label);font-size:16px;letter-spacing:.04em;color:var(--accent);text-shadow:var(--on-wood-shadow)}
+.pf-head .handle small{color:var(--on-wood-muted);font-family:var(--font-body);letter-spacing:0;font-size:14px}
+.pf-head p{margin:4px 0 0;color:var(--on-wood-muted);font-size:14.5px;text-shadow:var(--on-wood-shadow)}
+.pf-head .acts{display:flex;gap:8px;flex-wrap:wrap}
+.floor-btn{background:rgba(26,19,14,.72);color:var(--text);border:1px solid var(--gold-line);box-shadow:0 2px 8px rgba(0,0,0,.5)}
+.floor-btn.is-primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+
+/* favourite games: chips */
+.chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:2px 4px 2px 10px;border:1px solid var(--gold-line);border-radius:var(--radius-full);font-size:13.5px;background:rgba(0,0,0,.18)}
+.chip.ro{padding-right:10px}
+.chip button{background:none;border:0;color:var(--muted);cursor:pointer;width:22px;height:22px;border-radius:50%;font-size:15px;line-height:1}
+.chip button:hover{color:var(--text);background:rgba(255,255,255,.06)}
+.add-in{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-full);padding:3px 10px;color:var(--text);font-size:13.5px;width:150px}
+.add-in:focus{outline:0;border-color:var(--gold)}
+
+/* adventurers: medallions with names */
+.advs{display:flex;flex-wrap:wrap;gap:12px 14px}
+.adv{display:flex;flex-direction:column;align-items:center;gap:4px;width:68px;background:none;border:0;padding:0;cursor:pointer;color:inherit;text-align:center}
+.adv .medal{width:52px}
+.adv b{font-weight:500;font-size:12.5px;line-height:1.2}
+.adv small{font-size:11.5px;color:var(--k-muted,var(--muted));line-height:1.2}
+
+/* sessions: a row each */
+.srs{list-style:none;margin:0;padding:0}
+.srs li{border-top:1px solid var(--k-line)}
+.srs li:first-child{border-top:0}
+.sr{display:grid;grid-template-columns:52px 40px minmax(0,1fr);gap:10px;align-items:center;width:100%;padding:9px 4px;background:none;border:0;color:inherit;text-align:left;cursor:pointer;border-radius:var(--radius)}
+.sr:hover{background:rgba(255,214,140,.05)}
+.sr .medal{width:40px}
+.sr-when{font-family:var(--font-label);font-size:13px;letter-spacing:.04em;color:var(--k-muted);line-height:1.15;font-variant-numeric:tabular-nums}
+.sr-when b{display:block;color:var(--k-ink);font-weight:500;font-size:14px}
+.sr-t{min-width:0;display:flex;flex-direction:column}
+.sr-k{font-family:var(--font-label);font-size:12px;letter-spacing:.08em;color:var(--k-muted)}
+.sr-n{font-size:14.5px;font-weight:500;line-height:1.25}
+.sr-as{font-size:13px;color:var(--k-muted)}
+.sr-as b{font-weight:500;color:var(--k-ink)}
+.sr-as .gm{color:var(--torch)}
+.sr.is-next .sr-when b{color:var(--accent)}
+.sr .lv{font-family:var(--font-label);font-size:11.5px;letter-spacing:.06em;color:var(--k-ok);border:1px solid currentColor;border-radius:var(--radius-full);padding:0 6px;margin-left:4px;white-space:nowrap}
+.filt{display:flex;flex-wrap:wrap;gap:6px;padding:10px 12px;border-bottom:1px solid var(--gold-rule)}
+.filt button{background:transparent;border:1px solid var(--gold-line);color:var(--muted);border-radius:var(--radius-full);padding:2px 10px;font-family:var(--font-label);font-size:13px;letter-spacing:.04em;cursor:pointer;display:inline-flex;gap:6px;align-items:center}
+.filt button[aria-pressed="true"]{color:var(--accent-ink);background:var(--accent);border-color:var(--accent)}
+.filt button .n{font-family:var(--font-body);font-size:12px;opacity:.8}
+
+/* campaigns: banner cards */
+.ccs{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+.cc{position:relative;display:flex;flex-direction:column;text-align:left;color:inherit;cursor:pointer;padding:6px;min-width:0;font:inherit}
+.cc:not(.hs-gilded){background:rgba(0,0,0,.16);border:0}
+.cc-bn{position:relative;display:block;aspect-ratio:4/1;border-radius:2px;overflow:hidden;box-shadow:0 0 0 1px rgba(0,0,0,.6)}
+.cc.is-done .cc-bn .bn{filter:grayscale(.55) brightness(.8)}
+.cc-body{display:flex;flex-direction:column;gap:3px;padding:10px 10px 8px}
+.cc-t{font-family:var(--font-story);font-size:19px;line-height:1.15}
+.cc-s{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:13px;color:var(--muted)}
+.cc-role{display:flex;align-items:center;gap:8px;margin-top:6px;font-size:13.5px}
+.cc-role .medal{width:30px}
+.cc-role .twin{display:flex}
+.cc-role .twin .medal + .medal{margin-left:-10px}
+.cc-f{font-size:13px;color:var(--muted);margin-top:2px}
+.cc-f b{color:var(--accent);font-weight:500}
+.st-live{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-label);font-size:12.5px;letter-spacing:.06em;color:var(--accent)}
+.st-live::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 6px var(--accent)}
+
+/* notification settings: a grid of where each notice goes */
+.nt{width:100%;border-collapse:collapse;font-size:14px}
+.nt th,.nt td{padding:8px 4px;border-top:1px solid var(--gold-rule);vertical-align:middle}
+.nt thead th{border-top:0;font-family:var(--font-label);font-weight:500;font-size:12.5px;letter-spacing:.07em;color:var(--muted);text-align:center;width:58px;line-height:1.15;padding-bottom:6px}
+.nt thead th:first-child{width:auto}
+.nt thead th small{display:block;font-family:var(--font-body);letter-spacing:0;font-size:11.5px}
+.nt tbody th{text-align:left;font-weight:500;padding-left:6px}
+.nt tbody th small{display:block;font-weight:400;font-size:12.5px;color:var(--muted);line-height:1.3}
+.nt td{text-align:center}
+.nt tr.g th{padding-top:14px;border-top:0;font-family:var(--font-label);font-size:13px;letter-spacing:.1em;color:var(--accent);font-weight:500}
+.nt tr.sub td{border-top:0;padding-top:0;text-align:left;padding-left:6px}
+.ck{appearance:none;-webkit-appearance:none;width:20px;height:20px;margin:0;border:1.5px solid var(--muted);border-radius:3px;background:transparent;cursor:pointer;display:inline-grid;place-items:center;vertical-align:middle}
+.ck:checked{background:var(--moss);border-color:var(--moss)}
+.ck:checked::after{content:"";width:5px;height:10px;border:solid var(--accent-ink);border-width:0 2px 2px 0;transform:translateY(-1px) rotate(45deg)}
+.ck:disabled{opacity:.35;cursor:default}
+.ck:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.offs{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:13px;color:var(--muted)}
+.offs select,.fld select,.ig select,.qh select{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:3px 6px;color:var(--text);font-size:13.5px;max-width:100%}
+/* a switch, for a yes/no that changes something right away */
+.sw{display:flex;align-items:flex-start;gap:10px;cursor:pointer;font-size:14px;line-height:1.35}
+.sw input{appearance:none;-webkit-appearance:none;flex:none;width:34px;height:20px;margin:0;border-radius:10px;background:var(--surface);border:1px solid var(--line);position:relative;cursor:pointer;transition:background .15s}
+.sw input::after{content:"";position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:var(--muted);transition:transform .15s}
+.sw input:checked{background:var(--moss);border-color:var(--moss)}
+.sw input:checked::after{transform:translateX(14px);background:var(--accent-ink)}
+.sw input:disabled{opacity:.4}
+.sw small{display:block;color:var(--muted);font-size:12.5px}
+.qh{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border-top:1px solid var(--gold-rule)}
+.qh .times{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding-left:44px;font-size:13.5px;color:var(--muted)}
+
+/* integrations: modeled on the PWA's Google Calendar card. Name and a line on the left, one button on the right. */
+.igs{display:flex;flex-direction:column}
+.ig{display:grid;grid-template-columns:40px minmax(0,1fr) auto;gap:6px 12px;align-items:start;padding:14px}
+.ig + .ig{border-top:1px solid var(--gold-rule)}
+.ig-mark{width:40px;height:40px;border-radius:var(--radius);display:grid;place-items:center;border:1px solid var(--gold-line);background:rgba(0,0,0,.25);color:var(--gold-hi)}
+.ig-mark svg{width:22px;height:22px}
+.ig-name{font-family:var(--font-story);font-size:19px;line-height:1.2;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
+.ig-sub{margin:2px 0 0;font-size:14px;color:var(--muted);line-height:1.4}
+.ig-warn{margin:6px 0 0;font-size:13.5px;line-height:1.4;color:var(--text);padding-left:10px;border-left:2px solid var(--seal)}
+.ig-btn{align-self:center;min-width:104px}
+.ig-opts{grid-column:2 / -1;display:flex;flex-direction:column;gap:10px;margin-top:8px;padding-top:10px;border-top:1px dashed var(--gold-rule)}
+.ig-opts label.line{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:14px}
+.ig-note{grid-column:2 / -1;margin:4px 0 0;font-size:13px;color:var(--accent)}
+@media (max-width:480px){.ig{grid-template-columns:40px minmax(0,1fr)}.ig-btn{grid-column:2;justify-self:start}}
+
+/* ---------- A: The ledger. The PWA's tabs, in gilded leather. ---------- */
+.a-tabs{padding:0 6px}
+.a-tabs .hs-tabs{border-bottom:0;flex-wrap:wrap}
+.a-tabs .hs-tabs button{flex:1 1 auto;padding:10px 8px;font-size:14.5px;white-space:nowrap}
+.a-tabs .hs-tabs button small{font-family:var(--font-body);font-size:12px;letter-spacing:0;color:var(--muted);margin-left:4px}
+.a-panel{padding:6px}
+.a-sec + .a-sec{border-top:1px solid var(--gold-rule)}
+.a-sec{padding:12px 12px}
+.a-sec .k-h{color:var(--accent)}
+.a-ccs{padding:8px}
+.a-ccs .ccs{gap:10px}
+.a-ccs .cc{border:1px solid var(--gold-rule);border-radius:var(--radius)}
+.a-ccs .cc:hover{border-color:var(--gold-line)}
+
+/* ---------- B: The guest book. One long page, everything showing; sessions as slips of parchment. ---------- */
+.b-top{display:grid;grid-template-columns:184px minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:620px){.b-top{grid-template-columns:1fr}}
+.b-frame{display:flex;flex-direction:column;align-items:center;gap:10px}
+.b-frame .photo{width:168px}
+.b-frame .photo .medal{border-width:3px}
+.plate{min-width:150px;max-width:100%;padding:6px 14px 7px;text-align:center;border-radius:2px;
+  background:linear-gradient(180deg,#e7c06a,#b07c2c 60%,#8a5c1c);box-shadow:0 3px 8px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,240,200,.6);color:#2b1a08}
+.plate b{display:block;font-family:var(--font-story);font-weight:400;font-size:20px;line-height:1.1}
+.plate small{display:block;font-family:var(--font-label);font-size:13px;letter-spacing:.06em}
+.b-frame .k-row{justify-content:center}
+.b-rec{padding:6px}
+.b-rec .k-dl{padding:6px 12px}
+.b-rec .k-dl > div{border-top-style:solid}
+.slips{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:22px 16px;padding-top:6px}
+.slip.hs-sheet{padding:18px 16px 30px;cursor:pointer;text-align:left;display:block;font:inherit}
+.slip .hs-kicker{font-size:12px}
+.slip h4{margin:2px 0 0;font-family:var(--font-story);font-weight:400;font-size:18px;line-height:1.15;color:var(--paper-ink)}
+.slip .when{font-size:13px;color:var(--paper-muted);margin-top:2px}
+.slip .as{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13.5px;color:var(--paper-ink)}
+.slip .as .medal{width:34px;transform:rotate(-4deg)}
+.slip .as small{display:block;color:var(--paper-muted);font-size:12px}
+.slip .as .gm{color:#9a4a12}
+.b-all{padding:6px}
+.b-two{display:grid;grid-template-columns:1fr;gap:20px}
+
+/* ---------- C: The road, with settings in a room of their own. ---------- */
+.c-seg{display:inline-flex;padding:4px;gap:4px;border:1px solid var(--gold-line);border-radius:var(--radius);background:rgba(26,19,14,.72);box-shadow:0 2px 8px rgba(0,0,0,.5)}
+.c-seg button{background:transparent;border:0;color:var(--muted);padding:5px 14px;border-radius:3px;font-family:var(--font-label);font-size:14.5px;letter-spacing:.05em;cursor:pointer}
+.c-seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.c-hero{position:relative;overflow:hidden;padding:6px}
+.c-hero-bg{position:absolute;inset:0;z-index:0;filter:blur(18px) brightness(.45) saturate(1.1);transform:scale(1.2)}
+.c-hero-in{position:relative;z-index:1;display:grid;grid-template-columns:auto minmax(0,1fr);gap:16px;align-items:center;padding:18px 16px}
+.c-hero .photo{width:104px}
+.c-hero h2{margin:0;font-family:var(--font-story);font-weight:400;font-size:28px;line-height:1.1}
+.c-hero .handle{font-family:var(--font-label);font-size:15px;letter-spacing:.04em;color:var(--accent)}
+.c-hero .facts{font-size:14px;color:var(--muted);margin-top:4px}
+.c-hero .facts b{color:var(--text);font-weight:500}
+.c-hero-foot{position:relative;z-index:1;display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;padding:12px 16px 14px;border-top:1px solid var(--gold-rule);background:rgba(20,14,10,.45)}
+@media (max-width:560px){.c-hero-foot{grid-template-columns:1fr}.c-hero-in{grid-template-columns:1fr;justify-items:start}}
+.c-camps{display:flex;gap:10px;overflow-x:auto;padding:4px 2px 10px;scrollbar-width:thin}
+.c-camp{flex:0 0 172px;display:flex;flex-direction:column;gap:6px;text-align:left;cursor:pointer;color:inherit;padding:6px;font:inherit}
+.c-camp .cc-bn{aspect-ratio:3/1}
+.c-camp b{font-family:var(--font-story);font-weight:400;font-size:16px;line-height:1.15;padding:0 4px}
+.c-camp small{font-size:12.5px;color:var(--muted);padding:0 4px 4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.c-camp[aria-pressed="true"]{box-shadow:var(--shadow-panel),0 0 0 2px var(--accent),0 0 18px rgba(229,161,58,.35)}
+.road{list-style:none;margin:0;padding:8px 14px 8px 12px;position:relative}
+.road::before{content:"";position:absolute;left:calc(12px + 52px + 10px + 19px);top:16px;bottom:16px;width:2px;background:linear-gradient(var(--gold-line),var(--gold-rule))}
+.road li{position:relative}
+.road .sr{padding:8px 0}
+.road .sr .medal{position:relative;z-index:1}
+.road .mo{display:block;padding:12px 0 4px calc(52px + 10px + 40px + 10px);font-family:var(--font-label);font-size:13px;letter-spacing:.1em;color:var(--accent)}
+.road .mark{display:grid;grid-template-columns:52px 40px minmax(0,1fr);gap:10px;align-items:center;padding:6px 0;font-size:13.5px;color:var(--muted);font-style:italic}
+.road .mark i{justify-self:center;width:12px;height:12px;transform:rotate(45deg);border:1.5px solid var(--gold);background:var(--leather);position:relative;z-index:1}
+.road .mark.is-fell i{border-color:#8a8a8a;background:#2a2a2a}
+.road .mark.is-now{font-style:normal;font-family:var(--font-label);letter-spacing:.06em;color:var(--accent)}
+.road .mark.is-now i{background:var(--accent);border-color:var(--accent);box-shadow:0 0 10px var(--accent)}
+.road li.is-away .sr{opacity:.55}
+.road li.is-away .medal{border-style:dashed}
+.road li.is-up .sr-when b{color:var(--accent)}
+.road li.is-up .medal{box-shadow:0 0 0 2px rgba(229,161,58,.0),0 0 14px rgba(229,161,58,.45)}
+.c-set{display:flex;flex-direction:column;gap:20px}
+.c-form{padding:6px 14px 14px}
+.c-form .fld-2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+@media (max-width:520px){.c-form .fld-2{grid-template-columns:1fr}}
+.c-form .k-row{margin-top:14px;justify-content:flex-end}
+.vis{display:flex;gap:8px;align-items:baseline;font-size:13px;color:var(--muted);padding:10px 14px;border-top:1px solid var(--gold-rule)}
+.vis b{color:var(--text);font-weight:500}
+
+/* ---------- fields (Hearthside has no form styles yet; these follow the message composer) ---------- */
+.fld{display:flex;flex-direction:column;gap:5px;margin:14px 0 0;min-width:0}
+.fld > label,.fld .lab{font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.08em;color:var(--muted)}
+.fld input{width:100%;min-width:0;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:8px 10px;color:var(--text);font-size:15px}
+.fld input:focus{border-color:var(--gold);outline:0}
+.fld input:disabled{opacity:.6}
+.fld .at{position:relative}
+.fld .at span{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--accent);pointer-events:none}
+.fld .at input{padding-left:24px}
+.fld small{font-size:12.5px;color:var(--muted);line-height:1.4}
+.fld .from{font-family:var(--font-label);font-size:12px;letter-spacing:.05em;color:var(--moss);margin-left:6px}
+.fld-2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+@media (max-width:480px){.fld-2{grid-template-columns:1fr}}
+
+/* ---------- dialogs. Gilded. ---------- */
+.dlg-back{position:fixed;inset:0;z-index:60;background:rgba(10,7,4,.74);display:flex;align-items:center;justify-content:center;padding:16px;overflow:hidden}
+.dlg{width:min(560px,100%);max-height:calc(100dvh - 32px);display:flex;flex-direction:column;padding:6px}
+.dlg-h{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px 10px;border-bottom:1px solid var(--gold-rule)}
+.dlg-h h2{margin:0;font-family:var(--font-story);font-weight:400;font-size:24px;line-height:1.15}
+.dlg-body{overflow-y:auto;overscroll-behavior:contain;padding:0 12px 4px;min-height:0}
+.dlg-f{display:flex;justify-content:flex-end;gap:8px;padding:12px 10px 8px;border-top:1px solid var(--gold-rule);margin-top:14px}
+.dlg-f .k-btn{height:36px;font-size:15px}
+.x-btn{background:transparent;border:1px solid var(--line);border-radius:var(--radius);width:32px;height:32px;cursor:pointer;color:var(--text);flex:none}
+
+/* ---------- prototype switcher (not part of any design) ---------- */
+.proto-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:50;
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:center;max-width:calc(100vw - 24px);
+  background:var(--proto-bg);color:var(--proto-fg);border-radius:14px;padding:6px 8px;box-shadow:0 8px 30px rgba(0,0,0,.6);
+  font:13px/1.3 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+.proto-bar button{font:inherit;color:inherit;background:#e9e9e9;border:0;border-radius:8px;padding:6px 10px;cursor:pointer}
+.proto-bar button:hover{background:#dcdcdc}
+.proto-bar .lbl{min-width:190px;text-align:center;font-weight:600;padding:0 4px}
+.proto-bar .lbl small{display:block;font-weight:400;color:var(--proto-dim);font-size:11px}
+.proto-bar .sep{width:1px;height:26px;background:#ccc;margin:0 2px}
+.proto-bar #state small{display:block;font-size:11px;color:var(--proto-dim);text-align:left}
+.proto-bar #state{text-align:left;max-width:250px}
+@media (max-width:620px){.proto-bar .lbl{min-width:0;flex:1 1 0}.proto-bar .sep{display:none}.proto-bar small{display:none!important}}
+.proto-bar :focus-visible{outline:2px solid #2563eb;outline-offset:2px}
+.proto-toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(96px + env(safe-area-inset-bottom,0px));z-index:70;background:var(--proto-bg);color:var(--proto-fg);
+  font:13px/1.3 ui-sans-serif,system-ui,sans-serif;padding:8px 12px;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.5);max-width:calc(100vw - 32px)}
+@media (prefers-reduced-motion:reduce){.photo .ph-hint,.sw input,.sw input::after{transition:none}}
+</style>
+
+<canvas class="hs-floor" id="floor" aria-hidden="true"></canvas>
+<div class="hs-glow" aria-hidden="true"></div>
+<div class="hs-shell-wrap">
+  <div class="hs-shell">
+    <aside class="hs-rail">
+      <div class="hs-bar"><div class="hs-brand">Hearthside<small>The Party Gathers</small></div>
+        <nav class="hs-nav hs-gilded" aria-label="Main" id="nav"></nav>
+      </div>
+      <section class="hs-quests-sec"><h2 class="hs-sec"><span>Your Quests</span><span class="hs-aside" id="qc"></span></h2>
+        <div class="hs-gilded" id="rail-quests"></div></section>
+    </aside>
+
+    <main class="hs-page" id="page"></main>
+
+    <aside class="hs-letters-col"><h2 class="hs-sec"><span>Letters</span><span class="hs-aside">4 unread</span></h2><div class="hs-gilded"><div class="hs-tabs" role="tablist">
+      <button role="tab" aria-selected="true">All</button><button role="tab" aria-selected="false">Campaigns</button><button role="tab" aria-selected="false">Friends</button>
+    </div>
+    <ul class="hs-threads">
+      <li tabindex="0" role="button"><span class="hs-avatar is-campaign">SS</span><div style="min-width:0"><div class="hs-thread-name">Starfall Salvage</div><div class="hs-thread-sub">Campaign · 5 in the party</div></div><div class="hs-thread-when">now<span class="hs-dot" aria-label="3 unread"></span></div></li>
+      <li tabindex="0" role="button"><span class="hs-avatar">P</span><div style="min-width:0"><div class="hs-thread-name">Priya</div><div class="hs-thread-sub">Friend</div></div><div class="hs-thread-when">7:02 pm<span class="hs-dot" aria-label="1 unread"></span></div></li>
+      <li tabindex="0" role="button"><span class="hs-avatar is-campaign">AC</span><div style="min-width:0"><div class="hs-thread-name">Curse of the Ashen Crown</div><div class="hs-thread-sub">Campaign · 5 in the party</div></div><div class="hs-thread-when">Tue</div></li>
+    </ul></div></aside>
+  </div>
+</div>
+<div id="ov" hidden></div>
+
+<div class="proto-bar" role="toolbar" aria-label="Prototype controls">
+  <button type="button" id="prev" aria-label="Previous layout">←</button>
+  <div class="lbl" id="lbl" aria-live="polite"></div>
+  <button type="button" id="next" aria-label="Next layout">→</button>
+  <span class="sep" aria-hidden="true"></span>
+  <button type="button" id="state"></button>
+  <button type="button" id="who"></button>
+</div>
+<div class="proto-toast" id="toast" hidden></div>
+
+<script src="bundle.js"></script>
+<script>
+document.body.classList.add('hs-app');
+
+function rng(seed) { let h = 2166136261; for (const c of seed) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return () => ((h = Math.imul(h ^ (h >>> 15), 2246822507) ^ Math.imul(h ^ (h >>> 13), 3266489909)) >>> 0) / 4294967296; }
+function ridge(ctx, r, W, y0, amp, step, color, H = 400) {
+  ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(0, H);
+  let y = y0; for (let x = 0; x <= W + step; x += step) { y = Math.max(y0 - amp, Math.min(y0 + amp, y + (r() - .5) * amp)); ctx.lineTo(x, y); }
+  ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
+}
+function paintBanner(kind) {
+  const W = 1600, H = 400, c = document.createElement('canvas'); c.width = W; c.height = H;
+  const ctx = c.getContext('2d'), r = rng(kind);
+  const sky = (stops) => { const g = ctx.createLinearGradient(0, 0, 0, H); stops.forEach(([o, col]) => g.addColorStop(o, col)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); };
+  if (kind === 'ashen') {
+    sky([[0, '#2a0f0c'], [.55, '#7a2a14'], [.8, '#d0652a'], [1, '#f2a24a']]);
+    for (let i = 0; i < 220; i++) { ctx.fillStyle = `rgba(230,200,180,${r() * .35})`; ctx.fillRect(r() * W, r() * H * .8, 2, 2); }
+    ridge(ctx, r, W, 250, 60, 40, '#3a1710');
+    ridge(ctx, r, W, 300, 30, 30, '#1c0b08');
+    ctx.fillStyle = '#0e0605';
+    const kx = 1060; ctx.fillRect(kx, 170, 160, 140);
+    [[kx - 30, 140, 40, 170], [kx + 60, 110, 40, 200], [kx + 150, 140, 40, 170]].forEach(([x, y, w, h]) => {
+      ctx.fillRect(x, y, w, h); for (let i = 0; i < 3; i++) ctx.fillRect(x + i * 15, y - 12, 9, 12);
+    });
+    ctx.fillStyle = 'rgba(255,170,80,.8)'; [[kx + 76, 140], [kx + 20, 210], [kx + 120, 230]].forEach(([x, y]) => ctx.fillRect(x, y, 6, 10));
+    ridge(ctx, r, W, 360, 14, 24, '#070303');
+  } else if (kind === 'starfall') {
+    sky([[0, '#060a1c'], [.6, '#13294a'], [1, '#2f6a74']]);
+    for (let i = 0; i < 380; i++) { const s = r(); ctx.fillStyle = `rgba(255,255,240,${.3 + s * .7})`; ctx.fillRect(r() * W, r() * H * .75, s > .93 ? 3 : 1.5, s > .93 ? 3 : 1.5); }
+    const g = ctx.createLinearGradient(300, 40, 760, 220); g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(1, 'rgba(255,236,190,.95)');
+    ctx.strokeStyle = g; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(300, 40); ctx.lineTo(760, 220); ctx.stroke();
+    ctx.fillStyle = '#fff6d8'; ctx.beginPath(); ctx.arc(762, 221, 6, 0, 7); ctx.fill();
+    ridge(ctx, r, W, 300, 26, 60, '#3a3550');
+    ctx.fillStyle = '#16142a'; ctx.beginPath();
+    ctx.moveTo(380, 330); ctx.quadraticCurveTo(520, 200, 720, 300); ctx.lineTo(700, 330); ctx.closePath(); ctx.fill();
+    for (let i = 0; i < 6; i++) { ctx.fillRect(430 + i * 45, 250 - Math.sin(i / 5 * Math.PI) * 30, 7, 90); }
+    ridge(ctx, r, W, 350, 18, 50, '#0b0a18');
+  } else if (kind === 'lantern') {   // a road at dusk, lanterns along it
+    sky([[0, '#15122a'], [.5, '#3b2a4a'], [.82, '#a0553a'], [1, '#e3954c']]);
+    for (let i = 0; i < 90; i++) { ctx.fillStyle = `rgba(255,240,220,${r() * .6})`; ctx.fillRect(r() * W, r() * H * .45, 1.5, 1.5); }
+    ridge(ctx, r, W, 250, 50, 50, '#2c1f2e');
+    ridge(ctx, r, W, 305, 26, 36, '#180f19');
+    ctx.fillStyle = 'rgba(236,180,110,.32)'; ctx.beginPath();
+    ctx.moveTo(560, 400); ctx.quadraticCurveTo(760, 330, 980, 300); ctx.lineTo(1000, 300); ctx.quadraticCurveTo(820, 340, 760, 400); ctx.closePath(); ctx.fill();
+    ctx.shadowColor = '#ffb36b'; ctx.shadowBlur = 18; ctx.fillStyle = '#ffd08a';
+    [[640, 372], [730, 345], [810, 326], [880, 313], [940, 305], [985, 300]].forEach(([x, y], i) => { ctx.beginPath(); ctx.arc(x, y - 8, 5 - i * .6, 0, 7); ctx.fill(); });
+    ctx.shadowBlur = 0;
+  }
+  return c.toDataURL('image/jpeg', .85);
+}
+
+/* A portrait stand-in: a silhouette against a painted backdrop, rim-lit from the left (where the hearth is), with
+   a few glints. What an uploaded commission, sketch or token would sit in. p: bg, body, rim, gear, motif, glow. */
+function paintPortrait(p) {
+  const W = 480, H = 640, c = document.createElement('canvas'); c.width = W; c.height = H;
+  const ctx = c.getContext('2d'), r = rng(p.seed);
+  let g = ctx.createRadialGradient(W * .38, H * .32, 20, W * .5, H * .5, H * .8);
+  g.addColorStop(0, p.bg[0]); g.addColorStop(1, p.bg[1]); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  motif(ctx, r, p.motif, W, H);
+  figure(ctx, p, -7, -2, p.rim || '#ffb36b');
+  figure(ctx, p, 0, 0, p.body || '#140d09');
+  (p.glow || []).forEach(([x, y, rad, col]) => { ctx.shadowColor = col; ctx.shadowBlur = 18; ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x, y, rad, 0, 7); ctx.fill(); });
+  ctx.shadowBlur = 0;
+  g = ctx.createRadialGradient(W / 2, H * .45, H * .28, W / 2, H * .5, H * .78);
+  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.6)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  return c.toDataURL('image/jpeg', .86);
+}
+function motif(ctx, r, kind, W, H) {
+  if (kind === 'stars') for (let i = 0; i < 170; i++) { const s = r(); ctx.fillStyle = `rgba(255,255,240,${.25 + s * .7})`; ctx.fillRect(r() * W, r() * H * .8, s > .92 ? 3 : 1.5, s > .92 ? 3 : 1.5); }
+  if (kind === 'waves') { ctx.lineWidth = 2; for (let k = 0; k < 9; k++) { ctx.strokeStyle = `rgba(150,215,205,${.12 + r() * .14})`; ctx.beginPath(); const y0 = H * .45 + k * 30, ph = r() * 6;
+    for (let x = 0; x <= W; x += 8) ctx.lineTo(x, y0 + Math.sin(x / 38 + ph) * 8); ctx.stroke(); } }
+  if (kind === 'embers') for (let i = 0; i < 90; i++) { const y = H * (1 - Math.pow(r(), 1.6)); ctx.fillStyle = `rgba(255,${120 + r() * 80 | 0},50,${r() * .8})`; ctx.beginPath(); ctx.arc(r() * W, y, 1 + r() * 2.5, 0, 7); ctx.fill(); }
+  if (kind === 'leaves') for (let i = 0; i < 46; i++) { ctx.save(); ctx.translate(r() * W, r() * H); ctx.rotate(r() * 6); ctx.fillStyle = `rgba(${120 + r() * 70 | 0},${110 + r() * 50 | 0},50,${.25 + r() * .3})`; ctx.beginPath(); ctx.ellipse(0, 0, 9, 4, 0, 0, 7); ctx.fill(); ctx.restore(); }
+  if (kind === 'rain') { ctx.lineWidth = 1.2; for (let i = 0; i < 150; i++) { const x = r() * W, y = r() * H; ctx.strokeStyle = `rgba(200,212,235,${.08 + r() * .16})`; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 9, y + 26); ctx.stroke(); } }
+  if (kind === 'mist') for (let i = 0; i < 14; i++) { const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 120); g.addColorStop(0, 'rgba(220,210,255,.12)'); g.addColorStop(1, 'rgba(220,210,255,0)');
+    ctx.save(); ctx.translate(r() * W, H * .3 + r() * H * .7); ctx.fillStyle = g; ctx.fillRect(-120, -120, 240, 240); ctx.restore(); }
+}
+function figure(ctx, p, dx, dy, col) {
+  const cx = 240; ctx.save(); ctx.translate(dx, dy); ctx.fillStyle = col;
+  const gear = p.gear || '';
+  if (gear.includes('long')) { ctx.beginPath(); ctx.ellipse(cx, 360, 118, 175, 0, 0, 7); ctx.fill(); }
+  ctx.beginPath(); ctx.ellipse(cx, 730, 228, 260, 0, Math.PI, 0); ctx.fill();                       // shoulders
+  ctx.fillRect(cx - 34, 380, 68, 120);                                                            // neck
+  ctx.beginPath(); ctx.ellipse(cx, 300, 82, 104, 0, 0, 7); ctx.fill();                           // head
+  if (gear.includes('ears')) [-1, 1].forEach(s => { ctx.beginPath(); ctx.ellipse(cx + s * 92, 200, 46, 56, s * .4, 0, 7); ctx.fill(); });
+  if (gear.includes('hood')) { ctx.beginPath(); ctx.moveTo(cx - 160, 540); ctx.quadraticCurveTo(cx - 150, 220, cx, 150); ctx.quadraticCurveTo(cx + 150, 220, cx + 160, 540); ctx.closePath(); ctx.fill(); }
+  if (gear.includes('helm')) {
+    ctx.fillRect(cx - 92, 226, 184, 110);
+    if (gear.includes('horns')) [-1, 1].forEach(s => { ctx.beginPath(); ctx.moveTo(cx + s * 78, 250); ctx.quadraticCurveTo(cx + s * 185, 210, cx + s * 160, 100); ctx.quadraticCurveTo(cx + s * 130, 200, cx + s * 58, 222); ctx.closePath(); ctx.fill(); });
+    [-1, 1].forEach(s => { ctx.beginPath(); ctx.ellipse(cx + s * 165, 505, 78, 50, s * .25, 0, 7); ctx.fill(); });
+  }
+  if (gear.includes('wide')) { ctx.beginPath(); ctx.ellipse(cx, 218, 172, 26, -.06, 0, 7); ctx.fill(); ctx.beginPath(); ctx.moveTo(cx - 82, 218); ctx.lineTo(cx - 62, 128); ctx.quadraticCurveTo(cx, 96, cx + 70, 130); ctx.lineTo(cx + 84, 218); ctx.fill(); }
+  if (gear.includes('witch')) { ctx.beginPath(); ctx.ellipse(cx, 222, 165, 24, .05, 0, 7); ctx.fill(); ctx.beginPath(); ctx.moveTo(cx - 86, 222); ctx.quadraticCurveTo(cx - 20, 120, cx + 70, 22); ctx.quadraticCurveTo(cx + 40, 130, cx + 88, 222); ctx.fill(); }
+  if (gear.includes('cloche')) { ctx.beginPath(); ctx.ellipse(cx, 238, 112, 22, 0, 0, 7); ctx.fill(); ctx.beginPath(); ctx.ellipse(cx, 236, 92, 70, 0, Math.PI, 0); ctx.fill(); }
+  if (gear.includes('curls')) for (let i = 0; i < 9; i++) { ctx.beginPath(); ctx.arc(cx - 88 + i * 22, 214 + Math.abs(i - 4) * 9, 22, 0, 7); ctx.fill(); }
+  ctx.restore();
+}
+
+// every picture becomes a class (.art-<id>), so re-rendering never repeats a data URL. Uploads join the same way.
+const ARTSTYLE = document.createElement('style'); document.head.appendChild(ARTSTYLE);
+let artN = 0;
+function addArt(url, extra = '') { const id = 'a' + (++artN); ARTSTYLE.sheet.insertRule(`.art-${id}{background-image:url(${url});${extra}}`, ARTSTYLE.sheet.cssRules.length); return id; }
+const P = p => addArt(paintPortrait(p));
+const ART = {
+  geoff: P({ seed: 'geoff-photo', bg: ['#d6bd8e', '#6a5236'], rim: '#fff1d6', motif: 'none', body: '#3a281b', gear: 'curls' }),   // a photo, not a painting: lit from the front
+  kestrel: P({ seed: 'kestrel', bg: ['#1d3a5a', '#070b18'], rim: '#8fe3ff', gear: 'ears', motif: 'stars', glow: [[202, 286, 15, 'rgba(150,235,255,.95)'], [278, 286, 15, 'rgba(150,235,255,.95)']] }),
+  odran: P({ seed: 'odran', bg: ['#21423f', '#08130f'], rim: '#a7e0d2', gear: 'hood', motif: 'waves', glow: [[240, 575, 10, 'rgba(120,230,210,.95)']] }),
+  mags: P({ seed: 'mags', bg: ['#6a2c14', '#160805'], gear: 'helm horns', motif: 'embers', glow: [[214, 292, 5, 'rgba(255,190,110,.9)'], [266, 292, 5, 'rgba(255,190,110,.9)']] }),
+  pip: P({ seed: 'pip', bg: ['#4b5a2a', '#121807'], gear: 'wide curls', motif: 'leaves' }),
+  ada: P({ seed: 'ada', bg: ['#33405a', '#0a0e18'], rim: '#d7def0', gear: 'long cloche', motif: 'rain', glow: [[208, 300, 7, 'rgba(235,240,255,.7)'], [272, 300, 7, 'rgba(235,240,255,.7)']] }),
+};
+
+/* ---------------- data (made up, in memory; the same world as the Adventurers and Session prototypes) ---------------- */
+const D = (y, m, d, h = 19, min = 0) => new Date(y, m - 1, d, h, min);
+const TODAY = D(2026, 10, 27, 12);
+const CAMPS = {
+  ss: { title: 'Starfall Salvage', init: 'SS', art: 'starfall', cloth: ['#1f4a44', '#0f2422'], game: 'Starfinder', status: 'In progress', role: 'player', gm: 'Avery', gmTitle: 'Game Master', party: 5 },
+  ac: { title: 'Curse of the Ashen Crown', init: 'AC', art: 'ashen', cloth: ['#5a2416', '#2a0f0a'], game: 'D&D 5e', status: 'In progress', role: 'gm', gm: 'Geoff', gmTitle: 'Dungeon Master', party: 5 },
+  bb: { title: 'Bones of the Brinewood', init: 'BB', art: null, cloth: ['#2c3a24', '#141c10'], game: 'D&D 5e', status: 'Not started', role: 'player', gm: 'Marco', gmTitle: 'Dungeon Master', party: 4 },
+  lr: { title: 'The Lantern Road', init: 'LR', art: 'lantern', cloth: ['#3a2a4a', '#1a1222'], game: 'D&D 5e', status: 'Completed', role: 'player', gm: 'Marco', gmTitle: 'Dungeon Master', party: 4 },
+  bw: { title: 'Night at Blackwater Manor', init: 'BW', art: null, cloth: ['#24303a', '#10161c'], game: 'Call of Cthulhu 7e', status: 'Completed', role: 'player', gm: 'Avery', gmTitle: 'Keeper', party: 4, oneShot: true },
+};
+const CAMP_ORDER = ['ss', 'ac', 'bb', 'lr', 'bw'];
+const SHARED_WITH_AVERY = ['ss', 'bb', 'bw'];   // what a campaign-mate can see: only the campaigns you share
+document.head.insertAdjacentHTML('beforeend', `<style>${Object.entries(CAMPS).filter(([, c]) => c.art)
+  .map(([k, c]) => `.bn-${k}{background-image:url(${paintBanner(c.art)})}`).join('\n')}</style>`);
+const banner = k => CAMPS[k].art ? `<span class="bn bn-${k}" aria-hidden="true"></span>`
+  : `<span class="bn is-cloth" aria-hidden="true" style="--c1:${CAMPS[k].cloth[0]};--c2:${CAMPS[k].cloth[1]}"><span>${CAMPS[k].init}</span></span>`;
+
+// adventurers. levels: [after which session, level reached]
+const CHARS = {
+  kestrel: { name: 'Kestrel Vane', cls: 'Void Pilot', level: 5, camp: 'ss', art: ART.kestrel, levels: [['ss-2', 3], ['ss-4', 4], ['ss-6', 5]] },
+  odran: { name: 'Brother Odran', cls: 'Cleric', level: 3, camp: 'bb', art: ART.odran, levels: [] },
+  wren: { name: 'Wren Ashdown', cls: 'Bard', level: 1, camp: null, art: null, levels: [] },
+  mags: { name: 'Mags Ironhollow', cls: 'Fighter', level: 11, camp: 'lr', art: ART.mags, status: 'Retired', levels: [['lr-11', 8], ['lr-13', 9], ['lr-15', 10], ['lr-17', 11]] },
+  pip: { name: 'Pip Thistlewick', cls: 'Rogue', level: 6, camp: 'lr', art: ART.pip, status: 'Fallen', levels: [['lr-2', 2], ['lr-3', 3], ['lr-5', 4], ['lr-7', 5], ['lr-8', 6]] },
+  ada: { name: 'Dr. Ada Marsh', cls: 'Antiquarian', level: null, camp: 'bw', art: ART.ada, status: 'Retired', levels: [] },
+};
+// which adventurer you played at a session (null: you ran it)
+const charAt = s => s.camp === 'ss' ? 'kestrel' : s.camp === 'bb' ? 'odran' : s.camp === 'bw' ? 'ada' : s.camp === 'lr' ? (s.n <= 9 ? 'pip' : 'mags') : null;
+
+const SESSIONS = [];
+const sess = (camp, n, title, date, x = {}) => SESSIONS.push({ id: `${camp}-${n}`, camp, n, title, date, status: 'completed', ...x });
+['Salvage Rights', 'The Cold Hulk', 'Dock Fees', 'Pirates of the Belt', 'A Debt Called In', 'The Signal'].forEach((t, i) => sess('ss', i + 1, t, D(2026, 8, 4 + i * 14, 19, 30)));
+sess('ss', 7, 'Into the Hold', D(2026, 11, 3, 19, 30), { status: 'scheduled' });
+['A Crown in the Ash', 'The Cinder Road', 'Emberfall', 'The Grey Abbey', 'Smoke over Halden', 'The Ash Witch', 'Wardens', 'The Burning Library', 'The Ninefold Gate',
+  'Ashes to Ashes', 'The Ember Court', 'Under the Crown', 'The Pale King'].forEach((t, i) => sess('ac', i + 1, t, D(2026, 5, 2 + i * 14, 18, 30)));
+sess('ac', 14, 'The Drowned Chapel', D(2026, 10, 31, 18, 30), { status: 'scheduled' });
+sess('bb', 1, 'The Drowned Wood', D(2026, 11, 7, 13), { status: 'scheduled' });
+['Lanterns Lit', 'The Toll Bridge', 'Wolves at Merrow', 'The Hollow Inn', 'A Fair at Dunmere', 'The Pale Ferryman', 'Bandit Country', 'The Old Mill', 'The Bridge at Carrow',
+  'A New Lantern', 'The Ashwater', 'The Monastery', 'Fog on the Moor', 'The Witch of Hale', 'Ransom', 'The Long Night', 'The Gates of Carrow', 'The Last Nine Miles']
+  .forEach((t, i) => sess('lr', i + 1, t, new Date(2025, 10, 8 + i * 14, 18, 30)));
+sess('bw', 1, 'Night at Blackwater Manor', D(2025, 10, 31, 20));
+// attendance, as each GM confirmed it: sessions you missed, and whether the party played your adventurer anyway
+const AWAY = { 'ss-3': 'stood', 'ss-5': 'sat', 'lr-6': 'sat', 'lr-14': 'stood' };
+SESSIONS.forEach(s => { s.away = AWAY[s.id] || null; });
+const S = id => SESSIONS.find(s => s.id === id);
+
+// the rail's Your Quests, per viewer
+const RAIL = {
+  geoff: [{ title: 'Prep the table', tag: 'Host', due: D(2026, 10, 31, 17, 30), for: 'Session 14 · Curse of the Ashen Crown' }, { title: 'Level Kestrel up to 6', due: D(2026, 11, 2, 21), for: 'Session 7 · Starfall Salvage' },
+    { title: 'Bring the cider', due: D(2026, 10, 31, 18, 30), for: 'Session 14 · Curse of the Ashen Crown' }],
+  avery: [{ title: "Print the hold's deck plan", tag: 'Prep', due: D(2026, 11, 3, 18), for: 'Session 7 · Starfall Salvage' }, { title: 'Bring the dice bag back to Theo', due: D(2026, 10, 30, 12), for: 'Starfall Salvage' }],
+};
+
+// the record: every field the PWA's profile shows
+const RECORD = () => ({ name: 'Geoff Murray', handle: 'geoff', userNumber: '4127', userDigit: 'U-0042', email: 'geoff@example.com', phone: '(555) 014-2276', recordType: 'User',
+  discordHandle: '', discordId: '', since: D(2025, 3, 14), games: ['Starfinder', 'D&D 5e', 'Call of Cthulhu', 'Blades in the Dark'], photo: ART.geoff, friend: true });
+const DISCORD = { handle: 'geoff.rolls', id: '402918377561088012' };
+
+// notices: what Hearthside tells you, and where. bell = the bell in Hearthside; email; discord = a Discord message.
+const NOTICES = [
+  { g: 'Sessions' },
+  { id: 'called', name: 'A session is called', sub: 'The Notice Board wants your vote', d: [1, 1, 1] },
+  { id: 'chosen', name: 'A night is chosen', sub: 'With the time and the place', d: [1, 1, 0] },
+  { id: 'ready', name: 'The ready check', sub: 'Shortly before a session starts', d: [1, 0, 1] },
+  { id: 'moved', name: 'A session moves or is cancelled', d: [1, 1, 1] },
+  { id: 'told', name: 'The tale is written', sub: 'And when the cinematic is ready', d: [1, 0, 0] },
+  { g: 'Quests' },
+  { id: 'given', name: 'A quest is given to you', d: [1, 1, 0] },
+  { id: 'remind', name: 'Quest reminders', sub: 'Before a quest is due', d: [1, 0, 1], offsets: true },
+  { g: 'Letters' },
+  { id: 'camp', name: 'Letters in your campaigns', d: [1, 0, 0] },
+  { id: 'dm', name: 'Letters from friends', d: [1, 1, 0] },
+  { g: 'The party' },
+  { id: 'invite', name: 'Campaign invitations', d: [1, 1, 1] },
+  { id: 'friend', name: 'Friend requests', d: [1, 1, 0] },
+  { id: 'torch', name: 'The torch is passed to you', sub: 'You run a session as a stand-in', d: [1, 1, 1] },
+  { g: 'When you run a campaign', gmOnly: true },
+  { id: 'answers', name: 'Players answer the ready check', d: [1, 0, 0], gmOnly: true },
+  { id: 'accounts', name: 'Someone adds an account of a session', d: [1, 0, 0], gmOnly: true },
+];
+const CH = ['bell', 'email', 'discord'], CH_NAME = { bell: 'The bell', email: 'Email', discord: 'Discord' };
+const OFFSETS = [[15, '15 minutes'], [60, '1 hour'], [180, '3 hours'], [1440, '1 day'], [2880, '2 days'], [10080, '1 week']];
+const offName = m => (OFFSETS.find(o => o[0] === m) || [0, `${m} minutes`])[1];
+const PREFS = () => {
+  const p = {}; NOTICES.filter(n => n.id).forEach(n => p[n.id] = { bell: !!n.d[0], email: !!n.d[1], discord: !!n.d[2] });
+  return { p, offsets: [1440, 60], quiet: { on: true, from: '23:00', to: '08:00' } };
+};
+
+/* States, switchable from the bar. Each builds a fresh copy, so switching resets what you changed. */
+const STATES = [
+  { key: 'seasoned', name: 'Google connected', note: 'Five campaigns, 34 sessions; Discord not connected', make() {
+      return { rec: RECORD(), gcal: { connected: true, needsReconsent: false, cal: 'Game nights', busy: true }, discord: { connected: false, dms: true, mention: true }, prefs: PREFS(), fresh: false }; } },
+  { key: 'linked', name: 'Both connected', note: 'Discord fills in your handle and ID', make() {
+      const s = STATES[0].make(); s.discord.connected = true; s.rec.discordHandle = DISCORD.handle; s.rec.discordId = DISCORD.id; return s; } },
+  { key: 'reconnect', name: 'Google needs reconnecting', note: "The PWA's needsReconsent: busy time can't count yet", make() {
+      const s = STATES[0].make(); s.gcal.needsReconsent = true; s.gcal.busy = false; return s; } },
+  { key: 'newcomer', name: 'Newcomer', note: 'Just joined: no campaigns, no photo, nothing connected', make() {
+      const rec = { ...RECORD(), photo: null, games: [], phone: '', since: D(2026, 10, 25) };
+      return { rec, gcal: { connected: false, needsReconsent: false, cal: 'Primary', busy: true }, discord: { connected: false, dms: true, mention: true }, prefs: PREFS(), fresh: true }; } },
+];
+
+/* ---------------- prototype state ---------------- */
+const VARIANTS = [
+  { key: 'A', name: 'The ledger', note: "The PWA's tabs, in gilded leather" },
+  { key: 'B', name: 'The guest book', note: 'One long page; sessions as slips of parchment' },
+  { key: 'C', name: 'The road', note: 'Your story in public; settings in a room of their own' },
+];
+const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+const qs0 = new URLSearchParams(location.search);
+let variant = Math.max(0, VARIANTS.findIndex(v => v.key === (qs0.get('variant') || store.get('hs-prof-variant') || 'A')));
+let stateI = Math.max(0, STATES.findIndex(s => s.key === (qs0.get('state') || store.get('hs-prof-state') || 'seasoned')));
+let viewer = (qs0.get('as') || store.get('hs-prof-as')) === 'avery' ? 'avery' : 'geoff';
+let cur = STATES[stateI].make();
+let aTab = 'record';       // A's open tab
+let cView = 'profile';     // C: 'profile' or 'settings'
+let sFilter = 'all';       // which campaign's sessions are showing
+let showAll = false;       // B's full list, C's whole road
+let pending = null;        // an integration on its way to its sign-in page: 'gcal' | 'discord'
+let notice = {};           // the line under an integration after its sign-in comes back, as on the PWA
+let recDraft = null;       // C's inline record form
+let ov = null;             // a dialog: { kind: 'edit' }
+
+/* ---------------- helpers ---------------- */
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const tm = d => { const h = d.getHours(), m = d.getMinutes(); return `${h % 12 || 12}${m ? ':' + String(m).padStart(2, '0') : ''} ${h < 12 ? 'am' : 'pm'}`; };
+const dayLabel = d => `${WD[d.getDay()]} ${MON[d.getMonth()]} ${d.getDate()}`;
+const sTitle = s => s.title ? `Session ${s.n}: ${s.title}` : `Session ${s.n}`;
+const self = () => viewer === 'geoff';
+const R = () => cur.rec;
+const flame = '<svg class="flame" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3c1 3.5 5 5.5 5 10a5 5 0 0 1-10 0c0-2.4 1.2-3.8 2.4-5 .2 1.8 1 2.8 2.1 3.2C11 9 11 5.5 12 3z"/></svg>';
+const face = (art, init) => `<span class="pt">${art ? `<span class="art art-${art}"></span>` : `<span class="pt-none"><span>${esc(init)}</span></span>`}</span>`;
+const medal = (c, cls = '') => `<span class="medal ${cls}">${face(c.art, c.name[0])}</span>`;
+const gmMedal = () => `<span class="medal is-gm"><span class="pt"><span class="pt-none is-gm">${flame}</span></span></span>`;
+const photoHTML = (cls = '') => {
+  const r = R(), inner = `<span class="medal">${r.photo ? `<span class="pt is-photo"><span class="art art-${r.photo}"></span></span>` : face(null, r.name[0])}</span>`;
+  return self() ? `<label class="photo is-mine ${cls}" title="Change photo">${inner}<span class="ph-hint">${r.photo ? 'Change photo' : 'Add a photo'}</span>
+      <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" data-photo aria-label="${r.photo ? 'Change' : 'Add'} your photo (JPG, PNG, GIF or WEBP, up to 5 MB)"></label>`
+    : `<span class="photo ${cls}">${inner}</span>`;
+};
+const handle = () => R().handle ? `@${esc(R().handle)}` : '';
+const uniq = () => R().handle && R().userNumber ? `@${esc(R().handle)}#${esc(R().userNumber)}` : '';
+const sinceLabel = () => `${MONL[R().since.getMonth()]} ${R().since.getFullYear()}`;
+
+// what this viewer can see
+const campsSeen = () => cur.fresh ? [] : self() ? CAMP_ORDER : CAMP_ORDER.filter(k => SHARED_WITH_AVERY.includes(k));
+const played = () => SESSIONS.filter(s => s.status === 'completed' && !s.away && campsSeen().includes(s.camp)).sort((a, b) => b.date - a.date);
+const upcoming = () => SESSIONS.filter(s => s.status === 'scheduled' && campsSeen().includes(s.camp)).sort((a, b) => a.date - b.date);
+const advsSeen = () => cur.fresh ? [] : Object.entries(CHARS).filter(([, c]) => self() || (c.camp && SHARED_WITH_AVERY.includes(c.camp)));
+const isGM = () => campsSeen().some(k => CAMPS[k].role === 'gm');
+const levelAt = s => { const c = CHARS[charAt(s)]; const l = c && c.levels.find(x => x[0] === s.id); return l ? l[1] : null; };
+const playedIn = k => played().filter(s => s.camp === k).length;
+
+/* ---------------- shared pieces (each layout places them its own way) ---------------- */
+function headHTML({ actions = true } = {}) {
+  const r = R(), n = played().length, k = campsSeen().length;
+  const sub = cur.fresh ? `Joined ${sinceLabel()} · no campaigns yet`
+    : `${n} session${n === 1 ? '' : 's'} · ${k} campaign${k === 1 ? '' : 's'}${self() ? '' : ' you share'} · since ${sinceLabel()}`;
+  const acts = !actions ? '' : self() ? `<button type="button" class="k-btn floor-btn" data-edit>Edit</button>`
+    : `<button type="button" class="k-btn floor-btn is-primary" data-stub="a letter to Geoff">Write a letter</button>${r.friend ? '<span class="k-pill is-ok" style="align-self:center;background:rgba(26,19,14,.7)">Friends</span>' : ''}`;
+  return `<header class="pf-head hs-page-head">${photoHTML()}<div class="who"><h1>${esc(r.name)}</h1>
+    <div class="handle">${handle() || '<small>No handle yet</small>'}${uniq() ? ` <small>· ${uniq()}</small>` : ''}</div><p>${sub}</p></div>
+    <div class="acts">${acts}</div></header>`;
+}
+function recordDL() {
+  const r = R(), none = t => `<span class="is-none">${t}</span>`, lock = '<span class="lock">only you</span>';
+  const rows = [['Name', esc(r.name)], ['Handle', handle() || none('Not set')], ['Unique ID', uniq() ? `<span class="mono">${uniq()}</span>` : none('Set a handle to get one')]];
+  if (self()) {
+    if (r.recordType === 'User') rows.push(['Internal ID', `<span class="mono">${esc(r.userDigit)}</span>${lock}`]);
+    rows.push(['Email', `${esc(r.email)}${lock}<small>Can't be changed here.</small>`], ['Phone', (r.phone ? esc(r.phone) : none('Not set')) + lock], ['Record type', esc(r.recordType) + lock]);
+  }
+  rows.push(['Discord', r.discordHandle ? `${esc(r.discordHandle)}${cur.discord.connected ? ' <span class="k-pill is-ok">Linked</span>' : ''}` : none('Not linked')]);
+  if (r.discordId) rows.push(['Discord user ID', `<span class="mono">${esc(r.discordId)}</span>`]);
+  rows.push(['Joined', `${MONL[r.since.getMonth()]} ${r.since.getDate()}, ${r.since.getFullYear()}`]);
+  return `<dl class="k-dl">${rows.map(([t, d]) => `<div><dt>${t}</dt><dd>${d}</dd></div>`).join('')}</dl>`;
+}
+function gamesHTML() {
+  const g = R().games;
+  const chips = g.map(x => `<span class="chip ${self() ? '' : 'ro'}">${esc(x)}${self() ? `<button type="button" data-game-del="${esc(x)}" aria-label="Remove ${esc(x)}">×</button>` : ''}</span>`).join('');
+  const add = self() ? `<input class="add-in" id="game-in" placeholder="Add a game…" aria-label="Add a favourite game" maxlength="40">` : '';
+  return `<div class="chips">${chips || (self() ? '' : '<span class="k-empty">None listed.</span>')}${add}</div>`;
+}
+function advsHTML() {
+  const a = advsSeen();
+  if (!a.length) return `<p class="k-empty">${self() ? 'No adventurers yet. ' : 'None in the campaigns you share.'}${self() ? '<button type="button" class="p-link" data-stub="the new adventurer form">Make one</button>' : ''}</p>`;
+  return `<div class="advs">${a.map(([id, c]) => `<button type="button" class="adv" data-stub="${esc(c.name)}'s page">${medal(c, c.status === 'Fallen' ? 'is-gone' : '')}<b>${esc(c.name)}</b>
+    <small>${c.status ? c.status : c.level ? `${esc(c.cls)} · ${c.level}` : esc(c.cls)}</small></button>`).join('')}</div>`;
+}
+function sessRow(s, { up = false } = {}) {
+  const cid = charAt(s), c = CHARS[cid], camp = CAMPS[s.camp], lv = !up && levelAt(s);
+  let as;
+  if (!c) as = `<span class="gm">${flame} Ran it as ${esc(camp.gmTitle)}</span>`;
+  else if (s.away === 'stood') as = `You were away; the party played <b>${esc(c.name)}</b>`;
+  else if (s.away === 'sat') as = `You were away; ${esc(c.name)} sat it out`;
+  else as = `${up ? 'Bringing' : 'As'} <b>${esc(c.name)}</b>${lv ? `<span class="lv">Level ${lv}</span>` : ''}`;
+  return `<button type="button" class="sr ${up ? 'is-next' : ''}" data-stub="${esc(sTitle(s))} of ${esc(camp.title)}">
+    <span class="sr-when"><b>${MON[s.date.getMonth()]} ${s.date.getDate()}</b>${up ? WD[s.date.getDay()] + ' ' + tm(s.date) : s.date.getFullYear()}</span>
+    ${c ? medal(c, s.away === 'sat' ? 'is-gone' : '') : gmMedal()}
+    <span class="sr-t"><span class="sr-k">${esc(camp.title)}</span><span class="sr-n">${esc(sTitle(s))}</span><span class="sr-as">${as}</span></span></button>`;
+}
+function filterHTML() {
+  const ks = campsSeen().filter(k => playedIn(k));
+  if (ks.length < 2) return '';
+  return `<div class="filt" role="group" aria-label="Show sessions from">
+    <button type="button" data-sf="all" aria-pressed="${sFilter === 'all'}">All <span class="n">${played().length}</span></button>
+    ${ks.map(k => `<button type="button" data-sf="${k}" aria-pressed="${sFilter === k}"><span class="thumb">${banner(k)}</span>${esc(CAMPS[k].title)} <span class="n">${playedIn(k)}</span></button>`).join('')}</div>`;
+}
+const filtered = () => played().filter(s => sFilter === 'all' || s.camp === sFilter);
+function campRole(k) {
+  const c = CAMPS[k];
+  if (c.role === 'gm') return `${gmMedal()}<span><b style="color:var(--torch);font-weight:500">${esc(c.gmTitle)}</b> · you run it</span>`;
+  const ids = Object.keys(CHARS).filter(id => CHARS[id].camp === k), cs = ids.map(id => CHARS[id]);
+  return `<span class="twin">${cs.map(x => medal(x, x.status === 'Fallen' ? 'is-gone' : '')).join('')}</span><span>${cs.map(x => `<b style="font-weight:500">${esc(x.name)}</b>${x.status === 'Fallen' ? ' (fell)' : ''}`).join(', then ')}</span>`;
+}
+function statusHTML(c) {
+  return c.status === 'In progress' ? '<span class="st-live">In progress</span>' : c.status === 'Completed' ? '<span class="k-pill is-ok">Completed</span>' : '<span class="k-pill">Not started</span>';
+}
+function campCard(k, cls = '') {
+  const c = CAMPS[k], n = playedIn(k), next = upcoming().find(s => s.camp === k);
+  const tally = c.role === 'gm' ? `${n} session${n === 1 ? '' : 's'} run` : n ? `${n} session${n === 1 ? '' : 's'} played` : 'No sessions yet';
+  return `<button type="button" class="cc ${cls} ${c.status === 'Completed' ? 'is-done' : ''}" data-stub="the ${esc(c.title)} page">
+    <span class="cc-bn">${banner(k)}</span>
+    <span class="cc-body"><span class="cc-t">${esc(c.title)}</span>
+      <span class="cc-s">${statusHTML(c)}<span>· ${esc(c.oneShot ? 'One-shot · ' + c.game : c.game)}</span></span>
+      <span class="cc-role">${campRole(k)}</span>
+      <span class="cc-f">${tally}${c.role === 'gm' ? '' : ` · ${esc(c.gmTitle)}: ${esc(c.gm)}`}${next ? ` · next <b>${dayLabel(next.date)}</b>` : ''}</span></span></button>`;
+}
+function campsEmpty() { return `<p class="k-empty">${self() ? 'Not in any campaigns yet. A Game Master can invite you, or you can start one from Campaigns.' : 'No campaigns in common.'}</p>`; }
+
+// notification settings
+function noticesHTML() {
+  const p = cur.prefs, dOn = cur.discord.connected && cur.discord.dms;
+  const head = `<thead><tr><th scope="col"><span class="sr-only">Notice</span></th>${CH.map(ch => `<th scope="col">${CH_NAME[ch]}${ch === 'email' ? '' : ch === 'discord' && !cur.discord.connected ? '<small>not connected</small>' : ch === 'discord' && !cur.discord.dms ? '<small>turned off</small>' : ''}</th>`).join('')}</tr></thead>`;
+  const rows = NOTICES.filter(n => !n.gmOnly || isGM()).map(n => {
+    if (n.g) return `<tr class="g"><th colspan="4" scope="rowgroup">${esc(n.g)}</th></tr>`;
+    const cells = CH.map(ch => { const dis = ch === 'discord' && !dOn, on = p.p[n.id][ch] && !dis;
+      return `<td><input type="checkbox" class="ck" data-np="${n.id}:${ch}" ${on ? 'checked' : ''} ${dis ? 'disabled' : ''} aria-label="${esc(n.name)}: ${CH_NAME[ch]}"></td>`; }).join('');
+    let extra = '';
+    if (n.offsets) {
+      const left = OFFSETS.filter(o => !p.offsets.includes(o[0]));
+      extra = `<tr class="sub"><td colspan="4"><div class="offs">Remind me ${p.offsets.sort((a, b) => b - a).map(m => `<span class="chip">${offName(m)} before<button type="button" data-off-del="${m}" aria-label="Stop reminding ${offName(m)} before">×</button></span>`).join('')}
+        ${p.offsets.length < 5 && left.length ? `<select data-off-add aria-label="Add a reminder"><option value="">+ another</option>${left.map(o => `<option value="${o[0]}">${o[1]} before</option>`).join('')}</select>` : ''}
+        ${p.offsets.length ? '' : '<span>only when it’s due.</span>'}</div></td></tr>`;
+    }
+    return `<tr><th scope="row">${esc(n.name)}${n.sub ? `<small>${esc(n.sub)}</small>` : ''}</th>${cells}</tr>${extra}`;
+  }).join('');
+  const q = cur.prefs.quiet, hours = [...Array(24).keys()].map(h => { const v = String(h).padStart(2, '0') + ':00'; return [v, tm(new Date(2026, 0, 1, h))]; });
+  const sel = (key, val) => `<select data-quiet="${key}" aria-label="Quiet hours ${key === 'from' ? 'start' : 'end'}" ${q.on ? '' : 'disabled'}>${hours.map(([v, l]) => `<option value="${v}" ${v === val ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+  return `<div style="overflow-x:auto;padding:0 8px"><table class="nt">${head}<tbody>${rows}</tbody></table></div>
+    ${cur.discord.connected ? '' : `<p class="k-fine" style="padding:0 14px">Discord messages need Discord connected. <button type="button" class="p-link" data-go-ig>Connect it under Integrations</button>.</p>`}
+    <div class="qh"><label class="sw"><input type="checkbox" data-quiet="on" ${q.on ? 'checked' : ''}><span>Quiet hours<small>Hold email and Discord overnight. The bell still collects them, and you get them in the morning.</small></span></label>
+      <div class="times">From ${sel('from', q.from)} to ${sel('to', q.to)} · Central time</div></div>
+    <p class="k-fine" style="padding:0 14px 12px">Email goes to ${esc(R().email)}.</p>`;
+}
+
+// integrations: modeled on the PWA's Google Calendar card, one card per service
+const calIc = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="1.5"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/><path d="M8 13h2M12 13h2M16 13h0.01M8 16.5h2M12 16.5h2"/></svg>';
+const chatIc = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5h16v10H10l-4.5 3.5V15.5H4z"/><path d="M8.5 10.5h.01M12 10.5h.01M15.5 10.5h.01"/></svg>';
+function igCard(kind) {
+  const g = kind === 'gcal', st = g ? cur.gcal : cur.discord, on = st.connected, wait = pending === kind;
+  const name = g ? 'Google Calendar' : 'Discord';
+  const pill = !on ? '<span class="k-pill">Not connected</span>' : g && st.needsReconsent ? '<span class="k-pill is-seal">Reconnect needed</span>' : '<span class="k-pill is-ok">Connected</span>';
+  const sub = g ? (on ? 'Connected. Session events are added to your calendar automatically.' : 'Connect to add session events to your calendar automatically.')
+    : (on ? `Connected as <b style="color:var(--text);font-weight:500">${esc(DISCORD.handle)}</b>. Your Discord name and user ID are filled in from it.` : 'Connect to fill in your Discord name and user ID, and to get notices as Discord messages.');
+  const btn = wait ? `<button type="button" class="k-btn ig-btn" disabled>Opening ${g ? 'Google' : 'Discord'}…</button>`
+    : on ? `<button type="button" class="k-btn ig-btn is-danger" data-ig-off="${kind}">Disconnect</button>`
+    : `<button type="button" class="k-btn ig-btn is-primary" data-ig-on="${kind}">Connect</button>`;
+  let opts = '';
+  if (on && g) opts = `<div class="ig-opts">
+      <label class="line">Add sessions to <select data-opt="gcal.cal"><option ${st.cal === 'Primary' ? 'selected' : ''}>Primary</option><option ${st.cal === 'Game nights' ? 'selected' : ''}>Game nights</option></select></label>
+      ${st.needsReconsent ? `<p class="ig-warn">To let your busy time count when your party plans a night, reconnect once. <button type="button" class="p-link" data-ig-on="gcal">Reconnect</button></p>`
+        : `<label class="sw"><input type="checkbox" data-opt="gcal.busy" ${st.busy ? 'checked' : ''}><span>Count my busy time when the party plans a night<small>The Notice Board treats your busy evenings as not free. It never sees what they are.</small></span></label>`}</div>`;
+  if (on && !g) opts = `<div class="ig-opts">
+      <label class="sw"><input type="checkbox" data-opt="discord.dms" ${st.dms ? 'checked' : ''}><span>Send me notices as Discord messages<small>Which ones is set under Notices.</small></span></label>
+      <label class="sw"><input type="checkbox" data-opt="discord.mention" ${st.mention ? 'checked' : ''}><span>Mention me in a campaign's channel when a session is called<small>In campaigns that have a Discord channel.</small></span></label></div>`;
+  return `<div class="ig"><span class="ig-mark">${g ? calIc : chatIc}</span>
+    <div><div class="ig-name">${name} ${pill}</div><p class="ig-sub">${sub}</p></div>${btn}${opts}
+    ${notice[kind] ? `<p class="ig-note" role="status">${esc(notice[kind])}</p>` : ''}</div>`;
+}
+const integrationsHTML = () => `<div class="igs">${igCard('gcal')}${igCard('discord')}</div>`;
+
+/* ---------------- A: The ledger ---------------- */
+function VariantA() {
+  const tabs = self() ? [['record', 'Record'], ['sessions', 'Sessions', played().length], ['campaigns', 'Campaigns', campsSeen().length], ['notices', 'Notices'], ['integrations', 'Integrations']]
+    : [['record', 'Record'], ['sessions', 'Sessions', played().length], ['campaigns', 'Campaigns', campsSeen().length]];
+  if (!tabs.some(t => t[0] === aTab)) aTab = 'record';
+  let body = '';
+  if (aTab === 'record') body = `<div class="a-sec">${recordDL()}</div>
+      <div class="a-sec"><h3 class="k-h">Favourite games</h3>${gamesHTML()}</div>
+      <div class="a-sec"><h3 class="k-h">Adventurers <button type="button" class="p-link" data-stub="the Adventurers page">All on Adventurers</button></h3>${advsHTML()}</div>
+      ${self() ? '<div class="a-sec"><p class="k-fine" style="margin:0">Your free evenings are set in the Almanac now. The API key vault stays on the main site.</p></div>' : ''}`;
+  else if (aTab === 'sessions') {
+    const up = upcoming(), list = filtered();
+    body = !played().length && !up.length ? `<div class="a-sec">${sessEmpty()}</div>`
+      : `${up.length ? `<div class="a-sec"><h3 class="k-h">Coming up</h3><ul class="srs">${up.map(s => `<li>${sessRow(s, { up: true })}</li>`).join('')}</ul></div>` : ''}
+      <div class="a-sec" style="padding:0"><h3 class="k-h" style="padding:12px 12px 0">Played <span class="k-aside">${awayLine()}</span></h3>${filterHTML()}
+      <ul class="srs" style="padding:4px 8px">${list.map(s => `<li>${sessRow(s)}</li>`).join('')}</ul></div>`;
+  } else if (aTab === 'campaigns') body = campsSeen().length ? `<div class="a-ccs"><div class="ccs">${campsSeen().map(k => campCard(k)).join('')}</div></div>` : `<div class="a-sec">${campsEmpty()}</div>`;
+  else if (aTab === 'notices') body = `<div class="a-sec" style="padding-bottom:0"><h3 class="k-h">Where each notice reaches you</h3></div>${noticesHTML()}`;
+  else body = integrationsHTML();
+  return `${headHTML()}
+    <div class="hs-gilded a-tabs"><div class="hs-tabs" role="tablist" aria-label="Profile">${tabs.map(([k, l, n]) =>
+      `<button type="button" role="tab" data-atab="${k}" aria-selected="${aTab === k}">${l}${n != null ? `<small>${n}</small>` : ''}</button>`).join('')}</div></div>
+    <section class="hs-gilded a-panel" role="tabpanel">${body}</section>`;
+}
+const awayLine = () => { const m = SESSIONS.filter(s => s.away && campsSeen().includes(s.camp)).length; return m ? `missed ${m}` : ''; };
+const sessEmpty = () => `<p class="k-empty">${self() ? 'No sessions yet. Sessions you play show here, with the adventurer you brought.' : 'No sessions together yet.'}</p>`;
+
+/* ---------------- B: The guest book ---------------- */
+function VariantB() {
+  const r = R(), up = upcoming(), pl = played(), recent = pl.slice(0, 6);
+  const slips = recent.map(s => { const c = CHARS[charAt(s)], camp = CAMPS[s.camp];
+    return `<button type="button" class="hs-sheet slip" data-seed="${s.id}" data-stub="${esc(sTitle(s))} of ${esc(camp.title)}">
+      <div class="hs-kicker">${esc(camp.title)}</div><h4>${esc(sTitle(s))}</h4><div class="when">${dayLabel(s.date)}, ${s.date.getFullYear()}</div>
+      <div class="as">${c ? medal(c) : gmMedal()}<span>${c ? `As ${esc(c.name)}<small>${esc(c.cls)}${levelAt(s) ? ` · reached level ${levelAt(s)}` : ''}</small>` : `<span class="gm">Ran it as ${esc(camp.gmTitle)}</span>`}</span></div></button>`; }).join('');
+  const acts = self() ? `<div class="k-row"><button type="button" class="k-btn floor-btn" data-edit>Edit</button></div>`
+    : `<div class="k-row"><button type="button" class="k-btn floor-btn is-primary" data-stub="a letter to Geoff">Write a letter</button></div>`;
+  return `<header class="hs-page-head"><h1>${self() ? 'Your room' : esc(r.name.split(' ')[0]) + "'s room"}</h1><p>${self() ? 'Your record, your adventures, and how Hearthside reaches you.' : `What you can see of ${esc(r.name.split(' ')[0])}: the campaigns you share.`}</p></header>
+    <div class="b-top">
+      <div class="b-frame">${photoHTML()}<div class="plate"><b>${esc(r.name)}</b><small>${handle() || 'No handle yet'}</small></div>${acts}</div>
+      <section class="hs-gilded b-rec">${recordDL()}<div class="pad rule"><h3 class="k-h">Favourite games</h3>${gamesHTML()}</div>
+        <div class="pad rule"><h3 class="k-h">Adventurers</h3>${advsHTML()}</div></section>
+    </div>
+    <section><h2 class="hs-sec"><span>Campaigns</span><span class="hs-aside">${campsSeen().length ? `${campsSeen().length} · ${campsSeen().filter(k => CAMPS[k].status === 'In progress').length} in progress` : ''}</span></h2>
+      ${campsSeen().length ? `<div class="ccs">${campsSeen().map(k => campCard(k, 'hs-gilded')).join('')}</div>` : `<div class="hs-gilded pad">${campsEmpty()}</div>`}</section>
+    ${up.length ? `<section><h2 class="hs-sec"><span>Coming up</span><span class="hs-aside">${up.length}</span></h2><div class="hs-gilded" style="padding:6px 10px"><ul class="srs">${up.map(s => `<li>${sessRow(s, { up: true })}</li>`).join('')}</ul></div></section>` : ''}
+    <section><h2 class="hs-sec"><span>Sessions played</span><span class="hs-aside">${pl.length ? `${pl.length}${awayLine() ? ' · ' + awayLine() : ''}` : ''}</span></h2>
+      ${pl.length ? `<div class="slips">${slips}</div>
+        ${pl.length > 6 ? (showAll ? `<div class="hs-gilded b-all" style="margin-top:20px">${filterHTML()}<ul class="srs" style="padding:4px 8px">${filtered().map(s => `<li>${sessRow(s)}</li>`).join('')}</ul>
+            <div class="pad rule"><button type="button" class="p-link" data-more>Show fewer</button></div></div>`
+          : `<p class="hs-note" style="margin-top:14px"><button type="button" class="k-btn floor-btn" data-more>All ${pl.length} sessions</button></p>`) : ''}`
+        : `<div class="hs-gilded pad">${sessEmpty()}</div>`}</section>
+    ${self() ? `<section><h2 class="hs-sec"><span>Notices</span><span class="hs-aside">where each reaches you</span></h2><div class="hs-gilded" style="padding-top:8px">${noticesHTML()}</div></section>
+      <section><h2 class="hs-sec"><span>Integrations</span><span class="hs-aside">${[cur.gcal, cur.discord].filter(x => x.connected).length} of 2 connected</span></h2><div class="hs-gilded">${integrationsHTML()}</div></section>` : ''}`;
+}
+
+/* ---------------- C: The road, and settings in a room of their own ---------------- */
+function VariantC() {
+  if (!self()) cView = 'profile';
+  const seg = self() ? `<div class="c-seg" role="group" aria-label="Show"><button type="button" data-cview="profile" aria-pressed="${cView === 'profile'}">Profile</button><button type="button" data-cview="settings" aria-pressed="${cView === 'settings'}">Settings</button></div>` : '';
+  const head = `<header class="hs-page-head" style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap"><div><h1>${cView === 'settings' ? 'Settings' : self() ? 'Your profile' : esc(R().name.split(' ')[0])}</h1>
+    <p>${cView === 'settings' ? 'Only you see this page.' : self() ? 'This is what your party sees, plus your email and phone.' : 'From the campaigns you share.'}</p></div>${seg}</header>`;
+  return head + (cView === 'settings' ? cSettings() : cProfile());
+}
+function cProfile() {
+  const r = R(), pl = played(), up = upcoming();
+  const hero = `<section class="hs-gilded c-hero">${r.photo ? `<span class="c-hero-bg art art-${r.photo}" aria-hidden="true"></span>` : ''}
+    <div class="c-hero-in">${photoHTML()}<div style="min-width:0"><h2>${esc(r.name)}</h2><div class="handle">${handle() || '<span style="color:var(--muted)">No handle yet</span>'}${uniq() ? ` <span style="color:var(--muted);font-family:var(--font-body);font-size:13.5px">· ${uniq()}</span>` : ''}</div>
+      <div class="facts">${cur.fresh ? `Joined ${sinceLabel()}` : `<b>${pl.length}</b> sessions · <b>${campsSeen().length}</b> campaigns · <b>${advsSeen().length}</b> adventurers · since ${sinceLabel()}`}${r.discordHandle ? ` · Discord <b>${esc(r.discordHandle)}</b>` : ''}</div>
+      <div class="k-row" style="margin-top:10px">${self() ? '<button type="button" class="k-btn" data-cview="settings">Edit in Settings</button>' : '<button type="button" class="k-btn is-primary" data-stub="a letter to Geoff">Write a letter</button>' + (r.friend ? '<span class="k-pill is-ok">Friends</span>' : '')}</div></div></div>
+    <div class="c-hero-foot"><div><h3 class="k-h">Adventurers</h3>${advsHTML()}</div><div><h3 class="k-h">Favourite games</h3>${gamesHTML()}</div></div></section>`;
+  const camps = campsSeen().length ? `<section><h2 class="hs-sec"><span>Campaigns</span><span class="hs-aside">${sFilter === 'all' ? 'pick one to follow its road' : `<button type="button" class="p-link" data-sf="all">Show every campaign</button>`}</span></h2>
+    <div class="c-camps">${campsSeen().map(k => { const c = CAMPS[k], n = playedIn(k);
+      return `<button type="button" class="hs-gilded c-camp" data-sf="${sFilter === k ? 'all' : k}" aria-pressed="${sFilter === k}"><span class="cc-bn">${banner(k)}</span><b>${esc(c.title)}</b>
+        <small>${c.role === 'gm' ? `<span style="color:var(--torch)">${flame} ${esc(c.gmTitle)}</span>` : esc(Object.values(CHARS).filter(x => x.camp === k).map(x => x.name.split(' ')[0]).join(', then '))} · ${n}${c.status === 'In progress' ? ' · <span class="st-live">On</span>' : ''}</small></button>`; }).join('')}</div></section>` : '';
+  // the road: newest first, upcoming at the top, months as milestones, missed sessions faded, adventurers changing hands marked
+  const all = [...up.filter(s => sFilter === 'all' || s.camp === sFilter).reverse().map(s => ({ s, up: true })),
+    ...SESSIONS.filter(s => s.status === 'completed' && campsSeen().includes(s.camp) && (sFilter === 'all' || s.camp === sFilter)).sort((a, b) => b.date - a.date).map(s => ({ s }))];
+  const items = showAll ? all : all.slice(0, 14);
+  let lastMo = '', out = '', wasUp = false;
+  items.forEach(({ s, up: u }) => {
+    const mo = `${MONL[s.date.getMonth()]} ${s.date.getFullYear()}`;
+    if (wasUp && !u) out += `<li class="mark is-now"><span></span><i></i><span>Today, ${dayLabel(TODAY)}</span></li>`;
+    wasUp = !!u;
+    if (mo !== lastMo) { out += `<li><span class="mo">${u && lastMo === '' ? 'Coming up · ' : ''}${mo}</span></li>`; lastMo = mo; }
+    if (s.id === 'lr-18') out += `<li class="mark"><span></span><i></i><span>The Lantern Road ended. Mags Ironhollow retired.</span></li>`;
+    out += `<li class="${u ? 'is-up' : ''} ${s.away ? 'is-away' : ''}">${sessRow(s, { up: u })}</li>`;
+    if (s.id === 'lr-10') out += `<li class="mark"><span></span><i></i><span>Mags Ironhollow joined the road.</span></li>`;
+    if (s.id === 'lr-9') out += `<li class="mark is-fell"><span></span><i></i><span>Pip Thistlewick fell at the bridge.</span></li>`;
+    if (s.n === 1 && !u) out += `<li class="mark"><span></span><i></i><span>${CAMPS[s.camp].role === 'gm' ? 'Began running' : 'Joined'} ${esc(CAMPS[s.camp].title)}.</span></li>`;
+  });
+  const road = `<section><h2 class="hs-sec"><span>The road so far</span><span class="hs-aside">${pl.length ? `${pl.filter(s => sFilter === 'all' || s.camp === sFilter).length} played${awayLine() ? ' · ' + awayLine() : ''}` : ''}</span></h2>
+    <div class="hs-gilded">${all.length ? `<ol class="road">${out}</ol>${all.length > 14 ? `<div class="pad rule"><button type="button" class="p-link" data-more>${showAll ? 'Show less' : `Show the whole road (${all.length - 14} more)`}</button></div>` : ''}` : `<div class="pad">${sessEmpty()}</div>`}</div></section>`;
+  return hero + camps + road;
+}
+function cSettings() {
+  const r = R(), d = recDraft || (recDraft = { name: r.name, handle: r.handle, phone: r.phone, discordHandle: r.discordHandle, discordId: r.discordId });
+  const dirty = ['name', 'handle', 'phone', 'discordHandle', 'discordId'].some(k => (d[k] || '') !== (r[k] || ''));
+  return `<div class="c-set">
+    <section><h2 class="hs-sec"><span>Your record</span><span class="hs-aside">${r.recordType} · ${esc(r.userDigit)}</span></h2>
+      <form class="hs-gilded c-form" id="rec-inline">${recFields(d)}
+        <div class="k-row"><button type="button" class="k-btn" data-rec-reset ${dirty ? '' : 'disabled'}>Undo changes</button><button class="k-btn is-primary" ${dirty ? '' : 'disabled'}>Save</button></div></form>
+      <p class="hs-note" style="margin-top:10px">Your party sees your name, handle, photo, Discord name and favourite games. Email and phone are only shown to you.</p></section>
+    <section><h2 class="hs-sec"><span>Notices</span><span class="hs-aside">where each reaches you</span></h2><div class="hs-gilded" style="padding-top:8px">${noticesHTML()}</div></section>
+    <section id="c-ig"><h2 class="hs-sec"><span>Integrations</span><span class="hs-aside">${[cur.gcal, cur.discord].filter(x => x.connected).length} of 2 connected</span></h2><div class="hs-gilded">${integrationsHTML()}</div></section>
+    <p class="hs-note">Your free evenings are set in the Almanac. The API key vault stays on the main site.</p></div>`;
+}
+
+/* ---------------- the record's fields (A and B in a dialog, C in place) ---------------- */
+function recFields(d) {
+  const dc = cur.discord.connected;
+  return `<div class="fld"><label for="f-name">Name</label><input id="f-name" name="name" value="${esc(d.name)}" required></div>
+    <div class="fld-2"><div class="fld"><label for="f-handle">Handle</label><div class="at"><span>@</span><input id="f-handle" name="handle" value="${esc(d.handle)}" placeholder="yourhandle" autocomplete="off"></div>
+      <small>Your unique ID is your handle plus #${esc(R().userNumber)}.</small></div>
+      <div class="fld"><label for="f-phone">Phone</label><input id="f-phone" name="phone" value="${esc(d.phone)}" inputmode="tel"></div></div>
+    <div class="fld"><label for="f-email">Email</label><input id="f-email" value="${esc(R().email)}" disabled><small>Email can't be changed here.</small></div>
+    <div class="fld-2"><div class="fld"><label for="f-dh">Discord name${dc ? '<span class="from">from Discord</span>' : ''}</label><input id="f-dh" name="discordHandle" value="${esc(d.discordHandle)}" placeholder="username" ${dc ? 'disabled' : ''}></div>
+      <div class="fld"><label for="f-di">Discord user ID${dc ? '<span class="from">from Discord</span>' : ''}</label><input id="f-di" name="discordId" value="${esc(d.discordId)}" placeholder="123456789012345678" inputmode="numeric" ${dc ? 'disabled' : ''}></div></div>
+    <small class="k-fine" style="display:block">${dc ? 'Disconnect Discord under Integrations to type these yourself.' : 'Connecting Discord under Integrations fills these in. To find your ID by hand: Settings › Advanced › Developer Mode on, then right-click your profile › Copy User ID.'}</small>`;
+}
+function renderOv() {
+  const el = document.getElementById('ov');
+  if (!ov) { el.hidden = true; el.innerHTML = ''; return; }
+  const r = R();
+  el.hidden = false;
+  el.innerHTML = `<div class="dlg-back" data-ovclose><form class="hs-gilded dlg" id="rec-form" role="dialog" aria-modal="true" aria-labelledby="dlg-t">
+    <div class="dlg-h"><h2 id="dlg-t">Your record</h2><button type="button" class="x-btn" data-ovclose aria-label="Close">×</button></div>
+    <div class="dlg-body">${recFields({ name: r.name, handle: r.handle, phone: r.phone, discordHandle: r.discordHandle, discordId: r.discordId })}</div>
+    <div class="dlg-f"><button type="button" class="k-btn" data-ovclose>Cancel</button><button class="k-btn is-primary">Save changes</button></div></form></div>`;
+  Hearthside.GildedPanel.decorate(el);
+  el.querySelector('#f-name').focus();
+}
+
+/* ---------------- rail and nav ---------------- */
+function renderRail() {
+  const qs = cur.fresh && self() ? [] : RAIL[viewer];
+  document.getElementById('qc').textContent = `${qs.length} open`;
+  const el = document.getElementById('rail-quests');
+  el.innerHTML = !qs.length ? '<p class="k-empty pad">No quests yet.</p>' : `<ul class="hs-quests">${qs.map(q => `<li><span class="hs-box" aria-hidden="true"></span>
+      <div><div class="hs-quest-name">${esc(q.title)}${q.tag ? `<span class="hs-tag">${esc(q.tag)}</span>` : ''}</div><div class="hs-quest-time">${dayLabel(q.due)}, ${tm(q.due)}</div>
+        <div class="hs-quest-desc">For ${esc(q.for)}</div></div></li>`).join('')}</ul>`;
+  const nav = document.getElementById('nav');
+  // the profile is "Your room" in the nav: a tavern name for your own place, as the design system names its places
+  nav.innerHTML = ['The Hearth', 'Campaigns', 'Almanac', 'Adventurers', 'Your Room'].map(n => `<a ${n === 'Your Room' && self() ? 'aria-current="page"' : ''} data-stub="${n}">${n}</a>`).join('');
+  Hearthside.GildedPanel.decorate(document.querySelector('.hs-rail'));
+}
+
+/* ---------------- render + wiring ---------------- */
+const page = document.getElementById('page');
+const RENDER = [VariantA, VariantB, VariantC];
+function render() {
+  const keep = document.activeElement?.id;
+  page.innerHTML = RENDER[variant]();
+  Hearthside.GildedPanel.decorate(page);
+  page.querySelectorAll('.hs-sheet').forEach(el => Hearthside.NoticeSheet.mount(el));
+  renderRail();
+  const v = VARIANTS[variant], st = STATES[stateI];
+  document.getElementById('lbl').innerHTML = `${v.key} — ${v.name}<small>${v.note}</small>`;
+  document.getElementById('state').innerHTML = `State: ${st.name}<small>${st.note}</small>`;
+  document.getElementById('who').textContent = self() ? 'As Geoff (yourself)' : 'As Avery, a campaign-mate';
+  store.set('hs-prof-variant', v.key); store.set('hs-prof-state', st.key); store.set('hs-prof-as', viewer);
+  try { const u = new URL(location.href); u.searchParams.set('variant', v.key); u.searchParams.set('state', st.key); u.searchParams.set('as', viewer); history.replaceState(null, '', u); } catch {}
+  if (keep) document.getElementById(keep)?.focus();
+}
+function reset() { sFilter = 'all'; showAll = false; pending = null; notice = {}; recDraft = null; ov = null; renderOv(); cur = STATES[stateI].make(); }
+function go(d) { variant = (variant + d + VARIANTS.length) % VARIANTS.length; recDraft = null; render(); }
+document.getElementById('prev').onclick = () => go(-1);
+document.getElementById('next').onclick = () => go(1);
+document.getElementById('state').onclick = () => { stateI = (stateI + 1) % STATES.length; reset(); render(); };
+document.getElementById('who').onclick = () => { viewer = self() ? 'avery' : 'geoff'; sFilter = 'all'; showAll = false; recDraft = null; render(); };
+addEventListener('keydown', e => {
+  if (e.key === 'Escape' && ov) { ov = null; renderOv(); return; }
+  if (ov || e.target.closest('input,textarea,select,[contenteditable]')) return;
+  if (e.key === 'ArrowLeft') go(-1); else if (e.key === 'ArrowRight') go(1);
+});
+let toastTimer;
+function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 3200); }
+
+// connecting goes to the service's own sign-in page and comes back with ?gcal=connected (or denied), as the PWA does
+function connect(kind) {
+  pending = kind; notice[kind] = ''; render();
+  setTimeout(() => {
+    pending = null;
+    if (kind === 'gcal') { cur.gcal.connected = true; const re = cur.gcal.needsReconsent; cur.gcal.needsReconsent = false; cur.gcal.busy = true; notice.gcal = re ? 'Reconnected. Your busy time now counts when the party plans a night.' : 'Google Calendar connected!'; }
+    else { cur.discord.connected = true; cur.discord.dms = true; R().discordHandle = DISCORD.handle; R().discordId = DISCORD.id; recDraft = null; notice.discord = 'Discord connected! Your Discord name and user ID are filled in.'; }
+    render(); toast(`Prototype: the real button leaves for ${kind === 'gcal' ? "Google's" : "Discord's"} sign-in page and comes back here.`);
+  }, 1100);
+}
+document.addEventListener('click', e => {
+  const t = e.target.closest('button,a,[data-ovclose]'); if (!t) return;
+  const d = t.dataset;
+  if (d.ovclose != null && (t.tagName === 'BUTTON' || e.target === t)) { ov = null; renderOv(); return; }
+  if (d.stub) { toast(`Prototype: this opens ${d.stub}.`); return; }
+  if (d.atab) { aTab = d.atab; render(); document.querySelector(`[data-atab="${aTab}"]`)?.focus(); }
+  else if (d.sf) { sFilter = d.sf; render(); }
+  else if (d.more != null) { showAll = !showAll; render(); }
+  else if (d.edit != null) { ov = { kind: 'edit' }; renderOv(); }
+  else if (d.cview) { cView = d.cview; recDraft = null; render(); scrollTo({ top: 0 }); }
+  else if (d.igOn) connect(d.igOn);
+  else if (d.igOff) {
+    const k = d.igOff;
+    if (k === 'gcal') { cur.gcal.connected = false; cur.gcal.needsReconsent = false; notice.gcal = 'Disconnected. Sessions already on your calendar stay there.'; }
+    else { cur.discord.connected = false; notice.discord = 'Disconnected. Your Discord name stays on your record until you change it.'; }
+    render();
+  }
+  else if (d.goIg != null) {
+    if (variant === 0) { aTab = 'integrations'; render(); }
+    else if (variant === 2) document.getElementById('c-ig')?.scrollIntoView({ behavior: 'smooth' });
+    else page.querySelector('.igs')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  else if (d.gameDel) { R().games = R().games.filter(g => g !== d.gameDel); render(); }
+  else if (d.offDel) { cur.prefs.offsets = cur.prefs.offsets.filter(m => m !== +d.offDel); render(); }
+  else if (d.recReset != null) { recDraft = null; render(); }
+});
+document.addEventListener('change', e => {
+  const t = e.target, d = t.dataset;
+  if (d.np) { const [id, ch] = d.np.split(':'); cur.prefs.p[id][ch] = t.checked; }
+  else if (d.offAdd != null && t.value) { cur.prefs.offsets.push(+t.value); render(); }
+  else if (d.quiet) { if (d.quiet === 'on') { cur.prefs.quiet.on = t.checked; render(); } else cur.prefs.quiet[d.quiet] = t.value; }
+  else if (d.opt) { const [k, f] = d.opt.split('.'); cur[k][f] = t.type === 'checkbox' ? t.checked : t.value; if (f === 'dms') render(); }
+  else if (d.photo != null && t.files[0]) {
+    const f = t.files[0];
+    if (!/^image\/(png|jpeg|gif|webp)$/.test(f.type) || f.size > 5e6) { toast('A photo must be a JPG, PNG, GIF or WEBP, up to 5 MB.'); return; }
+    R().photo = addArt(URL.createObjectURL(f)); render(); toast('Prototype: your photo is kept in memory only.');
+  }
+});
+document.addEventListener('input', e => {
+  if (!recDraft || !e.target.closest('#rec-inline') || !e.target.name) return;
+  recDraft[e.target.name] = e.target.name === 'handle' ? e.target.value.replace(/^@/, '') : e.target.value;
+  const r = R(), dirty = ['name', 'handle', 'phone', 'discordHandle', 'discordId'].some(k => (recDraft[k] || '') !== (r[k] || ''));
+  document.querySelectorAll('#rec-inline .k-row button').forEach(b => b.disabled = !dirty);
+});
+document.addEventListener('keydown', e => {
+  if (e.target.id !== 'game-in' || e.key !== 'Enter') return;
+  e.preventDefault(); const v = e.target.value.trim();
+  if (v && !R().games.includes(v)) R().games.push(v);
+  render(); document.getElementById('game-in')?.focus();
+});
+document.addEventListener('submit', e => {
+  const f = e.target; if (f.id !== 'rec-form' && f.id !== 'rec-inline') return;
+  e.preventDefault();
+  const fd = new FormData(f), r = R();
+  ['name', 'handle', 'phone', 'discordHandle', 'discordId'].forEach(k => { if (fd.has(k)) r[k] = String(fd.get(k)).trim().replace(k === 'handle' ? /^@/ : /^$/, ''); });
+  ov = null; recDraft = null; renderOv(); render(); toast('Saved (in memory).');
+});
+
+render();
+Hearthside.GildedPanel.decorate();
+const floor = Hearthside.Floor.mount(document.getElementById('floor'));
+if (floor && floor.page) floor.page(4, false);
+</script>

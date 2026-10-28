@@ -18,10 +18,11 @@
  *
  *   DATABASE_URL=postgresql://postgres@127.0.0.1:5433/pwatest npx tsx scripts/test-venue-vote.ts
  */
+import "./use-test-jwt-secret.js";
 import express from "express";
 import type { AddressInfo } from "net";
 import crypto from "crypto";
-import jwt from "jsonwebtoken";
+import { signJwt } from "../utils/jwt.js";
 
 if (!/(\/\/|@)(127\.0\.0\.1|localhost)[:/]/.test(process.env.DATABASE_URL ?? "")) {
     console.error("\n  Refusing to run: DATABASE_URL must be a local throwaway database.\n");
@@ -39,7 +40,6 @@ const { createQuests } = await import("../planning/quests.js");
 const { startPlanningAnnouncements } = await import("../planning/announcements.js");
 const { createFakeIntegrations } = await import("../testing/fakeIntegrations.js");
 
-const SECRET = process.env.JWT_SECRET || "your-secret-key-change-this";
 const HOUR = 60 * 60 * 1000, DAY = 24 * HOUR;
 
 let pass = 0, fail = 0;
@@ -125,7 +125,7 @@ async function main() {
             const { rows: [acct] } = await pool.query(
                 `INSERT INTO accounts (id, handle, email, app_role, app_role_source) VALUES (gen_random_uuid(), $1, $2, $3, 'manual') RETURNING id`,
                 [`${name}_${tag}`, email, name === "admin" ? "admin" : "user"]);
-            who[name] = { id: acct.id, token: jwt.sign({ id: acct.id, email }, SECRET, { expiresIn: "1h" }) };
+            who[name] = { id: acct.id, token: signJwt({ id: acct.id, email }, { expiresIn: "1h" }) };
         }
         // Linked to a Discord server, so "no Discord event in person" means something.
         const { rows: [camp] } = await pool.query(

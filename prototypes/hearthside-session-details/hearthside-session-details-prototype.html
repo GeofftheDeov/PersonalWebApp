@@ -261,20 +261,59 @@ body{margin:0;background:var(--ground);color:var(--text)}
 .vb-roll .is-played .medal{outline:2px dashed var(--accent);outline-offset:2px}
 .vb-sheet h2{margin:0 0 10px;font-family:var(--font-story);font-weight:400;font-size:24px}
 
-/* ---------- C: Around the table. Who sat where, drawn from above; then the session's things in tabs. ---------- */
-.vc-ring{position:relative;width:100%;max-width:560px;margin:0 auto;aspect-ratio:1;container-type:inline-size}
+/* ---------- C: Around the table (revised, the default). The session's card above; the party seated around the table,
+   each player's quests on slips by their seat; in the middle, a two-sided card: the recording, and flipped, the AI
+   cinematic made from the tale; then tabs whose default depends on who's looking and whether the session has happened. ---------- */
+.vc-title{padding:var(--space-5) var(--space-6)}
+.vc-title .hs-sheet-title{font-size:clamp(26px,4vw,34px)}
+.vc-title > .k-row,.vc-title > .torch,.vc-title > .k-banner{margin-top:12px}
+.vc-ring{position:relative;width:100%;aspect-ratio:1;margin:8px auto 24%;container-type:inline-size}
 .vc-top{position:absolute;inset:14%;border-radius:50%;
   background:repeating-radial-gradient(circle at 50% 50%,rgba(0,0,0,0) 0 9px,rgba(0,0,0,.1) 9px 10px),radial-gradient(circle at 40% 35%,#7a5130,#4c3019 60%,#2e1c0e);
   box-shadow:0 0 0 6px #2a190c,0 0 0 8px rgba(214,168,78,.5),0 20px 40px rgba(0,0,0,.7),inset 0 0 50px rgba(0,0,0,.55)}
 .vc-glow{position:absolute;inset:14%;border-radius:50%;pointer-events:none;background:radial-gradient(circle at 50% 50%,rgba(255,179,107,.28),rgba(255,179,107,0) 60%)}
-.vc-card{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) rotate(-1.5deg);width:46%;padding:4.2cqw 3.6cqw 3.8cqw;text-align:center;color:var(--paper-ink);border-radius:var(--radius-sheet);
-  background:radial-gradient(120% 90% at 50% 40%,rgba(120,80,30,0) 60%,rgba(120,80,30,.22)),linear-gradient(170deg,var(--paper-hi),var(--paper-lo));box-shadow:var(--shadow-paper)}
-.vc-card .kk{font:500 clamp(10px,2.3cqw,13px)/1.2 var(--font-label);letter-spacing:.1em;color:var(--paper-muted)}
-.vc-card h1{margin:1.2cqw 0;font-family:var(--font-story);font-weight:400;font-size:clamp(17px,5.2cqw,30px);line-height:1.05}
-.vc-card p{margin:0;font-size:clamp(11px,2.6cqw,14.5px);line-height:1.35}
-.vc-card .hs-seal{margin-top:1.6cqw;font-size:clamp(10px,2.3cqw,13px);padding:2px 9px}
-.vc-seat{position:absolute;width:23%;transform:translate(-50%,-38%);display:flex;flex-direction:column;align-items:center;text-align:center;background:none;border:0;padding:0;color:inherit;font:inherit}
-button.vc-seat{cursor:pointer}
+/* the middle of the table: front is the recording, back is the cinematic */
+.vc-mid{position:absolute;left:50%;top:50%;width:48%;aspect-ratio:5/4;transform:translate(-50%,-50%);perspective:1400px;z-index:3}
+.vc-flip{position:absolute;inset:0;transition:transform .7s cubic-bezier(.3,.7,.3,1);transform-style:preserve-3d}
+.vc-mid.is-flipped .vc-flip{transform:rotateY(180deg)}
+.vc-face{position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;display:flex;flex-direction:column;gap:1.2cqw;padding:1.4cqw;
+  border:2px solid transparent;border-radius:var(--radius-panel);background:linear-gradient(#17100b,#0e0906) padding-box,var(--gild) border-box;box-shadow:0 14px 30px rgba(0,0,0,.65)}
+.vc-back{transform:rotateY(180deg)}
+.vc-fh{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:0 .4cqw}
+.vc-fh b{font:500 clamp(10px,2.1cqw,13.5px)/1.1 var(--font-label);letter-spacing:.1em;color:var(--gold-hi);white-space:nowrap}
+.vc-flipbtn{background:rgba(20,13,8,.7);border:1px solid var(--gold-line);border-radius:var(--radius-full);color:var(--text);cursor:pointer;padding:.3cqw 1.6cqw;
+  font:500 clamp(10px,2cqw,13px)/1.3 var(--font-label);letter-spacing:.04em;white-space:nowrap}
+.vc-flipbtn:hover{border-color:var(--gold);color:var(--gold-hi)}
+.vc-media{position:relative;flex:1;min-height:0;border-radius:2px;overflow:hidden;background:#050302}
+.vc-media .reel{position:absolute;inset:0;aspect-ratio:auto}
+.vc-media .reel-title{display:none}
+.vc-media .reel-ctl{padding:4px 8px;gap:6px}
+.vc-media .reel-time{font-size:10.5px}
+.vc-media .reel-cap{bottom:26%}
+.vc-media video{position:absolute;inset:0;width:100%;height:100%;background:#000}
+.vc-media audio{position:absolute;left:4%;right:4%;bottom:6%;width:92%;height:34px}
+.vc-poster{position:absolute;inset:0;background-size:cover;background-position:center;filter:brightness(.55) saturate(.8)}
+.vc-wave{position:absolute;left:6%;right:6%;top:20%;bottom:32%;background-size:100% 100%;background-repeat:no-repeat;opacity:.9}
+.vc-say{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1cqw;padding:3cqw;text-align:center;margin:0}
+.vc-say .bn{position:absolute;inset:-20px;background-size:cover;background-position:center;filter:blur(8px) brightness(.38) saturate(.8)}
+.vc-say > :not(.bn){position:relative}
+.vc-say b{font-family:var(--font-story);font-weight:400;font-size:clamp(13px,3.3cqw,21px);color:var(--on-wood-text);line-height:1.15}
+.vc-say p{margin:0;font-size:clamp(10px,2.1cqw,13.5px);color:var(--on-wood-muted);line-height:1.35;max-width:36ch}
+.vc-say .k-btn{font-size:clamp(11px,2.2cqw,14px);padding:.3cqw 2cqw;border-color:var(--gold-line);color:var(--text)}
+.vc-say .k-btn.is-primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.vc-say .reel-prog{width:80%}
+label.vc-drop{cursor:pointer;border:1.5px dashed rgba(246,221,150,.45);border-radius:3px;inset:3px}
+label.vc-drop:hover,label.vc-drop:focus-within{border-color:var(--gold)}
+label.vc-drop:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+label.vc-drop input{position:absolute;width:1px;height:1px;opacity:0}
+.vc-ff{display:flex;justify-content:space-between;align-items:center;gap:2px 8px;flex-wrap:wrap;padding:0 .4cqw;font-size:clamp(10px,1.9cqw,12.5px);color:var(--muted);line-height:1.25}
+.vc-ff .k-row{gap:1.6cqw}
+.vc-ff .p-link{font:inherit;--k-hi:var(--accent)}
+/* the seats */
+/* anchored on the portrait (13.6cqw across), so a seat with more quest slips stays put */
+.vc-seat{position:absolute;width:22%;transform:translate(-50%,-6.8cqw);display:flex;flex-direction:column;align-items:center;text-align:center;z-index:2}
+.vc-who{display:flex;flex-direction:column;align-items:center;width:100%;background:none;border:0;padding:0;color:inherit;font:inherit}
+button.vc-who{cursor:pointer}
 .vc-seat .medal{width:62%;border-width:2px;transition:box-shadow .2s,filter .2s,opacity .2s}
 .vc-seat .pl{margin-top:-1.4cqw;position:relative;z-index:2;max-width:118%;padding:.6cqw 1.6cqw .8cqw;border-radius:2px;background:linear-gradient(180deg,#f4d98e,#d7ab55 55%,#b88834);
   box-shadow:0 2px 5px rgba(0,0,0,.6);color:var(--accent-ink)}
@@ -288,14 +327,32 @@ button.vc-seat{cursor:pointer}
 .vc-seat.is-no .medal{box-shadow:0 0 0 3px var(--seal),0 0 14px 2px rgba(180,70,44,.5);filter:grayscale(.6)}
 .vc-seat.is-gm .medal{box-shadow:0 0 0 3px #f07b2c,0 0 22px 5px rgba(240,123,44,.5)}
 .vc-seat.is-me .pl::after{content:"you";position:absolute;right:-6px;top:-8px;font:700 9.5px/1 var(--font-label);letter-spacing:.06em;background:var(--accent);color:var(--accent-ink);padding:2px 5px;border-radius:8px}
-button.vc-seat:hover .medal,button.vc-seat:focus-visible .medal{box-shadow:0 0 0 2px rgba(246,221,150,.9),0 0 22px 6px rgba(255,179,107,.5)}
-.vc-under{max-width:560px;margin:-6px auto 0;width:100%}
+button.vc-who:hover .medal,button.vc-who:focus-visible .medal{box-shadow:0 0 0 2px rgba(246,221,150,.9),0 0 22px 6px rgba(255,179,107,.5)}
+/* each player's quests: paper slips by their seat. The GM's sit beside the head of the table. */
+.vc-qs{list-style:none;margin:1.2cqw 0 0;padding:0;width:110%;display:flex;flex-direction:column;gap:.9cqw}
+.vc-qs li{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.9cqw;align-items:start;text-align:left;padding:.8cqw 1.1cqw;border-radius:2px;color:var(--paper-ink);
+  background:linear-gradient(170deg,var(--paper-hi),var(--paper-lo));box-shadow:0 2px 5px rgba(0,0,0,.55);font-size:clamp(10px,1.85cqw,13px);line-height:1.2;transform:rotate(-.8deg)}
+.vc-qs li:nth-child(even){transform:rotate(.7deg)}
+.vc-qs .hs-box{width:clamp(11px,2cqw,14px);height:clamp(11px,2cqw,14px);margin-top:1px;border-color:var(--paper-muted)}
+.vc-qs .hs-box:disabled{cursor:default}
+.vc-qs small{display:block;color:var(--paper-muted);font-size:.88em;margin-top:1px}
+.vc-qs .is-done > span{text-decoration:line-through;color:var(--paper-muted)}
+.vc-qs li.is-tool{display:block;background:none;box-shadow:none;transform:none;padding:0}
+.vc-qs .vc-qplus{width:100%;background:rgba(20,13,8,.6);border:1px dashed var(--gold-line);border-radius:2px;color:var(--on-wood-muted);cursor:pointer;padding:.5cqw;
+  font:500 clamp(10px,1.8cqw,12.5px)/1.2 var(--font-label);letter-spacing:.04em}
+.vc-qs .vc-qplus:hover{color:var(--gold-hi);border-color:var(--gold)}
+.vc-qs input{width:100%;font-size:clamp(11px,1.9cqw,13px);padding:.6cqw 1cqw;border-radius:2px;border:1px solid var(--gold);background:var(--paper-hi);color:var(--paper-ink)}
+.vc-seat.is-head .vc-qs{position:absolute;left:104%;top:2%;width:122%;margin:0}
+.vc-under{width:100%}
 .vc-strip{padding:12px 16px}
 .vc-tabs{display:flex;overflow-x:auto;border-bottom:1px solid rgba(226,184,98,.22);scrollbar-width:none}
 .vc-tabs button{flex:1 0 auto;background:transparent;border:0;padding:11px 12px;cursor:pointer;color:var(--muted);font-family:var(--font-label);font-weight:500;letter-spacing:.05em;font-size:14.5px;border-bottom:2px solid transparent;white-space:nowrap}
 .vc-tabs button[aria-selected="true"]{color:var(--text);border-bottom-color:var(--accent)}
 .vc-tabs button small{font-size:12px;color:var(--muted);margin-left:3px}
 .vc-tab{padding:16px}
+/* "Watch large": the recording or the cinematic in a dialog */
+.watch{width:min(980px,100%)}
+.watch .vc-media{flex:none;aspect-ratio:16/9;margin:8px 4px 4px}
 
 /* ---------- dialogs (edit, paint the reel). Gilded; fields follow the message composer. ---------- */
 .dlg-back{position:fixed;inset:0;z-index:60;background:rgba(10,7,4,.74);display:flex;align-items:center;justify-content:center;padding:16px;overflow:hidden}
@@ -486,6 +543,13 @@ function paintNotes() {   // a photo of handwritten notes, for an uploaded accou
   return c.toDataURL('image/jpeg', .8);
 }
 
+function paintWave() {   // an audio recording's waveform
+  const [c, ctx] = canvas(800, 200), r = rng('wave');
+  ctx.fillStyle = 'rgba(246,221,150,.85)';
+  for (let x = 0; x < 800; x += 6) { const h = 8 + Math.abs(Math.sin(x / 37) * Math.cos(x / 91)) * 160 * (.35 + r() * .65); ctx.fillRect(x, 100 - h / 2, 3, h); }
+  return c.toDataURL('image/png');
+}
+
 // every picture becomes a class (.art-<id>), so re-rendering never repeats a data URL
 const ARTSTYLE = document.createElement('style'); document.head.appendChild(ARTSTYLE);
 let artN = 0;
@@ -497,6 +561,7 @@ const ART = {
   brass: addArt(paintPortrait({ seed: 'brass', bg: ['#4a3a1a', '#120c04'], gear: 'helm', glow: [[240, 290, 12, 'rgba(255,80,40,.95)']] })),
   sable: addArt(paintPortrait({ seed: 'sable', bg: ['#1a2a2a', '#050909'], gear: 'wide' })),
   notes: addArt(paintNotes()),
+  wave: addArt(paintWave()),
 };
 const SCENES = [
   ['drift', "The Gull's Wager drops out of the Drift above a moon with no name."],
@@ -549,21 +614,25 @@ const readyReel = () => ({ state: 'ready', scenes: SCENES, at: D(2026, 10, 14, 2
 const base6 = () => ({ id: 'ss-6', n: 6, title: 'The Signal', date: D(2026, 10, 13, 19, 30), end: D(2026, 10, 13, 23), status: 'completed', online: true, location: '',
   agenda: "The Gull's Wager reaches the claim. The signal puzzle (handout 3). If they open the beacon, roll on the Drift table. Level 5 at the end.",
   created: D(2026, 9, 29), quests: s6Quests(), levelled: ['geoff', 'priya', 'theo', 'marco'], gcal: true, discord: true,
-  ready: { sent: true, r: { avery: true, geoff: true, priya: true, marco: true, theo: false } }, standIn: null, accounts: [], tale: null, reel: null, vod: '',
+  ready: { sent: true, r: { avery: true, geoff: true, priya: true, marco: true, theo: false } }, standIn: null, accounts: [], tale: null, reel: null, vod: '', rec: null,
   att: { taken: false, came: new Set(), stood: new Set() } });
+const VIDEO6 = () => ({ kind: 'video', name: 'starfall-session-6.mp4', size: 2.1e9, dur: '3:41:06', by: 'avery', at: D(2026, 10, 14, 9) });
+const AUDIO6 = () => ({ kind: 'audio', name: 'starfall-session-6-discord.ogg', size: 2.1e8, dur: '3:38:52', by: 'avery', at: D(2026, 10, 14, 9) });
 const base7 = () => ({ id: 'ss-7', n: 7, title: 'Into the Hold', date: D(2026, 11, 3, 19, 30), end: D(2026, 11, 3, 23), status: 'scheduled', online: true, location: '',
   agenda: 'Into the hold of the hulk. Bring your level 6 sheets; ten minutes of shopping at the start. Handout: the deck plan.',
-  created: D(2026, 10, 14), quests: s7Quests(), levelled: [], gcal: true, discord: true, ready: null, standIn: null, accounts: [], tale: null, reel: null, vod: '',
+  created: D(2026, 10, 14), quests: s7Quests(), levelled: [], gcal: true, discord: true, ready: null, standIn: null, accounts: [], tale: null, reel: null, vod: '', rec: null,
   att: { taken: false, came: new Set(), stood: new Set() } });
 
 /* Session states, switchable from the bar. Each builds a fresh copy, so switching resets what you changed. */
 const STATES = [
   { key: 'told', name: 'Played and told', note: 'Session 6: attendance, the tale, accounts, the reel', make() {
       const s = base6(); s.att = { taken: true, came: new Set(['avery', 'geoff', 'priya', 'marco']), stood: new Set(['theo']) };
-      s.tale = { text: TALE, by: 'avery', at: D(2026, 10, 14, 21) }; s.accounts = accounts6(); s.reel = readyReel(); s.vod = 'https://www.youtube.com/watch?v=starfall-s6'; return s; } },
+      s.tale = { text: TALE, by: 'avery', at: D(2026, 10, 14, 21), from: 'recording' }; s.accounts = accounts6(); s.reel = readyReel(); s.rec = VIDEO6(); return s; } },
   { key: 'fresh', name: 'Just played', note: 'Session 6, before anything is written up', make() { return base6(); } },
+  { key: 'recorded', name: 'Recording in, no tale', note: 'Session 6: an audio recording, ready to draft the tale from', make() {
+      const s = base6(); s.att = STATES[0].make().att; s.rec = AUDIO6(); return s; } },
   { key: 'painting', name: 'Reel being painted', note: 'Session 6: the tale is in, the reel is on its way', make() {
-      const s = STATES[0].make(); s.reel = { state: 'painting', p: .3 }; s.accounts = s.accounts.slice(0, 1); s.vod = ''; return s; } },
+      const s = STATES[0].make(); s.reel = { state: 'painting', p: .3 }; s.accounts = s.accounts.slice(0, 1); return s; } },
   { key: 'upcoming', name: 'Coming up', note: 'Session 7 next Tuesday: prep notes, quests, the torch', make() { return base7(); } },
   { key: 'ready', name: 'Ready check out', note: 'Session 7 starts in 22 minutes', now: D(2026, 11, 3, 19, 8), make() {
       const s = base7(); s.ready = { sent: true, r: { avery: true, priya: true, marco: true, theo: false } }; return s; } },
@@ -583,11 +652,11 @@ const RAIL = {
 const VARIANTS = [
   { key: 'A', name: 'The session sheet', note: 'Words first: one parchment page, top to bottom' },
   { key: 'B', name: 'The reel', note: 'Pictures first: the reel up top, the tale and the table below' },
-  { key: 'C', name: 'Around the table', note: 'People first: who sat where, then tabs' },
+  { key: 'C', name: 'Around the table', note: 'Chosen, revised: recording in the middle, quests at the seats' },
 ];
 const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
 const qs0 = new URLSearchParams(location.search);
-let variant = Math.max(0, VARIANTS.findIndex(v => v.key === (qs0.get('variant') || store.get('hs-sess-variant') || 'A')));
+let variant = Math.max(0, VARIANTS.findIndex(v => v.key === (qs0.get('variant') || store.get('hs-sess-variant') || 'C')));
 let stateI = Math.max(0, STATES.findIndex(s => s.key === (qs0.get('state') || store.get('hs-sess-state') || 'told')));
 let viewer = (qs0.get('as') || store.get('hs-sess-as')) === 'avery' ? 'avery' : 'geoff';
 let cur = STATES[stateI].make();
@@ -707,10 +776,10 @@ function taleHTML(s, { sign = true } = {}) {
   if (taleDraft !== null) return `<textarea class="k-ta" id="tale-ta" aria-label="The tale" placeholder="What happened? Write it like you'd tell it at the next session.">${esc(taleDraft)}</textarea>
     <div class="k-row" style="margin-top:8px"><button type="button" class="k-btn is-primary" data-talesave="1">Save the tale</button><button type="button" class="k-btn" data-talecancel="1">Cancel</button>
     <span class="k-fine" style="margin:0">Everyone in the party can read it. Blank lines start a new paragraph.</span></div>`;
-  if (!s.tale) return `<div class="k-slot"><p class="k-empty">${isGM() ? "Nobody's told this one yet. Write up what happened while it's fresh: it's what the party reads before the next session, and what the reel is painted from." : `${esc(GM.name)} hasn't written this one up yet. You can add your own account below.`}</p>
+  if (!s.tale) return `<div class="k-slot"><p class="k-empty">${isGM() ? "Nobody's told this one yet. Write up what happened while it's fresh: it's what the party reads before the next session, and what the reel is painted from." : `${esc(GM.name)} hasn't written this one up yet. Anyone in the party can add their own account in the meantime.`}</p>
     ${isGM() ? '<div class="k-row" style="margin-top:10px"><button type="button" class="k-btn is-primary" data-talewrite="1">Write the tale</button></div>' : ''}</div>`;
   return `<div class="tale">${s.tale.text.split(/\n\s*\n/).map(p => `<p>${esc(p)}</p>`).join('')}</div>
-    ${sign ? `<p class="tale-by">Told by ${esc(you(s.tale.by) === 'You' ? 'you' : nameOf(s.tale.by))}, ${CAMP.gmTitle}, ${dayLabel(s.tale.at)}${isGM() ? ` · <button type="button" class="p-link" data-talewrite="1">Edit</button>` : ''}</p>` : ''}`;
+    ${sign ? `<p class="tale-by">Told by ${esc(you(s.tale.by) === 'You' ? 'you' : nameOf(s.tale.by))}, ${CAMP.gmTitle}, ${dayLabel(s.tale.at)}${s.tale.from === 'recording' ? ', from an AI draft of the recording' : ''}${isGM() ? ` · <button type="button" class="p-link" data-talewrite="1">Edit</button>` : ''}</p>` : ''}`;
 }
 /* accounts: summaries anyone in the party uploads. Kept as files: a PDF, a doc, a photo of notes, a voice memo. */
 const kindOf = f => /pdf/.test(f.type) ? 'PDF' : /^image/.test(f.type) ? 'IMG' : /^audio/.test(f.type) ? 'AUDIO' : /text\/(plain|markdown)|\.md$|\.txt$/.test(f.type + f.name) ? 'TXT' : 'DOC';
@@ -734,15 +803,7 @@ function reelHTML(s, { hero = false } = {}) {
   if (s.status === 'cancelled') return '';
   if (s.status !== 'completed') return hero ? '' : `<div class="k-slot"><p class="k-empty">After the session, a reel of its scenes can be painted from the tale.</p></div>`;
   if (r?.state === 'ready') {
-    const total = r.scenes.length * SCENE_MS;
-    return `<div class="reel-frame"><div class="reel" data-reel="1">
-      ${r.scenes.map((sc, i) => `<span class="art art-${sc.art} ${i === 0 ? 'is-on' : ''}"></span>`).join('')}
-      <div class="reel-title">${esc(kicker(s))} · ${esc(sTitle(s))}</div>
-      <p class="reel-cap"></p>
-      <button type="button" class="reel-big" data-reelplay="1" aria-label="Play the reel">${playIc}</button>
-      <div class="reel-ctl"><button type="button" class="pp" data-reelplay="1" aria-label="Play or pause">${playIc}</button>
-        <div class="reel-ticks">${r.scenes.map((sc, i) => `<button type="button" data-reelgo="${i}" aria-label="Scene ${i + 1}: ${esc(sc.cap)}"><i><b></b></i></button>`).join('')}</div>
-        <span class="reel-time">0:00 / ${fmtT(total)}</span></div></div></div>
+    return `<div class="reel-frame">${reelPlayer(s)}</div>
       <div class="reel-under"><span class="reel-ai">Painted by AI from the tale · ${r.scenes.length} scenes · ${dayLabel(r.at)}</span>
         ${isGM() ? '<span class="k-row"><button type="button" class="p-link" data-paint="1">Paint it again</button><button type="button" class="p-link" data-reeldel="1">Remove it</button></span>' : ''}</div>`;
   }
@@ -755,6 +816,18 @@ function reelHTML(s, { hero = false } = {}) {
   return wait(isGM() ? `<b>Paint the reel?</b><p>About ${SCENES.length} scenes and 40 seconds, painted by AI from the tale (${words(s.tale.text)} words) and the party's portraits.</p>
       <div class="k-row" style="justify-content:center"><button type="button" class="k-btn is-primary" data-paint="1">Paint the reel</button></div>`
     : `<b>No reel yet</b><p>${esc(GM.name)} can have Hearthside paint a short film of this session's scenes from the tale.</p>`);
+}
+/* the player: painted scenes with a slow pan and captions, standing in for a generated video */
+function reelPlayer(s) {
+  const r = s.reel, total = r.scenes.length * SCENE_MS;
+  return `<div class="reel" data-reel="1">
+      ${r.scenes.map((sc, i) => `<span class="art art-${sc.art} ${i === 0 ? 'is-on' : ''}"></span>`).join('')}
+      <div class="reel-title">${esc(kicker(s))} · ${esc(sTitle(s))}</div>
+      <p class="reel-cap"></p>
+      <button type="button" class="reel-big" data-reelplay="1" aria-label="Play">${playIc}</button>
+      <div class="reel-ctl"><button type="button" class="pp" data-reelplay="1" aria-label="Play or pause">${playIc}</button>
+        <div class="reel-ticks">${r.scenes.map((sc, i) => `<button type="button" data-reelgo="${i}" aria-label="Scene ${i + 1}: ${esc(sc.cap)}"><i><b></b></i></button>`).join('')}</div>
+        <span class="reel-time">0:00 / ${fmtT(total)}</span></div></div>`;
 }
 const fmtT = ms => { const t = Math.round(ms / 1000); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
 function reelSync() {
@@ -789,7 +862,7 @@ function paint(s) {
   paintTimer = setInterval(() => {
     if (cur !== s || s.reel?.state !== 'painting') { clearInterval(paintTimer); return; }
     s.reel.p += .02;
-    if (s.reel.p >= 1) { clearInterval(paintTimer); s.reel = readyReel(); s.reel.at = now(); render(); toast('Prototype: the reel is painted. The party would get a letter.'); return; }
+    if (s.reel.p >= 1) { clearInterval(paintTimer); s.reel = readyReel(); s.reel.at = now(); render(); toast(`Prototype: the ${variant === 2 ? 'cinematic is made' : 'reel is painted'}. The party would get a letter.`); return; }
     const n = Math.min(SCENES.length, Math.floor(s.reel.p * SCENES.length) + 1);
     document.querySelectorAll('.reel-prog i').forEach(i => i.style.width = Math.round(s.reel.p * 100) + '%');
     document.querySelectorAll('.reel-stage').forEach(p => p.textContent = `Scene ${n} of ${SCENES.length}: ${SCENES[n - 1].cap}`);
@@ -886,42 +959,135 @@ function VariantB() {
   <div class="vb-cols">${left}<div class="vb-side">${right.join('')}</div></div>`;
 }
 
-/* ---------------- C: Around the table ---------------- */
+/* ---------------- C: Around the table (revised) ---------------- */
+const isBefore = s => s.status === 'scheduled' || s.status === 'planning';
+let cFlip = false;      // the middle card shows the cinematic
+let qAdd = null;        // the seat whose "+ quest" is open
+let prepDraft = null;   // prep notes being edited
+let taleFrom = null;    // 'recording' while editing a draft the AI made from the recording
+const say = (b, p, extra = '') => `<div class="vc-say"><span class="bn art-${ART.banner}"></span><b>${b}</b>${p ? `<p>${p}</p>` : ''}${extra}</div>`;
+const recLine = r => [r.dur, kb(r.size)].filter(Boolean).join(' · ');
+/* the recording itself: the real file if one was uploaded here, otherwise a stand-in */
+const recMedia = r => r.url
+  ? (r.kind === 'video' ? `<video src="${r.url}" controls preload="metadata"></video>` : `<span class="vc-wave art-${ART.wave}"></span><audio src="${r.url}" controls preload="metadata"></audio>`)
+  : `${r.kind === 'video' ? `<span class="vc-poster art-${ART.banner}"></span>` : `<span class="vc-wave art-${ART.wave}"></span>`}<button type="button" class="reel-big" data-recplay="1" aria-label="Play the recording">${playIc}</button>`;
+function recFace(s) {
+  const r = s.rec, flip = s.status === 'cancelled' ? '' : '<button type="button" class="vc-flipbtn" data-flip="1">The cinematic ↻</button>';
+  let media, foot = '';
+  if (s.status === 'cancelled') media = say('Cancelled', 'Nothing to record.');
+  else if (isBefore(s)) media = say(s.date ? esc(when(s)) : 'No night yet', `After the session, ${esc(GM.name)} can put the recording here, audio or video, and draft the tale from it.`);
+  else if (r?.up != null) media = say('Uploading the recording', esc(r.name), `<span class="reel-prog vc-up"><i style="width:${Math.round(r.up * 100)}%"></i></span>`);
+  else if (r) {
+    media = recMedia(r);
+    foot = `<span>${esc(recLine(r) || r.name)}</span><span class="k-row"><button type="button" class="p-link" data-watch="rec">${r.kind === 'video' ? 'Watch' : 'Listen'} large</button>
+      ${isGM() ? '<label class="p-link k-up">Replace<input type="file" data-rec="1" accept="audio/*,video/*"></label><button type="button" class="p-link" data-recdel="1">Remove</button>' : ''}</span>`;
+  } else if (s.vod) media = say('The recording', 'It lives somewhere else.', '<button type="button" class="k-btn is-primary" data-stub="the recording">Watch it ↗</button>');
+  else if (isGM()) {
+    media = `<label class="vc-say vc-drop"><span class="bn art-${ART.banner}"></span><b>Upload the recording</b><p>Audio or video of the session. Hearthside can draft the tale from it.</p>
+      <span class="k-btn is-primary">Choose a file</span><input type="file" data-rec="1" accept="audio/*,video/*"></label>`;
+    foot = '<span></span><button type="button" class="p-link" data-edit="vod">Or link to one</button>';
+  } else media = say('No recording yet', `${esc(GM.name)} can upload one after the session.`);
+  return `<div class="vc-fh"><b>The recording</b>${flip}</div><div class="vc-media">${media}</div>${foot ? `<div class="vc-ff">${foot}</div>` : ''}`;
+}
+function cineFace(s) {
+  const r = s.reel;
+  let media, foot = '';
+  if (isBefore(s) || s.status === 'cancelled') media = say('The cinematic', 'After the session, an AI cinematic of its scenes can be made from the tale.');
+  else if (r?.state === 'ready') {
+    media = reelPlayer(s);
+    foot = `<span class="reel-ai">AI, from the tale · ${r.scenes.length} scenes</span><span class="k-row"><button type="button" class="p-link" data-watch="cine">Watch large</button>
+      ${isGM() ? '<button type="button" class="p-link" data-paint="1">Make again</button><button type="button" class="p-link" data-reeldel="1">Remove</button>' : ''}</span>`;
+  } else if (r?.state === 'painting') {
+    const n = Math.min(SCENES.length, Math.floor(r.p * SCENES.length) + 1);
+    media = say('Making the cinematic', '', `<span class="reel-prog"><i style="width:${Math.round(r.p * 100)}%"></i></span><p class="reel-stage">Scene ${n} of ${SCENES.length}: ${esc(SCENES[n - 1].cap)}</p>`);
+  } else if (!s.tale) media = say('The cinematic', isGM() ? 'Write the tale, or draft it from the recording, and an AI cinematic can be made from it.' : 'No cinematic yet.');
+  else media = isGM() ? say('Make the cinematic?', `About ${SCENES.length} scenes and 40 seconds, made by AI from the tale.`, '<button type="button" class="k-btn is-primary" data-paint="1">Make the cinematic</button>')
+    : say('No cinematic yet', `${esc(GM.name)} can have one made from the tale.`);
+  return `<div class="vc-fh"><b>The cinematic</b><button type="button" class="vc-flipbtn" data-flip="0">↻ The recording</button></div><div class="vc-media">${media}</div>${foot ? `<div class="vc-ff">${foot}</div>` : ''}`;
+}
+/* a seat's quests. The owner (or the GM) ticks them off; before the session the GM adds one from the seat. */
+function seatQuests(s, p) {
+  const qs = s.quests.filter(q => q.who === p.id), add = isGM() && isBefore(s);
+  if (!qs.length && !add) return '';
+  const items = qs.map(q => `<li class="${q.done ? 'is-done' : ''}"><button class="hs-box" role="checkbox" aria-checked="${q.done}" data-q="${q.id}" ${q.who === viewer || isGM() ? '' : 'disabled'} aria-label="${esc(q.title)}"></button>
+    <span>${esc(q.title)}<small>${q.done ? 'Done' : q.due ? `Due ${dayLabel(q.due)}` : 'Before the session'}</small></span></li>`).join('');
+  const tool = qAdd === p.id ? `<li class="is-tool"><input data-qnew="${p.id}" maxlength="120" placeholder="A quest for ${esc(p.name)}" aria-label="New quest for ${esc(p.name)}, Enter to add"></li>`
+    : add ? `<li class="is-tool"><button type="button" class="vc-qplus" data-qadd="${p.id}">+ quest</button></li>` : '';
+  return `<ul class="vc-qs" aria-label="${esc(p.id === viewer ? 'Your' : p.name + "'s")} quests">${items}${tool}</ul>`;
+}
+/* the tale: only the GM writes it, by hand or from an AI draft of the recording */
+function taleC(s) {
+  if (s.status !== 'completed') return taleHTML(s);
+  if (s.drafting != null) return `<div class="k-slot"><p class="k-empty" style="color:var(--text)">Drafting the tale from the recording${s.rec?.dur ? ` (${esc(s.rec.dur)})` : ''}…</p>
+    <span class="reel-prog vc-draft" style="display:block;width:100%;margin:10px 0 6px"><i style="width:${Math.round(s.drafting * 100)}%"></i></span><p class="k-fine vc-draft-stage" style="margin:0">${draftStage(s.drafting)}</p></div>`;
+  if (taleDraft !== null) return `${taleFrom === 'recording' ? '<p class="k-fine" style="margin:0 0 10px">Drafted by AI from the recording. Read it through and fix what it got wrong before you save it: the party reads this, and the cinematic is made from it.</p>' : ''}${taleHTML(s)}`;
+  if (!s.tale && isGM()) return `<div class="k-slot"><p class="k-empty">Nobody's told this one yet. Write up what happened, or have Hearthside draft it from the recording for you to edit.</p>
+    <div class="k-row" style="margin-top:10px"><button type="button" class="k-btn is-primary" data-talewrite="1">Write the tale</button>
+    ${s.rec && s.rec.up == null ? '<button type="button" class="k-btn" data-draft="1">Draft it from the recording</button>' : '<span class="k-fine" style="margin:0">Upload the recording to have it drafted.</span>'}</div></div>`;
+  return taleHTML(s) + (isGM() && s.rec && s.rec.up == null ? '<p class="k-fine"><button type="button" class="p-link" data-draft="1">Draft it again from the recording</button></p>' : '');
+}
+const DRAFT_STAGES = ['Listening to the recording', 'Working out who said what', 'Picking out the scenes', 'Writing it up'];
+const draftStage = p => DRAFT_STAGES[Math.min(DRAFT_STAGES.length - 1, Math.floor(p * DRAFT_STAGES.length))] + '…';
+function draftTale(s) {
+  s.drafting = 0; taleDraft = null; cTab = 'tale'; render();
+  const t = setInterval(() => {
+    if (cur !== s || s.drafting == null) { clearInterval(t); return; }
+    s.drafting += .025;
+    if (s.drafting >= 1) { clearInterval(t); s.drafting = null; taleDraft = TALE; taleFrom = 'recording'; render(); return; }
+    document.querySelectorAll('.vc-draft i').forEach(i => i.style.width = Math.round(s.drafting * 100) + '%');
+    document.querySelectorAll('.vc-draft-stage').forEach(p => p.textContent = draftStage(s.drafting));
+  }, 120);
+}
+/* prep notes: the GM's own. Players never see this tab. */
+function prepC(s) {
+  if (prepDraft !== null) return `<textarea class="k-ta" id="prep-ta" style="font-family:var(--font-body);font-size:15px;min-height:130px" aria-label="Prep notes" placeholder="Scenes, handouts, what to roll on.">${esc(prepDraft)}</textarea>
+    <div class="k-row" style="margin-top:8px"><button type="button" class="k-btn is-primary" data-prepsave="1">Save</button><button type="button" class="k-btn" data-prepcancel="1">Cancel</button></div>`;
+  return `<p class="k-fine" style="margin:0 0 10px">Only the ${CAMP.gmTitle} sees these.</p>
+    ${s.agenda ? `<p style="margin:0;font-size:15px;line-height:1.5;white-space:pre-line;max-width:66ch">${esc(s.agenda)}</p>` : '<p class="k-empty">No prep notes yet.</p>'}
+    ${s.status !== 'cancelled' ? `<div class="k-row" style="margin-top:12px"><button type="button" class="k-btn" data-prepedit="1">${s.agenda ? 'Edit' : 'Write prep notes'}</button></div>` : ''}`;
+}
+/* the tabs, and which one opens first: before the session the GM sees their prep notes and players see the details;
+   after it, the GM sees the details and players see the tale */
+function cTabs(s) {
+  if (s.status === 'cancelled') return { tabs: [['details', 'Details', ''], ...(isGM() ? [['prep', 'Prep notes', '']] : [])], def: 'details' };
+  const after = s.status === 'completed';
+  const tabs = [['tale', 'The tale', ''], ...(after ? [['accounts', 'Accounts', s.accounts.length || '']] : []), ['details', 'Details', ''], ...(isGM() ? [['prep', 'Prep notes', '']] : [])];
+  return { tabs, def: after ? (isGM() ? 'details' : 'tale') : (isGM() ? 'prep' : 'details') };
+}
 function VariantC() {
-  const s = cur, done = s.status === 'completed', people = roll(s), editing = showAttEditor(s) && attDraft;
-  const n = PEOPLE.length, R = 39;
+  const s = cur, people = roll(s), editing = showAttEditor(s) && attDraft;
+  const n = PEOPLE.length, R = 40;
   const seat = (p, i) => {
     const a = -Math.PI / 2 + i * 2 * Math.PI / n, x = 50 + R * Math.cos(a), y = 50 + R * Math.sin(a);
-    const isGmSeat = !p.ch, k = isGmSeat ? (gmCame(s) ? 'gm' : 'away') : p.k;
-    const cls = ['vc-seat', `is-${k}`, p.id === viewer ? 'is-me' : '', s.standIn === p.id ? 'is-gm' : ''].join(' ');
-    const label = isGmSeat ? `${esc(gmLabel())}` : esc(p.ch.name);
-    const sub = isGmSeat ? CAMP.gmTitle : p.name;
-    const st = isGmSeat ? (s.standIn ? '' : `${flame}`) : k === 'played' ? 'party played' : k === 'away' ? 'sat out' : k === 'yes' ? 'ready' : k === 'no' ? 'can’t make it' : k === 'wait' ? '…' : p.lv ? 'level 5' : '';
-    const tag = editing ? 'button' : 'div';
-    return `<${tag} ${editing ? `type="button" data-attp="${p.id}" aria-pressed="${attDraft.came.has(p.id)}" aria-label="${esc(p.name)} ${attDraft.came.has(p.id) ? 'came' : 'was away'}"` : ''} class="${cls}" style="left:${x.toFixed(1)}%;top:${y.toFixed(1)}%">
-      ${isGmSeat ? `<span class="medal">${face(null, 'A', true)}</span>` : medal(p)}<span class="pl"><b>${label}</b><small>${esc(p.id === viewer ? 'You' : sub)}</small></span>${st ? `<span class="st">${st}</span>` : ''}</${tag}>`;
+    const head = !p.ch, k = p.k;
+    const cls = ['vc-seat', `is-${k}`, head ? 'is-head' : '', p.id === viewer ? 'is-me' : '', s.standIn === p.id ? 'is-gm' : ''].join(' ');
+    const st = head ? (s.standIn ? '' : flame) : k === 'played' ? 'party played' : k === 'away' ? 'sat out' : k === 'yes' ? 'ready' : k === 'no' ? 'can’t make it' : k === 'wait' ? '…' : p.lv ? 'level 5' : '';
+    const inner = `${head ? `<span class="medal">${face(null, 'A', true)}</span>` : medal(p)}<span class="pl"><b>${esc(head ? gmLabel() : p.ch.name)}</b><small>${esc(p.id === viewer ? 'You' : head ? CAMP.gmTitle : p.name)}</small></span>${st ? `<span class="st">${st}</span>` : ''}`;
+    const who = editing ? `<button type="button" class="vc-who" data-attp="${p.id}" aria-pressed="${attDraft.came.has(p.id)}" aria-label="${esc(p.name)} ${attDraft.came.has(p.id) ? 'came' : 'was away'}">${inner}</button>` : `<div class="vc-who">${inner}</div>`;
+    return `<div class="${cls}" style="left:${x.toFixed(1)}%;top:${y.toFixed(1)}%">${who}${seatQuests(s, p)}</div>`;
   };
-  const seats = [{ ...GM }, ...people].map((p, i) => {
-    if (editing) { const c = attDraft.came.has(p.id); return seat({ ...p, k: p.ch ? (c ? 'came' : attDraft.stood.has(p.id) ? 'played' : 'away') : (c ? 'gm' : 'away') }, i); }
-    return seat(p, i);
+  const seats = [{ ...GM, k: gmCame(s) ? 'gm' : 'away' }, ...people].map((p, i) => {
+    if (!editing) return seat(p, i);
+    const c = attDraft.came.has(p.id);
+    return seat({ ...p, k: p.ch ? (c ? 'came' : attDraft.stood.has(p.id) ? 'played' : 'away') : (c ? 'gm' : 'away') }, i);
   }).join('');
-  const centre = `<div class="vc-card"><div class="kk">${esc(kicker(s))}</div><h1>${esc(sTitle(s))}</h1>
-    <p>${s.date ? `${esc(dayLabel(s.date))} · ${esc(span(s))}` : 'No night yet'}</p><p>${s.online ? 'Online' : esc(s.location || '')}</p>${statusSeal(s)}</div>`;
+  const mid = `<div class="vc-mid ${cFlip ? 'is-flipped' : ''}"><div class="vc-flip">
+    <div class="vc-face vc-front" ${cFlip ? 'inert' : ''}>${recFace(s)}</div><div class="vc-face vc-back" ${cFlip ? '' : 'inert'}>${cineFace(s)}</div></div></div>`;
   // the strip under the table: the GM's attendance, the ready check, or a line about who came
   let strip = '';
   if (editing) strip = `<p class="k-fine" style="margin:0 0 6px">Tap a seat to mark who came. ${s.att.taken ? '' : 'Ticked from the ready check.'}</p>${attQuestions(s)}${attSave(s)}`;
   else if (showAttEditor(s)) strip = `<div class="k-row" style="justify-content:space-between"><span style="font-size:14.5px">Attendance isn't taken yet. The seats show the ready check.</span><button type="button" class="k-btn is-primary" data-attedit="1">Take attendance</button></div>`;
   else if (readyHTML(s)) strip = readyHTML(s);
-  else if (done && s.att.taken) strip = `<div class="k-row" style="justify-content:space-between"><span style="font-size:14.5px">${esc(attSummary(s))}.${people.filter(p => p.k === 'played').map(p => ' ' + esc(p.note) + '.').join('')}</span>${editAttLink(s)}</div>`;
-  const tabs = done ? [['tale', 'The tale', ''], ['accounts', 'Accounts', s.accounts.length || ''], ['reel', 'The reel', s.reel?.state === 'painting' ? '…' : ''], ['quests', 'Quests', s.quests.length || ''], ['prep', 'Prep notes', ''], ['details', 'Details', '']]
-    : s.status === 'cancelled' ? [['details', 'Details', '']] : [['prep', 'Prep notes', ''], ['quests', 'Quests', s.quests.length || ''], ['details', 'Details', ''], ['tale', 'The tale', '']];
-  const tab = tabs.some(t => t[0] === cTab) ? cTab : tabs[0][0];
-  const body = { tale: () => taleHTML(s), accounts: () => accountsHTML(s), reel: () => reelHTML(s), quests: () => `${addQuestBtn(s) ? `<div style="text-align:right;margin:-4px 0 6px">${addQuestBtn(s)}</div>` : ''}${questsHTML(s)}`,
-    prep: () => agendaHTML(s) || '<p class="k-empty">None.</p>', details: () => detailsDL(s) }[tab]();
-  return `<header class="hs-page-head p-head"><div>${backBtn()}</div><div class="k-row k-leather">${editBtn('k-btn')}</div></header>
-    ${statusNote(s) ? `<div class="k-leather hs-gilded vc-strip">${statusNote(s)}</div>` : ''}
-    ${torchHTML(s) ? `<div class="hs-gilded vc-strip">${torchHTML(s)}</div>` : ''}
-    <section aria-label="Around the table"><div class="vc-ring"><div class="vc-top"></div><div class="vc-glow"></div>${centre}${seats}</div>
+  else if (s.status === 'completed' && s.att.taken) strip = `<div class="k-row" style="justify-content:space-between"><span style="font-size:14.5px">${esc(attSummary(s))}.${people.filter(p => p.k === 'played').map(p => ' ' + esc(p.note) + '.').join('')}</span>${editAttLink(s)}</div>`;
+  const { tabs, def } = cTabs(s), tab = tabs.some(t => t[0] === cTab) ? cTab : def;
+  const body = { tale: () => taleC(s), accounts: () => accountsHTML(s), details: () => detailsDL(s), prep: () => prepC(s) }[tab]();
+  const title = `<article class="hs-sheet vc-title"><div class="hs-sheet-head"><div style="min-width:0"><div class="hs-kicker">${esc(kicker(s))}</div><h1 class="hs-sheet-title">${esc(sTitle(s))}</h1>
+      <p class="hs-byline">${s.date ? `${esc(longDay(s.date))} · ${esc(span(s))}` : 'No night yet'} · ${s.online ? 'Online' : esc(s.location || 'Place to be decided')}${s.status === 'scheduled' ? ' · ' + esc(when(s)) : ''}</p></div>
+      <div class="k-row" style="margin:0">${statusSeal(s)}${editBtn('hs-btn')}</div></div>
+    ${statusNote(s)}${torchHTML(s)}
+    ${s.status === 'scheduled' && (s.online || s.gcal) ? `<div class="k-row">${s.online ? '<button type="button" class="hs-btn is-primary" data-stub="the table">Join the table</button>' : ''}${s.gcal ? '<button type="button" class="hs-btn" data-stub="Google Calendar">Add to Google Calendar</button>' : ''}</div>` : ''}</article>`;
+  return `<header class="hs-page-head p-head"><div>${backBtn()}</div></header>${title}
+    <section aria-label="Around the table"><div class="vc-ring"><div class="vc-top"></div><div class="vc-glow"></div>${mid}${seats}</div>
       ${strip ? `<div class="vc-under"><div class="hs-gilded vc-strip">${strip}</div></div>` : ''}</section>
     <section class="hs-gilded"><div class="vc-tabs" role="tablist">${tabs.map(([k, l, c]) => `<button role="tab" aria-selected="${k === tab}" data-ctab="${k}">${l}${c !== '' ? `<small>${c}</small>` : ''}</button>`).join('')}</div>
       <div class="vc-tab" role="tabpanel">${body}</div></section>`;
@@ -952,15 +1118,22 @@ function renderOv() {
       </div>
       <div class="dlg-f k-leather"><button type="button" class="k-btn" data-ovclose="1">Cancel</button><button type="submit" class="k-btn is-primary">Save</button></div></form></div>`;
     Hearthside.GildedPanel.decorate(el);
-    (ov.focus === 'agenda' ? el.querySelector('#e-agenda') : el.querySelector('#e-title')).focus();
+    el.querySelector({ agenda: '#e-agenda', vod: '#e-vod' }[ov.focus] || '#e-title').focus();
+  } else if (ov.kind === 'watch') {
+    const label = ov.what === 'rec' ? 'The recording' : 'The cinematic';
+    el.innerHTML = `<div class="dlg-back"><div class="hs-gilded dlg watch" role="dialog" aria-modal="true" aria-label="${label}">
+      <div class="dlg-h"><h2>${label} · ${esc(sTitle(cur))}</h2><button type="button" class="x-btn" data-ovclose="1" aria-label="Close">×</button></div>
+      <div class="vc-media">${ov.what === 'rec' ? recMedia(cur.rec) : reelPlayer(cur)}</div></div></div>`;
+    Hearthside.GildedPanel.decorate(el); reelSync();
   } else if (ov.kind === 'paint') {
+    const W = variant === 2 ? 'cinematic' : 'reel';
     el.innerHTML = `<div class="dlg-back"><div class="hs-gilded dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-t">
-      <div class="dlg-h"><h2 id="dlg-t">Paint the reel</h2><button type="button" class="x-btn" data-ovclose="1" aria-label="Close">×</button></div>
-      <div class="dlg-body"><p>Hearthside reads the tale and paints a short film of its scenes: about ${SCENES.length} scenes and 40 seconds.</p>
+      <div class="dlg-h"><h2 id="dlg-t">${W === 'reel' ? 'Paint the reel' : 'Make the cinematic'}</h2><button type="button" class="x-btn" data-ovclose="1" aria-label="Close">×</button></div>
+      <div class="dlg-body"><p>Hearthside reads the tale and has AI make a short film of its scenes: about ${SCENES.length} scenes and 40 seconds.</p>
         <ul><li>It works from the tale (${words(cur.tale.text)} words), not the accounts.</li><li>Faces come from the party's portraits: ${PARTY.map(p => esc(p.ch.name)).join(', ')}.</li>
-        <li>It takes a couple of minutes. The party gets a letter when it's ready.</li><li>AI gets things wrong. You can paint it again or remove it.</li></ul>
+        <li>It takes a couple of minutes. The party gets a letter when it's ready.</li><li>AI gets things wrong. You can make it again or remove it.</li></ul>
         <p class="k-fine">Prototype: this takes about 7 seconds and paints stand-ins.</p></div>
-      <div class="dlg-f k-leather"><button type="button" class="k-btn" data-ovclose="1">Not now</button><button type="button" class="k-btn is-primary" data-paintgo="1">Paint it</button></div></div></div>`;
+      <div class="dlg-f k-leather"><button type="button" class="k-btn" data-ovclose="1">Not now</button><button type="button" class="k-btn is-primary" data-paintgo="1">${W === 'reel' ? 'Paint it' : 'Make it'}</button></div></div></div>`;
     Hearthside.GildedPanel.decorate(el);
   }
 }
@@ -992,12 +1165,12 @@ function render() {
   store.set('hs-sess-variant', v.key); store.set('hs-sess-state', st.key); store.set('hs-sess-as', viewer);
   try { const u = new URL(location.href); u.searchParams.set('variant', v.key); u.searchParams.set('state', st.key); u.searchParams.set('as', viewer); history.replaceState(null, '', u); } catch {}
 }
-function reset() { clearInterval(paintTimer); reelToggle(false); reelT = 0; attDraft = null; taleDraft = null; cTab = null; ov = null; renderOv(); cur = STATES[stateI].make(); if (cur.reel?.state === 'painting') paint(cur); }
+function reset() { clearInterval(paintTimer); reelToggle(false); reelT = 0; attDraft = null; taleDraft = null; cTab = null; ov = null; cFlip = false; qAdd = null; prepDraft = null; taleFrom = null; renderOv(); cur = STATES[stateI].make(); if (cur.reel?.state === 'painting') paint(cur); }
 function go(d) { variant = (variant + d + VARIANTS.length) % VARIANTS.length; render(); }
 document.getElementById('prev').onclick = () => go(-1);
 document.getElementById('next').onclick = () => go(1);
 document.getElementById('state').onclick = () => { stateI = (stateI + 1) % STATES.length; reset(); render(); };
-document.getElementById('who').onclick = () => { viewer = viewer === 'avery' ? 'geoff' : 'avery'; attDraft = null; taleDraft = null; render(); };
+document.getElementById('who').onclick = () => { viewer = viewer === 'avery' ? 'geoff' : 'avery'; attDraft = null; taleDraft = null; taleFrom = null; prepDraft = null; qAdd = null; cTab = null; render(); };
 addEventListener('keydown', e => {
   if (e.key === 'Escape' && ov) { ov = null; renderOv(); return; }
   if (ov || e.target.closest('input,textarea,select,[contenteditable]')) return;
@@ -1008,7 +1181,7 @@ function toast(msg) { const t = document.getElementById('toast'); t.textContent 
 
 document.addEventListener('click', e => {
   if (e.target.matches('.dlg-back')) { ov = null; renderOv(); return; }
-  const el = e.target.closest('[data-q],[data-stub],[data-edit],[data-ready],[data-torchback],[data-talewrite],[data-talesave],[data-talecancel],[data-fopen],[data-fdel],[data-reelplay],[data-reelgo],[data-paint],[data-paintgo],[data-reeldel],[data-attedit],[data-attp],[data-stood],[data-attsave],[data-attcancel],[data-ctab],[data-ovclose]');
+  const el = e.target.closest('[data-q],[data-stub],[data-edit],[data-ready],[data-torchback],[data-talewrite],[data-talesave],[data-talecancel],[data-fopen],[data-fdel],[data-reelplay],[data-reelgo],[data-paint],[data-paintgo],[data-reeldel],[data-attedit],[data-attp],[data-stood],[data-attsave],[data-attcancel],[data-ctab],[data-ovclose],[data-flip],[data-recplay],[data-watch],[data-recdel],[data-draft],[data-qadd],[data-prepedit],[data-prepsave],[data-prepcancel]');
   if (!el || el.matches('input[type=checkbox]') && !el.dataset.attp) return;
   const d = el.dataset, s = cur;
   if (el.matches('input[type=checkbox]')) { /* attendance checkbox: let it toggle, then mirror it */ }
@@ -1018,15 +1191,24 @@ document.addEventListener('click', e => {
   else if (d.edit) openEdit(d.edit);
   else if (d.ready) { s.ready.r[viewer] = d.ready === '1'; render(); }
   else if (d.torchback) { s.standIn = null; render(); toast('The torch is back with Avery for this session.'); }
-  else if (d.talewrite) { taleDraft = s.tale?.text || ''; cTab = 'tale'; render(); const t = document.getElementById('tale-ta'); t?.focus(); t?.scrollIntoView({ block: 'center' }); }
-  else if (d.talesave) { const t = (taleDraft || '').trim(); s.tale = t ? { text: t, by: viewer, at: now() } : null; if (!t) s.reel = null; taleDraft = null; render(); }
-  else if (d.talecancel) { taleDraft = null; render(); }
+  else if (d.flip) { cFlip = d.flip === '1'; if (!cFlip) reelToggle(false); render(); }
+  else if (d.recplay) toast(`Prototype: this plays the ${s.rec.dur} ${s.rec.kind} recording.`);
+  else if (d.watch) { ov = { kind: 'watch', what: d.watch }; renderOv(); }
+  else if (d.recdel) { s.rec = null; render(); }
+  else if (d.draft) draftTale(s);
+  else if (d.qadd) { qAdd = d.qadd; render(); document.querySelector(`[data-qnew="${d.qadd}"]`)?.focus(); }
+  else if (d.prepedit) { prepDraft = s.agenda || ''; render(); document.getElementById('prep-ta')?.focus(); }
+  else if (d.prepsave) { s.agenda = (prepDraft || '').trim(); prepDraft = null; render(); }
+  else if (d.prepcancel) { prepDraft = null; render(); }
+  else if (d.talewrite) { taleDraft = s.tale?.text || ''; taleFrom = s.tale?.from || null; cTab = 'tale'; render(); const t = document.getElementById('tale-ta'); t?.focus(); t?.scrollIntoView({ block: 'center' }); }
+  else if (d.talesave) { const t = (taleDraft || '').trim(); s.tale = t ? { text: t, by: viewer, at: now(), from: taleFrom } : null; if (!t) s.reel = null; taleDraft = null; taleFrom = null; render(); }
+  else if (d.talecancel) { taleDraft = null; taleFrom = null; render(); }
   else if (d.fopen) { const f = s.accounts.find(x => x.id === d.fopen); f.url ? open(f.url, '_blank') : toast(`Prototype: this opens ${f.name}.`); }
   else if (d.fdel) { s.accounts = s.accounts.filter(x => x.id !== d.fdel); render(); }
   else if (d.reelplay) reelToggle();
   else if (d.reelgo) reelGo(+d.reelgo);
   else if (d.paint) { ov = { kind: 'paint' }; renderOv(); }
-  else if (d.paintgo) { ov = null; renderOv(); s.reel = { state: 'painting', p: 0 }; cTab = 'reel'; render(); paint(s); }
+  else if (d.paintgo) { ov = null; renderOv(); s.reel = { state: 'painting', p: 0 }; cTab = 'reel'; cFlip = true; render(); paint(s); }
   else if (d.reeldel) { reelToggle(false); reelT = 0; s.reel = null; render(); }
   else if (d.attedit) { startAtt(s); render(); }
   else if (d.attp) { attDraft.came.has(d.attp) ? attDraft.came.delete(d.attp) : attDraft.came.add(d.attp); render(); }
@@ -1036,10 +1218,28 @@ document.addEventListener('click', e => {
   else if (d.ctab) { cTab = d.ctab; render(); }
   else if (d.ovclose) { ov = null; renderOv(); }
 });
-document.addEventListener('input', e => { if (e.target.id === 'tale-ta') taleDraft = e.target.value; });
+document.addEventListener('input', e => { if (e.target.id === 'tale-ta') taleDraft = e.target.value; else if (e.target.id === 'prep-ta') prepDraft = e.target.value; });
+// "+ quest" at a seat: Enter adds it for that player, due when the session starts; Escape or leaving it empty closes it
+document.addEventListener('keydown', e => {
+  const t = e.target; if (!t.dataset?.qnew) return;
+  if (e.key === 'Enter') { e.preventDefault(); const v = t.value.trim(); if (v) cur.quests.push({ id: 'n' + Date.now(), title: v, who: t.dataset.qnew, due: cur.date, done: false }); qAdd = null; render(); }
+  else if (e.key === 'Escape') { e.stopPropagation(); qAdd = null; render(); }
+}, true);
+document.addEventListener('focusout', e => { if (e.target.dataset?.qnew && !e.target.value.trim()) setTimeout(() => { if (qAdd === e.target.dataset.qnew) { qAdd = null; render(); } }, 150); });
 document.addEventListener('change', e => {
   const t = e.target;
-  if (t.dataset.torch && t.value) { cur.standIn = t.value; render(); toast(`${nameOf(t.value)} runs this session as ${CAMP.gmTitle}.`); }
+  if (t.dataset.rec && t.files[0]) {   // the GM's recording: audio or video, uploaded (in memory) with a progress bar
+    const file = t.files[0], kind = /^video/.test(file.type) ? 'video' : /^audio/.test(file.type) ? 'audio' : null, s = cur;
+    if (!kind) { toast("That isn't audio or video."); return; }
+    s.rec = { kind, name: file.name, size: file.size, dur: '', by: viewer, at: now(), url: URL.createObjectURL(file), up: 0 }; cFlip = false; render();
+    const iv = setInterval(() => {
+      if (cur !== s || !s.rec || s.rec.up == null) { clearInterval(iv); return; }
+      s.rec.up += .05;
+      if (s.rec.up >= 1) { clearInterval(iv); delete s.rec.up; render(); toast('Prototype: the recording is kept in memory only.'); return; }
+      document.querySelectorAll('.vc-up i').forEach(i => i.style.width = Math.round(s.rec.up * 100) + '%');
+    }, 120);
+  }
+  else if (t.dataset.torch && t.value) { cur.standIn = t.value; render(); toast(`${nameOf(t.value)} runs this session as ${CAMP.gmTitle}.`); }
   else if (t.dataset.acct && t.files[0]) {
     const file = t.files[0], f = { id: 'u' + Date.now(), name: file.name, type: file.type, size: file.size, by: viewer, at: now(), url: URL.createObjectURL(file) };
     if (kindOf(f) === 'TXT') file.text().then(x => { f.text = x.slice(0, 20000); cur.accounts.push(f); render(); });

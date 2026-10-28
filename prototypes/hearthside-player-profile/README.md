@@ -38,7 +38,7 @@ The page column is about 680px at most in the shell, so every layout is one colu
 - **A campaign-mate sees your adventurers, not your campaigns** (decided). Every layout now follows this:
   - **Adventurers:** all of them, including ones from campaigns you don't share (Mags, Pip and Ada for Avery), with class and level or status, and no campaign.
   - **No campaign list or count:** no Campaigns tab in A, no Campaigns section in B, no campaign tiles in C. The head reads "6 adventurers · 5 sessions together · since March 2025".
-  - **Sessions together:** the tab is renamed for them, and shows only sessions in campaigns you both belong to. That reveals nothing they don't already know, since they were in those campaigns too.
+  - **Sessions together:** the tab is renamed for them, and shows only sessions in campaigns you both belong to. That reveals nothing they don't already know, since they were in those campaigns too. Kept on purpose (Geoff, 2026-10-27), even though each session names its campaign.
   - Your own view is unchanged: the Campaigns tab stays.
 
 ## What the prototype assumes (to confirm or change)
@@ -68,7 +68,6 @@ The page column is about 680px at most in the shell, so every layout is one colu
 ## Still open
 
 - Is a notices grid too much? A shorter version could be one choice per group (Sessions, Quests, Letters, The party) instead of a row per notice.
-- Should a campaign-mate see the sessions you played together at all? Each one names its campaign, though only a campaign you both belong to. Dropping them would leave the public view as the record and the adventurers.
 - A player who's only your friend (not a campaign-mate) sees no sessions, since you share none. The prototype doesn't draw that viewer.
 - Hearthside has no form styles, toggles or checkboxes yet. The fields follow the message composer, as in the earlier prototypes. The checkboxes follow Your Quests' boxes (moss when on). The switch is new. Whichever survive should go into the design system.
 - The integration marks are drawn glyphs (a calendar and a speech bubble), not the services' logos, since the design system has no icon set. The real cards may want the official marks.

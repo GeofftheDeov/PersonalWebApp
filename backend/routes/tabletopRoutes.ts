@@ -340,9 +340,54 @@ router.get("/characters", auth, async (req: any, res) => {
     }
 });
 
-router.post("/characters", async (req, res) => {
+// Who may do what with a character (#198's access gaps): the player edits it,
+// and reading follows a player's profile (GET /api/users/players/:id): the
+// player, their friends and campaign-mates, plus anyone in the character's own
+// campaign (its roster keeps a departed player's characters, #31). Admins may
+// do anything. campaignIds is getAuthorizedCampaignIds(user): null = admin.
+
+/** The fields a character's form sets. Anything else in the body is ignored. */
+function characterFields(body: any) {
+    const fields: Record<string, unknown> = {};
+    for (const [key, field] of [["name", "name"], ["class", "class"], ["level", "level"], ["gameType", "gameType"], ["isDead", "isDead"]] as const) {
+        if (body?.[key] !== undefined) fields[field] = body[key];
+    }
+    // The forms send "" for "no campaign".
+    if (body?.campaign !== undefined) fields.campaign = body.campaign || null;
+    return fields;
+}
+
+const idOf = (ref: any) => (ref == null ? null : String(ref._id ?? ref));
+
+async function canSeeCharacter(user: any, campaignIds: string[] | null, character: any): Promise<boolean> {
+    if (campaignIds === null) return true;
+    const playerId = idOf(character.player);
+    if (playerId === String(user.id)) return true;
+    const campaignId = idOf(character.campaign);
+    if (campaignId && campaignIds.includes(campaignId)) return true;
+    if (!playerId) return false;
+
+    const [viewer, player] = await Promise.all([findPersonById(user.id, "friends"), findPersonById(playerId, "friends")]);
+    const friends = (doc: any, id: string) => doc?.friends?.some((f: any) => String(f) === id);
+    if (friends(viewer?.doc, playerId) || friends(player?.doc, String(user.id))) return true;
+
+    // A player deactivated in a campaign is no longer a campaign-mate there (#31).
+    const memberships = await CampaignMember.find({ person: playerId, isActive: true }).select("campaign");
+    return memberships.some((m: any) => campaignIds.includes(String(m.campaign)));
+}
+
+router.post("/characters", auth, async (req: any, res) => {
     try {
-        const character = new Character(req.body);
+        const fields = characterFields(req.body);
+        if (typeof fields.name !== "string" || !fields.name.trim()) return res.status(400).json({ error: "A character needs a name" });
+        const campaignIds = await getAuthorizedCampaignIds(req.user);
+        if (fields.campaign != null) {
+            if (!isUuid(String(fields.campaign))) return res.status(400).json({ error: "campaign must be a campaign id" });
+            if (campaignIds && !campaignIds.includes(String(fields.campaign))) return res.status(403).json({ error: "Unauthorized" });
+        }
+        // You play what you create. An admin may make one for someone else.
+        const player = campaignIds === null && req.body?.player ? req.body.player : req.user.id;
+        const character = new Character({ ...fields, player });
         await character.save();
         res.status(201).json(character);
     } catch (error: any) {
@@ -352,8 +397,11 @@ router.post("/characters", async (req, res) => {
 
 router.get("/characters/:id", auth, async (req: any, res) => {
     try {
+        if (!isUuid(req.params.id)) return res.status(404).json({ error: "Character not found" });
         const character = await Character.findById(req.params.id).populate("campaign dungeon");
         if (!character) return res.status(404).json({ error: "Character not found" });
+        const campaignIds = await getAuthorizedCampaignIds(req.user);
+        if (!(await canSeeCharacter(req.user, campaignIds, character))) return res.status(403).json({ error: "Unauthorized" });
         res.json(character);
     } catch (error: any) {
         res.status(500).json({ error: "Failed to fetch character", details: error.message });
@@ -362,12 +410,20 @@ router.get("/characters/:id", auth, async (req: any, res) => {
 
 router.put("/characters/:id", auth, async (req: any, res) => {
     try {
-        const { name, class: charClass, level, gameType, campaign, isDead } = req.body;
-        const character = await Character.findByIdAndUpdate(
-            req.params.id,
-            { name, class: charClass, level, gameType, campaign, isDead },
-            { new: true }
-        ).populate("campaign dungeon");
+        if (!isUuid(req.params.id)) return res.status(404).json({ error: "Character not found" });
+        const existing = await Character.findById(req.params.id);
+        if (!existing) return res.status(404).json({ error: "Character not found" });
+        const campaignIds = await getAuthorizedCampaignIds(req.user);
+        if (campaignIds !== null && idOf(existing.player) !== String(req.user.id)) {
+            return res.status(403).json({ error: "Only the character's player can change it" });
+        }
+        const fields = characterFields(req.body);
+        // Moving it needs a seat in the new campaign; leaving it where it is doesn't.
+        if (fields.campaign != null && String(fields.campaign) !== idOf(existing.campaign)) {
+            if (!isUuid(String(fields.campaign))) return res.status(400).json({ error: "campaign must be a campaign id" });
+            if (campaignIds && !campaignIds.includes(String(fields.campaign))) return res.status(403).json({ error: "Unauthorized" });
+        }
+        const character = await Character.findByIdAndUpdate(req.params.id, fields, { new: true }).populate("campaign dungeon");
         if (!character) return res.status(404).json({ error: "Character not found" });
         res.json(character);
     } catch (error: any) {

@@ -65,6 +65,17 @@ export default function CharacterDetailPage() {
 
     const levelStars = Math.min(character.level || 1, 20);
 
+    // Only the character's player (or an admin) may change it; the API refuses anyone else.
+    const canEdit = (() => {
+        try {
+            const me = JSON.parse(localStorage.getItem('user') || 'null');
+            if (!me) return false;
+            return me.appRole === 'admin' || String(character.player?._id ?? character.player) === String(me.id ?? me._id);
+        } catch {
+            return false;
+        }
+    })();
+
     return (
         <div className="min-h-[calc(100vh-76px)] flex flex-col">
             <div className="flex-grow w-full max-w-3xl mx-auto p-4 sm:p-6 md:p-12">
@@ -97,7 +108,7 @@ export default function CharacterDetailPage() {
                             </div>
                         </div>
                     </div>
-                    {!editing && (
+                    {!editing && canEdit && (
                         <button onClick={() => setEditing(true)} className="flex items-center gap-2 px-4 py-2 border-4 border-black bg-yellow-400 text-black font-permanent uppercase text-sm hover:bg-white transition-colors shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] shrink-0">
                             <Pencil className="w-4 h-4" /> EDIT
                         </button>

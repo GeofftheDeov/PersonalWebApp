@@ -268,22 +268,48 @@ body{margin:0;background:var(--ground);color:var(--text)}
 .vc-title .hs-sheet-title{font-size:clamp(26px,4vw,34px)}
 .vc-title > .k-row,.vc-title > .torch,.vc-title > .k-banner{margin-top:12px}
 .vc-ring{position:relative;width:100%;aspect-ratio:1;margin:8px auto 24%;container-type:inline-size}
-.vc-top{position:absolute;inset:14%;border-radius:50%;
-  background:repeating-radial-gradient(circle at 50% 50%,rgba(0,0,0,0) 0 9px,rgba(0,0,0,.1) 9px 10px),radial-gradient(circle at 40% 35%,#7a5130,#4c3019 60%,#2e1c0e);
-  box-shadow:0 0 0 6px #2a190c,0 0 0 8px rgba(214,168,78,.5),0 20px 40px rgba(0,0,0,.7),inset 0 0 50px rgba(0,0,0,.55)}
-.vc-glow{position:absolute;inset:14%;border-radius:50%;pointer-events:none;background:radial-gradient(circle at 50% 50%,rgba(255,179,107,.28),rgba(255,179,107,0) 60%)}
-/* the middle of the table: front is the recording, back is the cinematic */
-.vc-mid{position:absolute;left:50%;top:50%;width:48%;aspect-ratio:5/4;transform:translate(-50%,-50%);perspective:1400px;z-index:3}
-.vc-flip{position:absolute;inset:0;transition:transform .7s cubic-bezier(.3,.7,.3,1);transform-style:preserve-3d}
+/* the table top is painted (paintTable): oak boards, grain, knots, pegs, a bent-wood rim, varnish. The shadows below give
+   it an edge and lift it off the floor. */
+.vc-top{position:absolute;inset:13%;border-radius:50%;background-size:cover;background-position:center;
+  box-shadow:0 4px 0 #3b2210,0 7px 0 #24140a,0 9px 4px rgba(0,0,0,.6),0 36px 60px 6px rgba(0,0,0,.75)}
+.vc-glow{position:absolute;inset:13%;border-radius:50%;pointer-events:none;background:radial-gradient(circle at 50% 50%,rgba(255,179,107,.2),rgba(255,179,107,0) 55%)}
+/* the middle of the table: front is the recording, back is the cinematic. Flipping turns the card over in place, lifting
+   it off the table as it goes. */
+.vc-mid{position:absolute;left:50%;top:50%;width:48%;aspect-ratio:5/4;transform:translate(-50%,-50%);z-index:3}
+.vc-lift{position:absolute;inset:0;perspective:1400px;transform-style:preserve-3d}
+.vc-lift.is-turning{animation:hs-lift .75s cubic-bezier(.3,.7,.3,1)}
+@keyframes hs-lift{45%{transform:translateY(-4%) scale(1.09)}}
+.vc-flip{position:absolute;inset:0;transition:transform .75s cubic-bezier(.3,.7,.3,1);transform-style:preserve-3d}
 .vc-mid.is-flipped .vc-flip{transform:rotateY(180deg)}
+.vc-lift.is-turning .vc-face{box-shadow:0 30px 50px rgba(0,0,0,.7)}
+@media (prefers-reduced-motion:reduce){.vc-flip{transition:none}.vc-lift.is-turning{animation:none}}
 .vc-face{position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;display:flex;flex-direction:column;gap:1.2cqw;padding:1.4cqw;
   border:2px solid transparent;border-radius:var(--radius-panel);background:linear-gradient(#17100b,#0e0906) padding-box,var(--gild) border-box;box-shadow:0 14px 30px rgba(0,0,0,.65)}
 .vc-back{transform:rotateY(180deg)}
 .vc-fh{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:0 .4cqw}
 .vc-fh b{font:500 clamp(10px,2.1cqw,13.5px)/1.1 var(--font-label);letter-spacing:.1em;color:var(--gold-hi);white-space:nowrap}
-.vc-flipbtn{background:rgba(20,13,8,.7);border:1px solid var(--gold-line);border-radius:var(--radius-full);color:var(--text);cursor:pointer;padding:.3cqw 1.6cqw;
+.vc-flipbtn{display:inline-flex;align-items:center;gap:5px;background:rgba(20,13,8,.7);border:1px solid var(--gold-line);border-radius:var(--radius-full);color:var(--text);cursor:pointer;padding:.3cqw 1.6cqw;
   font:500 clamp(10px,2cqw,13px)/1.3 var(--font-label);letter-spacing:.04em;white-space:nowrap}
+.vc-flipbtn svg{width:1.15em;height:1.15em;flex:none}
 .vc-flipbtn:hover{border-color:var(--gold);color:var(--gold-hi)}
+/* a small table (phones): the flip button is just its icon */
+@container (max-width:520px){
+  .vc-flipbtn{padding:0;width:26px;height:26px;justify-content:center}
+  .vc-flipbtn .t{display:none}
+  .vc-flipbtn svg{width:14px;height:14px}
+}
+/* the cinematic, popped out of its card: full screen where the browser allows it, otherwise over the whole window */
+.reel-ctl button.fs{background:none;border:0;color:#fff;cursor:pointer;width:26px;height:26px;padding:0;display:grid;place-items:center;flex:none}
+.reel-ctl button.fs svg{width:16px;height:16px}
+.cine-full{position:fixed;inset:0;z-index:90;background:#000;display:flex;align-items:center;justify-content:center}
+.cine-full .reel{width:min(100vw,177.78vh);max-height:100vh;aspect-ratio:16/9;animation:hs-pop .35s cubic-bezier(.2,.8,.3,1)}
+.cine-full .reel-title{font-size:clamp(12px,1.6cqw,18px);padding:16px 22px 40px}
+.cine-full .reel-cap{font-size:clamp(16px,2.8cqw,34px)}
+.cine-full .reel-ctl{padding:12px 18px;gap:14px}
+.cine-full-x{position:absolute;z-index:3;top:calc(12px + env(safe-area-inset-top,0px));right:calc(12px + env(safe-area-inset-right,0px));width:40px;height:40px;border-radius:50%;
+  border:1px solid rgba(246,221,150,.5);background:rgba(20,13,8,.6);color:var(--gold-hi);font-size:22px;line-height:1;cursor:pointer}
+@keyframes hs-pop{from{transform:scale(.45);opacity:0}}
+@media (prefers-reduced-motion:reduce){.cine-full .reel{animation:none}}
 .vc-media{position:relative;flex:1;min-height:0;border-radius:2px;overflow:hidden;background:#050302}
 .vc-media .reel{position:absolute;inset:0;aspect-ratio:auto}
 .vc-media .reel-title{display:none}
@@ -550,6 +576,79 @@ function paintWave() {   // an audio recording's waveform
   return c.toDataURL('image/png');
 }
 
+/* The round table, from above: eight oak boards pegged to battens underneath, with grain running round the knots; a
+   bent-wood rim with its grain running round the edge; the wear of game nights (cup rings, scratches, dice left out);
+   and varnish catching the hearth's light from the lower left. */
+const shade = (hex, n) => '#' + [1, 3, 5].map(i => Math.max(0, Math.min(255, parseInt(hex.slice(i, i + 2), 16) + n)).toString(16).padStart(2, '0')).join('');
+function paintTable() {
+  const S = 1400, C = S / 2, RT = 700, RB = 648, [c, ctx] = canvas(S, S), r = rng('table');
+  ctx.fillStyle = '#1a130e'; ctx.fillRect(0, 0, S, S);
+  ctx.save(); ctx.beginPath(); ctx.arc(C, C, RB, 0, 7); ctx.clip();
+  const PW = S / 8, tones = ['#7a4a26', '#6c3f20', '#83522b', '#714424', '#7d4d28', '#673c1e', '#805029', '#6f4222'];
+  for (let i = 0; i < 8; i++) {
+    const x0 = i * PW, g = ctx.createLinearGradient(0, 0, 0, S);
+    g.addColorStop(0, shade(tones[i], -12)); g.addColorStop(.45, tones[i]); g.addColorStop(1, shade(tones[i], -16));
+    ctx.fillStyle = g; ctx.fillRect(x0, 0, PW, S);
+    const knots = Array.from({ length: 1 + (r() * 2 | 0) }, () => [x0 + PW * (.25 + r() * .5), S * (.1 + r() * .8), 7 + r() * 12]);
+    for (let k = 0; k < 52; k++) {   // grain: long wavering lines that bend round the knots
+      const bx = x0 + r() * PW, ph = r() * 6, f = 90 + r() * 160, a = .05 + r() * .2, dark = r() < .8;
+      ctx.strokeStyle = dark ? `rgba(38,18,7,${a})` : `rgba(255,222,170,${a * .45})`; ctx.lineWidth = .6 + r() * 1.7; ctx.beginPath();
+      for (let y = -10; y <= S + 10; y += 10) {
+        let x = bx + Math.sin(y / f + ph) * 3 + Math.sin(y / 23 + ph * 2) * .6;
+        knots.forEach(([kx, ky, kr]) => { const dx = x - kx, dy = y - ky; x += Math.sign(dx || 1) * kr * 1.7 * Math.exp(-(dy * dy) / (kr * kr * 10)) * Math.exp(-(dx * dx) / (kr * kr * 12)); });
+        y < 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    knots.forEach(([kx, ky, kr]) => {
+      const kg = ctx.createRadialGradient(kx, ky, 0, kx, ky, kr * 1.5); kg.addColorStop(0, 'rgba(28,12,4,.9)'); kg.addColorStop(.6, 'rgba(50,24,9,.5)'); kg.addColorStop(1, 'rgba(50,24,9,0)');
+      ctx.fillStyle = kg; ctx.beginPath(); ctx.ellipse(kx, ky, kr * 1.1, kr * 1.6, 0, 0, 7); ctx.fill();
+      for (let j = 1; j < 4; j++) { ctx.strokeStyle = `rgba(35,16,6,${.38 - j * .08})`; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.ellipse(kx, ky, kr * (1 + j * .5), kr * (1.6 + j * 1), 0, 0, 7); ctx.stroke(); }
+    });
+    for (let k = 0; k < 300; k++) { ctx.fillStyle = `rgba(28,12,4,${.1 + r() * .2})`; ctx.fillRect(x0 + r() * PW, r() * S, .9, 3 + r() * 7); }   // pores
+    ctx.fillStyle = '#1b0d04'; ctx.fillRect(x0 - 1.5, 0, 3, S);                                                            // the seam
+    ctx.fillStyle = 'rgba(255,215,160,.13)'; ctx.fillRect(x0 + 1.5, 0, 1.2, S);
+    [.26, .74].forEach(fy => { const py = S * fy + (r() - .5) * 8, px = x0 + PW / 2 + (r() - .5) * 10;   // pegs into the battens
+      ctx.fillStyle = '#2a1407'; ctx.beginPath(); ctx.arc(px, py, 8, 0, 7); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,215,160,.18)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(px, py, 8, Math.PI * 1.1, Math.PI * 1.7); ctx.stroke(); });
+  }
+  // the wear of game nights
+  [[S * .79, S * .3, 44], [S * .2, S * .64, 40], [S * .34, S * .13, 38]].forEach(([x, y, rr]) => {
+    ctx.strokeStyle = 'rgba(22,10,3,.32)'; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(x, y, rr, .3, Math.PI * 1.85); ctx.stroke();
+    ctx.strokeStyle = 'rgba(22,10,3,.14)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x + 3, y + 2, rr - 7, 0, 7); ctx.stroke(); });
+  for (let k = 0; k < 40; k++) { const x = r() * S, y = r() * S, a = r() * 7, l = 20 + r() * 70; ctx.strokeStyle = `rgba(255,226,182,${.06 + r() * .1})`; ctx.lineWidth = .8;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); ctx.stroke(); }
+  // dice left out, at the foot of the table: a d20 and a d6
+  const die = (x, y, fn) => { ctx.save(); ctx.translate(x, y); ctx.shadowColor = 'rgba(0,0,0,.6)'; ctx.shadowBlur = 10; ctx.shadowOffsetY = 5; fn(); ctx.restore(); };
+  die(C - 50, S * .885, () => { ctx.rotate(.3); ctx.fillStyle = '#a63e25'; ctx.beginPath(); for (let i = 0; i < 6; i++) ctx.lineTo(Math.cos(i * Math.PI / 3) * 34, Math.sin(i * Math.PI / 3) * 34); ctx.closePath(); ctx.fill();
+    ctx.shadowColor = 'transparent'; ctx.strokeStyle = 'rgba(255,200,170,.55)'; ctx.lineWidth = 1.5; ctx.beginPath();
+    const t = [0, 2, 4].map(i => [Math.cos(i * Math.PI / 3 + Math.PI / 6) * 20, Math.sin(i * Math.PI / 3 + Math.PI / 6) * 20]);
+    ctx.moveTo(...t[0]); ctx.lineTo(...t[1]); ctx.lineTo(...t[2]); ctx.closePath();
+    for (let i = 0; i < 6; i++) { const v = [Math.cos(i * Math.PI / 3) * 34, Math.sin(i * Math.PI / 3) * 34], n = t[[0, 0, 1, 1, 2, 2][(i + 5) % 6]]; ctx.moveTo(...v); ctx.lineTo(...n); }
+    ctx.stroke(); ctx.fillStyle = '#fbe9d8'; ctx.font = 'bold 15px Georgia'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('20', 0, 1); });
+  die(C + 62, S * .9, () => { ctx.rotate(-.42); ctx.fillStyle = '#e8dbbe'; ctx.beginPath(); ctx.roundRect(-24, -24, 48, 48, 8); ctx.fill();
+    ctx.shadowColor = 'transparent'; ctx.fillStyle = '#2b1d12'; [[-11, -11], [11, -11], [0, 0], [-11, 11], [11, 11]].forEach(([x, y]) => { ctx.beginPath(); ctx.arc(x, y, 4.5, 0, 7); ctx.fill(); }); });
+  ctx.restore();
+  // the rim: bent wood, grain running round, bevelled at both edges
+  ctx.save(); ctx.beginPath(); ctx.arc(C, C, RT, 0, 7); ctx.arc(C, C, RB, 0, 7, true); ctx.clip();
+  ctx.fillStyle = '#5e361a'; ctx.fillRect(0, 0, S, S);
+  for (let k = 0; k < 90; k++) { const rr = RB + r() * (RT - RB), a0 = r() * 7; ctx.strokeStyle = r() < .8 ? `rgba(35,16,6,${.12 + r() * .28})` : `rgba(255,215,160,${.06 + r() * .1})`;
+    ctx.lineWidth = .6 + r() * 1.5; ctx.beginPath(); ctx.arc(C, C, rr, a0, a0 + .6 + r() * 3.5); ctx.stroke(); }
+  const bev = ctx.createRadialGradient(C, C, RB, C, C, RT);
+  bev.addColorStop(0, 'rgba(0,0,0,.6)'); bev.addColorStop(.12, 'rgba(255,215,160,.26)'); bev.addColorStop(.5, 'rgba(255,215,160,.06)'); bev.addColorStop(.9, 'rgba(0,0,0,.25)'); bev.addColorStop(1, 'rgba(0,0,0,.7)');
+  ctx.fillStyle = bev; ctx.fillRect(0, 0, S, S);
+  for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2 + .4; ctx.strokeStyle = 'rgba(20,9,3,.7)'; ctx.lineWidth = 2;   // where the rim's four pieces join
+    ctx.beginPath(); ctx.moveTo(C + Math.cos(a) * RB, C + Math.sin(a) * RB); ctx.lineTo(C + Math.cos(a) * RT, C + Math.sin(a) * RT); ctx.stroke(); }
+  ctx.restore();
+  // varnish: warm light from the hearth at the lower left, a sheen up top, darker towards the edge
+  ctx.save(); ctx.beginPath(); ctx.arc(C, C, RT, 0, 7); ctx.clip();
+  let g = ctx.createRadialGradient(S * .18, S * .86, 0, S * .18, S * .86, S * .85); g.addColorStop(0, 'rgba(255,170,90,.24)'); g.addColorStop(1, 'rgba(255,170,90,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, S, S);
+  g = ctx.createRadialGradient(S * .62, S * .27, 0, S * .62, S * .27, S * .42); g.addColorStop(0, 'rgba(255,240,215,.14)'); g.addColorStop(1, 'rgba(255,240,215,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, S, S);
+  g = ctx.createRadialGradient(C, C, RB * .5, C, C, RT); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.32)'); ctx.fillStyle = g; ctx.fillRect(0, 0, S, S);
+  ctx.restore();
+  return c.toDataURL('image/jpeg', .88);
+}
+
 // every picture becomes a class (.art-<id>), so re-rendering never repeats a data URL
 const ARTSTYLE = document.createElement('style'); document.head.appendChild(ARTSTYLE);
 let artN = 0;
@@ -562,6 +661,7 @@ const ART = {
   sable: addArt(paintPortrait({ seed: 'sable', bg: ['#1a2a2a', '#050909'], gear: 'wide' })),
   notes: addArt(paintNotes()),
   wave: addArt(paintWave()),
+  table: addArt(paintTable()),
 };
 const SCENES = [
   ['drift', "The Gull's Wager drops out of the Drift above a moon with no name."],
@@ -682,11 +782,15 @@ const isGM = () => isCampGM() || cur.standIn === viewer;
 const gmLabel = () => cur.standIn ? `${nameOf(cur.standIn)} (standing in)` : GM.name;
 const sTitle = s => s.title ? s.title : `Session ${s.n}`;
 const kicker = s => `${CAMP.title} · Session ${s.n}`;
-const kb = n => n > 1e6 ? (n / 1e6).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1e3)) + ' KB';
+const kb = n => n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : n > 1e6 ? (n / 1e6).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1e3)) + ' KB';
 const words = t => (t || '').trim().split(/\s+/).filter(Boolean).length;
 const flame = '<svg class="flame" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3c1 3.5 5 5.5 5 10a5 5 0 0 1-10 0c0-2.4 1.2-3.8 2.4-5 .2 1.8 1 2.8 2.1 3.2C11 9 11 5.5 12 3z"/></svg>';
 const playIc = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l13-7.5z"/></svg>';
 const pauseIc = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>';
+const strokeIc = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const flipIc = strokeIc('<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>');
+const growIc = strokeIc('<path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>');
+const shrinkIc = strokeIc('<path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/>');
 const face = (art, init, gm) => `<span class="pt">${art ? `<span class="art art-${art}"></span>` : `<span class="pt-none ${gm ? 'is-gm' : ''}"><span>${esc(init)}</span></span>`}</span>`;
 const medal = p => `<span class="medal">${p.ch ? face(p.ch.art, p.ch.name[0]) : face(null, p.name[0], true)}</span>`;
 const daysTo = d => Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - new Date(now().getFullYear(), now().getMonth(), now().getDate())) / 864e5);
@@ -818,7 +922,7 @@ function reelHTML(s, { hero = false } = {}) {
     : `<b>No reel yet</b><p>${esc(GM.name)} can have Hearthside paint a short film of this session's scenes from the tale.</p>`);
 }
 /* the player: painted scenes with a slow pan and captions, standing in for a generated video */
-function reelPlayer(s) {
+function reelPlayer(s, { full = false } = {}) {
   const r = s.reel, total = r.scenes.length * SCENE_MS;
   return `<div class="reel" data-reel="1">
       ${r.scenes.map((sc, i) => `<span class="art art-${sc.art} ${i === 0 ? 'is-on' : ''}"></span>`).join('')}
@@ -827,8 +931,23 @@ function reelPlayer(s) {
       <button type="button" class="reel-big" data-reelplay="1" aria-label="Play">${playIc}</button>
       <div class="reel-ctl"><button type="button" class="pp" data-reelplay="1" aria-label="Play or pause">${playIc}</button>
         <div class="reel-ticks">${r.scenes.map((sc, i) => `<button type="button" data-reelgo="${i}" aria-label="Scene ${i + 1}: ${esc(sc.cap)}"><i><b></b></i></button>`).join('')}</div>
-        <span class="reel-time">0:00 / ${fmtT(total)}</span></div></div>`;
+        <span class="reel-time">0:00 / ${fmtT(total)}</span>
+        <button type="button" class="fs" data-full="${full ? 0 : 1}" aria-label="${full ? 'Leave full screen' : 'Full screen'}" title="${full ? 'Leave full screen' : 'Full screen'}">${full ? shrinkIc : growIc}</button></div></div>`;
 }
+/* pop the cinematic out of its card: an overlay over the whole window, made truly full screen when the browser lets it.
+   It plays on from where it was. */
+function openFull() {
+  ov = { kind: 'full' }; renderOv();
+  const el = document.querySelector('.cine-full');
+  try { el.requestFullscreen?.({ navigationUI: 'hide' })?.catch(() => {}); } catch {}
+  if (!reelPlaying) reelToggle(true);
+  el.querySelector('.cine-full-x').focus({ preventScroll: true });
+}
+function closeFull() {
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  ov = null; renderOv();
+}
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && ov?.kind === 'full') { ov = null; renderOv(); } });
 const fmtT = ms => { const t = Math.round(ms / 1000); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
 function reelSync() {
   const r = cur.reel; if (r?.state !== 'ready') return;
@@ -972,7 +1091,7 @@ const recMedia = r => r.url
   ? (r.kind === 'video' ? `<video src="${r.url}" controls preload="metadata"></video>` : `<span class="vc-wave art-${ART.wave}"></span><audio src="${r.url}" controls preload="metadata"></audio>`)
   : `${r.kind === 'video' ? `<span class="vc-poster art-${ART.banner}"></span>` : `<span class="vc-wave art-${ART.wave}"></span>`}<button type="button" class="reel-big" data-recplay="1" aria-label="Play the recording">${playIc}</button>`;
 function recFace(s) {
-  const r = s.rec, flip = s.status === 'cancelled' ? '' : '<button type="button" class="vc-flipbtn" data-flip="1">The cinematic ↻</button>';
+  const r = s.rec, flip = s.status === 'cancelled' ? '' : `<button type="button" class="vc-flipbtn" data-flip="1" aria-label="Flip the card to the cinematic" title="Flip to the cinematic"><span class="t">The cinematic</span>${flipIc}</button>`;
   let media, foot = '';
   if (s.status === 'cancelled') media = say('Cancelled', 'Nothing to record.');
   else if (isBefore(s)) media = say(s.date ? esc(when(s)) : 'No night yet', `After the session, ${esc(GM.name)} can put the recording here, audio or video, and draft the tale from it.`);
@@ -995,7 +1114,7 @@ function cineFace(s) {
   if (isBefore(s) || s.status === 'cancelled') media = say('The cinematic', 'After the session, an AI cinematic of its scenes can be made from the tale.');
   else if (r?.state === 'ready') {
     media = reelPlayer(s);
-    foot = `<span class="reel-ai">AI, from the tale · ${r.scenes.length} scenes</span><span class="k-row"><button type="button" class="p-link" data-watch="cine">Watch large</button>
+    foot = `<span class="reel-ai">AI, from the tale · ${r.scenes.length} scenes</span><span class="k-row"><button type="button" class="p-link" data-full="1">Full screen</button>
       ${isGM() ? '<button type="button" class="p-link" data-paint="1">Make again</button><button type="button" class="p-link" data-reeldel="1">Remove</button>' : ''}</span>`;
   } else if (r?.state === 'painting') {
     const n = Math.min(SCENES.length, Math.floor(r.p * SCENES.length) + 1);
@@ -1003,7 +1122,7 @@ function cineFace(s) {
   } else if (!s.tale) media = say('The cinematic', isGM() ? 'Write the tale, or draft it from the recording, and an AI cinematic can be made from it.' : 'No cinematic yet.');
   else media = isGM() ? say('Make the cinematic?', `About ${SCENES.length} scenes and 40 seconds, made by AI from the tale.`, '<button type="button" class="k-btn is-primary" data-paint="1">Make the cinematic</button>')
     : say('No cinematic yet', `${esc(GM.name)} can have one made from the tale.`);
-  return `<div class="vc-fh"><b>The cinematic</b><button type="button" class="vc-flipbtn" data-flip="0">↻ The recording</button></div><div class="vc-media">${media}</div>${foot ? `<div class="vc-ff">${foot}</div>` : ''}`;
+  return `<div class="vc-fh"><b>The cinematic</b><button type="button" class="vc-flipbtn" data-flip="0" aria-label="Flip the card to the recording" title="Flip to the recording">${flipIc}<span class="t">The recording</span></button></div><div class="vc-media">${media}</div>${foot ? `<div class="vc-ff">${foot}</div>` : ''}`;
 }
 /* a seat's quests. The owner (or the GM) ticks them off; before the session the GM adds one from the seat. */
 function seatQuests(s, p) {
@@ -1071,8 +1190,8 @@ function VariantC() {
     const c = attDraft.came.has(p.id);
     return seat({ ...p, k: p.ch ? (c ? 'came' : attDraft.stood.has(p.id) ? 'played' : 'away') : (c ? 'gm' : 'away') }, i);
   }).join('');
-  const mid = `<div class="vc-mid ${cFlip ? 'is-flipped' : ''}"><div class="vc-flip">
-    <div class="vc-face vc-front" ${cFlip ? 'inert' : ''}>${recFace(s)}</div><div class="vc-face vc-back" ${cFlip ? '' : 'inert'}>${cineFace(s)}</div></div></div>`;
+  const mid = `<div class="vc-mid ${cFlip ? 'is-flipped' : ''}"><div class="vc-lift"><div class="vc-flip">
+    <div class="vc-face vc-front" ${cFlip ? 'inert' : ''}>${recFace(s)}</div><div class="vc-face vc-back" ${cFlip ? '' : 'inert'}>${cineFace(s)}</div></div></div></div>`;
   // the strip under the table: the GM's attendance, the ready check, or a line about who came
   let strip = '';
   if (editing) strip = `<p class="k-fine" style="margin:0 0 6px">Tap a seat to mark who came. ${s.att.taken ? '' : 'Ticked from the ready check.'}</p>${attQuestions(s)}${attSave(s)}`;
@@ -1087,7 +1206,7 @@ function VariantC() {
     ${statusNote(s)}${torchHTML(s)}
     ${s.status === 'scheduled' && (s.online || s.gcal) ? `<div class="k-row">${s.online ? '<button type="button" class="hs-btn is-primary" data-stub="the table">Join the table</button>' : ''}${s.gcal ? '<button type="button" class="hs-btn" data-stub="Google Calendar">Add to Google Calendar</button>' : ''}</div>` : ''}</article>`;
   return `<header class="hs-page-head p-head"><div>${backBtn()}</div></header>${title}
-    <section aria-label="Around the table"><div class="vc-ring"><div class="vc-top"></div><div class="vc-glow"></div>${mid}${seats}</div>
+    <section aria-label="Around the table"><div class="vc-ring"><div class="vc-top art-${ART.table}"></div><div class="vc-glow"></div>${mid}${seats}</div>
       ${strip ? `<div class="vc-under"><div class="hs-gilded vc-strip">${strip}</div></div>` : ''}</section>
     <section class="hs-gilded"><div class="vc-tabs" role="tablist">${tabs.map(([k, l, c]) => `<button role="tab" aria-selected="${k === tab}" data-ctab="${k}">${l}${c !== '' ? `<small>${c}</small>` : ''}</button>`).join('')}</div>
       <div class="vc-tab" role="tabpanel">${body}</div></section>`;
@@ -1125,6 +1244,10 @@ function renderOv() {
       <div class="dlg-h"><h2>${label} · ${esc(sTitle(cur))}</h2><button type="button" class="x-btn" data-ovclose="1" aria-label="Close">×</button></div>
       <div class="vc-media">${ov.what === 'rec' ? recMedia(cur.rec) : reelPlayer(cur)}</div></div></div>`;
     Hearthside.GildedPanel.decorate(el); reelSync();
+  } else if (ov.kind === 'full') {
+    el.innerHTML = `<div class="cine-full" role="dialog" aria-modal="true" aria-label="The cinematic, full screen">
+      <button type="button" class="cine-full-x" data-full="0" aria-label="Leave full screen">×</button>${reelPlayer(cur, { full: true })}</div>`;
+    reelSync();
   } else if (ov.kind === 'paint') {
     const W = variant === 2 ? 'cinematic' : 'reel';
     el.innerHTML = `<div class="dlg-back"><div class="hs-gilded dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-t">
@@ -1172,7 +1295,7 @@ document.getElementById('next').onclick = () => go(1);
 document.getElementById('state').onclick = () => { stateI = (stateI + 1) % STATES.length; reset(); render(); };
 document.getElementById('who').onclick = () => { viewer = viewer === 'avery' ? 'geoff' : 'avery'; attDraft = null; taleDraft = null; taleFrom = null; prepDraft = null; qAdd = null; cTab = null; render(); };
 addEventListener('keydown', e => {
-  if (e.key === 'Escape' && ov) { ov = null; renderOv(); return; }
+  if (e.key === 'Escape' && ov) { ov.kind === 'full' ? closeFull() : (ov = null, renderOv()); return; }
   if (ov || e.target.closest('input,textarea,select,[contenteditable]')) return;
   if (e.key === 'ArrowLeft') go(-1); else if (e.key === 'ArrowRight') go(1);
 });
@@ -1181,7 +1304,7 @@ function toast(msg) { const t = document.getElementById('toast'); t.textContent 
 
 document.addEventListener('click', e => {
   if (e.target.matches('.dlg-back')) { ov = null; renderOv(); return; }
-  const el = e.target.closest('[data-q],[data-stub],[data-edit],[data-ready],[data-torchback],[data-talewrite],[data-talesave],[data-talecancel],[data-fopen],[data-fdel],[data-reelplay],[data-reelgo],[data-paint],[data-paintgo],[data-reeldel],[data-attedit],[data-attp],[data-stood],[data-attsave],[data-attcancel],[data-ctab],[data-ovclose],[data-flip],[data-recplay],[data-watch],[data-recdel],[data-draft],[data-qadd],[data-prepedit],[data-prepsave],[data-prepcancel]');
+  const el = e.target.closest('[data-q],[data-stub],[data-edit],[data-ready],[data-torchback],[data-talewrite],[data-talesave],[data-talecancel],[data-fopen],[data-fdel],[data-reelplay],[data-reelgo],[data-paint],[data-paintgo],[data-reeldel],[data-attedit],[data-attp],[data-stood],[data-attsave],[data-attcancel],[data-ctab],[data-ovclose],[data-flip],[data-full],[data-recplay],[data-watch],[data-recdel],[data-draft],[data-qadd],[data-prepedit],[data-prepsave],[data-prepcancel]');
   if (!el || el.matches('input[type=checkbox]') && !el.dataset.attp) return;
   const d = el.dataset, s = cur;
   if (el.matches('input[type=checkbox]')) { /* attendance checkbox: let it toggle, then mirror it */ }
@@ -1191,7 +1314,15 @@ document.addEventListener('click', e => {
   else if (d.edit) openEdit(d.edit);
   else if (d.ready) { s.ready.r[viewer] = d.ready === '1'; render(); }
   else if (d.torchback) { s.standIn = null; render(); toast('The torch is back with Avery for this session.'); }
-  else if (d.flip) { cFlip = d.flip === '1'; if (!cFlip) reelToggle(false); render(); }
+  else if (d.flip) {   // turn the card over in place (no re-render, so it animates), and hand focus to the side now showing
+    cFlip = d.flip === '1'; if (!cFlip) reelToggle(false);
+    const m = document.querySelector('.vc-mid'), lift = m.querySelector('.vc-lift');
+    m.classList.toggle('is-flipped', cFlip);
+    m.querySelector('.vc-front').inert = cFlip; m.querySelector('.vc-back').inert = !cFlip;
+    lift.classList.remove('is-turning'); void lift.offsetWidth; lift.classList.add('is-turning');
+    m.querySelector(cFlip ? '.vc-back .vc-flipbtn' : '.vc-front .vc-flipbtn')?.focus({ preventScroll: true });
+  }
+  else if (d.full) d.full === '1' ? openFull() : closeFull();
   else if (d.recplay) toast(`Prototype: this plays the ${s.rec.dur} ${s.rec.kind} recording.`);
   else if (d.watch) { ov = { kind: 'watch', what: d.watch }; renderOv(); }
   else if (d.recdel) { s.rec = null; render(); }

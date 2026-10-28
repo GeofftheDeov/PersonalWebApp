@@ -35,7 +35,7 @@ The design system keeps parchment for "one session's own business", so this is t
 - **The session's card moves above the table.** It's a parchment sheet with the name, night, place and status, plus Edit for the GM. It also holds the torch, the Notice Board line while the session is being planned, and Join the table and Add to Google Calendar before an online session.
 - **The middle of the table is a two-sided card:**
   - **Front: the recording.** The GM uploads the session's recording here: audio or video. It plays in place (a waveform for audio), with "Watch large" (or "Listen large") for a bigger view, and Replace and Remove for the GM. "Or link to one" keeps the PWA's recording URL as a fallback. Before the session the front shows the countdown, and players see "No recording yet" until there is one.
-  - **Back: the AI cinematic.** "The cinematic ↻" flips the card. The cinematic is made from the tale. Only the GM can make it, after the same "what this uses" dialog that the reel had, and the card flips to show its progress. It plays in place, with "Watch large".
+  - **Back: the AI cinematic.** "The cinematic ↻" flips the card. The cinematic is made from the tale. Only the GM can make it, after the same "what this uses" dialog that the reel had, and the card flips to show its progress. It plays in place, and can be popped out to full screen (round 3).
 - **The tale can be drafted from the recording.** With a recording in, the GM's Tale tab offers "Draft it from the recording". Hearthside listens to it, works out who said what, picks out the scenes and writes a draft. The draft opens in the editor with a note to fix what the AI got wrong before saving, since the party reads it and the cinematic is made from it. The byline then says "from an AI draft of the recording". **Only the GM writes or edits the tale.** Players read it, and can still add accounts.
 - **Quests sit by each player's seat** as paper slips, and the Quests tab is gone. Players tick their own quests, and the GM can tick anyone's. Before the session, the GM adds a quest from the seat with "+ quest": it goes to that player and is due when the session starts. The GM's own quests sit beside the head of the table.
 - **The tabs under the table open on a time-gated default:**
@@ -47,6 +47,19 @@ The design system keeps parchment for "one session's own business", so this is t
 
   The tabs are The tale, Accounts (after the session), Details and Prep notes (GM only). **Players never see the GM's prep notes,** before or after. The GM edits prep notes in place in their tab.
 - Seats are anchored on their portrait, so a seat with more quest slips doesn't move. The middle card, the seats and the slips stay clear of each other at phone and desktop widths.
+
+Round 3 (Geoff, 2026-10-27):
+
+- **The card turns over.** Flipping turns the existing card over in place: it lifts off the table, rotates and settles. Focus moves to the flip button on the side now showing. With reduced motion, the card switches without animating.
+- **On phones** (when the table is under 520px across), the flip button is just its icon, with the label kept for screen readers.
+- **The table is a real table.** It's painted as one image:
+  - eight oak boards with their seams, grain that bends round knots, and pegs where the boards meet the battens;
+  - a bent-wood rim in four joined pieces, bevelled at both edges;
+  - cup rings and scratches, and a d20 and a d6 left at the foot;
+  - varnish that catches the hearth's light from the lower left.
+
+  Shadows under it give it an edge and lift it off the floor.
+- **The cinematic pops out.** "Full screen" under the card, or the icon at the right of its controls, opens it over the whole window and asks the browser for real full screen. It plays on from where it was. The × button, the icon again, or Escape brings it back. The app's own browser pane refuses full-screen permission, so there it fills the window instead. A normal browser should go truly full screen, but that hasn't been checked.
 
 ## What the data would need
 
@@ -69,7 +82,7 @@ Beyond what the Adventurers prototype already listed (an adventurer's span in a 
 - The prototype assumes a quest's due time defaults to the session's start, as the PWA's does. The "+ quest" slip only takes a title. Notes and a different due time would need the full form.
 - The cinematic here is a stand-in: five painted stills with a slow pan and captions, 8 seconds each. The drafted tale is the same tale as the sample. A real model's output would differ in both.
 - Hearthside has no form styles yet. Fields follow the message composer, as in the earlier prototypes.
-- The medallion, the brass plate, the round table, the two-sided card and the quest slips are drawn in this prototype. Whichever survive should go into the design system.
+- The medallion, the brass plate, the painted table, the two-sided card and the quest slips are drawn in this prototype. The real table should be a designed asset rather than painted by the page. Whichever survive should go into the design system.
 
 ## Running it
 

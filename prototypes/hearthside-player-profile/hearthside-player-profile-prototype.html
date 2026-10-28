@@ -512,7 +512,7 @@ const CAMPS = {
   bw: { title: 'Night at Blackwater Manor', init: 'BW', art: null, cloth: ['#24303a', '#10161c'], game: 'Call of Cthulhu 7e', status: 'Completed', role: 'player', gm: 'Avery', gmTitle: 'Keeper', party: 4, oneShot: true },
 };
 const CAMP_ORDER = ['ss', 'ac', 'bb', 'lr', 'bw'];
-const SHARED_WITH_AVERY = ['ss', 'bb', 'bw'];   // what a campaign-mate can see: only the campaigns you share
+const SHARED_WITH_AVERY = ['ss', 'bb', 'bw'];   // the campaigns Avery is also in: the only sessions a campaign-mate sees, and never listed as campaigns
 document.head.insertAdjacentHTML('beforeend', `<style>${Object.entries(CAMPS).filter(([, c]) => c.art)
   .map(([k, c]) => `.bn-${k}{background-image:url(${paintBanner(c.art)})}`).join('\n')}</style>`);
 const banner = k => CAMPS[k].art ? `<span class="bn bn-${k}" aria-hidden="true"></span>`
@@ -604,7 +604,7 @@ const STATES = [
 
 /* ---------------- prototype state ---------------- */
 const VARIANTS = [
-  { key: 'A', name: 'The ledger', note: "The PWA's tabs, in gilded leather" },
+  { key: 'A', name: 'The ledger', note: "Chosen: the PWA's tabs, in gilded leather" },
   { key: 'B', name: 'The guest book', note: 'One long page; sessions as slips of parchment' },
   { key: 'C', name: 'The road', note: 'Your story in public; settings in a room of their own' },
 ];
@@ -651,7 +651,9 @@ const sinceLabel = () => `${MONL[R().since.getMonth()]} ${R().since.getFullYear(
 const campsSeen = () => cur.fresh ? [] : self() ? CAMP_ORDER : CAMP_ORDER.filter(k => SHARED_WITH_AVERY.includes(k));
 const played = () => SESSIONS.filter(s => s.status === 'completed' && !s.away && campsSeen().includes(s.camp)).sort((a, b) => b.date - a.date);
 const upcoming = () => SESSIONS.filter(s => s.status === 'scheduled' && campsSeen().includes(s.camp)).sort((a, b) => a.date - b.date);
-const advsSeen = () => cur.fresh ? [] : Object.entries(CHARS).filter(([, c]) => self() || (c.camp && SHARED_WITH_AVERY.includes(c.camp)));
+// a campaign-mate sees all your adventurers, but not your campaigns: only sessions they were at, and no campaign list or count
+const campsListed = () => self() ? campsSeen() : [];
+const advsSeen = () => cur.fresh ? [] : Object.entries(CHARS);
 const isGM = () => campsSeen().some(k => CAMPS[k].role === 'gm');
 const levelAt = s => { const c = CHARS[charAt(s)]; const l = c && c.levels.find(x => x[0] === s.id); return l ? l[1] : null; };
 const playedIn = k => played().filter(s => s.camp === k).length;
@@ -660,7 +662,8 @@ const playedIn = k => played().filter(s => s.camp === k).length;
 function headHTML({ actions = true } = {}) {
   const r = R(), n = played().length, k = campsSeen().length;
   const sub = cur.fresh ? `Joined ${sinceLabel()} · no campaigns yet`
-    : `${n} session${n === 1 ? '' : 's'} · ${k} campaign${k === 1 ? '' : 's'}${self() ? '' : ' you share'} · since ${sinceLabel()}`;
+    : self() ? `${n} session${n === 1 ? '' : 's'} · ${k} campaign${k === 1 ? '' : 's'} · since ${sinceLabel()}`
+    : `${advsSeen().length} adventurers · ${n} session${n === 1 ? '' : 's'} together · since ${sinceLabel()}`;
   const acts = !actions ? '' : self() ? `<button type="button" class="k-btn floor-btn" data-edit>Edit</button>`
     : `<button type="button" class="k-btn floor-btn is-primary" data-stub="a letter to Geoff">Write a letter</button>${r.friend ? '<span class="k-pill is-ok" style="align-self:center;background:rgba(26,19,14,.7)">Friends</span>' : ''}`;
   return `<header class="pf-head hs-page-head">${photoHTML()}<div class="who"><h1>${esc(r.name)}</h1>
@@ -687,7 +690,7 @@ function gamesHTML() {
 }
 function advsHTML() {
   const a = advsSeen();
-  if (!a.length) return `<p class="k-empty">${self() ? 'No adventurers yet. ' : 'None in the campaigns you share.'}${self() ? '<button type="button" class="p-link" data-stub="the new adventurer form">Make one</button>' : ''}</p>`;
+  if (!a.length) return `<p class="k-empty">${self() ? 'No adventurers yet. ' : 'No adventurers yet.'}${self() ? '<button type="button" class="p-link" data-stub="the new adventurer form">Make one</button>' : ''}</p>`;
   return `<div class="advs">${a.map(([id, c]) => `<button type="button" class="adv" data-stub="${esc(c.name)}'s page">${medal(c, c.status === 'Fallen' ? 'is-gone' : '')}<b>${esc(c.name)}</b>
     <small>${c.status ? c.status : c.level ? `${esc(c.cls)} · ${c.level}` : esc(c.cls)}</small></button>`).join('')}</div>`;
 }
@@ -787,7 +790,7 @@ const integrationsHTML = () => `<div class="igs">${igCard('gcal')}${igCard('disc
 /* ---------------- A: The ledger ---------------- */
 function VariantA() {
   const tabs = self() ? [['record', 'Record'], ['sessions', 'Sessions', played().length], ['campaigns', 'Campaigns', campsSeen().length], ['notices', 'Notices'], ['integrations', 'Integrations']]
-    : [['record', 'Record'], ['sessions', 'Sessions', played().length], ['campaigns', 'Campaigns', campsSeen().length]];
+    : [['record', 'Record'], ['sessions', 'Sessions together', played().length]];
   if (!tabs.some(t => t[0] === aTab)) aTab = 'record';
   let body = '';
   if (aTab === 'record') body = `<div class="a-sec">${recordDL()}</div>
@@ -798,7 +801,7 @@ function VariantA() {
     const up = upcoming(), list = filtered();
     body = !played().length && !up.length ? `<div class="a-sec">${sessEmpty()}</div>`
       : `${up.length ? `<div class="a-sec"><h3 class="k-h">Coming up</h3><ul class="srs">${up.map(s => `<li>${sessRow(s, { up: true })}</li>`).join('')}</ul></div>` : ''}
-      <div class="a-sec" style="padding:0"><h3 class="k-h" style="padding:12px 12px 0">Played <span class="k-aside">${awayLine()}</span></h3>${filterHTML()}
+      <div class="a-sec" style="padding:0"><h3 class="k-h" style="padding:12px 12px 0">${self() ? 'Played' : 'Played together'} <span class="k-aside">${awayLine()}</span></h3>${filterHTML()}
       <ul class="srs" style="padding:4px 8px">${list.map(s => `<li>${sessRow(s)}</li>`).join('')}</ul></div>`;
   } else if (aTab === 'campaigns') body = campsSeen().length ? `<div class="a-ccs"><div class="ccs">${campsSeen().map(k => campCard(k)).join('')}</div></div>` : `<div class="a-sec">${campsEmpty()}</div>`;
   else if (aTab === 'notices') body = `<div class="a-sec" style="padding-bottom:0"><h3 class="k-h">Where each notice reaches you</h3></div>${noticesHTML()}`;
@@ -820,14 +823,14 @@ function VariantB() {
       <div class="as">${c ? medal(c) : gmMedal()}<span>${c ? `As ${esc(c.name)}<small>${esc(c.cls)}${levelAt(s) ? ` · reached level ${levelAt(s)}` : ''}</small>` : `<span class="gm">Ran it as ${esc(camp.gmTitle)}</span>`}</span></div></button>`; }).join('');
   const acts = self() ? `<div class="k-row"><button type="button" class="k-btn floor-btn" data-edit>Edit</button></div>`
     : `<div class="k-row"><button type="button" class="k-btn floor-btn is-primary" data-stub="a letter to Geoff">Write a letter</button></div>`;
-  return `<header class="hs-page-head"><h1>${self() ? 'Your room' : esc(r.name.split(' ')[0]) + "'s room"}</h1><p>${self() ? 'Your record, your adventures, and how Hearthside reaches you.' : `What you can see of ${esc(r.name.split(' ')[0])}: the campaigns you share.`}</p></header>
+  return `<header class="hs-page-head"><h1>${self() ? 'Your room' : esc(r.name.split(' ')[0]) + "'s room"}</h1><p>${self() ? 'Your record, your adventures, and how Hearthside reaches you.' : `${esc(r.name.split(' ')[0])}'s adventurers, and the sessions you have played together.`}</p></header>
     <div class="b-top">
       <div class="b-frame">${photoHTML()}<div class="plate"><b>${esc(r.name)}</b><small>${handle() || 'No handle yet'}</small></div>${acts}</div>
       <section class="hs-gilded b-rec">${recordDL()}<div class="pad rule"><h3 class="k-h">Favourite games</h3>${gamesHTML()}</div>
         <div class="pad rule"><h3 class="k-h">Adventurers</h3>${advsHTML()}</div></section>
     </div>
-    <section><h2 class="hs-sec"><span>Campaigns</span><span class="hs-aside">${campsSeen().length ? `${campsSeen().length} · ${campsSeen().filter(k => CAMPS[k].status === 'In progress').length} in progress` : ''}</span></h2>
-      ${campsSeen().length ? `<div class="ccs">${campsSeen().map(k => campCard(k, 'hs-gilded')).join('')}</div>` : `<div class="hs-gilded pad">${campsEmpty()}</div>`}</section>
+    ${self() ? `<section><h2 class="hs-sec"><span>Campaigns</span><span class="hs-aside">${campsSeen().length ? `${campsSeen().length} · ${campsSeen().filter(k => CAMPS[k].status === 'In progress').length} in progress` : ''}</span></h2>
+      ${campsSeen().length ? `<div class="ccs">${campsSeen().map(k => campCard(k, 'hs-gilded')).join('')}</div>` : `<div class="hs-gilded pad">${campsEmpty()}</div>`}</section>` : ''}
     ${up.length ? `<section><h2 class="hs-sec"><span>Coming up</span><span class="hs-aside">${up.length}</span></h2><div class="hs-gilded" style="padding:6px 10px"><ul class="srs">${up.map(s => `<li>${sessRow(s, { up: true })}</li>`).join('')}</ul></div></section>` : ''}
     <section><h2 class="hs-sec"><span>Sessions played</span><span class="hs-aside">${pl.length ? `${pl.length}${awayLine() ? ' · ' + awayLine() : ''}` : ''}</span></h2>
       ${pl.length ? `<div class="slips">${slips}</div>
@@ -844,18 +847,18 @@ function VariantC() {
   if (!self()) cView = 'profile';
   const seg = self() ? `<div class="c-seg" role="group" aria-label="Show"><button type="button" data-cview="profile" aria-pressed="${cView === 'profile'}">Profile</button><button type="button" data-cview="settings" aria-pressed="${cView === 'settings'}">Settings</button></div>` : '';
   const head = `<header class="hs-page-head" style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap"><div><h1>${cView === 'settings' ? 'Settings' : self() ? 'Your profile' : esc(R().name.split(' ')[0])}</h1>
-    <p>${cView === 'settings' ? 'Only you see this page.' : self() ? 'This is what your party sees, plus your email and phone.' : 'From the campaigns you share.'}</p></div>${seg}</header>`;
+    <p>${cView === 'settings' ? 'Only you see this page.' : self() ? 'This is what your party sees, plus your email and phone.' : 'Their adventurers, and the sessions you have played together.'}</p></div>${seg}</header>`;
   return head + (cView === 'settings' ? cSettings() : cProfile());
 }
 function cProfile() {
   const r = R(), pl = played(), up = upcoming();
   const hero = `<section class="hs-gilded c-hero">${r.photo ? `<span class="c-hero-bg art art-${r.photo}" aria-hidden="true"></span>` : ''}
     <div class="c-hero-in">${photoHTML()}<div style="min-width:0"><h2>${esc(r.name)}</h2><div class="handle">${handle() || '<span style="color:var(--muted)">No handle yet</span>'}${uniq() ? ` <span style="color:var(--muted);font-family:var(--font-body);font-size:13.5px">· ${uniq()}</span>` : ''}</div>
-      <div class="facts">${cur.fresh ? `Joined ${sinceLabel()}` : `<b>${pl.length}</b> sessions · <b>${campsSeen().length}</b> campaigns · <b>${advsSeen().length}</b> adventurers · since ${sinceLabel()}`}${r.discordHandle ? ` · Discord <b>${esc(r.discordHandle)}</b>` : ''}</div>
+      <div class="facts">${cur.fresh ? `Joined ${sinceLabel()}` : `<b>${pl.length}</b> sessions${self() ? '' : ' together'}${self() ? ` · <b>${campsSeen().length}</b> campaigns` : ''} · <b>${advsSeen().length}</b> adventurers · since ${sinceLabel()}`}${r.discordHandle ? ` · Discord <b>${esc(r.discordHandle)}</b>` : ''}</div>
       <div class="k-row" style="margin-top:10px">${self() ? '<button type="button" class="k-btn" data-cview="settings">Edit in Settings</button>' : '<button type="button" class="k-btn is-primary" data-stub="a letter to Geoff">Write a letter</button>' + (r.friend ? '<span class="k-pill is-ok">Friends</span>' : '')}</div></div></div>
     <div class="c-hero-foot"><div><h3 class="k-h">Adventurers</h3>${advsHTML()}</div><div><h3 class="k-h">Favourite games</h3>${gamesHTML()}</div></div></section>`;
-  const camps = campsSeen().length ? `<section><h2 class="hs-sec"><span>Campaigns</span><span class="hs-aside">${sFilter === 'all' ? 'pick one to follow its road' : `<button type="button" class="p-link" data-sf="all">Show every campaign</button>`}</span></h2>
-    <div class="c-camps">${campsSeen().map(k => { const c = CAMPS[k], n = playedIn(k);
+  const camps = campsListed().length ? `<section><h2 class="hs-sec"><span>Campaigns</span><span class="hs-aside">${sFilter === 'all' ? 'pick one to follow its road' : `<button type="button" class="p-link" data-sf="all">Show every campaign</button>`}</span></h2>
+    <div class="c-camps">${campsListed().map(k => { const c = CAMPS[k], n = playedIn(k);
       return `<button type="button" class="hs-gilded c-camp" data-sf="${sFilter === k ? 'all' : k}" aria-pressed="${sFilter === k}"><span class="cc-bn">${banner(k)}</span><b>${esc(c.title)}</b>
         <small>${c.role === 'gm' ? `<span style="color:var(--torch)">${flame} ${esc(c.gmTitle)}</span>` : esc(Object.values(CHARS).filter(x => x.camp === k).map(x => x.name.split(' ')[0]).join(', then '))} · ${n}${c.status === 'In progress' ? ' · <span class="st-live">On</span>' : ''}</small></button>`; }).join('')}</div></section>` : '';
   // the road: newest first, upcoming at the top, months as milestones, missed sessions faded, adventurers changing hands marked

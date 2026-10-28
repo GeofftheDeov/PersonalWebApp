@@ -30,9 +30,20 @@ The page column is about 680px at most in the shell, so every layout is one colu
   - **Profile** is what the party sees: a hero with your adventurers and favourite games, then your campaigns as tiles (pick one to follow its road), then **the road so far**. That's a timeline with upcoming sessions at the top and a "Today" marker. Under it come the sessions played, by month, with missed sessions faded and adventurers changing hands marked ("Pip Thistlewick fell at the bridge", "Mags Ironhollow joined the road").
   - **Settings** is only for you. The record is edited in place there rather than in a dialog. It also holds Notices and Integrations, and says what the party can and can't see.
 
+## The answer
+
+**A, "The ledger".** Picked by Geoff on 2026-10-27. The prototype opens on it. B and C stay in the switcher for comparison.
+
+- **The nav entry is "Your Room"** (decided), the fifth item in the nav.
+- **A campaign-mate sees your adventurers, not your campaigns** (decided). Every layout now follows this:
+  - **Adventurers:** all of them, including ones from campaigns you don't share (Mags, Pip and Ada for Avery), with class and level or status, and no campaign.
+  - **No campaign list or count:** no Campaigns tab in A, no Campaigns section in B, no campaign tiles in C. The head reads "6 adventurers · 5 sessions together · since March 2025".
+  - **Sessions together:** the tab is renamed for them, and shows only sessions in campaigns you both belong to. That reveals nothing they don't already know, since they were in those campaigns too.
+  - Your own view is unchanged: the Campaigns tab stays.
+
 ## What the prototype assumes (to confirm or change)
 
-- **The profile is "Your Room" in the nav,** a tavern name for your own place. That makes five nav items, so the phone's 2 × 2 nav grid gets a third row. It could live behind your photo or name instead.
+- **The profile is "Your Room" in the nav** (decided, see above). That makes five nav items, so the phone's 2 × 2 nav grid gets a third row.
 - **Connecting Discord fills in the Discord name and user ID.** While Discord is connected, those fields are read-only and marked "from Discord". When it isn't, you can still type them, with the PWA's "Developer Mode › Copy User ID" hint. Disconnecting keeps them on the record.
 - **Notices are a grid:** each notice has a row and each place (the bell, email, Discord) has a column.
   - The Discord column needs Discord connected and "Send me notices as Discord messages" turned on.
@@ -42,12 +53,13 @@ The page column is about 680px at most in the shell, so every layout is one colu
 - **Google Calendar options:**
   - Which calendar sessions go to.
   - "Count my busy time when the party plans a night", the free/busy use behind the PWA's reconnect line. When `needsReconsent` is set, that switch becomes the line "reconnect once", with a Reconnect link, and the pill says "Reconnect needed" in seal red (it needs you).
-- **A campaign-mate sees** what `toPublicPerson` returns: name, handle, unique ID, photo, Discord, favourite games and join date. They also see only the campaigns you share, and only those campaigns' sessions and adventurers. They never see email, phone, internal ID, record type, Notices or Integrations. They get "Write a letter" and a Friends pill instead of Edit.
+- **A campaign-mate sees** what `toPublicPerson` returns: name, handle, unique ID, photo, Discord, favourite games and join date. They also see all your adventurers and the sessions you played together (see the answer above). They never see your campaigns, email, phone, internal ID, record type, Notices or Integrations. They get "Write a letter" and a Friends pill instead of Edit.
 - **Availability and the Almanac leave the profile.** The PWA's Availability and Almanac tabs belong to the Almanac page now. The API key vault isn't a Hearthside thing and stays on the main site. A line on the page says so.
 
 ## What the data would need
 
 - **The adventurer at each session.** `/api/users/profile/sessions` returns the session, its date and campaign, but not who you played. The Adventurers prototype's rule (an adventurer's span in their campaign, plus "the party played them without you") gives it, along with the level reached at each session (level history).
+- **The public player view changes shape.** `GET /api/users/players/:id` returns `sharedCampaigns` today. It would drop that, and add the person's adventurers (name, class, level, status and art, without their campaign) and the sessions both people were at. The adventurer page a campaign-mate opens from here must hide the campaign too: the Adventurers prototype's page shows it, in the banner and on the road.
 - **Sessions you ran.** Today, attendance (`player_sessions`) is what lists your sessions. Sessions where you were the GM (or stood in with the torch) need to come from the campaign's GM, not attendance.
 - **Notice preferences:** a per-person table of (notice, channel) → on/off, default reminder offsets, and quiet hours with a time zone. Today `notifications` only feeds the bell, with four types (`friend_request`, `campaign_invite`, `message`, `system`), so most of these notices are new events too.
 - **Discord as an integration:** an OAuth link (identify scope) that stores the Discord user ID and name, plus a bot or DM path for sending notices. Today `discord_id` and `discord_handle` are typed by hand.
@@ -56,7 +68,8 @@ The page column is about 680px at most in the shell, so every layout is one colu
 ## Still open
 
 - Is a notices grid too much? A shorter version could be one choice per group (Sessions, Quests, Letters, The party) instead of a row per notice.
-- Should Settings be its own page (C) or part of the profile (A, B)? C keeps the public view clean, but it's another place to find.
+- Should a campaign-mate see the sessions you played together at all? Each one names its campaign, though only a campaign you both belong to. Dropping them would leave the public view as the record and the adventurers.
+- A player who's only your friend (not a campaign-mate) sees no sessions, since you share none. The prototype doesn't draw that viewer.
 - Hearthside has no form styles, toggles or checkboxes yet. The fields follow the message composer, as in the earlier prototypes. The checkboxes follow Your Quests' boxes (moss when on). The switch is new. Whichever survive should go into the design system.
 - The integration marks are drawn glyphs (a calendar and a speech bubble), not the services' logos, since the design system has no icon set. The real cards may want the official marks.
 
@@ -72,7 +85,7 @@ Then open http://127.0.0.1:4176/hearthside-player-profile-prototype.html, or sta
 
 The bar at the bottom switches:
 
-- **The layout** (← → or the arrow keys), with `?variant=A|B|C`.
+- **The layout** (← → or the arrow keys), with `?variant=A|B|C`. A is the default.
 - **The state** (`?state=`):
   - `seasoned`: five campaigns, 34 sessions, Google connected, Discord not.
   - `linked`: both connected. Discord has filled in the handle and ID, and the Discord column is on.

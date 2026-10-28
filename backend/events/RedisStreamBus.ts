@@ -58,6 +58,9 @@ export function busNames(namespace?: string) {
  * - publish: XADD to `events:<domain>` with MAXLEN ~ trimming
  * - subscribe: consumer-group reads (XREADGROUP), XACK on handler success
  * - recovery: failed/stuck entries are reclaimed with XAUTOCLAIM after 60s idle
+ * - Redis outage: a consumer group that can't be created at start() (Redis
+ *   down at boot) or is gone later (NOGROUP) is created again by the read
+ *   loop, so durable consumers resume without a restart
  * - broadcast: publish also PUBLISHes the envelope on `events:live:<name>`;
  *   every process with a broadcast subscription SUBSCRIBEs to that channel.
  *   publishEphemeral only PUBLISHes, so it never reaches a stream.
@@ -182,17 +185,34 @@ export class RedisStreamBus implements EventBus {
 
         const streams = [...new Set([...this.handlers.keys()].map(this.streamFor))];
         for (const stream of streams) {
-            try {
-                await this.pub.xgroup("CREATE", stream, this.group, "$", "MKSTREAM");
-            } catch (err: any) {
-                if (!String(err?.message).includes("BUSYGROUP")) throw err;
-            }
             const reader = this.pub.duplicate();
             reader.on("error", (err) => console.error(`[events] redis (${stream}) error:`, err.message));
             this.readers.push(reader);
-            void this.readLoop(reader, stream);
+            // With Redis up, the group exists before start() returns, so events
+            // published right after are read. With it down, the read loop keeps
+            // trying instead of leaving the stream unread until a restart (#132).
+            const grouped = await this.createGroup(this.pub, stream).then(
+                () => true,
+                (err) => {
+                    console.error(`[events] consumer group on ${stream} not created yet (${err.message}); retrying`);
+                    return false;
+                },
+            );
+            void this.readLoop(reader, stream, grouped);
         }
         console.log(`[events] RedisStreamBus started — group=${this.group} consumer=${this.consumer} streams=[${streams.join(", ")}]`);
+    }
+
+    /**
+     * Creates this bus's consumer group on `stream` (and the stream itself),
+     * reading from new entries only; an existing group is left as it is.
+     */
+    private async createGroup(conn: Redis, stream: string): Promise<void> {
+        try {
+            await conn.xgroup("CREATE", stream, this.group, "$", "MKSTREAM");
+        } catch (err: any) {
+            if (!String(err?.message).includes("BUSYGROUP")) throw err;
+        }
     }
 
     async stop(): Promise<void> {
@@ -264,10 +284,22 @@ export class RedisStreamBus implements EventBus {
         }
     }
 
-    private async readLoop(reader: Redis, stream: string): Promise<void> {
+    /**
+     * Reads `stream` until stop(). `grouped` says whether the consumer group
+     * is known to exist; until it does, each pass tries to create it. A
+     * NOGROUP reply (Redis restarted without persistence, or the group was
+     * destroyed) sends it back to creating the group, from new entries on.
+     */
+    private async readLoop(reader: Redis, stream: string, grouped: boolean): Promise<void> {
         let lastClaim = 0;
         while (this.running) {
             try {
+                if (!grouped) {
+                    await this.createGroup(reader, stream);
+                    grouped = true;
+                    console.log(`[events] consumer group ${this.group} ready on ${stream}`);
+                }
+
                 // Periodically reclaim entries another (dead) consumer left pending.
                 if (Date.now() - lastClaim > CLAIM_MIN_IDLE_MS) {
                     lastClaim = Date.now();
@@ -285,7 +317,12 @@ export class RedisStreamBus implements EventBus {
                 if (res) for (const [, entries] of res) await this.dispatch(reader, stream, entries);
             } catch (err: any) {
                 if (!this.running) break;
-                console.error(`[events] read loop (${stream}) error:`, err.message);
+                if (grouped && String(err?.message).includes("NOGROUP")) {
+                    grouped = false;
+                    console.warn(`[events] consumer group ${this.group} is gone from ${stream}; recreating it`);
+                } else {
+                    console.error(`[events] read loop (${stream}) error:`, err.message);
+                }
                 await new Promise((r) => setTimeout(r, 2_000));
             }
         }

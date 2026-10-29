@@ -67,6 +67,12 @@ export const skillSchedule = (id: SkillId): SkillSchedule | null =>
 
 /** A run still `running` after this long is presumed dead (PC slept, runner killed). */
 export const STALE_AFTER = '45 minutes';
+/**
+ * The summary expireStale gives a presumed-dead run. It marks the run as
+ * expired rather than reported failed, so a late complete can still record
+ * what really happened (#168).
+ */
+export const EXPIRED_SUMMARY = `no result from runner within ${STALE_AFTER}`;
 
 /** What started a run: the RUN button (through the queue), the Task Scheduler, or a hand-run wrapper. */
 export const TRIGGERS = ['button', 'scheduled', 'manual'] as const;
@@ -179,9 +185,8 @@ export async function enqueueRun(skill: SkillId, requestedBy: string | null): Pr
 
 async function expireStale(): Promise<void> {
     await query(
-        `UPDATE agent_runs SET status = 'failed', finished_at = now(),
-                summary = 'no result from runner within ${STALE_AFTER}'
-          WHERE status = 'running' AND claimed_at < now() - interval '${STALE_AFTER}'`);
+        `UPDATE agent_runs SET status = 'failed', finished_at = now(), summary = $1
+          WHERE status = 'running' AND claimed_at < now() - interval '${STALE_AFTER}'`, [EXPIRED_SUMMARY]);
 }
 
 export async function listRuns(limit = 10): Promise<AgentRun[]> {
@@ -211,17 +216,28 @@ export async function claimNext(runner: string, supported: string[]): Promise<Ag
 }
 
 /**
- * Only a `running` row can be completed, so a late or repeated report cannot rewrite history.
+ * A `running` row can be completed, and so can one expireStale presumed dead
+ * (#168): a long run that outlived STALE_AFTER still reports its real outcome
+ * and usage, and `finished_at` becomes when it really finished. A run the
+ * runner already completed cannot be, so a repeated report cannot rewrite
+ * history; neither can a queued, unknown or recorded run.
  * `usage` is the runner's usage block as sent, unchecked; see readUsage. A runner
  * that sends none (every runner before #137) leaves the run's usage null.
  */
 export async function completeRun(id: number, result: RunResult): Promise<AgentRun | null> {
-    const { rows } = await query<AgentRun>(
-        `UPDATE agent_runs SET status = $2, finished_at = now(), summary = $3, output_path = $4,
+    const { rows } = await query<AgentRun & { was_expired: boolean }>(
+        `WITH prev AS (SELECT status = 'failed' AS was_expired FROM agent_runs WHERE id = $1)
+         UPDATE agent_runs SET status = $2, finished_at = now(), summary = $3, output_path = $4,
                 cost_usd = $5, input_tokens = $6, output_tokens = $7, duration_ms = $8
-          WHERE id = $1 AND status = 'running' RETURNING *`,
-        [id, ...resultColumns(`run ${id}`, result)]);
-    return rows[0] ?? null;
+           FROM prev
+          WHERE id = $1 AND (status = 'running'
+                             OR (status = 'failed' AND summary = $9 AND output_path IS NULL AND cost_usd IS NULL))
+          RETURNING agent_runs.*, prev.was_expired`,
+        [id, ...resultColumns(`run ${id}`, result), EXPIRED_SUMMARY]);
+    if (!rows[0]) return null;
+    const { was_expired, ...run } = rows[0];
+    if (was_expired) console.warn(`[runner] run ${id} completed after it was expired at ${STALE_AFTER}; recorded its real outcome`);
+    return run;
 }
 
 /** A finished run's outcome as the runner reports it, on complete or on record. */

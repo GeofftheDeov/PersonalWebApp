@@ -88,12 +88,17 @@ router.post('/runs', async (req, res) => {
     }
 });
 
+/**
+ * Complete a claimed run: 200 with { run }. A run expired as presumed dead
+ * (STALE_AFTER) can still be completed, so a long run keeps its outcome and
+ * usage (#168). 409 for a run that's queued, unknown, recorded or already completed.
+ */
 router.post('/runs/:id/complete', async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'bad run id' });
     try {
         const run = await completeRun(id, readResult(req.body));
-        if (!run) return res.status(409).json({ error: 'run is not running (unknown, already completed, or expired)' });
+        if (!run) return res.status(409).json({ error: 'run is not running (unknown, queued, or already completed)' });
         // The output travels through the vault; Obsidian Git may not have pushed
         // yet, but an early pull is cheap and often catches it.
         void pullVault();

@@ -54,6 +54,7 @@ import { startLiveChannel } from "./live/startLiveChannel.js";
 import { startReadyCheckLoop } from "./utils/readyCheck.js";
 import { startWorkers } from "./jobs/workers.js";
 import { startVaultSyncLoop } from "./services/vaultSync.js";
+import { runLoopTick } from "./utils/loopLease.js";
 import { registerRepeatableJobs, closeBullConnection } from "./jobs/queues.js";
 
 import https from "https";
@@ -195,10 +196,12 @@ live.ready.then((channel) => {
 // Alpaca snapshots: capture account + positions every 5 minutes so the dashboard
 // can chart per-symbol position values over time. Covers the Cloud-Claw wallet
 // (when its env keys are set) and admins' Profile page wallets, so it always runs.
+// Once per tick across backend tasks (#133), or each task would store its own row.
 {
     const FIVE_MIN = 5 * 60 * 1000;
-    setTimeout(() => snapshotAlpacaNow(), 30_000); // first one shortly after boot
-    setInterval(() => snapshotAlpacaNow(), FIVE_MIN);
+    const tick = () => runLoopTick('alpaca-snapshot', FIVE_MIN, snapshotAlpacaNow);
+    setTimeout(tick, 30_000); // first one shortly after boot
+    setInterval(tick, FIVE_MIN);
     console.log('[BACKEND] Alpaca snapshot loop scheduled (every 5 min).');
 }
 

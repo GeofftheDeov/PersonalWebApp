@@ -1,7 +1,9 @@
 const nextConfig = {
     swcMinify: false,
     eslint: { ignoreDuringBuilds: true },
-    typescript: { ignoreBuildErrors: true },
+    // A type error fails the build (and so the deploy). `npm run typecheck`
+    // runs the same check on every pull request.
+    typescript: { ignoreBuildErrors: false },
     // output: 'standalone',
     experimental: { proxyTimeout: 300_000 },
     async redirects() {

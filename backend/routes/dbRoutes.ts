@@ -12,7 +12,7 @@ import { renderPage } from '../utils/adminUi.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { resolveAccountId } from '../utils/accountRefs.js';
 import { toCsv } from '../utils/csv.js';
-import { publishAccountDeleted, publishFriendshipChanged, publishMembershipChanged } from '../services/accessEvents.js';
+import { publishAccountDeleted, publishFriendshipChanged, publishMembershipChanged, publishOwnerChanged } from '../services/accessEvents.js';
 import { getMemberCampaignIds } from '../utils/gameNightPlannerUtils.js';
 import { isUuid } from '../db/model.js';
 import { workshopClientJs } from '../utils/workshopClient.js';
@@ -916,6 +916,11 @@ async function publishAccessChanges(collection: string, before: any, after: any)
     if (!ACCESS_COLLECTIONS.has(collection)) return;
     if (collection === 'campaigns') {
         if (before && !after) await publishMembershipChanged(idOf(before._id)!, 'deleted');
+        // A new campaign with no owner, or a changed owner, moves it into or
+        // out of admin management (#130).
+        else if (after && (before ? idOf(before.owner) !== idOf(after.owner) : !after.owner)) {
+            await publishOwnerChanged(idOf(after._id)!, idOf(after.owner));
+        }
         return;
     }
     if (collection === 'campaign_members') {
@@ -1029,11 +1034,17 @@ router.post('/:collection/update/:id', async (req, res) => {
 router.post('/:collection/delete/:id', async (req, res) => {
     const { collection, id } = req.params;
     try {
-        // Deleting an account cascades to its memberships: note them first.
-        const campaignsOf = collection === 'accounts' && isUuid(id) ? await getMemberCampaignIds({ id }) : [];
+        // Deleting an account cascades to its memberships, and the campaigns it
+        // owns become admin-managed (owner_id ON DELETE SET NULL): note both first.
+        const isAccount = collection === 'accounts' && isUuid(id);
+        const campaignsOf = isAccount ? await getMemberCampaignIds({ id }) : [];
+        const ownedBy = isAccount
+            ? (await Campaign.find({ owner: id }).select('_id')).map((c: any) => String(c._id))
+            : [];
         const removed = await modelFor(collection).findByIdAndDelete(id);
         await publishAccessChanges(collection, removed?.toObject?.() ?? null, null);
         if (removed) for (const campaignId of campaignsOf) await publishMembershipChanged(campaignId, 'member-removed', id);
+        if (removed) for (const campaignId of ownedBy) await publishOwnerChanged(campaignId, null);
         if (removed && collection === 'accounts') await publishAccountDeleted(id);
         res.sendStatus(200);
     } catch (err) {

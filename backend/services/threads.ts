@@ -14,9 +14,10 @@ import { findPersonById, personDisplayName } from "../utils/personUtils.js";
  *
  * Two questions, two answers:
  *   - visibleThreadKeys(person): every campaign they're a member of, whatever
- *     its status, plus one DM thread per current friend. Membership-only, so an
- *     admin's set doesn't include every campaign on the site. Live subscriptions
- *     use this set; the thread list narrows it to active campaigns.
+ *     its status, plus one DM thread per current friend. For an admin, also
+ *     every campaign under admin management (#130): no owner, or owned by that
+ *     admin. Not every campaign on the site, though. Live subscriptions use
+ *     this set; the thread list narrows it to active campaigns.
  *   - canAccessThread(person, key): campaign threads follow campaign access
  *     (members, and admins for any campaign); DM threads are friends-only and
  *     only for the two people in the pair. Malformed keys are refused.
@@ -77,12 +78,39 @@ async function friendIds(person: ThreadPerson): Promise<string[]> {
     return [...new Set<string>(ids)].filter((id) => isUuid(id) && id !== String(person.id));
 }
 
-/** Thread keys for the person's campaign memberships plus one DM per friend. */
+/**
+ * Campaigns an admin manages (#130): those with no owner (`owner_id` NULL
+ * means admin-managed) and those the admin owns. Empty for anyone else.
+ */
+async function managedCampaignIds(person: ThreadPerson): Promise<string[]> {
+    const { rows } = await query<{ id: string }>(
+        `SELECT c.id FROM campaigns c
+           JOIN accounts a ON a.id = $1 AND a.app_role = 'admin'
+          WHERE c.owner_id IS NULL OR c.owner_id = a.id`,
+        [person.id]);
+    return rows.map((r) => String(r.id));
+}
+
+/** Of these people, the admins. */
+export async function adminIdsAmong(personIds: string[]): Promise<string[]> {
+    const ids = personIds.filter((id) => isUuid(id));
+    if (!ids.length) return [];
+    const { rows } = await query<{ id: string }>(
+        `SELECT id FROM accounts WHERE id = ANY($1::uuid[]) AND app_role = 'admin'`, [ids]);
+    return rows.map((r) => String(r.id));
+}
+
+/**
+ * Thread keys for the person's campaign memberships, the campaigns they manage
+ * as an admin, and one DM per friend.
+ */
 export async function visibleThreadKeys(person: ThreadPerson): Promise<ThreadKey[]> {
     if (!person?.id || !isUuid(String(person.id))) return [];
-    const [campaignIds, friends] = await Promise.all([getMemberCampaignIds(person), friendIds(person)]);
+    const [memberIds, managedIds, friends] = await Promise.all([
+        getMemberCampaignIds(person), managedCampaignIds(person), friendIds(person),
+    ]);
     return [
-        ...[...new Set(campaignIds)].map(campaignThreadKey),
+        ...[...new Set([...memberIds, ...managedIds])].map(campaignThreadKey),
         ...friends.map((f) => dmThreadKey(person.id, f)),
     ];
 }
@@ -191,7 +219,7 @@ async function dmEntries(me: string, dms: { dmKey: string; friendId: string }[])
 
 /**
  * The Letters list: one thread per active campaign the person is a member of
- * and one per friend they've exchanged messages with, newest activity first.
+ * (or, for an admin, manages) and one per friend they've exchanged messages with, newest activity first.
  * Built on visibleThreadKeys, so it shows nothing the access rules don't.
  */
 export async function listThreads(person: ThreadPerson, filter: ThreadFilter = "all"): Promise<ThreadListEntry[]> {

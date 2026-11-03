@@ -7,6 +7,7 @@ import SfContact from "../models/SfContact.js";
 import SfAccount from "../models/SfAccount.js";
 import { recordPull } from "../jobs/personSync.js";
 import Campaign from "../models/Campaign.js";
+import { publishOwnerChanged } from "../services/accessEvents.js";
 import Session from "../models/Session.js";
 import Character from "../models/Character.js";
 import Dungeon from "../models/Dungeon.js";
@@ -581,7 +582,9 @@ router.post("/salesforce", authenticateSync, async (req, res) => {
                         if (r.StartDate) payload.startDate = new Date(r.StartDate);
                         if (r.EndDate) payload.endDate = new Date(r.EndDate);
                         
-                        await Campaign.create(payload);
+                        const created = await Campaign.create(payload) as any;
+                        // No owner: admin-managed, so admins follow it (#130).
+                        await publishOwnerChanged(String(created._id), null);
                         results.success++;
                     }
                 } catch (err: any) {

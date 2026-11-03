@@ -1,5 +1,6 @@
 import Session from "../models/Session.js";
 import Campaign from "../models/Campaign.js";
+import { query } from "../db/index.js";
 import { notify } from "../utils/notify.js";
 import { postTableTalk } from "./tableTalk.js";
 import { findCampaignPeopleIds } from "./personUtils.js";
@@ -13,6 +14,9 @@ const READY_WINDOW_MS = 30 * 60 * 1000;    // fire 30 minutes before start
  *  1. bell-notify every campaign member with a link to the session page,
  *  2. post an automated ready-check message into the campaign's Table Talk,
  *  3. stamp readyCheck.sentAt so the session page shows the Ready Up panel.
+ *
+ * Every backend task runs this loop, so the stamp is also the claim (#133):
+ * only the task whose update sets sentAt sends the check.
  */
 export function startReadyCheckLoop() {
     setInterval(() => runReadyCheckSweep().catch(err =>
@@ -58,9 +62,18 @@ async function sendReadyCheck(session: any) {
     const startTime = new Date(session.date).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 
     // Stamp first — better to occasionally miss a notification than to spam
-    // every member each minute if a later step throws.
-    session.readyCheck = { sentAt: new Date(), responses: session.readyCheck?.responses ?? [] };
-    await session.save();
+    // every member each minute if a later step throws. The stamp only lands
+    // while sentAt is unset, so of two backend tasks sweeping the same session
+    // (#133) exactly one gets the row back and sends.
+    const sentAt = new Date();
+    const { rowCount } = await query(
+        `UPDATE game_sessions
+            SET ready_check = COALESCE(ready_check, '{}'::jsonb)
+                  || jsonb_build_object('sentAt', $2::text, 'responses', COALESCE(ready_check->'responses', '[]'::jsonb))
+          WHERE id = $1 AND (ready_check->>'sentAt') IS NULL`,
+        [String(session._id), sentAt.toISOString()]);
+    if (rowCount !== 1) return;
+    session.readyCheck = { sentAt, responses: session.readyCheck?.responses ?? [] };
 
     // 1. Bell notifications for every member with an account.
     const peopleIds = await findCampaignPeopleIds(campaignId);

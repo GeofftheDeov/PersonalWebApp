@@ -3,7 +3,7 @@ import { describeError, ok, type Overview, type Queryable, type TileSource } fro
 import { ago, centralDay, centralTime, esc, TIME_ZONE } from "../format.js";
 import { nextScheduledRun, scheduledOn, type SkillSchedule } from "../schedule.js";
 import {
-    RUNNER_ONLINE_WITHIN_MS, SKILLS, STALE_AFTER, runnerLastSeen, skillLabel, skillSchedule,
+    QUEUED_EXPIRE_AFTER, RUNNER_ONLINE_WITHIN_MS, SKILLS, STALE_AFTER, runnerLastSeen, skillLabel, skillSchedule,
     type AgentRun, type RunTrigger, type SkillId,
 } from "../../services/agentRuns.js";
 import { listBriefs, type BriefMeta } from "../../utils/briefs.js";
@@ -109,7 +109,8 @@ export interface BriefTileData {
     /**
      * The run a RUN press would wait behind (#143): the oldest running run,
      * else the oldest queued one, of any skill. A run still `running`
-     * STALE_AFTER after its claim is presumed dead and isn't active. Null when
+     * STALE_AFTER after its claim is presumed dead and isn't active, nor is
+     * one still `queued` QUEUED_EXPIRE_AFTER after its request. Null when
      * nothing is active or the run history can't be read.
      */
     activeRun: ActiveRun | null;
@@ -142,7 +143,7 @@ async function readRuns(db: Queryable, now: Date): Promise<Pick<BriefTileData, "
     const { rows } = await db.query<AgentRun & { kind: "active" | "scheduled"; n: number | null }>(
         `(SELECT 'active' AS kind, ${cols}, (count(*) OVER ())::int AS n
             FROM agent_runs
-           WHERE status = 'queued'
+           WHERE (status = 'queued' AND requested_at >= $2::timestamptz - $4::interval)
               OR (status = 'running' AND (claimed_at IS NULL OR claimed_at >= $2::timestamptz - $3::interval))
            ORDER BY status = 'running' DESC, requested_at, id
            LIMIT 1)
@@ -152,7 +153,7 @@ async function readRuns(db: Queryable, now: Date): Promise<Pick<BriefTileData, "
            WHERE skill = $1 AND trigger = 'scheduled' AND status IN ('succeeded', 'failed')
            ORDER BY finished_at DESC NULLS LAST, id DESC
            LIMIT 1)`,
-        [BRIEF_SKILL, now, STALE_AFTER]);
+        [BRIEF_SKILL, now, STALE_AFTER, QUEUED_EXPIRE_AFTER]);
     const active = rows.find((r) => r.kind === "active");
     const sched = rows.find((r) => r.kind === "scheduled");
     return {

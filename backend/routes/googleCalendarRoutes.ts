@@ -33,12 +33,11 @@ import { originSite, portfolioSite, profilePath, siteForHost, type FrontendSite 
 
 const router = express.Router();
 
-/** Profile tabs the consent screen may send the person back to. */
+/** Portfolio profile tabs the consent screen may send the person back to. */
 const RETURN_TABS = new Set(['availability']);
 
 const redirectUri = () =>
-    process.env.GOOGLE_REDIRECT_URI ||
-    `${process.env.FRONTEND_URL || 'http://localhost:3000'}/api/google-calendar/callback`;
+    process.env.GOOGLE_REDIRECT_URI || `${portfolioSite().origin}/api/google-calendar/callback`;
 
 const oauthClient = () => {
     if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
@@ -88,7 +87,8 @@ router.get('/callback', async (req: any, res: Response) => {
             if (!from) throw new Error(`state names a host that isn't allowed: ${String(decoded.host)}`);
             site = from;
         }
-        if (RETURN_TABS.has(decoded.back)) tab = `&tab=${decoded.back}`;
+        // The tabs are the portfolio profile's; Hearthside's /room has its own.
+        if (site.name === 'portfolio' && RETURN_TABS.has(decoded.back)) tab = `&tab=${decoded.back}`;
         if (error) return back('denied');
         if (!code) return back('error');
 

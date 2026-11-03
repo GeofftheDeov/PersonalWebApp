@@ -152,6 +152,9 @@ router.post("/register", async (req, res) => {
   }
 });
 
+/** How long after signing up a verify link also signs you in: the 24 hours the email promises. */
+const VERIFY_SIGN_IN_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 router.post("/verify-email", async (req, res) => {
     const { token } = req.body;
     // A string only: the model layer reads an object filter value as operators,
@@ -172,7 +175,13 @@ router.post("/verify-email", async (req, res) => {
         // Verifying is where a new account first gets a token (#215, #69), so it
         // signs the person in: the session cookie, and the token for bearer
         // clients, as login does. Someone who signed up on Hearthside is then
-        // signed in on both sites.
+        // signed in on both sites. Verification tokens have no expiry column,
+        // so only a link used within the day the email promises signs anyone
+        // in; an older one still verifies, and the person logs in as before.
+        const createdAt = user.createdAt ? new Date(user.createdAt).getTime() : NaN;
+        if (!(Date.now() - createdAt < VERIFY_SIGN_IN_WINDOW_MS)) {
+            return res.json({ message: "Email verified successfully" });
+        }
         res.json({ message: "Email verified successfully", token: issueSession(res, user), user: publicUser(user) });
     } catch (error) {
         console.error("Verify Email Error:", error);

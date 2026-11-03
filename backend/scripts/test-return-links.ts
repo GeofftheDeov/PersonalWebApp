@@ -59,7 +59,11 @@ function check(name: string, ok: boolean, detail: unknown = "") {
   ok ? pass++ : fail++;
 }
 
-/** The sites of each environment, as the deploy workflows configure them. */
+/**
+ * The sites of each environment once Hearthside is deployed. The workflows set
+ * FRONTEND_URL and (prod) PORTFOLIO_ORIGINS today; HEARTHSIDE_URL arrives with
+ * Hearthside's deploy (#214, #217), and until then no host counts as Hearthside.
+ */
 const PROD = {
   FRONTEND_URL: "https://geoffthedeov.net",
   PORTFOLIO_ORIGINS: "https://www.geoffthedeov.net",
@@ -222,6 +226,18 @@ async function main() {
       again.status === 400 && !again.json.token && !again.setCookie.some((c) => c.startsWith(`${COOKIE}=`)),
       `${again.status} ${JSON.stringify(again.json)} ${JSON.stringify(again.setCookie)}`);
 
+    // A verify link from long ago still verifies, but signs nobody in: the
+    // token has no expiry of its own, so it mustn't become a standing login.
+    const late = await signUp("register", "hearthside.geoffthedeov.net");
+    await pool.query(`UPDATE accounts SET created_at = now() - interval '25 hours' WHERE email = $1`, [late.email]);
+    const lateVerify = await call("POST", "/api/users/verify-email", {
+      body: { token: new URL(late.link ?? "http://x/").searchParams.get("token") } });
+    const { rows: [lateRow] } = await pool.query(`SELECT is_verified FROM accounts WHERE email = $1`, [late.email]);
+    check("a verify link used over a day after signing up verifies, with no token and no cookie",
+      lateVerify.status === 200 && lateRow?.is_verified === true && !lateVerify.json.token
+        && !lateVerify.setCookie.some((c) => c.startsWith(`${COOKIE}=`)),
+      `${lateVerify.status} ${JSON.stringify(lateVerify.json)} verified=${lateRow?.is_verified}`);
+
     const loginAfter = await call("POST", "/api/users/login", { body: { email: player.email, password: player.password } });
     check("the verified player can log in with their password", loginAfter.status === 200, `${loginAfter.status}`);
 
@@ -257,14 +273,23 @@ async function main() {
     check("prod: Connect started from an unknown host comes back to the portfolio's /profile",
       unknownBack.location === "https://geoffthedeov.net/profile?gcal=denied", `${unknownBack.status} ${unknownBack.location}`);
 
+    const portfolioTab = await callback((await startConnect("www.geoffthedeov.net", "?return=availability")).state);
+    check("the portfolio's availability tab rides along to its /profile",
+      portfolioTab.location === "https://www.geoffthedeov.net/profile?gcal=denied&tab=availability", `${portfolioTab.location}`);
+
     const withTab = await startConnect("hearthside.geoffthedeov.net", "?return=availability");
     const tabBack = await callback(withTab.state);
-    check("the availability tab rides along to Hearthside's /room",
-      tabBack.location === "https://hearthside.geoffthedeov.net/room?gcal=denied&tab=availability", `${tabBack.location}`);
+    check("...but not to Hearthside's /room, which has no such tab",
+      tabBack.location === "https://hearthside.geoffthedeov.net/room?gcal=denied", `${tabBack.location}`);
 
     const noCode = await callback(withTab.state, "");
     check("a callback with neither code nor error is an error on the site it started from",
-      noCode.location === "https://hearthside.geoffthedeov.net/room?gcal=error&tab=availability", `${noCode.location}`);
+      noCode.location === "https://hearthside.geoffthedeov.net/room?gcal=error", `${noCode.location}`);
+
+    const authUrl = await call("GET", "/api/google-calendar/auth-url", { from: "hearthside.geoffthedeov.net", headers: bearer });
+    check("Google still comes back through the portfolio's one redirect URI",
+      new URL(authUrl.json.url).searchParams.get("redirect_uri") === "https://geoffthedeov.net/api/google-calendar/callback",
+      `${authUrl.json.url}`);
 
     // Tampering: a state's host must be one we'd have put there ourselves. These
     // callbacks say the person declined, which an accepted state would answer

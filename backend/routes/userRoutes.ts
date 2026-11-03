@@ -18,6 +18,7 @@ import fs from "fs";
 import { sendResetPasswordEmail, sendVerificationEmail } from "../services/emailService.js";
 import { auth } from "../middleware/auth.js";
 import { isDevEnv } from "../utils/env.js";
+import { originSite } from "../utils/frontendSites.js";
 import { hashToken } from "../utils/tokenHash.js";
 import { OAuth2Client } from "google-auth-library";
 
@@ -138,7 +139,7 @@ router.post("/register", async (req, res) => {
     await user.save();
     await bindPendingInvites(user);
     // The user is already saved, so a mail failure must not turn this into a 500.
-    if (!isDev && token) await sendVerificationEmail(email, token).catch((err: any) =>
+    if (!isDev && token) await sendVerificationEmail(email, token, originSite(req).origin).catch((err: any) =>
       console.error("Register: verification email failed:", err.message));
 
     res.status(201).json({
@@ -494,7 +495,8 @@ router.post("/forgot-password", async (req, res) => {
             }
         );
 
-        await sendResetPasswordEmail(user.email, token);
+        // The link lands on the site the request came from, if it's an allowed one (#215).
+        await sendResetPasswordEmail(user.email, token, originSite(req).origin);
 
         // mockToken is for local testing (verify_reset.ts) only. Returning it in
         // prod would let anyone reset any account's password without the email.

@@ -9,7 +9,8 @@
     "dev:debug": "NODE_OPTIONS='--inspect' next dev -H 127.0.0.1",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@icons-pack/react-simple-icons": "^13.12.0",

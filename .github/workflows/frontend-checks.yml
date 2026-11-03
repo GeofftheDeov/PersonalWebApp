@@ -1,0 +1,47 @@
+name: Frontend checks
+# Type-checks and builds the portfolio frontend on pull requests that touch it.
+# `npm run typecheck` (tsc) gives the quick answer. `next build` then runs the
+# check the deploy runs: it also type-checks the route types Next generates
+# under .next/types (page and layout exports and props), which a fresh
+# checkout doesn't have, so tsc alone can't see them.
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+    paths:
+      - 'frontend/**'
+      - 'packages/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/frontend-checks.yml'
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  typecheck:
+    name: Typecheck and build frontend
+    runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+      - name: Typecheck
+        working-directory: frontend
+        run: npm run typecheck
+      - name: Build
+        working-directory: frontend
+        run: npm run build

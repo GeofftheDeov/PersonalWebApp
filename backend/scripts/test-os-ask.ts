@@ -47,6 +47,7 @@ import pool from "../db/index.js";
 import adminRoutes, { adminGate } from "../routes/adminRoutes.js";
 import { createOsRouter, type OsRouterDeps } from "../routes/osRoutes.js";
 import type { Command } from "../os/ask.js";
+import { CLAIM_STALE_MS as T173_CLAIM_STALE_MS, confirmProposal as t173ConfirmProposal } from "../os/proposals.js";
 import type { Queryable } from "../os/overview.js";
 import type { ModelDecision, ModelReply, ModelRequest, ModelUsage, OsModel } from "../os/model.js";
 import { signJwt } from "../utils/jwt.js";
@@ -404,11 +405,50 @@ async function main() {
         const ingestOk = await confirm(ingest.id);
         check("... so a retry confirms it", ingestOk.status === 201 && ingestOk.json?.run?.skill === "ingest-debrief", ingestOk.json);
 
+        // #173: the enqueue fails and so does undoing the claim. lint-wiki is already queued (by the button above).
+        {
+            const stuck = (await ask("run the lint wiki", "typed")).json?.confirmation;
+            const unclaimFails: Queryable = {
+                query: ((sql: string, params?: unknown[]) => /SET confirmed_at = NULL/.test(sql)
+                    ? Promise.reject(new Error("database gone")) : pool.query(sql, params)) as Queryable["query"],
+            };
+            const realError = console.error;
+            console.error = () => {};
+            let threw = false;
+            try {
+                await t173ConfirmProposal(unclaimFails, { id: stuck?.id, accountId: admin.id, now: clock,
+                    enqueue: async () => { throw new Error("queue down"); } });
+            } catch { threw = true; } finally { console.error = realError; }
+            const stuckRow = await askRow(stuck?.id);
+            check("(precondition) a failed enqueue whose claim can't be undone leaves the proposal claimed with no run",
+                threw && stuckRow?.confirmed_at !== null && stuckRow.run_id === null, stuckRow);
+            const soon = await confirm(stuck?.id);
+            check("... a confirm while that claim is fresh is a 503 (try again), not a 409 (already confirmed)",
+                soon.status === 503 && typeof soon.json?.error === "string", soon);
+            const saved = clock;
+            clock = new Date(clock.getTime() + T173_CLAIM_STALE_MS);
+            const reclaimed = await confirm(stuck?.id);
+            check("... and once the claim is CLAIM_STALE_MS old, a confirm reclaims it and links the run",
+                reclaimed.status === 200 && reclaimed.json?.run?.skill === "lint-wiki"
+                    && (await askRow(stuck?.id))?.run_id === reclaimed.json.run.id, reclaimed.json);
+            check("... after which it's 409 as usual", (await confirm(stuck?.id)).status === 409);
+            clock = saved;
+
+            const retired = (await pool.query(
+                `INSERT INTO os_asks (account_id, text, source, tier, kind, latency_ms, skill, expires_at)
+                 VALUES ($1, 'run the retired skill', 'typed', 3, 'confirm_run', 0, 'retired-skill', $2) RETURNING id`,
+                [admin.id, new Date(clock.getTime() + 60_000)])).rows[0].id;
+            const gone = await confirm(retired);
+            check("a proposal of a skill that has left SKILLS gets 410 with reason not_runnable, and stays unconfirmed",
+                gone.status === 410 && gone.json?.reason === "not_runnable" && (await askRow(retired))?.confirmed_at === null, gone);
+        }
+
         // Exactly two minutes on: expired.
         clock = new Date(new Date("2026-10-12T15:00:00Z").getTime() + TTL_MS);
         const weekly = proposals["please run the weekly review"];
         const expired = await confirm(weekly.id);
-        check("an expired proposal gets 410", expired.status === 410 && typeof expired.json?.error === "string", expired);
+        check("an expired proposal gets 410 (reason expired)",
+            expired.status === 410 && typeof expired.json?.error === "string" && expired.json.reason === "expired", expired);
         check("... queues nothing and stays unconfirmed",
             !(await createdRuns()).some((r) => r.skill === "weekly-review") && (await askRow(weekly.id))?.confirmed_at === null);
         check("a confirmed proposal confirmed again after expiry is still 409", (await confirm(brief.id)).status === 409);

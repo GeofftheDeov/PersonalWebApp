@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import { isDevEnv } from '../utils/env.js';
+import { portfolioSite } from '../utils/frontendSites.js';
 
 dotenv.config();
 
@@ -14,8 +15,13 @@ const transporter = nodemailer.createTransport({
     }
 });
 
-export const sendResetPasswordEmail = async (email: string, token: string) => {
-    const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${token}`;
+/**
+ * `siteOrigin` is the site the link lands on (#215): the one the request came
+ * from, already checked against the allowlist by utils/frontendSites.ts. Both
+ * sites serve /reset-password and /verify-email. Without one, the portfolio.
+ */
+export const sendResetPasswordEmail = async (email: string, token: string, siteOrigin = portfolioSite().origin) => {
+    const resetUrl = `${siteOrigin}/reset-password?token=${token}`;
 
     const mailOptions = {
         from: process.env.EMAIL_USER,
@@ -83,8 +89,9 @@ export const sendEmail = async (msg: OutgoingEmail) => {
     return info;
 };
 
-export const sendVerificationEmail = async (email: string, token: string) => {
-    const verifyUrl = `${process.env.FRONTEND_URL}/verify-email?token=${token}`;
+/** `siteOrigin` as for sendResetPasswordEmail. */
+export const sendVerificationEmail = async (email: string, token: string, siteOrigin = portfolioSite().origin) => {
+    const verifyUrl = `${siteOrigin}/verify-email?token=${token}`;
 
     const mailOptions = {
         from: process.env.EMAIL_USER,

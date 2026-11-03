@@ -31,7 +31,8 @@ export function isoWeek(day: string): string {
 /**
  * What may be enqueued: the runnable skills. The runner keeps its own list of
  * what it will run, and claims only those; a queued run of a skill no runner
- * lists waits (and holds off a second press of that skill) until one does.
+ * lists waits (and holds off a second press of that skill) until one does, or
+ * until QUEUED_EXPIRE_AFTER, when it fails.
  *
  * `label` is the RUN button's text (upper-cased) and the "run <label>" voice
  * phrase. `output` is where the vault skill writes, given the run's calendar
@@ -67,6 +68,13 @@ export const skillSchedule = (id: SkillId): SkillSchedule | null =>
 
 /** A run still `running` after this long is presumed dead (PC slept, runner killed). */
 export const STALE_AFTER = '45 minutes';
+/**
+ * A run still `queued` after this long is given up on (#170): no runner that
+ * lists its skill has polled, so it would otherwise wait forever, hold off
+ * every later press of that skill, and run long after anyone wanted it. Long
+ * enough to outlast a night with the PC asleep.
+ */
+export const QUEUED_EXPIRE_AFTER = '12 hours';
 
 /** What started a run: the RUN button (through the queue), the Task Scheduler, or a hand-run wrapper. */
 export const TRIGGERS = ['button', 'scheduled', 'manual'] as const;
@@ -152,8 +160,9 @@ export function runnerOnline(now: Date = new Date()): boolean {
 /**
  * Enqueue, unless the same skill is already queued or running — pressing the
  * button twice should not run the brief twice. Returns the run either way.
- * A `running` row past STALE_AFTER is expired first, so a dead run doesn't
- * block the RUN button or a voice/tap confirm with "already running".
+ * A `running` row past STALE_AFTER, or a `queued` one past QUEUED_EXPIRE_AFTER,
+ * is expired first, so a dead run doesn't block the RUN button or a voice/tap
+ * confirm with "already running".
  *
  *
  * The unique partial index idx_agent_runs_one_active (migration 0002) decides
@@ -182,6 +191,11 @@ async function expireStale(): Promise<void> {
         `UPDATE agent_runs SET status = 'failed', finished_at = now(),
                 summary = 'no result from runner within ${STALE_AFTER}'
           WHERE status = 'running' AND claimed_at < now() - interval '${STALE_AFTER}'`);
+    // claimed_at stays null: the run never started.
+    await query(
+        `UPDATE agent_runs SET status = 'failed', finished_at = now(),
+                summary = 'no runner claimed it within ${QUEUED_EXPIRE_AFTER}'
+          WHERE status = 'queued' AND requested_at < now() - interval '${QUEUED_EXPIRE_AFTER}'`);
 }
 
 export async function listRuns(limit = 10): Promise<AgentRun[]> {

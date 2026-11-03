@@ -6,14 +6,15 @@
  * twice. The unique partial index from migration 0002 now decides the race.
  *
  * Also checks that migration 0002 builds on a table that a race has already
- * left with two active runs of one skill.
+ * left with two active runs of one skill, and that a queued run no runner
+ * claims expires after QUEUED_EXPIRE_AFTER (#170).
  *
  * Run:  DATABASE_URL=postgresql://postgres@127.0.0.1:5433/pwatest npx tsx scripts/test-agent-runs-enqueue.ts
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import pool, { query } from "../db/index.js";
-import { enqueueRun, claimNext, completeRun } from "../services/agentRuns.js";
+import { enqueueRun, claimNext, completeRun, listRuns, QUEUED_EXPIRE_AFTER } from "../services/agentRuns.js";
 
 let pass = 0;
 let fail = 0;
@@ -59,6 +60,44 @@ async function main() {
     await completeRun(running.id, { ok: true, summary: "done" });
     const next = await enqueueRun("morning-brief", null);
     assert(next.created && next.run.id !== running.id, "no new run after completion");
+  });
+
+  console.log("\n#170 — a queued run no runner claims expires\n");
+
+  const queuedAgo = async (skill: string, ago: string) =>
+    (await query(`INSERT INTO agent_runs (skill, requested_at) VALUES ($1, now() - $2::interval) RETURNING id`, [skill, ago])).rows[0].id;
+  const runRow = async (id: number) => (await query(`SELECT * FROM agent_runs WHERE id = $1`, [id])).rows[0];
+
+  await check("a queued run past the window fails, and the next press queues a new one", async () => {
+    await query(`DELETE FROM agent_runs`);
+    const old = await queuedAgo("lint-wiki", "12 hours 1 minute");
+    const next = await enqueueRun("lint-wiki", null);
+    assert(next.created && next.run.id !== old, "the press got the stale run back");
+    const r = await runRow(old);
+    assert(r.status === "failed" && r.finished_at !== null && r.claimed_at === null, `stale run: ${r.status}, claimed ${r.claimed_at}`);
+    assert(r.summary === `no runner claimed it within ${QUEUED_EXPIRE_AFTER}`, `summary: ${r.summary}`);
+  });
+
+  await check("a queued run inside the window still holds off a second press", async () => {
+    await query(`DELETE FROM agent_runs`);
+    const recent = await queuedAgo("lint-wiki", "11 hours 59 minutes");
+    const again = await enqueueRun("lint-wiki", null);
+    assert(!again.created && again.run.id === recent, "a second run was queued beside the waiting one");
+  });
+
+  await check("a runner that finally lists the skill doesn't pick up the stale request", async () => {
+    await query(`DELETE FROM agent_runs`);
+    const old = await queuedAgo("weekly-review", "2 days");
+    const claimed = await claimNext("test-pc", ["weekly-review"]);
+    assert(claimed === null, `claimed run ${claimed?.id}`);
+    assert((await runRow(old)).status === "failed", "the stale run wasn't expired");
+  });
+
+  await check("listing the history expires it too, so the admin page shows it failed", async () => {
+    await query(`DELETE FROM agent_runs`);
+    const old = await queuedAgo("weekly-review", "13 hours");
+    const [r] = await listRuns();
+    assert(r.id === old && r.status === "failed", `listed: ${r.id} ${r.status}`);
   });
 
   console.log("\nmigration 0002 on a table that already has duplicates\n");

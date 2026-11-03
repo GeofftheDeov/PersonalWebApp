@@ -648,6 +648,17 @@ async function main() {
         check("a run claimed over 45 minutes ago isn't active; one claimed 44 minutes ago is",
             mixed?.activeRun?.id === alive && mixed.activeCount === 1, { activeRun: mixed?.activeRun, dead, alive });
         await pool.query(`DELETE FROM agent_runs WHERE id = ANY($1)`, [[dead, alive]]);
+
+        // A run queued over 12 hours ago is given up on (#170); one queued just under isn't.
+        const queuedSince = async (skill: string, minutes: number) => (await pool.query(
+            `INSERT INTO agent_runs (skill, requested_at) VALUES ($1, $2) RETURNING id`,
+            [skill, new Date(clock.getTime() - minutes * MIN)])).rows[0].id;
+        const stale = await queuedSince("weekly-review", 12 * 60 + 1);
+        const waiting = await queuedSince("ingest-debrief", 12 * 60 - 1);
+        const queuedMix = await briefAt(clock);
+        check("a run queued over 12 hours ago isn't active; one queued just under 12 hours ago is",
+            queuedMix?.activeRun?.id === waiting && queuedMix.activeCount === 1, { activeRun: queuedMix?.activeRun, stale, waiting });
+        await pool.query(`DELETE FROM agent_runs WHERE id = ANY($1)`, [[stale, waiting]]);
         const after = await pageAt(new Date());
         check("once nothing is active the page is back on the 2-minute refresh", after.every === "120000", after.every);
 

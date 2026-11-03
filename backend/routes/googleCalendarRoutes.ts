@@ -5,6 +5,7 @@ import { auth } from '../middleware/auth.js';
 import ApiKeyVault from '../models/ApiKeyVault.js';
 import { GOOGLE_PROVIDER, GOOGLE_SCOPES, loadGoogleGrant, saveGoogleGrant } from '../utils/googleCalendarGrant.js';
 import { disableBusySource } from '../planning/busySources.js';
+import { originSite, portfolioSite, profilePath, siteForHost, type FrontendSite } from '../utils/frontendSites.js';
 
 /**
  * Google Calendar OAuth — lets a user connect their Google account so the app
@@ -15,6 +16,13 @@ import { disableBusySource } from '../planning/busySources.js';
  *
  * Connections made before #84 hold calendar.events only, which free/busy does
  * not accept; their owners are asked to reconnect once (`needsReconsent`).
+ *
+ * Connect returns to the site it was started on (#215): auth-url puts the
+ * originating host in `state`, and the callback sends the person to that
+ * site's own page (/profile on the portfolio, /room on Hearthside). A state
+ * whose host isn't on the allowlist (utils/frontendSites.ts) is refused. Google
+ * always comes back through the one redirect URI below, on the portfolio host;
+ * only the final hop goes to Hearthside.
  *
  * Required env: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET.
  * The OAuth client in Google Cloud Console must list
@@ -44,8 +52,8 @@ const oauthClient = () => {
 router.get('/auth-url', auth, (req: any, res: Response) => {
     try {
         const back = RETURN_TABS.has(String(req.query.return)) ? String(req.query.return) : undefined;
-              const state = signJwt({ id: req.user.id, purpose: 'gcal-connect', back }, { expiresIn: '10m' });
-
+        const host = originSite(req).host;
+        const state = signJwt({ id: req.user.id, purpose: 'gcal-connect', back, host }, { expiresIn: '10m' });
 
         const url = oauthClient().generateAuthUrl({
             access_type: 'offline',
@@ -63,29 +71,38 @@ router.get('/auth-url', auth, (req: any, res: Response) => {
 // ── GET /api/google-calendar/callback ─────────────────────────────────────────
 // Google redirects here. No auth header — identity comes from the state JWT.
 router.get('/callback', async (req: any, res: Response) => {
-    const frontend = process.env.FRONTEND_URL || 'http://localhost:3000';
+    // Until the state is trusted, anything that goes wrong goes back to the portfolio.
+    let site: FrontendSite = portfolioSite();
     let tab = '';
+    const back = (result: string) => res.redirect(`${site.origin}${profilePath(site)}?gcal=${result}${tab}`);
     try {
         const { code, state, error } = req.query as { code?: string; state?: string; error?: string };
-        if (!state) return res.redirect(`${frontend}/profile?gcal=error`);
+        if (!state) return back('error');
 
         const decoded = verifyJwt(state);
         if (decoded.purpose !== 'gcal-connect') throw new Error('Bad state');
+        // A state from before #215 carries no host and meant the portfolio. One
+        // naming a host off the allowlist was not issued by this environment.
+        if (decoded.host !== undefined) {
+            const from = siteForHost(decoded.host);
+            if (!from) throw new Error(`state names a host that isn't allowed: ${String(decoded.host)}`);
+            site = from;
+        }
         if (RETURN_TABS.has(decoded.back)) tab = `&tab=${decoded.back}`;
-        if (error) return res.redirect(`${frontend}/profile?gcal=denied${tab}`);
-        if (!code) return res.redirect(`${frontend}/profile?gcal=error${tab}`);
+        if (error) return back('denied');
+        if (!code) return back('error');
 
         const { tokens } = await oauthClient().getToken(code);
         if (!tokens.refresh_token) {
             // Happens if consent was previously granted without prompt=consent
-            return res.redirect(`${frontend}/profile?gcal=noRefreshToken${tab}`);
+            return back('noRefreshToken');
         }
 
         await saveGoogleGrant(String(decoded.id as string), tokens.refresh_token, tokens.scope);
-        res.redirect(`${frontend}/profile?gcal=connected${tab}`);
+        back('connected');
     } catch (err: any) {
         console.error('[GCAL] OAuth callback failed:', err.message);
-        res.redirect(`${frontend}/profile?gcal=error${tab}`);
+        back('error');
     }
 });
 

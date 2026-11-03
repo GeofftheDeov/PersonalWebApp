@@ -224,6 +224,77 @@ async function main() {
 
     const loginAfter = await call("POST", "/api/users/login", { body: { email: player.email, password: player.password } });
     check("the verified player can log in with their password", loginAfter.status === 200, `${loginAfter.status}`);
+
+    // ── Google Calendar Connect ──────────────────────────────────────────────
+    console.log("\nGoogle Calendar Connect\n");
+    /** Start Connect from `from` and return the signed state it hands Google. */
+    const startConnect = async (from: string | undefined, query = "") => {
+      const res = await call("GET", `/api/google-calendar/auth-url${query}`, { from, headers: bearer });
+      return { status: res.status, state: res.json.url ? new URL(res.json.url).searchParams.get("state") ?? "" : "" };
+    };
+    /** Google sending the person back. `error=access_denied` keeps the run away from Google's token endpoint. */
+    const callback = (state: string, extra = "error=access_denied") =>
+      call("GET", `/api/google-calendar/callback?state=${encodeURIComponent(state)}&${extra}`);
+
+    for (const [envName, env, from, back] of [
+      ["prod", PROD, "hearthside.geoffthedeov.net", "https://hearthside.geoffthedeov.net/room"],
+      ["prod", PROD, "geoffthedeov.net", "https://geoffthedeov.net/profile"],
+      ["prod", PROD, "www.geoffthedeov.net", "https://www.geoffthedeov.net/profile"],
+      ["dev", DEV, "deov.hearthside.geoffthedeov.net", "https://deov.hearthside.geoffthedeov.net/room"],
+      ["dev", DEV, "deov.geoffthedeov.net", "https://deov.geoffthedeov.net/profile"],
+    ] as const) {
+      useEnv(env);
+      const started = await startConnect(from);
+      const done = await callback(started.state);
+      check(`${envName}: Connect started on ${from} comes back to ${back}`,
+        started.status === 200 && done.status === 302 && done.location === `${back}?gcal=denied`,
+        `${started.status} ${done.status} ${done.location}`);
+    }
+
+    useEnv(PROD);
+    const fromUnknown = await startConnect("evil.example");
+    const unknownBack = await callback(fromUnknown.state);
+    check("prod: Connect started from an unknown host comes back to the portfolio's /profile",
+      unknownBack.location === "https://geoffthedeov.net/profile?gcal=denied", `${unknownBack.status} ${unknownBack.location}`);
+
+    const withTab = await startConnect("hearthside.geoffthedeov.net", "?return=availability");
+    const tabBack = await callback(withTab.state);
+    check("the availability tab rides along to Hearthside's /room",
+      tabBack.location === "https://hearthside.geoffthedeov.net/room?gcal=denied&tab=availability", `${tabBack.location}`);
+
+    const noCode = await callback(withTab.state, "");
+    check("a callback with neither code nor error is an error on the site it started from",
+      noCode.location === "https://hearthside.geoffthedeov.net/room?gcal=error&tab=availability", `${noCode.location}`);
+
+    // Tampering: a state's host must be one we'd have put there ourselves. These
+    // callbacks say the person declined, which an accepted state would answer
+    // with gcal=denied on its site; a refused one is gcal=error on the portfolio.
+    const forged = signJwt({ id: person.id, purpose: "gcal-connect", host: "evil.example" }, { expiresIn: "10m" });
+    const forgedBack = await callback(forged);
+    check("a signed state naming a host off the allowlist is refused: an error on the portfolio",
+      forgedBack.location === "https://geoffthedeov.net/profile?gcal=error", `${forgedBack.status} ${forgedBack.location}`);
+
+    const [h, payload, sig] = (await startConnect("geoffthedeov.net")).state.split(".");
+    const altered = JSON.parse(Buffer.from(payload, "base64url").toString());
+    altered.host = "hearthside.geoffthedeov.net";
+    const tampered = `${h}.${Buffer.from(JSON.stringify(altered)).toString("base64url")}.${sig}`;
+    const tamperedBack = await callback(tampered);
+    check("a state whose host was edited after signing is refused: an error on the portfolio",
+      tamperedBack.location === "https://geoffthedeov.net/profile?gcal=error", `${tamperedBack.status} ${tamperedBack.location}`);
+
+    const otherEnv = signJwt({ id: person.id, purpose: "gcal-connect", host: "deov.hearthside.geoffthedeov.net" }, { expiresIn: "10m" });
+    const otherEnvBack = await callback(otherEnv);
+    check("prod refuses a state naming the dev Hearthside host",
+      otherEnvBack.location === "https://geoffthedeov.net/profile?gcal=error", `${otherEnvBack.location}`);
+
+    const legacy = signJwt({ id: person.id, purpose: "gcal-connect" }, { expiresIn: "10m" });
+    const legacyBack = await callback(legacy);
+    check("a state from before this change (no host) still comes back to the portfolio",
+      legacyBack.location === "https://geoffthedeov.net/profile?gcal=denied", `${legacyBack.location}`);
+
+    const hearthsideState = (await startConnect("hearthside.geoffthedeov.net")).state;
+    check("the state carries the originating host",
+      (verifyJwt(hearthsideState) as any).host === "hearthside.geoffthedeov.net", JSON.stringify(verifyJwt(hearthsideState)));
   } finally {
     await pool.query(`DELETE FROM accounts WHERE email = ANY($1)`, [emails]);
     server.close();

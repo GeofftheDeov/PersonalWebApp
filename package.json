@@ -1,0 +1,13 @@
+{
+  "name": "personal-web-app",
+  "private": true,
+  "description": "npm workspace: the portfolio frontend and the code it shares with Hearthside (spec #69). The backend and Paperclip keep their own lockfiles.",
+  "workspaces": [
+    "frontend",
+    "packages/*"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm test --workspaces --if-present"
+  }
+}

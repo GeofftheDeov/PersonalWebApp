@@ -1,0 +1,21 @@
+{
+  "name": "@gtd/shared",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Code the portfolio and Hearthside share (spec #69). Shipped as TypeScript source: each Next app compiles it through transpilePackages.",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./api": "./src/api/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "fast-glob": "^3.3.3",
+    "tsx": "^4.21.0",
+    "typescript": "^5"
+  }
+}

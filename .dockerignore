@@ -1,0 +1,23 @@
+# For images built from the repo root: the portfolio (frontend/Dockerfile,
+# #209) and, later, Hearthside. The backend and Paperclip build from their own
+# folders and use their own .dockerignore.
+
+# Installed and built inside the image, never copied from the host.
+**/node_modules
+**/.next
+**/out
+
+**/.env
+**/.env.local
+**/.env*.local
+**/*.log
+
+# Not part of any frontend image.
+.git
+.github
+.claude
+.aws
+certs
+backend
+paperclip
+scripts

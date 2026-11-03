@@ -20,8 +20,10 @@ The frontend of the Personal Web App, built with Next.js and Tailwind CSS.
 
 ### Installation
 
+The frontend is an npm workspace with `packages/shared` (`@gtd/shared`, shared with Hearthside). Install from the repo root, where the one lockfile lives:
+
 ```bash
-npm install
+cd .. && npm install
 ```
 
 ### Development

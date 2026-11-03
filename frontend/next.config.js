@@ -4,6 +4,9 @@ const nextConfig = {
     // A type error fails the build, and so the deploy. Pull requests run
     // `npm run typecheck` and this build (.github/workflows/frontend-checks.yml).
     typescript: { ignoreBuildErrors: false },
+    // The workspace package shared with Hearthside (#209) ships TypeScript
+    // source, so Next compiles it like the app's own code.
+    transpilePackages: ['@gtd/shared'],
     // output: 'standalone',
     experimental: { proxyTimeout: 300_000 },
     async redirects() {

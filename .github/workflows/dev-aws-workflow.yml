@@ -86,9 +86,11 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
+        # From the repo root: the frontend is an npm workspace with the shared
+        # packages and the root lockfile (#209).
         run: |
-          cd frontend
           docker buildx build --platform linux/amd64 \
+            -f frontend/Dockerfile \
             -t $ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:$IMAGE_TAG \
             -t $ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:dev \
             --build-arg NEXT_PUBLIC_GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }} \

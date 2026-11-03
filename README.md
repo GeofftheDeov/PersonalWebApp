@@ -6,7 +6,7 @@ A full-stack personal web application featuring a Next.js frontend and an Expres
 
 - `frontend/`: Next.js application (React, Tailwind CSS, Framer Motion)
 - `backend/`: Express.js server (MongoDB, Salesforce JSforce integration)
-- `shared/`: (Planned) Shared types and utilities
+- `packages/shared/`: `@gtd/shared`, the code the portfolio and Hearthside share (so far the API client)
 - `resume-review` (compose service): Stan's Resume Review Flask app, built from
   the sibling repo at `../resume_review/resume_review` (both repos must be
   checked out side by side). Served on host port **5002** (container 5000).
@@ -33,9 +33,13 @@ A full-stack personal web application featuring a Next.js frontend and an Expres
 
 ### Frontend Setup
 
-1. Navigate to `frontend/`
-2. Install dependencies: `npm install`
-3. Start the development server: `npm run dev`
+The frontend and `packages/*` are one npm workspace, with one lockfile at the repo root.
+
+1. Install dependencies from the repo root: `npm install` (or `npm ci`)
+2. Start the development server: `cd frontend && npm run dev`
+3. Check: `npm run typecheck` and `npm test` at the root run every workspace's; `cd frontend && npm run build` runs the build the deploy runs.
+
+The frontend image builds from the repo root: `docker build -f frontend/Dockerfile .`
 
 ## Deployment
 

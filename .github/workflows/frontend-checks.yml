@@ -1,20 +1,32 @@
 name: Frontend checks
-# Type-checks the portfolio frontend on every pull request. The production
-# build (`next build`) runs the same check, so a type error that slips past
-# this would fail the deploy instead.
+# Type-checks and builds the portfolio frontend on pull requests that touch it.
+# `npm run typecheck` (tsc) gives the quick answer. `next build` then runs the
+# check the deploy runs: it also type-checks the route types Next generates
+# under .next/types (page and layout exports and props), which a fresh
+# checkout doesn't have, so tsc alone can't see them.
 on:
   pull_request:
     types:
       - opened
       - reopened
       - synchronize
+    paths:
+      - 'frontend/**'
+      - 'packages/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/frontend-checks.yml'
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+permissions:
+  contents: read
 jobs:
   typecheck:
-    name: Typecheck frontend
+    name: Typecheck and build frontend
     runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,3 +42,6 @@ jobs:
       - name: Typecheck
         working-directory: frontend
         run: npm run typecheck
+      - name: Build
+        working-directory: frontend
+        run: npm run build

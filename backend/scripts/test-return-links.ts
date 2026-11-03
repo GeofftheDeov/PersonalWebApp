@@ -48,6 +48,7 @@ const outbox: Mail[] = [];
 
 const { default: pool } = await import("../db/index.js");
 const { default: userRoutes } = await import("../routes/userRoutes.js");
+const { default: leadRoutes } = await import("../routes/leadRoutes.js");
 const { default: googleCalendarRoutes } = await import("../routes/googleCalendarRoutes.js");
 const { signJwt, verifyJwt } = await import("../utils/jwt.js");
 
@@ -83,6 +84,7 @@ async function main() {
   const app = express();
   app.use(express.json());
   app.use("/api/users", userRoutes);
+  app.use("/api/leads", leadRoutes);
   app.use("/api/google-calendar", googleCalendarRoutes);
   const server = app.listen(0, "127.0.0.1");
   await new Promise((r) => server.once("listening", r));
@@ -166,6 +168,62 @@ async function main() {
     check("hosts match case-insensitively, and the link uses the allowlist's spelling",
       upper.status === 200 && !!linkTo(person.email)?.startsWith("https://hearthside.geoffthedeov.net/reset-password?token="),
       `${upper.status} ${linkTo(person.email)}`);
+
+    // ── verify-email links ───────────────────────────────────────────────────
+    console.log("\nverify-email links\n");
+    /** Sign up through `route` from `from`; returns the email and the link it was sent. */
+    const signUp = async (route: "register" | "leads", from: string | undefined) => {
+      const email = `t215-${route}-${crypto.randomBytes(4).toString("hex")}@example.test`;
+      emails.push(email);
+      const password = crypto.randomBytes(12).toString("hex");
+      const res = route === "register"
+        ? await call("POST", "/api/users/register", { from, body: { name: "Signup", email, password } })
+        : await call("POST", "/api/leads", { from, body: { firstName: "Sign", lastName: "Up", email, password } });
+      return { status: res.status, email, password, link: linkTo(email) };
+    };
+
+    for (const [envName, env, hosts] of [
+      ["prod", PROD, ["geoffthedeov.net", "www.geoffthedeov.net", "hearthside.geoffthedeov.net"]],
+      ["dev", DEV, ["deov.geoffthedeov.net", "deov.hearthside.geoffthedeov.net"]],
+    ] as const) {
+      useEnv(env);
+      for (const host of hosts) {
+        const r = await signUp("register", host);
+        check(`${envName}: signing up on ${host} sends a verify link to https://${host}/verify-email`,
+          r.status === 201 && !!r.link?.startsWith(`https://${host}/verify-email?token=`), `${r.status} ${r.link}`);
+      }
+    }
+    useEnv(PROD);
+    const leadOnHearthside = await signUp("leads", "hearthside.geoffthedeov.net");
+    check("the create-account signup (/api/leads) links back to its site too",
+      leadOnHearthside.status === 201 && !!leadOnHearthside.link?.startsWith("https://hearthside.geoffthedeov.net/verify-email?token="),
+      `${leadOnHearthside.status} ${leadOnHearthside.link}`);
+    const unknownSignup = await signUp("register", "evil.example");
+    check("prod: signing up from an unknown host sends a verify link to the portfolio host",
+      unknownSignup.status === 201 && !!unknownSignup.link?.startsWith("https://geoffthedeov.net/verify-email?token="),
+      `${unknownSignup.status} ${unknownSignup.link}`);
+
+    // ── verify-email logs you in ─────────────────────────────────────────────
+    console.log("\nverify-email logs you in\n");
+    const player = await signUp("register", "hearthside.geoffthedeov.net");
+    const verifyToken = new URL(player.link ?? "http://x/").searchParams.get("token") ?? "";
+    const verified = await call("POST", "/api/users/verify-email", { from: "hearthside.geoffthedeov.net", body: { token: verifyToken } });
+    const issued = verified.setCookie.find((c) => c.startsWith(`${COOKIE}=`)) ?? "";
+    check("verifying returns a token and the person, as login does",
+      verified.status === 200 && typeof verified.json.token === "string" && verified.json.user?.email === player.email,
+      `${verified.status} ${JSON.stringify(verified.json).slice(0, 160)}`);
+    check("...and sets the session cookie holding that token",
+      !!verified.json.token && issued.startsWith(`${COOKIE}=${verified.json.token};`), issued || "(none)");
+    const me = await call("GET", "/api/users/profile", { headers: { cookie: `${COOKIE}=${verified.json.token}` } });
+    check("...which signs the new player in", me.status === 200 && me.json.email === player.email, `${me.status}`);
+
+    const again = await call("POST", "/api/users/verify-email", { body: { token: verifyToken } });
+    check("a verify link works once: used again it issues no token and no cookie",
+      again.status === 400 && !again.json.token && !again.setCookie.some((c) => c.startsWith(`${COOKIE}=`)),
+      `${again.status} ${JSON.stringify(again.json)} ${JSON.stringify(again.setCookie)}`);
+
+    const loginAfter = await call("POST", "/api/users/login", { body: { email: player.email, password: player.password } });
+    check("the verified player can log in with their password", loginAfter.status === 200, `${loginAfter.status}`);
   } finally {
     await pool.query(`DELETE FROM accounts WHERE email = ANY($1)`, [emails]);
     server.close();

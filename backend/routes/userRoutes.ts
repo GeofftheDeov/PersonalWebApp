@@ -159,16 +159,21 @@ router.post("/verify-email", async (req, res) => {
     if (typeof token !== "string" || !token) return res.status(400).json({ error: "Token is required" });
 
     try {
-        const user = await Account.findOne({ emailVerificationToken: hashToken(token) });
+        // Spend the token as we find it. The model layer has no $unset; null clears the column.
+        const user: any = await Account.findOneAndUpdate(
+            { emailVerificationToken: hashToken(token) },
+            { $set: { isVerified: true, emailVerificationToken: null } },
+            { new: true }
+        );
         if (!user) return res.status(400).json({ error: "Invalid or expired token" });
 
-        // The model layer has no $unset; null clears the column.
-        await Account.updateOne(
-            { _id: user._id },
-            { $set: { isVerified: true, emailVerificationToken: null } }
-        );
+        await bindPendingInvites(user);
 
-        res.json({ message: "Email verified successfully" });
+        // Verifying is where a new account first gets a token (#215, #69), so it
+        // signs the person in: the session cookie, and the token for bearer
+        // clients, as login does. Someone who signed up on Hearthside is then
+        // signed in on both sites.
+        res.json({ message: "Email verified successfully", token: issueSession(res, user), user: publicUser(user) });
     } catch (error) {
         console.error("Verify Email Error:", error);
         res.status(500).json({ error: "Error verifying email" });

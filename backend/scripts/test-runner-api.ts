@@ -20,7 +20,7 @@ import crypto from "crypto";
 import pool from "../db/index.js";
 import adminRoutes from "../routes/adminRoutes.js";
 import runnerRoutes from "../routes/runnerRoutes.js";
-import { SKILLS } from "../services/agentRuns.js";
+import { EXPIRED_SUMMARY, SKILLS } from "../services/agentRuns.js";
 import { signJwt } from "../utils/jwt.js";
 
 if (!/(\/\/|@)(127\.0\.0\.1|localhost)[:/]/.test(process.env.DATABASE_URL ?? "")) {
@@ -245,6 +245,41 @@ async function main() {
 
             const unknown = await complete(2_000_000_000, { ok: true, usage: { costUsd: 0.1 } });
             check("completing an unknown run gets 409", unknown.status === 409, unknown);
+        }
+
+        // ── #168: a run expired as presumed dead still takes its late complete ──
+        {
+            const id = await runningRun();
+            // Claimed an hour ago: the next claim (as the runner's poll would) expires it.
+            await pool.query(`UPDATE agent_runs SET claimed_at = now() - interval '1 hour' WHERE id = $1`, [id]);
+            await asRunner("/claim", { runner: `t168-${tag}`, skills: [] });
+            const expired = await row(id);
+            check("a run claimed over STALE_AFTER ago is expired as failed",
+                expired.status === "failed" && expired.summary === EXPIRED_SUMMARY && expired.finished_at !== null, expired);
+
+            const usage = { costUsd: 1.25, inputTokens: 1000, outputTokens: 200, durationMs: 3_000_000 };
+            const res = await complete(id, { ok: true, summary: "late but done", outputPath: "outputs/reviews/2026-W44.md", usage });
+            const r = await row(id);
+            check("a late complete of an expired run answers 200 with the run",
+                res.status === 200 && Number(res.json?.run?.id) === id && res.json?.run?.status === "succeeded"
+                && res.json?.run?.was_expired === undefined, res);
+            check("a late complete records the real outcome and usage",
+                r.status === "succeeded" && r.summary === "late but done" && r.output_path === "outputs/reviews/2026-W44.md"
+                && r.cost_usd === 1.25 && r.input_tokens === 1000 && r.output_tokens === 200 && r.duration_ms === 3_000_000, r);
+            check("a late complete moves finished_at to when the report came",
+                new Date(r.finished_at).getTime() >= new Date(expired.finished_at).getTime(), { before: expired.finished_at, after: r.finished_at });
+
+            const again = await complete(id, { ok: false, summary: "again", usage: { costUsd: 9 } });
+            const r2 = await row(id);
+            check("a second complete of that run gets 409 and changes nothing",
+                again.status === 409 && r2.status === "succeeded" && r2.summary === "late but done" && r2.cost_usd === 1.25, { again, r2 });
+
+            // A run the runner itself reported as failed is not an expired one.
+            const id2 = await runningRun();
+            await complete(id2, { ok: false, summary: "boom" });
+            const late2 = await complete(id2, { ok: true, summary: "fine really" });
+            check("a run the runner completed as failed can't be completed again (409)",
+                late2.status === 409 && (await row(id2)).summary === "boom", late2);
         }
 
         // ── auth is unchanged ──────────────────────────────────────────────────

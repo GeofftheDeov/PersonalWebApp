@@ -13,10 +13,11 @@
  *
  *   DATABASE_URL=postgresql://postgres@127.0.0.1:5433/pwatest npx tsx scripts/test-campaign-settings-api.ts
  */
+import "./use-test-jwt-secret.js";
 import express from "express";
 import type { AddressInfo } from "net";
 import crypto from "crypto";
-import jwt from "jsonwebtoken";
+import { signJwt } from "../utils/jwt.js";
 import pool from "../db/index.js";
 import { bus } from "../events/index.js";
 import campaignRoutes from "../routes/campaignRoutes.js";
@@ -30,7 +31,6 @@ if (!/(\/\/|@)(127\.0\.0\.1|localhost)[:/]/.test(process.env.DATABASE_URL ?? "")
     process.exit(2);
 }
 
-const SECRET = process.env.JWT_SECRET || "your-secret-key-change-this";
 
 let pass = 0, fail = 0;
 function check(name: string, ok: boolean, detail: unknown = "") {
@@ -84,7 +84,7 @@ async function main() {
                 `INSERT INTO accounts (id, handle, email, first_name, app_role, app_role_source)
                  VALUES (gen_random_uuid(), $1, $2, $3, $4, 'manual') RETURNING id`,
                 [`${name}_${tag}`, email, name, name === "admin" ? "admin" : "user"]);
-            who[name] = { id: r.id, token: jwt.sign({ id: r.id, email }, SECRET, { expiresIn: "1h" }) };
+            who[name] = { id: r.id, token: signJwt({ id: r.id, email }, { expiresIn: "1h" }) };
         }
 
         console.log("\n#80 — campaign owner, GM title and table link\n");

@@ -11,6 +11,8 @@
  * The server checks the same limits (backend/services/attachments.ts); these
  * are here only so the error shows at once.
  */
+import { ApiError } from '@gtd/shared/api';
+import { api } from './api';
 
 export const ATTACHMENT_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf'];
 export const ATTACHMENT_ACCEPT = ATTACHMENT_TYPES.join(',');
@@ -47,18 +49,22 @@ async function imageSize(file: File): Promise<{ width: number; height: number } 
 }
 
 /** Uploads one file for a thread and returns its key. Throws an Error with a message fit to show. */
-export async function uploadAttachment(threadKey: string, file: File, token: string | null): Promise<string> {
+export async function uploadAttachment(threadKey: string, file: File): Promise<string> {
     const problem = attachmentProblem(file);
     if (problem) throw new Error(problem);
     const size = await imageSize(file);
-    const res = await fetch(`/api/threads/${encodeURIComponent(threadKey)}/attachments`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name: file.name, contentType: file.type, size: file.size, ...(size ?? {}) }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || !data?.url || !data?.key) throw new Error(data?.error || `Couldn't upload ${file.name} (${res.status})`);
+    let data: { url?: string; method?: string; headers?: Record<string, string>; key?: string } | undefined;
+    try {
+        data = await api.post(`/api/threads/${encodeURIComponent(threadKey)}/attachments`,
+            { name: file.name, contentType: file.type, size: file.size, ...(size ?? {}) });
+    } catch (err) {
+        if (!(err instanceof ApiError)) throw err;
+        const said = (err.body as { error?: string } | undefined)?.error;
+        throw new Error(said || `Couldn't upload ${file.name} (${err.status})`);
+    }
+    if (!data?.url || !data?.key) throw new Error(`Couldn't upload ${file.name}`);
 
+    // Straight to S3 with a plain fetch: the presigned URL is its own credential.
     const put = await fetch(data.url, { method: data.method || 'PUT', headers: data.headers ?? {}, body: file });
     if (!put.ok) throw new Error(`Couldn't upload ${file.name} (storage answered ${put.status})`);
     return data.key as string;

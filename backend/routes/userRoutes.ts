@@ -16,7 +16,7 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { sendResetPasswordEmail, sendVerificationEmail } from "../services/emailService.js";
-import { auth } from "../middleware/auth.js";
+import { auth, requireAdmin } from "../middleware/auth.js";
 import { isDevEnv } from "../utils/env.js";
 import { originSite } from "../utils/frontendSites.js";
 import { hashToken } from "../utils/tokenHash.js";
@@ -339,6 +339,21 @@ router.get("/me/capabilities", auth, async (req: any, res) => {
     } catch (err) {
         res.status(500).json({ error: "Failed to fetch capabilities" });
     }
+});
+
+/**
+ * A bearer token for the admin portal (#210). The portal is server-rendered
+ * and takes `?token=` in its URL (its pages call the API with it as a bearer),
+ * but the browser no longer holds a JWT: the session cookie is HttpOnly and
+ * nothing is kept in localStorage. So the nav asks for one as the admin link
+ * is opened.
+ *
+ * Admins only. A POST, so a cookie-authenticated call needs the CSRF header:
+ * no other page on the parent domain can mint one, and none could read the
+ * reply anyway (no CORS). Same lifetime as a login token.
+ */
+router.post("/me/admin-token", auth, requireAdmin(false), async (req: any, res) => {
+    res.json({ token: signToken({ _id: req.user.id, email: req.user.email }) });
 });
 
 router.put("/profile", auth, async (req: any, res) => {

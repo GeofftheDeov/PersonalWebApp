@@ -3,3 +3,4 @@
  * a subpath (`@gtd/shared/api`) to pull in only that piece.
  */
 export * from "./api";
+export * from "./session";

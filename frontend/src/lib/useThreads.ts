@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { campaignThreadKey, dmThreadKey } from './realtime/threadKeys';
 import { getLiveClient } from './realtime/useLiveThread';
 import type { ThreadRead, ThreadUpdate } from './realtime/liveClient';
+import { api, errorOf } from './api';
+import { currentUserId, session, useSession } from './session';
 
 /**
  * Letters thread list (#100, spec #58), headless.
@@ -38,22 +40,10 @@ export interface ThreadSummary {
   unreadCount: number;
 }
 
-const token = () => (typeof window !== 'undefined' ? localStorage.getItem('token') : null);
-
-/** The signed-in account id from the JWT, or null. */
-function myAccountId(): string | null {
-  try {
-    const t = token();
-    return t ? JSON.parse(atob(t.split('.')[1]))?.id ?? null : null;
-  } catch {
-    return null;
-  }
-}
-
 /** The thread key for a campaign chat or a DM with a friend, matching the server's. */
 export function threadKeyFor(kind: 'campaign' | 'dm', id: string): string | null {
   if (kind === 'campaign') return campaignThreadKey(id);
-  const me = myAccountId();
+  const me = currentUserId();
   return me ? dmThreadKey(me, id) : null;
 }
 
@@ -80,6 +70,7 @@ const MISSING_REFETCH_MS = 300;
  */
 export function useThreads({ filter = 'all', enabled = true }:
   { filter?: ThreadFilter; enabled?: boolean } = {}) {
+  const signedIn = useSession().status === 'signedIn';
   const [all, setAll] = useState<ThreadSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -107,17 +98,15 @@ export function useThreads({ filter = 'all', enabled = true }:
   const liveTouchedAt = useRef<Map<string, number>>(new Map());
 
   const refresh = useCallback(async () => {
-    const t = token();
-    if (!t) return;
+    if (session.getState().status !== 'signedIn') return;
     const started = Date.now();
     const seq = ++refreshSeq.current;
     const awaited = new Set(awaitedThreads.current);
     awaitedThreads.current.clear();
     setLoading(true);
     try {
-      const res = await fetch('/api/threads', { headers: { Authorization: `Bearer ${t}` } });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Could not load conversations');
-      const data = await res.json();
+      const data = await api.get<{ threads?: ThreadSummary[] }>('/api/threads')
+        .catch((err) => { throw new Error(errorOf(err, 'Could not load conversations')); });
       if (seq !== refreshSeq.current) return; // a later refetch is on its way; its snapshot is newer
       const fresh: ThreadSummary[] = Array.isArray(data?.threads) ? data.threads : [];
       const listed = new Set(fresh.map(th => th.threadKey));
@@ -192,7 +181,7 @@ export function useThreads({ filter = 'all', enabled = true }:
   }, [scheduleRefresh]);
 
   useEffect(() => {
-    if (!enabled || !token()) return;
+    if (!enabled || !signedIn) return;
     const client = getLiveClient();
     refresh();
     // Nothing is replayed after a reconnect, so refetch then.
@@ -214,21 +203,15 @@ export function useThreads({ filter = 'all', enabled = true }:
       if (refetchTimer.current) clearTimeout(refetchTimer.current);
       refetchTimer.current = null;
     };
-  }, [enabled, refresh, applyUpdate, applyRead]);
+  }, [enabled, signedIn, refresh, applyUpdate, applyRead]);
 
   const markRead = useCallback(async (threadKey: string, messageId: string) => {
-    const t = token();
-    if (!t || !threadKey || !messageId || marked.current.get(threadKey) === messageId) return;
+    if (!threadKey || !messageId || marked.current.get(threadKey) === messageId) return;
     marked.current.set(threadKey, messageId);
     markedAt.current.set(threadKey, Date.now());
     setAll(prev => prev.map(th => (th.threadKey === threadKey ? { ...th, unreadCount: 0 } : th)));
     try {
-      const res = await fetch(`/api/threads/${encodeURIComponent(threadKey)}/read`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t}` },
-        body: JSON.stringify({ messageId }),
-      });
-      if (!res.ok) throw new Error('mark read failed');
+      await api.post(`/api/threads/${encodeURIComponent(threadKey)}/read`, { messageId });
     } catch {
       marked.current.delete(threadKey);
       markedAt.current.delete(threadKey);

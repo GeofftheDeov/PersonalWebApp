@@ -18,6 +18,7 @@ import fs from "fs";
 import { sendResetPasswordEmail, sendVerificationEmail } from "../services/emailService.js";
 import { auth } from "../middleware/auth.js";
 import { isDevEnv } from "../utils/env.js";
+import { originSite } from "../utils/frontendSites.js";
 import { hashToken } from "../utils/tokenHash.js";
 import { OAuth2Client } from "google-auth-library";
 
@@ -138,7 +139,7 @@ router.post("/register", async (req, res) => {
     await user.save();
     await bindPendingInvites(user);
     // The user is already saved, so a mail failure must not turn this into a 500.
-    if (!isDev && token) await sendVerificationEmail(email, token).catch((err: any) =>
+    if (!isDev && token) await sendVerificationEmail(email, token, originSite(req).origin).catch((err: any) =>
       console.error("Register: verification email failed:", err.message));
 
     res.status(201).json({
@@ -151,6 +152,9 @@ router.post("/register", async (req, res) => {
   }
 });
 
+/** How long after signing up a verify link also signs you in: the 24 hours the email promises. */
+const VERIFY_SIGN_IN_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 router.post("/verify-email", async (req, res) => {
     const { token } = req.body;
     // A string only: the model layer reads an object filter value as operators,
@@ -158,16 +162,27 @@ router.post("/verify-email", async (req, res) => {
     if (typeof token !== "string" || !token) return res.status(400).json({ error: "Token is required" });
 
     try {
-        const user = await Account.findOne({ emailVerificationToken: hashToken(token) });
+        // Spend the token as we find it. The model layer has no $unset; null clears the column.
+        const user: any = await Account.findOneAndUpdate(
+            { emailVerificationToken: hashToken(token) },
+            { $set: { isVerified: true, emailVerificationToken: null } },
+            { new: true }
+        );
         if (!user) return res.status(400).json({ error: "Invalid or expired token" });
 
-        // The model layer has no $unset; null clears the column.
-        await Account.updateOne(
-            { _id: user._id },
-            { $set: { isVerified: true, emailVerificationToken: null } }
-        );
+        await bindPendingInvites(user);
 
-        res.json({ message: "Email verified successfully" });
+        // Verifying is where a new account first gets a token (#215, #69), so it
+        // signs the person in: the session cookie, and the token for bearer
+        // clients, as login does. Someone who signed up on Hearthside is then
+        // signed in on both sites. Verification tokens have no expiry column,
+        // so only a link used within the day the email promises signs anyone
+        // in; an older one still verifies, and the person logs in as before.
+        const createdAt = user.createdAt ? new Date(user.createdAt).getTime() : NaN;
+        if (!(Date.now() - createdAt < VERIFY_SIGN_IN_WINDOW_MS)) {
+            return res.json({ message: "Email verified successfully" });
+        }
+        res.json({ message: "Email verified successfully", token: issueSession(res, user), user: publicUser(user) });
     } catch (error) {
         console.error("Verify Email Error:", error);
         res.status(500).json({ error: "Error verifying email" });
@@ -494,7 +509,8 @@ router.post("/forgot-password", async (req, res) => {
             }
         );
 
-        await sendResetPasswordEmail(user.email, token);
+        // The link lands on the site the request came from, if it's an allowed one (#215).
+        await sendResetPasswordEmail(user.email, token, originSite(req).origin);
 
         // mockToken is for local testing (verify_reset.ts) only. Returning it in
         // prod would let anyone reset any account's password without the email.

@@ -19,6 +19,7 @@ import { isUuid } from "../db/model.js";
 import CampaignMember from "../models/CampaignMember.js";
 import { followSessionStarts } from "../planning/questReminders.js";
 import { AttendanceError, confirmAttendance, getAttendance } from "../planning/attendance.js";
+import { forReader, prepNotesReader, withoutPrepNotes } from "../utils/prepNotes.js";
 
 // --- Sessions ---
 router.get("/sessions", auth, async (req: any, res) => {
@@ -26,8 +27,12 @@ router.get("/sessions", auth, async (req: any, res) => {
         const campaignIds = await getAuthorizedCampaignIds(req.user);
         const query = campaignIds ? { campaign: { $in: campaignIds } } : {};
 
-        const sessions = await Session.find(query).populate("campaign").sort({ date: -1 });
-        res.json(sessions);
+        const [sessions, canRead] = await Promise.all([
+            Session.find(query).populate("campaign").sort({ date: -1 }),
+            prepNotesReader(req.user),
+        ]);
+        // Prep notes (agenda) are the GM's (#213).
+        res.json(sessions.map((s: any) => forReader(canRead, s)));
     } catch (error: any) {
         res.status(500).json({ error: "Failed to fetch sessions", details: error.message });
     }
@@ -97,8 +102,8 @@ router.post("/sessions", auth, async (req: any, res) => {
                         botToken: keys.secret,
                         guildId: campaignDoc.discordGuildId as string,
                         channelId: campaignDoc.discordChannelId || undefined,
+                        // No description: the agenda is the GM's Prep notes (#213).
                         name: `${campaignDoc.title}: ${title}`,
-                        description: agenda || undefined,
                         location: effectiveLocation || undefined,
                         start: new Date(date),
                         end: endDate ? new Date(endDate) : undefined,
@@ -114,8 +119,8 @@ router.post("/sessions", auth, async (req: any, res) => {
         // ── Google Calendar ────────────────────────────────────────────────────
         if (createGoogleEvent) {
             const eventInput = {
+                // No description: the agenda is the GM's Prep notes (#213).
                 title: `${campaignDoc.title}: ${title}`,
-                description: agenda || undefined,
                 location: effectiveLocation || undefined,
                 start: new Date(date),
                 end: new Date(endDate),
@@ -146,14 +151,18 @@ router.post("/sessions", auth, async (req: any, res) => {
 
 router.get("/sessions/:id", auth, async (req: any, res) => {
     try {
-        const campaignIds = await getAuthorizedCampaignIds(req.user);
-        const session = await Session.findById(req.params.id).populate("campaign");
+        const [campaignIds, session, canRead] = await Promise.all([
+            getAuthorizedCampaignIds(req.user),
+            Session.findById(req.params.id).populate("campaign"),
+            prepNotesReader(req.user),
+        ]);
         if (!session) return res.status(404).json({ error: "Session not found" });
         // Check access
         if (campaignIds && !campaignIds.some((id: any) => id.toString() === session.campaign?._id?.toString())) {
             return res.status(403).json({ error: "Unauthorized" });
         }
-        res.json(session);
+        // Prep notes (agenda) are the GM's (#213): the key is left out for anyone else.
+        res.json(forReader(canRead, session));
     } catch (error: any) {
         res.status(500).json({ error: "Failed to fetch session", details: error.message });
     }
@@ -169,15 +178,17 @@ router.put("/sessions/:id", auth, async (req: any, res) => {
             return res.status(403).json({ error: `Only the ${await gmTitleOf(existing.campaign)} can edit sessions for this campaign` });
         }
 
-        const { title, date, endDate, location, isOnline, agenda, summary, vodUrl } = req.body;
-        const session = await Session.findByIdAndUpdate(
-            req.params.id,
-            { title, date, endDate, location, isOnline, agenda, summary, vodUrl },
-            { new: true }
-        ).populate("campaign");
+        // Only the fields sent change: editing the Prep notes alone (#213)
+        // mustn't blank the title and date.
+        const changes: Record<string, unknown> = {};
+        for (const key of ["title", "date", "endDate", "location", "isOnline", "agenda", "summary", "vodUrl"]) {
+            if (req.body?.[key] !== undefined) changes[key] = req.body[key];
+        }
+        if (!Object.keys(changes).length) return res.status(400).json({ error: "Nothing to change" });
+        const session = await Session.findByIdAndUpdate(req.params.id, changes, { new: true }).populate("campaign");
         if (!session) return res.status(404).json({ error: "Session not found" });
         // Its quests' due times follow a new start (#91). The reminder job catches up anyway.
-        if (date !== undefined) {
+        if (changes.date !== undefined) {
             await followSessionStarts(pool, String(session._id)).catch((err) =>
                 console.error("[tabletop] moving quest due times failed:", err.message));
         }
@@ -279,10 +290,11 @@ router.post("/prepare-session", auth, async (req: any, res) => {
         });
         await task.save();
 
-        // 3. Create Event
+        // 3. Create Event. Anyone can list events, so it doesn't carry the
+        // agenda: that's the GM's Prep notes (#213). The task above is the
+        // GM's own and keeps it.
         const event = new Event({
             title: `Tabletop Session: ${title}`,
-            description: agenda,
             startDate: date,
             endDate: new Date(new Date(date).getTime() + 4 * 60 * 60 * 1000), // Default 4 hours session
             status: "Not Started",
@@ -445,7 +457,12 @@ router.get("/dungeons", async (req, res) => {
 router.get("/encounters", async (req, res) => {
     try {
         const encounters = await Encounter.find().populate("session dungeon");
-        res.json(encounters);
+        // Anyone may call this, so no session in it carries Prep notes (#213).
+        res.json(encounters.map((e: any) => {
+            const out = e.toJSON();
+            if (out.session && typeof out.session === "object") out.session = withoutPrepNotes(out.session);
+            return out;
+        }));
     } catch (error: any) {
         res.status(500).json({ error: "Failed to fetch encounters", details: error.message });
     }

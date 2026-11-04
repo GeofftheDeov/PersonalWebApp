@@ -27,7 +27,8 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
  *   Required: start and end. We also send summary, description, location.
  *
  * Moving a session's night (#87) PATCHes both kinds of event with only the
- * changed fields, and cancelling one DELETEs them. A delete of an event
+ * changed fields (the times, and the description, which #213 empties of the
+ * GM's agenda), and cancelling one DELETEs them. A delete of an event
  * that's already gone succeeds.
  *
  * S3 uploads (#81)          — one private bucket, reached with the AWS SDK v3.
@@ -108,6 +109,7 @@ export interface DiscordEventRef {
 /** Only the fields given are changed. */
 export interface DiscordEventChanges extends DiscordEventRef {
     name?: string;
+    /** "" clears it. */
     description?: string;
     location?: string;
     start?: Date;
@@ -137,7 +139,8 @@ async function updateDiscordScheduledEvent(input: DiscordEventChanges): Promise<
     }
     const body: any = {};
     if (input.name !== undefined) body.name = input.name.slice(0, 100);
-    if (input.description !== undefined) body.description = input.description.slice(0, 1000);
+    // Discord takes null, not an empty string, to clear a description.
+    if (input.description !== undefined) body.description = input.description ? input.description.slice(0, 1000) : null;
     if (input.location !== undefined) body.entity_metadata = { location: input.location.slice(0, 100) };
     if (input.start) body.scheduled_start_time = input.start.toISOString();
     if (input.end) body.scheduled_end_time = input.end.toISOString();

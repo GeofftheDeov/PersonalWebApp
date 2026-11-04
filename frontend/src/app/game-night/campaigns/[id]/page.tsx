@@ -902,7 +902,7 @@ export default function CampaignDetailPage() {
                             label="Online Session"
                             icon={<Wifi className={`w-3 h-3 ${sessionForm.isOnline ? 'text-teal-400' : 'text-zinc-500'}`} />}
                         />
-                        <div><label className={LABEL_CLS}>Agenda / Prep Notes</label><textarea className={INPUT_CLS} rows={3} value={sessionForm.agenda} onChange={e => setSessionForm({ ...sessionForm, agenda: e.target.value })} /></div>
+                        <div><label className={LABEL_CLS}>Prep Notes (GM only)</label><textarea className={INPUT_CLS} rows={3} value={sessionForm.agenda} onChange={e => setSessionForm({ ...sessionForm, agenda: e.target.value })} /></div>
                         <div className="pt-3 border-t-2 border-white/10 space-y-3">
                             <p className="font-permanent text-xs text-teal-400 uppercase">External Events</p>
                             <Toggle
@@ -917,7 +917,7 @@ export default function CampaignDetailPage() {
                             />
                             {(sessionForm.createDiscordEvent || sessionForm.createGoogleEvent) && (
                                 <p className="text-[10px] text-zinc-500 font-permanent uppercase leading-relaxed">
-                                    External events require start and end times{sessionForm.createDiscordEvent && !campaign.discordChannelId ? ', and Discord needs a location (or online)' : ''}. The agenda becomes the event description.
+                                    External events require start and end times{sessionForm.createDiscordEvent && !campaign.discordChannelId ? ', and Discord needs a location (or online)' : ''}. Prep notes stay off the event: only the GM sees them.
                                 </p>
                             )}
                         </div>

@@ -47,7 +47,9 @@ export default function SessionDetailPage() {
                 if (res.ok) {
                     const s = await res.json();
                     setSession(s);
-                    setForm({ title: s.title, date: toDatetimeInput(s.date), endDate: toDatetimeInput(s.endDate), location: s.location || '', isOnline: !!s.isOnline, agenda: s.agenda || '', summary: s.summary || '', vodUrl: s.vodUrl || '' });
+                    setForm({ title: s.title, date: toDatetimeInput(s.date), endDate: toDatetimeInput(s.endDate), location: s.location || '', isOnline: !!s.isOnline,
+                        // Prep notes come back only to those who may read and write them (#213); otherwise they aren't sent.
+                        ...('agenda' in s ? { agenda: s.agenda || '' } : {}), summary: s.summary || '', vodUrl: s.vodUrl || '' });
                     // Sessions are GM-only to edit — check the viewer's campaign role.
                     if (s.campaign?._id) {
                         try {
@@ -246,7 +248,7 @@ export default function SessionDetailPage() {
                                 <Wifi className={`w-3 h-3 ${form.isOnline ? 'text-teal-400' : 'text-zinc-500'}`} /> Online Session
                             </span>
                         </button>
-                        <div><label className={LABEL_CLS}>Agenda / Prep Notes</label><textarea className={INPUT_CLS} rows={3} value={form.agenda} onChange={e => setForm({ ...form, agenda: e.target.value })} /></div>
+                        {'agenda' in form && <div><label className={LABEL_CLS}>Prep Notes (GM only)</label><textarea className={INPUT_CLS} rows={3} value={form.agenda} onChange={e => setForm({ ...form, agenda: e.target.value })} /></div>}
                         <div><label className={LABEL_CLS}>Summary</label><textarea className={INPUT_CLS} rows={3} value={form.summary} onChange={e => setForm({ ...form, summary: e.target.value })} /></div>
                         <div><label className={LABEL_CLS}>VOD / Recording URL</label><input className={INPUT_CLS} placeholder="HTTPS://..." value={form.vodUrl} onChange={e => setForm({ ...form, vodUrl: e.target.value })} /></div>
                         <div className="flex gap-3 pt-2">
@@ -314,7 +316,7 @@ export default function SessionDetailPage() {
                         </div>
                         {session.agenda && (
                             <div>
-                                <div className="flex items-center gap-2 mb-2"><FileText className="w-4 h-4 text-teal-500" /><p className="font-permanent text-xs text-zinc-400 uppercase">Agenda / Prep Notes</p></div>
+                                <div className="flex items-center gap-2 mb-2"><FileText className="w-4 h-4 text-teal-500" /><p className="font-permanent text-xs text-zinc-400 uppercase">Prep Notes (GM only)</p></div>
                                 <div className="p-3 border-2 border-black/20 dark:border-white/20 bg-zinc-50 dark:bg-zinc-900">
                                     <p className="font-permanent text-black dark:text-white uppercase text-sm leading-relaxed">{session.agenda}</p>
                                 </div>

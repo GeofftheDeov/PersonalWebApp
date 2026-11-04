@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { UserCheck, Check, Save } from 'lucide-react';
+import { api, errorOf } from '@/lib/api';
 
 interface AttendanceRow {
     playerId: string;
@@ -39,29 +40,19 @@ export default function SessionAttendance({ sessionId }: { sessionId: string }) 
     };
 
     useEffect(() => {
-        fetch(`/api/tabletop/sessions/${sessionId}/attendance`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
-            .then(async res => {
-                if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Could not load attendance.');
-                apply(await res.json());
-            })
-            .catch(err => setError(err.message));
+        api.get<Attendance>(`/api/tabletop/sessions/${sessionId}/attendance`)
+            .then(apply)
+            .catch(err => setError(errorOf(err, 'Could not load attendance.')));
     }, [sessionId]);
 
     const save = async () => {
         setSaving(true);
         setError(null);
         try {
-            const res = await fetch(`/api/tabletop/sessions/${sessionId}/attendance`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
-                body: JSON.stringify({ playerIds: [...checked] }),
-            });
-            const body = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(body.error || 'Could not save attendance.');
-            apply(body);
+            apply(await api.put<Attendance>(`/api/tabletop/sessions/${sessionId}/attendance`, { playerIds: [...checked] }));
             setEditing(false);
-        } catch (err: any) {
-            setError(err.message);
+        } catch (err) {
+            setError(errorOf(err, 'Could not save attendance.'));
         } finally {
             setSaving(false);
         }

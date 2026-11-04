@@ -15,6 +15,13 @@ export const api = createApiClient({
 });
 
 /**
+ * A read that may fail quietly: the reply, or null if it failed. For pages
+ * that show what they could load. A 401 still ends the session.
+ */
+export const getOrNull = <T,>(path: string): Promise<T | null> =>
+    api.get<T>(path).catch(() => null);
+
+/**
  * What to show for a failed call: the server's own `error` when it sent one,
  * else `fallback` (a network failure's "Failed to fetch" is no help to anyone).
  */

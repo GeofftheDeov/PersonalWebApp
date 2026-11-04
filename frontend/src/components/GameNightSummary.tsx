@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { Book, Map, Sword, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 import { sessionWhen } from '@/lib/sessions';
+import { getOrNull } from '@/lib/api';
 import CampaignBanner from '@/components/CampaignBanner';
 
 interface Campaign {
@@ -35,19 +36,16 @@ export default function GameNightSummary() {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        const token = localStorage.getItem('token');
-        if (!token) return;
-
         const fetchData = async () => {
             try {
-                const [campRes, sessRes, charRes] = await Promise.all([
-                    fetch('/api/campaigns', { headers: { Authorization: `Bearer ${token}` } }),
-                    fetch('/api/tabletop/sessions', { headers: { Authorization: `Bearer ${token}` } }),
-                    fetch('/api/tabletop/characters', { headers: { Authorization: `Bearer ${token}` } }),
+                const [camps, sess, chars] = await Promise.all([
+                    getOrNull<Campaign[]>('/api/campaigns'),
+                    getOrNull<Session[]>('/api/tabletop/sessions'),
+                    getOrNull<Character[]>('/api/tabletop/characters'),
                 ]);
-                if (campRes.ok) setCampaigns(await campRes.json());
-                if (sessRes.ok) setSessions(await sessRes.json());
-                if (charRes.ok) setCharacters(await charRes.json());
+                if (camps) setCampaigns(camps);
+                if (sess) setSessions(sess);
+                if (chars) setCharacters(chars);
             } catch (err) {
                 console.error('GameNightSummary: Failed to fetch data', err);
             } finally {

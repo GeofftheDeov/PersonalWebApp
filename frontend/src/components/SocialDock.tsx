@@ -6,6 +6,9 @@ import Link from 'next/link';
 import { Users, UserPlus, MessageCircle, X, Search, Check, Trash2, ExternalLink, ArrowLeft, Map, MessageSquare, User as UserIcon } from 'lucide-react';
 import ChatThread, { ChatChannel } from './ChatThread';
 import { useThreads, threadKeyFor, ThreadFilter, ThreadSummary } from '../lib/useThreads';
+import { ApiError } from '@gtd/shared/api';
+import { api, errorOf } from '../lib/api';
+import { useSession } from '../lib/session';
 
 interface Friend {
   _id: string;
@@ -60,6 +63,7 @@ export default function SocialDock() {
   const [activeChat, setActiveChat] = useState<ActiveChat | null>(null);
   const [chatFilter, setChatFilter] = useState<ThreadFilter>('all');
   const { threads, totalUnread, markRead, refresh: refreshThreads } = useThreads({ filter: chatFilter });
+  const signedIn = useSession().status === 'signedIn';
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Friend[]>([]);
   const [searchError, setSearchError] = useState('');
@@ -74,37 +78,24 @@ export default function SocialDock() {
   // Friends and requests load once for the badge, then again whenever the
   // dock opens, along with the thread list as a cheap catch-up.
   useEffect(() => {
-    if (localStorage.getItem('token')) fetchSocialData();
-  }, []);
+    if (signedIn) fetchSocialData();
+  }, [signedIn]);
 
   useEffect(() => {
-    if (!isOpen || !localStorage.getItem('token')) return;
+    if (!isOpen || !signedIn) return;
     fetchSocialData();
     refreshThreads();
-  }, [isOpen, refreshThreads]);
+  }, [isOpen, signedIn, refreshThreads]);
 
   const fetchSocialData = async () => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-
-    try {
-      const [friendsRes, requestsRes] = await Promise.all([
-        fetch('/api/friends/list', { headers: { 'Authorization': `Bearer ${token}` } }),
-        fetch('/api/friends/requests', { headers: { 'Authorization': `Bearer ${token}` } }),
-      ]);
-
-      if (friendsRes.ok) {
-        const friendsData = await friendsRes.json();
-        setFriends(friendsData);
-      }
-
-      if (requestsRes.ok) {
-        const requestsData = await requestsRes.json();
-        setIncomingRequests(requestsData.incoming);
-        setNotificationCount(requestsData.incoming.length);
-      }
-    } catch (err) {
-      console.error("Failed to fetch social data", err);
+    const [friendsData, requestsData] = await Promise.all([
+      api.get<Friend[]>('/api/friends/list').catch((err) => { console.error("Failed to fetch friends", err); return null; }),
+      api.get<{ incoming: Request[] }>('/api/friends/requests').catch((err) => { console.error("Failed to fetch requests", err); return null; }),
+    ]);
+    if (friendsData) setFriends(friendsData);
+    if (requestsData) {
+      setIncomingRequests(requestsData.incoming);
+      setNotificationCount(requestsData.incoming.length);
     }
   };
 
@@ -130,24 +121,17 @@ export default function SocialDock() {
     const controller = new AbortController();
     searchAbort.current = controller;
     setIsLoading(true);
-    const token = localStorage.getItem('token');
     try {
-      const res = await fetch(`/api/friends/search?query=${encodeURIComponent(trimmed)}`, {
-        headers: { 'Authorization': `Bearer ${token}` },
+      const data = await api.get<Friend[]>(`/api/friends/search?query=${encodeURIComponent(trimmed)}`, {
         signal: controller.signal,
       });
-      const data = await res.json();
       if (controller.signal.aborted) return;
-      if (res.ok) {
-        setSearchResults(data);
-        setSearchError(data.length ? '' : 'Nobody by that handle');
-      } else {
-        setSearchResults([]);
-        setSearchError(data.error || 'Search failed');
-      }
+      setSearchResults(data);
+      setSearchError(data.length ? '' : 'Nobody by that handle');
     } catch (err: any) {
-      if (err?.name === 'AbortError') return;
-      setSearchError('Search failed');
+      if (err?.name === 'AbortError' || controller.signal.aborted) return;
+      setSearchResults([]);
+      setSearchError(errorOf(err, 'Search failed'));
     } finally {
       if (searchAbort.current === controller) setIsLoading(false);
     }
@@ -166,59 +150,33 @@ export default function SocialDock() {
   };
 
   const sendRequest = async (toUserId: string) => {
-    const token = localStorage.getItem('token');
     try {
-      const res = await fetch('/api/friends/request', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ toUserId })
-      });
-      if (res.ok) {
-        alert("Friend request sent!");
-        setSearchResults((prev) => prev.filter((p) => p._id !== toUserId));
-      } else {
-        const data = await res.json();
-        alert(data.error || "Failed to send request");
-      }
+      await api.post('/api/friends/request', { toUserId });
+      alert("Friend request sent!");
+      setSearchResults((prev) => prev.filter((p) => p._id !== toUserId));
     } catch (err) {
-      alert("Error sending request");
+      alert(err instanceof ApiError ? errorOf(err, "Failed to send request") : "Error sending request");
     }
   };
 
   const respondToRequest = async (requestId: string, action: 'accept' | 'reject') => {
-    const token = localStorage.getItem('token');
     setProcessingRequestId(requestId);
     setFeedbackMessage(null);
 
     try {
-      const res = await fetch(`/api/friends/request/${requestId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ action })
+      await api.put(`/api/friends/request/${requestId}`, { action });
+      const actionText = action === 'accept' ? 'accepted' : 'declined';
+      setFeedbackMessage({
+        type: 'success',
+        text: `Friend request ${actionText}!`
       });
-
-      if (res.ok) {
-        const actionText = action === 'accept' ? 'accepted' : 'declined';
-        setFeedbackMessage({
-          type: 'success',
-          text: `Friend request ${actionText}!`
-        });
-        await fetchSocialData();
-        setTimeout(() => setFeedbackMessage(null), 3000);
-      } else {
-        const data = await res.json();
-        setFeedbackMessage({
-          type: 'error',
-          text: data.error || `Failed to ${action} request`
-        });
-      }
+      await fetchSocialData();
+      setTimeout(() => setFeedbackMessage(null), 3000);
     } catch (err) {
+      if (err instanceof ApiError) {
+        setFeedbackMessage({ type: 'error', text: errorOf(err, `Failed to ${action} request`) });
+        return;
+      }
       console.error("Error responding to request", err);
       setFeedbackMessage({
         type: 'error',
@@ -231,15 +189,9 @@ export default function SocialDock() {
 
   const removeFriend = async (friendId: string) => {
     if (!confirm("Are you sure you want to remove this friend?")) return;
-    const token = localStorage.getItem('token');
     try {
-      const res = await fetch(`/api/friends/${friendId}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        fetchSocialData();
-      }
+      await api.delete(`/api/friends/${friendId}`);
+      fetchSocialData();
     } catch (err) {
       console.error("Error removing friend", err);
     }

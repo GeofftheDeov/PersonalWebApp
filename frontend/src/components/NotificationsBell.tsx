@@ -4,6 +4,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Bell, Check, MessageSquare, UserPlus, Map, Info, X, CheckCheck } from 'lucide-react';
+import { api } from '../lib/api';
+import { useSession } from '../lib/session';
 
 interface Notification {
   _id: string;
@@ -39,29 +41,24 @@ export default function NotificationsBell() {
   const [busy, setBusy] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
-  const token = () => (typeof window !== 'undefined' ? localStorage.getItem('token') : null);
+  const signedIn = useSession().status === 'signedIn';
 
   const fetchNotifications = useCallback(async () => {
-    const t = token();
-    if (!t) return;
     try {
-      const res = await fetch('/api/notifications?limit=30', { headers: { Authorization: `Bearer ${t}` } });
-      if (res.ok) {
-        const data = await res.json();
-        setNotifications(data.notifications || []);
-        setUnreadCount(data.unreadCount || 0);
-      }
+      const data = await api.get<{ notifications?: Notification[]; unreadCount?: number }>('/api/notifications?limit=30');
+      setNotifications(data?.notifications || []);
+      setUnreadCount(data?.unreadCount || 0);
     } catch {
       /* polling — next tick will retry */
     }
   }, []);
 
   useEffect(() => {
-    if (!token()) return;
+    if (!signedIn) return;
     fetchNotifications();
     const interval = setInterval(fetchNotifications, 30000);
     return () => clearInterval(interval);
-  }, [fetchNotifications]);
+  }, [signedIn, fetchNotifications]);
 
   // Close on outside click
   useEffect(() => {
@@ -74,35 +71,20 @@ export default function NotificationsBell() {
   }, [isOpen]);
 
   const markRead = async (id: string) => {
-    const t = token();
-    if (!t) return;
-    try {
-      await fetch(`/api/notifications/${id}/read`, { method: 'PUT', headers: { Authorization: `Bearer ${t}` } });
-    } finally {
-      fetchNotifications();
-    }
+    await api.put(`/api/notifications/${id}/read`).catch(() => {});
+    fetchNotifications();
   };
 
   const markAllRead = async () => {
-    const t = token();
-    if (!t) return;
-    try {
-      await fetch('/api/notifications/read-all', { method: 'PUT', headers: { Authorization: `Bearer ${t}` } });
-    } finally {
-      fetchNotifications();
-    }
+    await api.put('/api/notifications/read-all').catch(() => {});
+    fetchNotifications();
   };
 
   const respondFriendRequest = async (n: Notification, action: 'accept' | 'reject') => {
-    const t = token();
-    if (!t || !n.meta?.requestId) return;
+    if (!n.meta?.requestId) return;
     setBusy(n._id);
     try {
-      await fetch(`/api/friends/request/${n.meta.requestId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t}` },
-        body: JSON.stringify({ action }),
-      });
+      await api.put(`/api/friends/request/${n.meta.requestId}`, { action }).catch(() => {});
       await markRead(n._id);
     } finally {
       setBusy(null);
@@ -110,15 +92,10 @@ export default function NotificationsBell() {
   };
 
   const respondInvite = async (n: Notification, action: 'accept' | 'decline') => {
-    const t = token();
-    if (!t || !n.meta?.inviteId) return;
+    if (!n.meta?.inviteId) return;
     setBusy(n._id);
     try {
-      await fetch(`/api/campaign-invites/${n.meta.inviteId}/respond`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t}` },
-        body: JSON.stringify({ action }),
-      });
+      await api.put(`/api/campaign-invites/${n.meta.inviteId}/respond`, { action }).catch(() => {});
       await markRead(n._id);
       if (action === 'accept' && n.meta?.campaignId) router.push(`/game-night/campaigns/${n.meta.campaignId}`);
     } finally {

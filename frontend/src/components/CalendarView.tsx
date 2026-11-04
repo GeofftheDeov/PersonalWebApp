@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { CheckSquare, Calendar, ChevronLeft, ChevronRight, AlertCircle, Dices, Check } from 'lucide-react';
 import { questApi, type AlmanacSession } from '@/lib/quests';
+import { api } from '@/lib/api';
 
 interface Task {
     _id: string;
@@ -57,7 +58,6 @@ export default function CalendarView() {
     const [sessions, setSessions] = useState<Record<string, AlmanacSession>>({});
 
     const loadSessions = async (start: Date, end: Date) => {
-        if (!localStorage.getItem('token')) return;
         try {
             const { sessions: found } = await questApi<{ sessions: AlmanacSession[] }>(
                 `/almanac?start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`);
@@ -77,17 +77,14 @@ export default function CalendarView() {
     }, [current]);
 
     useEffect(() => {
-        const token = localStorage.getItem('token');
-        if (!token) { setLoading(false); return; }
-
         const fetchData = async () => {
             try {
-                const [taskRes, eventRes] = await Promise.all([
-                    fetch('/api/tasks', { headers: { Authorization: `Bearer ${token}` } }),
-                    fetch('/api/events', { headers: { Authorization: `Bearer ${token}` } }),
+                const [taskData, eventData] = await Promise.all([
+                    api.get<Task[]>('/api/tasks').catch(() => null),
+                    api.get<CalendarEvent[]>('/api/events').catch(() => null),
                 ]);
-                if (taskRes.ok) setTasks(await taskRes.json());
-                if (eventRes.ok) setEvents(await eventRes.json());
+                if (taskData) setTasks(taskData);
+                if (eventData) setEvents(eventData);
             } catch (err) {
                 console.error('Calendar fetch failed:', err);
             } finally {

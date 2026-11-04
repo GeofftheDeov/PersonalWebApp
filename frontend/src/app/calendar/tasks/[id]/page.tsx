@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { CheckSquare, ArrowLeft, Save, Trash2, Clock, User } from 'lucide-react';
+import { ApiError } from '@gtd/shared/api';
+import { api } from '@/lib/api';
 
 const INPUT_CLS = "w-full p-3 border-4 border-black bg-white text-black font-permanent text-lg uppercase focus:border-yellow-400 outline-none";
 const LABEL_CLS = "block text-teal-600 font-permanent uppercase text-sm mb-1";
@@ -28,25 +30,24 @@ export default function TaskDetailPage() {
     const [saving, setSaving] = useState(false);
     const [deleting, setDeleting] = useState(false);
 
-    const token = () => localStorage.getItem('token');
-
     useEffect(() => {
         if (!id) return;
         const fetchTask = async () => {
-            const res = await fetch(`/api/tasks/${id}`, { headers: { Authorization: `Bearer ${token()}` } });
-            if (res.status === 401) { localStorage.clear(); router.push('/login'); return; }
-            if (res.ok) {
-                const data = await res.json();
-                setTask(data);
-                setForm({
-                    title: data.title,
-                    description: data.description || '',
-                    status: data.status,
-                    dueDate: data.dueDate ? new Date(data.dueDate).toISOString().split('T')[0] : '',
-                });
-            } else {
-                router.push('/calendar');
+            let data: any;
+            try {
+                data = await api.get(`/api/tasks/${id}`);
+            } catch (err) {
+                // A 401 has already sent the person to log in.
+                if (!(err instanceof ApiError && err.status === 401)) router.push('/calendar');
+                return;
             }
+            setTask(data);
+            setForm({
+                title: data.title,
+                description: data.description || '',
+                status: data.status,
+                dueDate: data.dueDate ? new Date(data.dueDate).toISOString().split('T')[0] : '',
+            });
             setLoading(false);
         };
         fetchTask();
@@ -55,13 +56,8 @@ export default function TaskDetailPage() {
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
         setSaving(true);
-        const res = await fetch(`/api/tasks/${id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-            body: JSON.stringify(form),
-        });
-        if (res.ok) {
-            const updated = await res.json();
+        const updated = await api.put(`/api/tasks/${id}`, form).catch(() => null);
+        if (updated) {
             setTask(updated);
             setEditing(false);
         }
@@ -71,8 +67,8 @@ export default function TaskDetailPage() {
     const handleDelete = async () => {
         if (!confirm('Delete this task? This cannot be undone.')) return;
         setDeleting(true);
-        const res = await fetch(`/api/tasks/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token()}` } });
-        if (res.ok) router.push('/calendar');
+        const deleted = await api.delete(`/api/tasks/${id}`).then(() => true, () => false);
+        if (deleted) router.push('/calendar');
         setDeleting(false);
     };
 
@@ -196,12 +192,8 @@ export default function TaskDetailPage() {
                                     <button
                                         key={s}
                                         onClick={async () => {
-                                            const res = await fetch(`/api/tasks/${id}`, {
-                                                method: 'PUT',
-                                                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-                                                body: JSON.stringify({ ...task, status: s }),
-                                            });
-                                            if (res.ok) setTask({ ...task, status: s });
+                                            const saved = await api.put(`/api/tasks/${id}`, { ...task, status: s }).then(() => true, () => false);
+                                            if (saved) setTask({ ...task, status: s });
                                         }}
                                         className={`px-3 py-2 border-2 border-black font-permanent uppercase text-xs transition-colors ${task.status === s ? 'bg-black text-yellow-400' : 'bg-white text-black hover:bg-zinc-200'}`}
                                     >

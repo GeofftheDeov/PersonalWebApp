@@ -12,7 +12,9 @@ import BannerEditor from '@/components/BannerEditor';
 import NoticeBoard, { ComingUp, useNoticeBoard } from '@/components/NoticeBoard';
 import { sessionWhen } from '@/lib/sessions';
 import { DEFAULT_GM_TITLE, gmTitleOf, roleLabel } from '@/lib/campaigns';
-import { canAdmin, fetchCapabilities } from '@/lib/capabilities';
+import { ApiError } from '@gtd/shared/api';
+import { api, errorOf, getOrNull } from '@/lib/api';
+import { canAdmin, useSession, type Capabilities, type SessionUser } from '@/lib/session';
 
 interface Session {
     _id: string;
@@ -52,19 +54,18 @@ const statusColor = (status: string) => {
 
 const toDateInput = (d?: string) => d ? new Date(d).toISOString().split('T')[0] : '';
 
-/** Is the logged-in user the Game Master of this campaign (or an admin)? */
-const computeIsGM = (members: Member[]) => {
-    try {
-        const me = JSON.parse(localStorage.getItem('user') || 'null');
-        if (!me) return false;
-        if (me.appRole === 'admin') return true;
-        return members.some(m =>
-            m.status === 'Game Master' &&
-            ((m.email && me.email && m.email.toLowerCase() === me.email.toLowerCase()) || (m.playerId && m.playerId === me.id))
-        );
-    } catch {
-        return false;
-    }
+/**
+ * Is the signed-in person the Game Master of this campaign (or an admin)?
+ * From the session client (#210), so it can't outlive the session. Display
+ * only: the server enforces it.
+ */
+const computeIsGM = (members: Member[], me: SessionUser | null, caps: Capabilities | null) => {
+    if (!me) return false;
+    if (canAdmin(caps)) return true;
+    return members.some(m =>
+        m.status === 'Game Master' &&
+        ((m.email && me.email && m.email.toLowerCase() === me.email.toLowerCase()) || (m.playerId && m.playerId === me.id))
+    );
 };
 
 const Toggle = ({ on, onClick, label, icon }: { on: boolean; onClick: () => void; label: string; icon?: React.ReactNode }) => (
@@ -92,9 +93,7 @@ export default function CampaignDetailPage() {
     const [form, setForm] = useState<any>({});
     const [friends, setFriends] = useState<any[]>([]);
     const [inviteStatus, setInviteStatus] = useState<Record<string, string>>({});
-    const [isGM, setIsGM] = useState(false);
-    const [isOwner, setIsOwner] = useState(false);
-    const [isAdmin, setIsAdmin] = useState(false);
+    const { user: me, capabilities: caps } = useSession();
     // Leaving, or a GM removing someone: the member row in flight, and any refusal.
     const [removingId, setRemovingId] = useState<string | null>(null);
     const [membershipError, setMembershipError] = useState<string | null>(null);
@@ -115,50 +114,38 @@ export default function CampaignDetailPage() {
     const [sessionError, setSessionError] = useState<string | null>(null);
     const [sessionWarnings, setSessionWarnings] = useState<string[]>([]);
 
-    const token = () => localStorage.getItem('token');
-
     useEffect(() => {
-        const t = token();
-        if (!t) { router.push('/login'); return; }
-        const headers = { Authorization: `Bearer ${t}` };
         Promise.all([
-            fetch(`/api/campaigns/${id}`, { headers }),
-            fetch(`/api/campaigns/${id}/sessions`, { headers }),
-            fetch(`/api/campaigns/${id}/members`, { headers }),
-        ]).then(async ([campRes, sessRes, membRes]) => {
-            if (campRes.status === 401) { localStorage.clear(); router.push('/login'); return; }
-            if (!campRes.ok) { router.push('/game-night'); return; }
-            const c = await campRes.json();
+            api.get<any>(`/api/campaigns/${id}`).catch((err) => err as Error),
+            getOrNull<Session[]>(`/api/campaigns/${id}/sessions`),
+            getOrNull<Member[]>(`/api/campaigns/${id}/members`),
+        ]).then(([c, sess, memberRows]) => {
+            // A 401 has already sent the person to log in and back (#210).
+            if (c instanceof ApiError && c.status === 401) return;
+            if (c instanceof Error) { router.push('/game-night'); return; }
             setCampaign(c);
             setForm({ title: c.title, description: c.description || '', status: c.status, startDate: toDateInput(c.startDate), endDate: toDateInput(c.endDate), discordGuildId: c.discordGuildId || '', discordChannelId: c.discordChannelId || '', quorum: c.quorum ?? '', tableLink: c.tableLink || '', gmTitle: c.gmTitle || DEFAULT_GM_TITLE });
-            // Planning settings belong to the campaign's owner or an admin (#57).
-            // Display only: the server enforces it.
-            const me = JSON.parse(localStorage.getItem('user') || 'null');
-            const caps = await fetchCapabilities(t);
-            setIsOwner(Boolean((me?.id && c.owner === me.id) || canAdmin(caps)));
-            setIsAdmin(canAdmin(caps));
-            if (sessRes.ok) setSessions(await sessRes.json());
-            if (membRes.ok) {
-                const memberRows = await membRes.json();
-                setMembers(memberRows);
-                setIsGM(computeIsGM(memberRows));
-            }
+            if (sess) setSessions(sess);
+            if (memberRows) setMembers(memberRows);
         }).catch(() => router.push('/game-night'))
           .finally(() => setLoading(false));
     }, [id, router]);
 
     const reloadSessions = useCallback(async () => {
-        const res = await fetch(`/api/campaigns/${id}/sessions`, { headers: { Authorization: `Bearer ${token()}` } });
-        if (res.ok) setSessions(await res.json());
+        const sess = await getOrNull<Session[]>(`/api/campaigns/${id}/sessions`);
+        if (sess) setSessions(sess);
     }, [id]);
 
     const reloadMembers = useCallback(async () => {
-        const res = await fetch(`/api/campaigns/${id}/members`, { headers: { Authorization: `Bearer ${token()}` } });
-        if (!res.ok) return;
-        const memberRows = await res.json();
-        setMembers(memberRows);
-        setIsGM(computeIsGM(memberRows));
+        const memberRows = await getOrNull<Member[]>(`/api/campaigns/${id}/members`);
+        if (memberRows) setMembers(memberRows);
     }, [id]);
+
+    // Display only: the server enforces all three. Planning settings belong
+    // to the campaign's owner or an admin (#57).
+    const isGM = computeIsGM(members, me, caps);
+    const isAdmin = canAdmin(caps);
+    const isOwner = Boolean((me?.id && campaign?.owner === me.id) || isAdmin);
 
     // The Notice Board's data (#57), shared with Coming up and live. Re-read
     // on a GM rename or a torch pass, which change who can plan.
@@ -170,8 +157,6 @@ export default function CampaignDetailPage() {
     // the owner's settings if that's the viewer.
     const setOwner = (owner: string | null) => {
         setCampaign((c: any) => ({ ...c, owner }));
-        const meId = JSON.parse(localStorage.getItem('user') || 'null')?.id;
-        if (owner && owner === meId) setIsOwner(true);
     };
 
     const handlePassTorch = async (e: React.FormEvent) => {
@@ -180,7 +165,7 @@ export default function CampaignDetailPage() {
         if (!target) return;
         const title = gmTitleOf(campaign);
         // A GM passing it steps down themselves; an admin who isn't one names who does.
-        const meId = JSON.parse(localStorage.getItem('user') || 'null')?.id;
+        const meId = me?.id;
         const gms = members.filter(m => m.status === 'Game Master' && m.playerId);
         const iAmGm = gms.some(m => m.playerId === meId);
         const from = iAmGm ? null : gms.length === 1 ? gms[0] : gms.find(m => m.playerId === torchFrom);
@@ -192,17 +177,13 @@ export default function CampaignDetailPage() {
         setTorchBusy(true);
         setTorchError(null);
         try {
-            const res = await fetch(`/api/campaigns/${id}/torch`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-                body: JSON.stringify(from ? { to: torchTo, from: from.playerId } : { to: torchTo }),
-            });
-            if (!res.ok) { setTorchError((await res.json().catch(() => ({}))).error || 'Could not pass the torch.'); return; }
+            const passed = await api.post<{ owner: string | null }>(`/api/campaigns/${id}/torch`,
+                from ? { to: torchTo, from: from.playerId } : { to: torchTo });
             setTorchTo(null);
-            setOwner((await res.json()).owner);
+            setOwner(passed.owner);
             await reloadMembers();
-        } catch {
-            setTorchError('Could not reach the server.');
+        } catch (err) {
+            setTorchError(err instanceof ApiError ? errorOf(err, 'Could not pass the torch.') : 'Could not reach the server.');
         } finally {
             setTorchBusy(false);
         }
@@ -215,15 +196,11 @@ export default function CampaignDetailPage() {
         setTorchBusy(true);
         setTorchError(null);
         try {
-            const res = await fetch(`/api/campaigns/${id}/torch/claim`, {
-                method: 'POST',
-                headers: { Authorization: `Bearer ${token()}` },
-            });
-            if (!res.ok) { setTorchError((await res.json().catch(() => ({}))).error || 'Could not claim the torch.'); return; }
-            setOwner((await res.json()).owner);
+            const claimed = await api.post<{ owner: string | null }>(`/api/campaigns/${id}/torch/claim`);
+            setOwner(claimed.owner);
             await reloadMembers();
-        } catch {
-            setTorchError('Could not reach the server.');
+        } catch (err) {
+            setTorchError(err instanceof ApiError ? errorOf(err, 'Could not claim the torch.') : 'Could not reach the server.');
         } finally {
             setTorchBusy(false);
         }
@@ -239,18 +216,13 @@ export default function CampaignDetailPage() {
         setRemovingId(member._id);
         setMembershipError(null);
         try {
-            const res = await fetch(`/api/campaign-members/${member._id}`, {
-                method: 'DELETE',
-                headers: { Authorization: `Bearer ${token()}` },
-            });
-            if (!res.ok) {
-                setMembershipError((await res.json().catch(() => ({}))).error || (self ? 'Could not leave the campaign.' : 'Could not remove them.'));
-                return;
-            }
+            await api.delete(`/api/campaign-members/${member._id}`);
             if (self) { router.push('/game-night'); return; }
             await reloadMembers();
-        } catch {
-            setMembershipError('Could not reach the server.');
+        } catch (err) {
+            setMembershipError(err instanceof ApiError
+                ? errorOf(err, self ? 'Could not leave the campaign.' : 'Could not remove them.')
+                : 'Could not reach the server.');
         } finally {
             setRemovingId(null);
         }
@@ -264,15 +236,10 @@ export default function CampaignDetailPage() {
         setActivityBusy(m._id);
         setActivityError(null);
         try {
-            const res = await fetch(`/api/campaign-members/${m._id}/active`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-                body: JSON.stringify({ active }),
-            });
-            if (!res.ok) { setActivityError((await res.json().catch(() => ({}))).error || 'Could not change that.'); return; }
+            await api.patch(`/api/campaign-members/${m._id}/active`, { active });
             await reloadMembers();
-        } catch {
-            setActivityError('Could not reach the server.');
+        } catch (err) {
+            setActivityError(err instanceof ApiError ? errorOf(err, 'Could not change that.') : 'Could not reach the server.');
         } finally {
             setActivityBusy(null);
         }
@@ -283,26 +250,17 @@ export default function CampaignDetailPage() {
         setSaving(true);
         setSettingsError(null);
         const { quorum, tableLink, gmTitle, ...details } = form;
-        const res = await fetch(`/api/campaigns/${id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-            body: JSON.stringify(details),
-        });
-        if (!res.ok) { setSaving(false); return; }
-        let updated = await res.json();
+        let updated = await api.put<any>(`/api/campaigns/${id}`, details).catch(() => null);
+        if (!updated) { setSaving(false); return; }
         let settingsOk = true;
         if (isOwner) {
-            const settings = await fetch(`/api/campaigns/${id}/settings`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-                body: JSON.stringify({ quorum: quorum === '' ? null : Number(quorum), tableLink, gmTitle }),
-            });
-            const body = await settings.json().catch(() => ({}));
-            settingsOk = settings.ok;
-            updated = settings.ok
+            const body = await api.patch<any>(`/api/campaigns/${id}/settings`,
+                { quorum: quorum === '' ? null : Number(quorum), tableLink, gmTitle }).catch((err) => err as Error);
+            settingsOk = !(body instanceof Error);
+            updated = settingsOk
                 ? { ...updated, quorum: body.quorum, tableLink: body.tableLink, gmTitle: body.gmTitle }
                 : { ...updated, quorum: campaign.quorum, tableLink: campaign.tableLink, gmTitle: campaign.gmTitle };
-            if (!settings.ok) setSettingsError(body.error || 'Could not save the planning settings.');
+            if (!settingsOk) setSettingsError(errorOf(body, 'Could not save the planning settings.'));
         }
         setCampaign(updated);
         if (settingsOk) setEditing(false);
@@ -329,24 +287,14 @@ export default function CampaignDetailPage() {
         setSavingSession(true);
         setSessionError(null);
         try {
-            const res = await fetch('/api/tabletop/sessions', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-                body: JSON.stringify({ ...sessionForm, campaign: id }),
-            });
-            if (res.ok) {
-                const created = await res.json();
-                setSessionWarnings(created.warnings || []);
-                setSessions(prev => [created, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-                board.reload(); // a session still to come belongs under Coming up
-                setShowSessionModal(false);
-                setSessionForm(EMPTY_SESSION);
-            } else {
-                const err = await res.json().catch(() => ({}));
-                setSessionError(err.error || 'Failed to create session');
-            }
-        } catch {
-            setSessionError('Failed to create session');
+            const created = await api.post<Session & { warnings?: string[] }>('/api/tabletop/sessions', { ...sessionForm, campaign: id });
+            setSessionWarnings(created.warnings || []);
+            setSessions(prev => [created, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+            board.reload(); // a session still to come belongs under Coming up
+            setShowSessionModal(false);
+            setSessionForm(EMPTY_SESSION);
+        } catch (err) {
+            setSessionError(errorOf(err, 'Failed to create session'));
         } finally {
             setSavingSession(false);
         }
@@ -366,28 +314,16 @@ export default function CampaignDetailPage() {
     // Load friends when the invite modal opens (for direct invites).
     useEffect(() => {
         if (!showInviteModal) return;
-        fetch('/api/friends/list', { headers: { Authorization: `Bearer ${token()}` } })
-            .then(res => res.ok ? res.json() : [])
-            .then(setFriends)
-            .catch(() => setFriends([]));
+        getOrNull<any[]>('/api/friends/list').then(list => setFriends(list ?? []));
     }, [showInviteModal]);
 
     const handleInviteFriend = async (friendId: string) => {
         setInviteStatus(prev => ({ ...prev, [friendId]: 'sending' }));
         try {
-            const res = await fetch('/api/campaign-invites', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-                body: JSON.stringify({ campaignId: id, toUserId: friendId }),
-            });
-            if (res.ok) {
-                setInviteStatus(prev => ({ ...prev, [friendId]: 'sent' }));
-            } else {
-                const err = await res.json().catch(() => ({}));
-                setInviteStatus(prev => ({ ...prev, [friendId]: err.error || 'failed' }));
-            }
-        } catch {
-            setInviteStatus(prev => ({ ...prev, [friendId]: 'failed' }));
+            await api.post('/api/campaign-invites', { campaignId: id, toUserId: friendId });
+            setInviteStatus(prev => ({ ...prev, [friendId]: 'sent' }));
+        } catch (err) {
+            setInviteStatus(prev => ({ ...prev, [friendId]: errorOf(err, 'failed') }));
         }
     };
 
@@ -401,7 +337,7 @@ export default function CampaignDetailPage() {
     // Who the torch can pass to (#89): active party members with an account who aren't a GM already.
     const torchCandidates = activeMembers.filter(m => m.playerId && m.status !== 'Game Master');
     const gmMembers = members.filter(m => m.status === 'Game Master' && m.playerId);
-    const viewerId = JSON.parse(localStorage.getItem('user') || 'null')?.id;
+    const viewerId = me?.id;
     const torchNeedsFrom = gmMembers.length > 1 && !gmMembers.some(m => m.playerId === viewerId);
     // An admin-managed campaign with nobody holding the torch: a player may claim it
     // (an admin passes it instead).

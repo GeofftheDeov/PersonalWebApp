@@ -32,10 +32,13 @@ export function getLiveClient(): LiveClient {
             cookieAuth: true,
         });
         // A socket refused for an expired session (4001) stays closed; once
-        // the person signs in again, connect with the new cookie.
+        // the person signs in again, connect with the new cookie. Signing out
+        // closes it: the server would otherwise keep it open as them.
         const client = shared;
         session.subscribe(() => {
-            if (session.getState().status === 'signedIn') client.resume();
+            const { status } = session.getState();
+            if (status === 'signedIn') client.resume();
+            else if (status === 'signedOut') client.close();
         });
     }
     return shared;

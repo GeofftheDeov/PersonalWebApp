@@ -12,10 +12,12 @@
  * code. Sending it on reads too keeps the rule simple and costs nothing.
  *
  * Requests go with `credentials: 'same-origin'`, so the browser carries the
- * HttpOnly session cookie and the client never touches the token itself.
- * Until the session client (#210) takes over, callers may still pass a bearer
- * token (`getToken`, or `token` per call); the backend then authenticates by
- * the bearer and ignores the cookie.
+ * HttpOnly session cookie and the client never touches the token itself. The
+ * browser apps authenticate that way only (#210; the session client in
+ * `@gtd/shared/session` knows who's signed in). Bearer clients (scripts, and
+ * the desktop and mobile apps to come) pass a token instead (`getToken`, or
+ * `token` per call); the backend then authenticates by the bearer and ignores
+ * any cookie.
  */
 
 export const CSRF_HEADER = "X-Requested-With";
@@ -46,7 +48,7 @@ export interface ApiRequestOptions {
   signal?: AbortSignal;
   /**
    * A bearer token for this call, over the client's `getToken`. `null` sends
-   * none. Transitional: goes away with localStorage tokens (#210).
+   * none. For bearer clients; the browser apps use the cookie.
    */
   token?: string | null;
 }
@@ -58,8 +60,18 @@ export interface ApiClientOptions {
   baseUrl?: string;
   /** Default: the global fetch, looked up per call. */
   fetch?: typeof fetch;
-  /** Where a bearer token comes from, if anywhere. Transitional (#210). */
+  /**
+   * Where a bearer token comes from, if anywhere. For bearer clients (scripts,
+   * desktop and mobile apps); the browser apps leave it unset and let the
+   * session cookie authenticate.
+   */
   getToken?: () => string | null | undefined;
+  /**
+   * Called with the error when a reply is 401, before it's thrown: the
+   * session has expired or never existed. The browser apps point it at the
+   * session client's `expire`, which sends the person to log in and back.
+   */
+  onUnauthorized?: (error: ApiError) => void;
 }
 
 export interface ApiClient {
@@ -127,7 +139,11 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       signal: init.signal,
     });
     const parsed = await readBody(res);
-    if (!res.ok) throw new ApiError(errorMessage(parsed, res.status), res.status, parsed);
+    if (!res.ok) {
+      const error = new ApiError(errorMessage(parsed, res.status), res.status, parsed);
+      if (res.status === 401) options.onUnauthorized?.(error);
+      throw error;
+    }
     return parsed as T;
   }
 

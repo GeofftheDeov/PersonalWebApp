@@ -171,3 +171,22 @@ test("paths join the base URL, and the default base is the page's own origin", a
   await api.get("/api/users/me");
   assert.deepEqual(urls, ["/api/users/me"]);
 });
+
+test("a 401 reaches onUnauthorized (the session's expiry hook), then still throws", async () => {
+  const reached: ApiError[] = [];
+  const api = createApiClient({
+    onUnauthorized: (err) => { reached.push(err); },
+    fetch: async () => new Response(JSON.stringify({ error: "Unauthorized: Invalid token" }), { status: 401 }),
+  });
+  await assert.rejects(api.get("/api/things"), (err: unknown) => err instanceof ApiError && err.status === 401);
+  assert.equal(reached.length, 1);
+  assert.equal(reached[0].message, "Unauthorized: Invalid token");
+});
+
+test("other refusals don't reach onUnauthorized", async () => {
+  let calls = 0;
+  const api = createApiClient({ baseUrl: origin, onUnauthorized: () => { calls++; } });
+  await assert.rejects(api.post("/api/refused", {}));
+  await assert.rejects(api.get("/api/broken"));
+  assert.equal(calls, 0);
+});

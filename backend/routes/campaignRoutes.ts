@@ -13,6 +13,7 @@ import { clearBanner, requestBannerUpload, setBanner, withBannerUrl } from "../p
 import { bus } from "../events/index.js";
 import { query } from "../db/index.js";
 import { TorchError, claimTorch, passTorchPermanently } from "../planning/torch.js";
+import { forReader, prepNotesReader } from "../utils/prepNotes.js";
 
 /**
  * Phase 3 (#35, plan §3.4). Auto-enrolment used to branch on req.user.type to
@@ -199,14 +200,18 @@ router.get("/:id/sessions", auth, async (req: any, res) => {
         if (campaignIds && !campaignIds.some((cid: any) => cid.toString() === req.params.id)) {
             return res.status(403).json({ error: "Unauthorized" });
         }
-        const sessions = await Session.find({ campaign: req.params.id }).sort({ date: -1 });
+        const [sessions, canRead] = await Promise.all([
+            Session.find({ campaign: req.params.id }).sort({ date: -1 }),
+            prepNotesReader(req.user),
+        ]);
         // How many came (#37), for the campaign's session list.
         const { rows } = await query<{ session_id: string; n: number }>(
             `SELECT p.session_id, count(*)::int AS n
                FROM player_sessions p JOIN game_sessions s ON s.id = p.session_id
               WHERE s.campaign_id = $1 GROUP BY p.session_id`, [req.params.id]);
         const counts = new Map(rows.map((r) => [String(r.session_id), r.n]));
-        res.json(sessions.map((s: any) => ({ ...s.toJSON(), attendeeCount: counts.get(String(s._id)) ?? 0 })));
+        // Prep notes (agenda) are the GM's (#213).
+        res.json(sessions.map((s: any) => ({ ...forReader(canRead, s.toJSON()), attendeeCount: counts.get(String(s._id)) ?? 0 })));
     } catch (error: any) {
         console.error("Error fetching campaign sessions:", error);
         res.status(500).json({ error: "Failed to fetch sessions", details: error.message });

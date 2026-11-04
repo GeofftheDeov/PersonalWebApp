@@ -320,7 +320,7 @@ async function main() {
             fake.calls().map((c) => c.name).sort().join() === "discord.updateScheduledEvent,google.updateCalendarEvent", fake.calls().map((c) => c.name));
         check("...the event ids stay, and the shareable link shows the new time",
             mRow.discord_event_id === discordId && mRow.google_event_id === googleId &&
-                mRow.google_calendar_link === buildGoogleCalendarLink({ title: "Ashen Crown: Forced night", description: "Forced night agenda",
+                mRow.google_calendar_link === buildGoogleCalendarLink({ title: "Ashen Crown: Forced night",
                     location: "https://foundry.example/game", start: new Date(E.start), end: new Date(E.end) }), mRow);
         check("...the ready check for the old night is cleared", mRow.ready_check === null, mRow.ready_check);
         const nm = events.slice(mark).find((e) => e.name === "planning.night_moved" && e.payload.sessionId === sidV)?.payload;

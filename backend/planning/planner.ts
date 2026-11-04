@@ -60,6 +60,7 @@ import { bus } from "../events/index.js";
 import type { EventMap } from "../events/events.js";
 import { notify } from "../utils/notify.js";
 import { personDisplayName } from "../utils/personUtils.js";
+import { scrubCalendarLink } from "../utils/prepNotes.js";
 import { resolveQuorum } from "./availability.js";
 import { campaignParty } from "./availabilityStore.js";
 import { realExternalEvents, type ExternalEvents } from "./externalEvents.js";
@@ -415,7 +416,8 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
         const start: Date = s.date, end: Date = s.end_date ?? new Date(+s.date + 4 * HOUR);
         effects.push(async () => {
             const published = await deps.events.publishSession({
-                gmIds, name: `${s.campaign_title}: ${s.title}`, description: s.agenda || undefined,
+                // No description: the agenda is the GM's Prep notes (#213).
+                gmIds, name: `${s.campaign_title}: ${s.title}`,
                 location: venueLocation(v.name, v.address), start, end,
             });
             await pool.query(
@@ -471,7 +473,7 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
         const event = {
             gmIds,
             name: `${s.campaign_title}: ${s.title}`,
-            description: s.agenda || undefined,
+            // No description: the agenda is the GM's Prep notes (#213).
             location: eventLocation(s),
             start, end,
             discord: s.discord_guild_id
@@ -579,12 +581,16 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
         return {
             session: {
                 id: s.id, campaignId: s.campaign_id, title: s.title, status: s.status, stage: s.planning_stage,
-                isOnline: s.is_online, foodMode: s.food_mode, foodOwnerId: s.food_owner_id, agenda: s.agenda,
+                isOnline: s.is_online, foodMode: s.food_mode, foodOwnerId: s.food_owner_id,
+                // Prep notes are the GM's (#213): the key is there (maybe null) only for the
+                // Game Master, the stand-in and admins.
+                ...(role.gm ? { agenda: s.agenda } : {}),
                 date: s.date?.toISOString() ?? null, endDate: s.end_date?.toISOString() ?? null, location: s.location,
                 /** The confirmed venue (#92), with its address. */
                 venue: venue(s.venue_id),
                 hostId: s.host_id,
-                googleCalendarLink: s.google_calendar_link, discordEventId: s.discord_event_id, googleEventId: s.google_event_id,
+                googleCalendarLink: role.gm ? s.google_calendar_link : scrubCalendarLink(s.google_calendar_link, s.agenda),
+                discordEventId: s.discord_event_id, googleEventId: s.google_event_id,
                 // The one-session stand-in Game Master (#89), if the torch was passed for this session.
                 gmOverride: s.gm_override_id ? { id: s.gm_override_id, name: await personName(s.gm_override_id, party) } : null,
             },

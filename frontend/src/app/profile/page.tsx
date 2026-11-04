@@ -1,15 +1,19 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Footer from '@/components/Footer';
 import CalendarView from '@/components/CalendarView';
 import AvailabilityEditor from '@/components/AvailabilityEditor';
+import { ApiError } from '@gtd/shared/api';
+import { api, errorOf, getOrNull } from '@/lib/api';
+import { session, useRequiredSession } from '@/lib/session';
 
 export default function ProfilePage() {
-    const router = useRouter();
-    const [user, setUser] = useState<any>(null);
+    // Signed out goes to log in and comes back here (#210). The person comes
+    // from the session client, which asks the backend; after an edit it asks again.
+    const { user: sessionUser } = useRequiredSession();
+    const user = sessionUser as any;
     const [isEditing, setIsEditing] = useState(false);
     const [profileData, setProfileData] = useState<any>({});
     const [uploadError, setUploadError] = useState<string | null>(null);
@@ -31,70 +35,42 @@ export default function ProfilePage() {
     const [keyError, setKeyError] = useState<string | null>(null);
     const [deletingProvider, setDeletingProvider] = useState<string | null>(null);
 
-    const loadApiKeys = (token: string) => {
-        fetch('/api/api-keys', { headers: { 'Authorization': `Bearer ${token}` } })
-            .then(r => r.ok ? r.json() : [])
-            .then(setApiKeys)
-            .catch(() => setApiKeys([]));
+    const loadApiKeys = () => {
+        getOrNull<any[]>('/api/api-keys').then(keys => setApiKeys(keys ?? []));
     };
 
     const [gcal, setGcal] = useState<{ connected: boolean; configured: boolean; needsReconsent?: boolean } | null>(null);
     const [gcalNotice, setGcalNotice] = useState<string | null>(null);
 
-    const loadGcalStatus = (token: string) => {
-        fetch('/api/google-calendar/status', { headers: { 'Authorization': `Bearer ${token}` } })
-            .then(r => r.ok ? r.json() : null)
-            .then(setGcal)
-            .catch(() => setGcal(null));
+    const loadGcalStatus = () => {
+        getOrNull<typeof gcal>('/api/google-calendar/status').then(setGcal);
     };
 
     const connectGcal = async () => {
-        const token = localStorage.getItem('token');
-        const res = await fetch('/api/google-calendar/auth-url', { headers: { 'Authorization': `Bearer ${token}` } });
-        if (res.ok) {
-            const { url } = await res.json();
+        try {
+            const { url } = await api.get<{ url: string }>('/api/google-calendar/auth-url');
             window.location.href = url;
-        } else {
-            const err = await res.json().catch(() => ({}));
-            setGcalNotice(err.error || 'Google Calendar is not configured on the server.');
+        } catch (err) {
+            setGcalNotice(errorOf(err, 'Google Calendar is not configured on the server.'));
         }
     };
 
     const disconnectGcal = async () => {
-        const token = localStorage.getItem('token');
-        const res = await fetch('/api/google-calendar', { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
-        if (res.ok) loadGcalStatus(token!);
+        const ok = await api.delete('/api/google-calendar').then(() => true, () => false);
+        if (ok) loadGcalStatus();
     };
 
-    const handleAuthError = () => {
-        localStorage.clear();
-        window.dispatchEvent(new Event('authChange'));
-        router.push('/login');
-    };
-
+    const userId = user?.id as string | undefined;
     useEffect(() => {
-        const token = localStorage.getItem('token');
-        const userData = localStorage.getItem('user');
+        if (!userId) return;
+        const me = session.getState().user;
+        setProfileData(me ?? {});
+        setGames((me?.favoriteGames as string[] | undefined) || []);
 
-        if (!token || !userData) {
-            router.push('/login');
-            return;
-        }
+        getOrNull<any[]>('/api/users/profile/sessions').then(rows => setSessions(rows ?? []));
 
-        const parsedUser = JSON.parse(userData);
-        setUser(parsedUser);
-        setProfileData(parsedUser);
-        setGames(parsedUser.favoriteGames || []);
-
-        fetch('/api/users/profile/sessions', {
-            headers: { 'Authorization': `Bearer ${token}` },
-        })
-            .then(r => r.ok ? r.json() : [])
-            .then(setSessions)
-            .catch(() => setSessions([]));
-
-        loadApiKeys(token);
-        loadGcalStatus(token);
+        loadApiKeys();
+        loadGcalStatus();
 
         // Feedback from the Google OAuth redirect (?gcal=connected|denied|error|noRefreshToken),
         // and the tab it was started from (?tab=availability: connecting Google as a busy source).
@@ -112,29 +88,18 @@ export default function ProfilePage() {
             window.history.replaceState({}, '', '/profile');
         }
 
-        fetch('/api/campaigns', {
-            headers: { 'Authorization': `Bearer ${token}` },
-        })
-            .then(r => r.ok ? r.json() : [])
-            .then(setCampaigns)
-            .catch(() => setCampaigns([]));
+        getOrNull<any[]>('/api/campaigns').then(rows => setCampaigns(rows ?? []));
 
-        fetch('/api/tabletop/characters', {
-            headers: { 'Authorization': `Bearer ${token}` },
-        })
-            .then(r => r.ok ? r.json() : [])
-            .then((chars: any[]) => {
-                const playerId = parsedUser.id || parsedUser._id;
-                const mine = chars.filter((c) => {
-                    const p = c.player;
-                    if (!p) return false;
-                    const pid = typeof p === 'string' ? p : (p._id || p.id);
-                    return pid === playerId;
-                });
-                setCharacters(mine);
-            })
-            .catch(() => setCharacters([]));
-    }, [router]);
+        getOrNull<any[]>('/api/tabletop/characters').then((chars) => {
+            const mine = (chars ?? []).filter((c) => {
+                const p = c.player;
+                if (!p) return false;
+                const pid = typeof p === 'string' ? p : (p._id || p.id);
+                return pid === userId;
+            });
+            setCharacters(mine);
+        });
+    }, [userId]);
 
     if (!user) {
         return (
@@ -155,29 +120,10 @@ export default function ProfilePage() {
         formData.append('profilePicture', file);
 
         try {
-            const token = localStorage.getItem('token');
-            const response = await fetch('/api/users/profile/picture', {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}` },
-                body: formData,
-            });
-
-            if (response.status === 401) {
-                handleAuthError();
-                return;
-            }
-
-            if (response.ok) {
-                const data = await response.json();
-                const updatedUser = { ...user, profilePicture: data.profilePicture };
-                setUser(updatedUser);
-                localStorage.setItem('user', JSON.stringify(updatedUser));
-            } else {
-                const err = await response.json();
-                setUploadError(err.error || 'Upload failed');
-            }
-        } catch {
-            setUploadError('Upload failed. Please try again.');
+            await api.post('/api/users/profile/picture', formData);
+            await session.refresh().catch(() => {});
+        } catch (err) {
+            setUploadError(err instanceof ApiError ? errorOf(err, 'Upload failed') : 'Upload failed. Please try again.');
         } finally {
             setIsUploading(false);
             if (fileInputRef.current) fileInputRef.current.value = '';
@@ -186,26 +132,10 @@ export default function ProfilePage() {
 
     const updateProfile = async (e: React.FormEvent) => {
         e.preventDefault();
-        const token = localStorage.getItem('token');
-        const response = await fetch('/api/users/profile', {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`,
-            },
-            body: JSON.stringify(profileData),
-        });
+        const saved = await api.put('/api/users/profile', profileData).then(() => true, () => false);
 
-        if (response.status === 401) {
-            handleAuthError();
-            return;
-        }
-
-        if (response.ok) {
-            const data = await response.json();
-            const updatedUser = { ...user, ...data.user };
-            setUser(updatedUser);
-            localStorage.setItem('user', JSON.stringify(updatedUser));
+        if (saved) {
+            await session.refresh().catch(() => {});
             setIsEditing(false);
         }
     };
@@ -228,19 +158,8 @@ export default function ProfilePage() {
     const persistGames = async (list: string[]) => {
         setSavingGames(true);
         try {
-            const token = localStorage.getItem('token');
-            const response = await fetch('/api/users/profile', {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ favoriteGames: list }),
-            });
-            if (response.status === 401) { handleAuthError(); return; }
-            if (response.ok) {
-                const data = await response.json();
-                const updatedUser = { ...user, ...data.user };
-                setUser(updatedUser);
-                localStorage.setItem('user', JSON.stringify(updatedUser));
-            }
+            const saved = await api.put('/api/users/profile', { favoriteGames: list }).then(() => true, () => false);
+            if (saved) await session.refresh().catch(() => {});
         } finally {
             setSavingGames(false);
         }
@@ -253,23 +172,13 @@ export default function ProfilePage() {
         setSavingKey(true);
         setKeyError(null);
         try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`/api/api-keys/${encodeURIComponent(provider)}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ keyId: keyForm.keyId, secret: keyForm.secret, label: keyForm.label }),
-            });
-            if (response.status === 401) { handleAuthError(); return; }
-            if (response.ok) {
-                setKeyForm(EMPTY_KEY_FORM);
-                setShowKeyForm(false);
-                loadApiKeys(token!);
-            } else {
-                const err = await response.json().catch(() => ({}));
-                setKeyError(err.error || 'Failed to save key');
-            }
-        } catch {
-            setKeyError('Failed to save key');
+            await api.put(`/api/api-keys/${encodeURIComponent(provider)}`,
+                { keyId: keyForm.keyId, secret: keyForm.secret, label: keyForm.label });
+            setKeyForm(EMPTY_KEY_FORM);
+            setShowKeyForm(false);
+            loadApiKeys();
+        } catch (err) {
+            setKeyError(errorOf(err, 'Failed to save key'));
         } finally {
             setSavingKey(false);
         }
@@ -279,13 +188,8 @@ export default function ProfilePage() {
         if (!window.confirm(`Delete the stored key for "${provider}"? This cannot be undone.`)) return;
         setDeletingProvider(provider);
         try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`/api/api-keys/${encodeURIComponent(provider)}`, {
-                method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${token}` },
-            });
-            if (response.status === 401) { handleAuthError(); return; }
-            if (response.ok) setApiKeys(prev => prev.filter(k => k.provider !== provider));
+            const deleted = await api.delete(`/api/api-keys/${encodeURIComponent(provider)}`).then(() => true, () => false);
+            if (deleted) setApiKeys(prev => prev.filter(k => k.provider !== provider));
         } finally {
             setDeletingProvider(null);
         }

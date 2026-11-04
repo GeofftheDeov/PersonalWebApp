@@ -2,25 +2,21 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Footer from "@/components/Footer";
+import { useSession } from "@/lib/session";
 
 export default function Home() {
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
+  // Signed in (the session cookie, asked of the backend: #210) goes to the dashboard.
+  const { status } = useSession();
 
   useEffect(() => {
-    // Check if user is already logged in
-    const token = localStorage.getItem("token");
-    if (token) {
-      router.push("/dashboard");
-    } else {
-      setLoading(false);
-    }
-  }, [router]);
+    if (status === "signedIn") router.push("/dashboard");
+  }, [status, router]);
 
-  if (loading) {
+  if (status !== "signedOut") {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-zinc-900">
         <div className="h-16 w-16 animate-spin border-8 border-black border-t-teal-600 dark:border-white dark:border-t-teal-400"></div>

@@ -2,6 +2,10 @@
 
 import React from 'react';
 import { useRouter } from 'next/navigation';
+import { ApiError } from '@gtd/shared/api';
+import { RETURN_PARAM, safeReturnTo } from '@gtd/shared/session';
+import { errorOf } from '@/lib/api';
+import { session } from '@/lib/session';
 
 declare global {
     interface Window {
@@ -16,31 +20,23 @@ export default function LoginPage() {
     const [loading, setLoading] = React.useState(false);
     const router = useRouter();
 
+    // Where to go after logging in: the return URL a 401 or a gated page sent
+    // here with (#210), if it's a path on this site; else the dashboard.
     const getRedirectTarget = () => {
         if (typeof window === 'undefined') return '/dashboard';
         const params = new URLSearchParams(window.location.search);
-        return params.get('redirect') || '/dashboard';
+        return safeReturnTo(params.get(RETURN_PARAM)) || '/dashboard';
     };
 
     const handleGoogleLogin = async (response: any) => {
         setLoading(true);
         setError('');
         try {
-            const res = await fetch('/api/users/google-login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ idToken: response.credential }),
-            });
-
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Google Login failed');
-
-            localStorage.setItem('token', data.token);
-            localStorage.setItem('user', JSON.stringify(data.user));
-            window.dispatchEvent(new Event('authChange'));
+            // The session cookie carries the login; nothing is stored here.
+            await session.loginWithGoogle(response.credential);
             router.push(getRedirectTarget());
         } catch (err: any) {
-            setError(err.message);
+            setError(err instanceof ApiError ? errorOf(err, 'Google Login failed') : err.message);
         } finally {
             setLoading(false);
         }
@@ -76,32 +72,16 @@ export default function LoginPage() {
         setError('');
 
         try {
-            const res = await fetch('/api/users/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, password }),
-            });
-
-            const data = await res.json();
-            
-            if (!res.ok) {
-                if (res.status === 403 && data.requiresReset) {
-                    setError(data.message);
-                    return;
-                }
-                throw new Error(data.error || 'Login failed');
-            }
-
-            // Save token and user info
-            localStorage.setItem('token', data.token);
-            localStorage.setItem('user', JSON.stringify(data.user));
-            
-            // Notify navigation of auth state change
-            window.dispatchEvent(new Event('authChange'));
-
+            // The session cookie carries the login; nothing is stored here.
+            await session.login(email, password);
             router.push(getRedirectTarget());
         } catch (err: any) {
-            setError(err.message);
+            const body = err instanceof ApiError ? err.body as { requiresReset?: boolean; message?: string } | undefined : undefined;
+            if (err instanceof ApiError && err.status === 403 && body?.requiresReset && body.message) {
+                setError(body.message);
+                return;
+            }
+            setError(err instanceof ApiError ? errorOf(err, 'Login failed') : err.message);
         } finally {
             setLoading(false);
         }

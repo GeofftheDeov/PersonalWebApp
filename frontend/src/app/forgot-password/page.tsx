@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { useRouter } from 'next/navigation';
+import { api, errorOf } from '@/lib/api';
 
 export default function ForgotPasswordPage() {
     const [email, setEmail] = React.useState('');
@@ -17,17 +18,8 @@ export default function ForgotPasswordPage() {
         setMessage('');
 
         try {
-            const res = await fetch('/api/users/forgot-password', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email }),
-            });
-
-            const data = await res.json();
-
-            if (!res.ok) {
-                throw new Error(data.error || 'Failed to send reset email');
-            }
+            await api.post('/api/users/forgot-password', { email })
+                .catch((err) => { throw new Error(errorOf(err, 'Failed to send reset email')); });
 
             setMessage('If an account exists with that email, we have sent a password reset link.');
             // Optional: Redirect after a few seconds?

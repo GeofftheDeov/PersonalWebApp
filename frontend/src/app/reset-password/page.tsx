@@ -2,6 +2,7 @@
 
 import React, { Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { api, errorOf } from '@/lib/api';
 
 function ResetPasswordContent() {
     const [password, setPassword] = React.useState('');
@@ -32,17 +33,8 @@ function ResetPasswordContent() {
         }
 
         try {
-            const res = await fetch('/api/users/reset-password', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ token, newPassword: password }),
-            });
-
-            const data = await res.json();
-
-            if (!res.ok) {
-                throw new Error(data.error || 'Failed to reset password');
-            }
+            await api.post('/api/users/reset-password', { token, newPassword: password })
+                .catch((err) => { throw new Error(errorOf(err, 'Failed to reset password')); });
 
             setMessage('Password reset successfully! Redirecting to login...');
             setTimeout(() => {

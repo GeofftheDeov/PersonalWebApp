@@ -204,6 +204,9 @@ async function main() {
             const r = await put(as, `${NOTES} (${as})`);
             check(`${as} can write them`, r.status === 200 && r.json.agenda === `${NOTES} (${as})` && (await row(sid)).agenda === `${NOTES} (${as})`, r.json);
         }
+        const afterEdit = (await call("GET", `/api/tabletop/sessions/${sid}`, "p1")).json;
+        check("with the notes since edited, the old link a player gets still leaves out the old ones",
+            !hasNotes(afterEdit) && !String(afterEdit.googleCalendarLink).includes("details="), afterEdit.googleCalendarLink);
         await put("gm", NOTES);
 
         // ── event descriptions ──────────────────────────────────────────────
@@ -222,6 +225,18 @@ async function main() {
                 title: "Ashen Crown: One-shot", location: "Online", start: new Date(slot(2).start), end: new Date(slot(2).end),
             }), created.json.googleCalendarLink);
         check("...while the GM still gets the Prep notes back", created.json.agenda === NOTES, created.json);
+
+        // The older "prepare session" form also makes an app event, which anyone can list.
+        const prepared = await call("POST", "/api/tabletop/prepare-session", "gm", {
+            title: "t213 Prepared", campaignId, date: slot(2).start, isOnline: true, agenda: NOTES, ownerId: who.gm.id, ownerName: "GM",
+        });
+        const preparedEvent = prepared.json?.event?._id
+            ? (await pool.query(`SELECT description FROM events WHERE id = $1`, [prepared.json.event._id])).rows[0] : null;
+        check("preparing a session makes its app event without the Prep notes",
+            prepared.status === 201 && preparedEvent !== null && preparedEvent.description === null, { res: prepared.json, preparedEvent });
+        check("...while the GM's own prep task keeps them", String(prepared.json?.task?.description ?? "").includes(NOTES), prepared.json?.task);
+        if (prepared.json?.event?._id) await pool.query(`DELETE FROM events WHERE id = $1`, [prepared.json.event._id]);
+        if (prepared.json?.task?._id) await pool.query(`DELETE FROM tasks WHERE id = $1`, [prepared.json.task._id]);
 
         // The planner publishes when the night is confirmed.
         fake.clear();

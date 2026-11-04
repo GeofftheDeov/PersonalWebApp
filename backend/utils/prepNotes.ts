@@ -17,7 +17,10 @@ const idOf = (ref: any): string => (ref == null ? "" : String(ref._id ?? ref));
 
 /**
  * Who may read Prep notes, decided once per request for any number of
- * sessions: one admin check and one membership lookup.
+ * sessions: one admin check and one membership lookup. The same people as
+ * isSessionGameMaster (gameNightPlannerUtils.ts), who may write them, and
+ * roleIn's `gm` (planning/roles.ts), which the planning read uses: keep the
+ * three in step.
  */
 export async function prepNotesReader(user: any): Promise<(session: { campaign?: unknown; gmOverride?: unknown }) => boolean> {
     if (await isAdmin(user)) return () => true;
@@ -35,15 +38,16 @@ export async function prepNotesReader(user: any): Promise<(session: { campaign?:
 }
 
 /**
- * The shareable Google link without the agenda. Links built before #213
- * carried it as `details`; they lose it here until the session's events are
- * next published.
+ * The shareable Google link without its `details`. Until #213 the details
+ * were only ever the agenda, and links stored then still carry it (perhaps an
+ * agenda since edited), so anyone but a reader gets the link without them.
+ * If a later change puts something else in `details`, this must learn to tell
+ * the two apart.
  */
-export function scrubCalendarLink(link: string | null | undefined, agenda: string | null | undefined): string | null | undefined {
-    if (!link || !agenda) return link;
+export function scrubCalendarLink(link: string | null | undefined): string | null | undefined {
+    if (!link || !link.includes("details=")) return link;
     try {
         const url = new URL(link);
-        if (url.searchParams.get("details") !== agenda) return link;
         url.searchParams.delete("details");
         return url.toString();
     } catch {
@@ -54,8 +58,8 @@ export function scrubCalendarLink(link: string | null | undefined, agenda: strin
 /** A session (a model document or plain object) as someone who may not read Prep notes sees it. */
 export function withoutPrepNotes<T extends Record<string, any>>(session: T): Omit<T, "agenda"> {
     const plain: any = typeof session?.toJSON === "function" ? session.toJSON() : { ...session };
-    const { agenda, ...rest } = plain;
-    if ("googleCalendarLink" in rest) rest.googleCalendarLink = scrubCalendarLink(rest.googleCalendarLink, agenda);
+    const { agenda: _agenda, ...rest } = plain;
+    if ("googleCalendarLink" in rest) rest.googleCalendarLink = scrubCalendarLink(rest.googleCalendarLink);
     return rest;
 }
 

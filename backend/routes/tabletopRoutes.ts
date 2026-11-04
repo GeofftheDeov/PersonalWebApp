@@ -151,15 +151,18 @@ router.post("/sessions", auth, async (req: any, res) => {
 
 router.get("/sessions/:id", auth, async (req: any, res) => {
     try {
-        const campaignIds = await getAuthorizedCampaignIds(req.user);
-        const session = await Session.findById(req.params.id).populate("campaign");
+        const [campaignIds, session, canRead] = await Promise.all([
+            getAuthorizedCampaignIds(req.user),
+            Session.findById(req.params.id).populate("campaign"),
+            prepNotesReader(req.user),
+        ]);
         if (!session) return res.status(404).json({ error: "Session not found" });
         // Check access
         if (campaignIds && !campaignIds.some((id: any) => id.toString() === session.campaign?._id?.toString())) {
             return res.status(403).json({ error: "Unauthorized" });
         }
         // Prep notes (agenda) are the GM's (#213): the key is left out for anyone else.
-        res.json(forReader(await prepNotesReader(req.user), session));
+        res.json(forReader(canRead, session));
     } catch (error: any) {
         res.status(500).json({ error: "Failed to fetch session", details: error.message });
     }
@@ -287,10 +290,11 @@ router.post("/prepare-session", auth, async (req: any, res) => {
         });
         await task.save();
 
-        // 3. Create Event
+        // 3. Create Event. Anyone can list events, so it doesn't carry the
+        // agenda: that's the GM's Prep notes (#213). The task above is the
+        // GM's own and keeps it.
         const event = new Event({
             title: `Tabletop Session: ${title}`,
-            description: agenda,
             startDate: date,
             endDate: new Date(new Date(date).getTime() + 4 * 60 * 60 * 1000), // Default 4 hours session
             status: "Not Started",

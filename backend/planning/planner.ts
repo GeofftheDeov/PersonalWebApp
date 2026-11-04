@@ -589,7 +589,7 @@ export function createPlanner(deps: PlannerDeps = { events: realExternalEvents, 
                 /** The confirmed venue (#92), with its address. */
                 venue: venue(s.venue_id),
                 hostId: s.host_id,
-                googleCalendarLink: role.gm ? s.google_calendar_link : scrubCalendarLink(s.google_calendar_link, s.agenda),
+                googleCalendarLink: role.gm ? s.google_calendar_link : scrubCalendarLink(s.google_calendar_link),
                 discordEventId: s.discord_event_id, googleEventId: s.google_event_id,
                 // The one-session stand-in Game Master (#89), if the torch was passed for this session.
                 gmOverride: s.gm_override_id ? { id: s.gm_override_id, name: await personName(s.gm_override_id, party) } : null,

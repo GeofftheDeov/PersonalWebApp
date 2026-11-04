@@ -286,6 +286,8 @@ router.post("/prepare-session", auth, async (req: any, res) => {
             startDate: date,
             endDate: new Date(new Date(date).getTime() + 4 * 60 * 60 * 1000), // Default 4 hours session
             status: "Not Started",
+            // The GM's own (#238): it lists only for them and admins.
+            owner: req.user.id,
         });
         await event.save();
 
@@ -376,9 +378,24 @@ router.put("/characters/:id", auth, async (req: any, res) => {
 });
 
 // --- Dungeons ---
-router.get("/dungeons", async (req, res) => {
+// Dungeons and encounters were readable with no login at all (#238). Now a
+// non-admin sees what touches their campaigns: an encounter by its session's
+// campaign, a dungeon through an encounter or a character in one of them.
+router.get("/dungeons", auth, async (req: any, res) => {
     try {
-        const dungeons = await Dungeon.find();
+        const campaignIds = await getAuthorizedCampaignIds(req.user);
+        let query = {};
+        if (campaignIds) {
+            const { rows } = await pool.query(
+                `SELECT e.dungeon_id AS id FROM encounters e JOIN game_sessions s ON s.id = e.session_id
+                  WHERE e.dungeon_id IS NOT NULL AND s.campaign_id = ANY($1::uuid[])
+                 UNION
+                 SELECT dungeon_id FROM characters
+                  WHERE dungeon_id IS NOT NULL AND campaign_id = ANY($1::uuid[])`,
+                [campaignIds]);
+            query = { _id: { $in: rows.map((r) => r.id) } };
+        }
+        const dungeons = await Dungeon.find(query);
         res.json(dungeons);
     } catch (error: any) {
         res.status(500).json({ error: "Failed to fetch dungeons", details: error.message });
@@ -386,9 +403,15 @@ router.get("/dungeons", async (req, res) => {
 });
 
 // --- Encounters ---
-router.get("/encounters", async (req, res) => {
+router.get("/encounters", auth, async (req: any, res) => {
     try {
-        const encounters = await Encounter.find().populate("session dungeon");
+        const campaignIds = await getAuthorizedCampaignIds(req.user);
+        let query = {};
+        if (campaignIds) {
+            const sessions = await Session.find({ campaign: { $in: campaignIds } }).select("_id");
+            query = { session: { $in: sessions.map((x: any) => x._id) } };
+        }
+        const encounters = await Encounter.find(query).populate("session dungeon");
         res.json(encounters);
     } catch (error: any) {
         res.status(500).json({ error: "Failed to fetch encounters", details: error.message });

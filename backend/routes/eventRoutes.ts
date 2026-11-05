@@ -2,12 +2,19 @@ import express from "express";
 const router = express.Router();
 import Event from "../models/Event.js";
 import { auth } from "../middleware/auth.js";
+import { isAdmin } from "../utils/gameNightPlannerUtils.js";
+import { isUuid } from "../db/model.js";
 
 // Apply authentication middleware to all routes
 router.use(auth);
 
+// An event is its creator's (#238): every signed-in account used to list every
+// event, and "prepare session" ones carried the GM's agenda. Admins see all;
+// events made before owners existed (owner NULL) are theirs alone.
+const visibleTo = async (user: any) => (await isAdmin(user)) ? {} : { owner: user.id };
+
 // Create a new event
-router.post("/", async (req, res) => {
+router.post("/", async (req: any, res) => {
     try {
         const { title, description, status, startDate, endDate } = req.body;
         
@@ -25,6 +32,7 @@ router.post("/", async (req, res) => {
             status, 
             startDate, 
             endDate,
+            owner: req.user.id,
         });
         
         await event.save();
@@ -47,9 +55,9 @@ router.post("/", async (req, res) => {
 });
 
 // Get all events
-router.get("/", async (req, res) => {
+router.get("/", async (req: any, res) => {
     try {
-        const events = await Event.find().sort({ startDate: -1 });
+        const events = await Event.find(await visibleTo(req.user)).sort({ startDate: -1 });
         res.json(events);
     } catch (error: any) {
         console.error("Error fetching events:", error);
@@ -58,9 +66,12 @@ router.get("/", async (req, res) => {
 });
 
 // Get a specific event
-router.get("/:id", async (req, res) => {
+router.get("/:id", async (req: any, res) => {
     try {
-        const event = await Event.findById(req.params.id);
+        // Someone else's event reads as missing, not forbidden: no probing ids.
+        const event = isUuid(req.params.id)
+            ? await Event.findOne({ ...(await visibleTo(req.user)), _id: req.params.id })
+            : null;
         if (!event) {
             return res.status(404).json({ error: "Event not found" });
         }

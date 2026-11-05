@@ -460,7 +460,7 @@ export default function GameNightPage() {
                                 icon={<Wifi className={`w-3 h-3 ${sessionForm.isOnline ? 'text-teal-400' : 'text-zinc-500'}`} />}
                             />
                             <div>
-                                <label className={LABEL_CLS}>Agenda / Prep Notes</label>
+                                <label className={LABEL_CLS}>Prep Notes (GM only)</label>
                                 <textarea className={INPUT_CLS} rows={2} placeholder="WHAT'S PLANNED FOR THIS SESSION..." value={sessionForm.agenda} onChange={e => setSessionForm({ ...sessionForm, agenda: e.target.value })} />
                             </div>
                             <div>
@@ -485,7 +485,7 @@ export default function GameNightPage() {
                                 />
                                 {(sessionForm.createDiscordEvent || sessionForm.createGoogleEvent) && (
                                     <p className="text-[10px] text-zinc-500 font-permanent uppercase leading-relaxed">
-                                        External events require start and end times{sessionForm.createDiscordEvent && !sessionCampaign?.discordChannelId ? ', and Discord needs a location (or online)' : ''}. The agenda becomes the event description.
+                                        External events require start and end times{sessionForm.createDiscordEvent && !sessionCampaign?.discordChannelId ? ', and Discord needs a location (or online)' : ''}. Prep notes stay off the event: only the GM sees them.
                                     </p>
                                 )}
                             </div>

@@ -15,7 +15,7 @@ import Account from "../models/Account.js";
  */
 
 /** True when this person is an app admin. One indexed lookup. */
-async function isAdmin(user: any): Promise<boolean> {
+export async function isAdmin(user: any): Promise<boolean> {
     if (!user?.id) return false;
     const doc = await Account.findById(user.id).select("appRole");
     return doc?.appRole === "admin";

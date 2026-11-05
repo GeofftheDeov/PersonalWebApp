@@ -40,7 +40,7 @@ interface Member { id: string; name: string }
 interface FoodQuest { id: string; title: string; notes: string | null; assignee: Member | null; status: 'open' | 'done' | 'cancelled'; dueAt: string | null; createdBy: string | null }
 interface PlanningState {
     session: {
-        id: string; title: string; status: string; stage: 'night' | 'venue' | 'food' | null; isOnline: boolean; agenda: string | null;
+        id: string; title: string; status: string; stage: 'night' | 'venue' | 'food' | null; isOnline: boolean; agenda?: string | null;
         date: string | null; endDate: string | null; foodMode: FoodMode | null; foodOwnerId: string | null;
         venue: Venue | null; hostId: string | null; gmOverride: StandIn | null;
     };
@@ -915,7 +915,7 @@ export default function NoticeBoard({ campaignId, data: { board, error, reload }
                         <input required maxLength={120} value={kickoff.title} onChange={e => setKickoff({ ...kickoff, title: e.target.value })} className={INPUT_CLS} placeholder="SESSION 14: THE DROWNED CHAPEL" />
                     </label>
                     <label className="block">
-                        <span className="block font-permanent text-[10px] text-teal-400 uppercase mb-1">Agenda (optional)</span>
+                        <span className="block font-permanent text-[10px] text-teal-400 uppercase mb-1">Prep notes (optional, GM only)</span>
                         <textarea rows={2} maxLength={2000} value={kickoff.agenda} onChange={e => setKickoff({ ...kickoff, agenda: e.target.value })} className={INPUT_CLS} />
                     </label>
                     <fieldset>

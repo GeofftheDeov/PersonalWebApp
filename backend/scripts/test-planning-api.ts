@@ -230,7 +230,8 @@ async function main() {
         check("one Discord + Google publish, with the GM's vault, the table link as location, and the linked server",
             published.length === before + 1 && call1.gmIds[0] === who.gm.id && call1.location === "https://foundry.example/game" &&
                 call1.discord?.guildId === "123456789" && call1.name === "Ashen Crown: Session 14" &&
-                call1.description === "The Drowned Chapel" && call1.start.toISOString() === A.start, call1);
+                // The agenda is the GM's Prep notes (#213): no description.
+                call1.description === undefined && call1.start.toISOString() === A.start, call1);
         check("the returned event ids and calendar link are saved on the session",
             done.discord_event_id === `discord-${before + 1}` && done.google_event_id === `google-${before + 1}` &&
                 done.google_calendar_link === `https://calendar.google.com/fake/${before + 1}`, done);

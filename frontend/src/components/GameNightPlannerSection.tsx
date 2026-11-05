@@ -176,7 +176,7 @@ export default function GameNightPlannerSection() {
                         </div>
                     </div>
                     <div className="mb-8">
-                        <label className="block text-teal-500 font-permanent uppercase mb-2">Agenda / Prep Notes</label>
+                        <label className="block text-teal-500 font-permanent uppercase mb-2">Prep Notes (GM only)</label>
                         <textarea 
                             value={formData.agenda}
                             onChange={e => setFormData({...formData, agenda: e.target.value})}

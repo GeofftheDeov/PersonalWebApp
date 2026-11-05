@@ -18,7 +18,9 @@ import type { Request } from "express";
  *   HEARTHSIDE_URL     Hearthside's origin (https://hearthside.geoffthedeov.net,
  *                      https://deov.hearthside.geoffthedeov.net). Unset until
  *                      Hearthside is deployed, and then no host counts as
- *                      Hearthside.
+ *                      Hearthside. Setting it also points every Game Night
+ *                      link the backend generates at Hearthside (#214,
+ *                      gameNightLinks below).
  *
  * Read per call, not at import: route modules load before server.ts runs
  * dotenv.config().

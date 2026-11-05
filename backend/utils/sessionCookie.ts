@@ -30,8 +30,8 @@ import { COOKIE_TOKEN_CLAIM, signJwt } from "./jwt.js";
  * modules load before server.ts runs dotenv.config().
  */
 
-/** The cookie and its token last as long as a login token ("1h" in userRoutes). */
-const MAX_AGE_S = 60 * 60;
+/** How long a login lasts, in seconds: the cookie, its token, and the body's token in userRoutes. */
+export const SESSION_TTL_S = 60 * 60;
 
 /**
  * The header a cookie-authenticated write must carry (CSRF). All the
@@ -69,8 +69,8 @@ function cookieOptions() {
 export function setSessionCookie(res: Response, claims: { id: unknown; email: unknown }): void {
     const name = sessionCookieName();
     if (!name) return;
-    const token = signJwt({ ...claims, [COOKIE_TOKEN_CLAIM]: true }, { expiresIn: MAX_AGE_S });
-    res.cookie(name, token, { ...cookieOptions(), maxAge: MAX_AGE_S * 1000 });
+    const token = signJwt({ ...claims, [COOKIE_TOKEN_CLAIM]: true }, { expiresIn: SESSION_TTL_S });
+    res.cookie(name, token, { ...cookieOptions(), maxAge: SESSION_TTL_S * 1000 });
 }
 
 /** Clear it on the same name, domain and path it was set with. */

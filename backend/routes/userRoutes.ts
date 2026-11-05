@@ -10,7 +10,7 @@ import { findPersonById, toPublicPerson } from "../utils/personUtils.js";
 import { resolvePaperclipIdentity } from "../services/paperclipIdentity.js";
 import bcrypt from "bcryptjs";
 import { signJwt } from "../utils/jwt.js";
-import { clearSessionCookie, setSessionCookie } from "../utils/sessionCookie.js";
+import { clearSessionCookie, SESSION_TTL_S, setSessionCookie } from "../utils/sessionCookie.js";
 import crypto from "crypto";
 import multer from "multer";
 import path from "path";
@@ -65,7 +65,7 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
  * something will eventually start reading again by mistake.
  */
 const tokenClaims = (person: any) => ({ id: person._id, email: person.email });
-const signToken = (person: any) => signJwt(tokenClaims(person), { expiresIn: "1h" });
+const signToken = (person: any) => signJwt(tokenClaims(person), { expiresIn: SESSION_TTL_S });
 
 /**
  * Sign the person in (#69): put a session-cookie token in this environment's

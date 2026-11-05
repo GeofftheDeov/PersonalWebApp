@@ -198,8 +198,8 @@ async function main() {
     const portalMarked = await call("GET", `/admin?token=${encodeURIComponent(cookieTok)}`);
     check("the cookie's token in /admin?token= is refused (redirect to login)",
       portalMarked.status === 302 && /\/login$/.test(portalMarked.location ?? ""), `${portalMarked.status} ${portalMarked.location}`);
-    const portalBody = await call("GET", `/admin/obsidian/api/tree?token=${encodeURIComponent(bodyTok)}`);
-    check("  the body's token there still passes the gate", portalBody.status !== 302 && portalBody.status !== 403,
+    const portalBody = await call("GET", `/admin?token=${encodeURIComponent(bodyTok)}`);
+    check("  the body's token there still opens the portal", portalBody.status === 200,
       `${portalBody.status} ${portalBody.location ?? ""}`);
 
     // ── the live channel ─────────────────────────────────────────────────────

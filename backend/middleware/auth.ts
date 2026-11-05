@@ -31,7 +31,9 @@ export const auth = async (req: AuthRequest, res: Response, next: NextFunction) 
     // exempt from the CSRF check, since another page can't make the browser
     // attach it. Only without one does the environment's session cookie count.
     // The cookie's own token is marked and refused as a bearer (#212), so
-    // anything else that sees the cookie can't replay it here.
+    // something that sees the cookie can't replay it as a bearer to skip the
+    // CSRF check. (A non-browser client can still send it as a Cookie header
+    // with the CSRF header; the marker doesn't stop that.)
     const authHeader = req.headers.authorization;
     let token: string | null = null;
     let viaCookie = false;

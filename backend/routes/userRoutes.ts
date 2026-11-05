@@ -10,7 +10,7 @@ import { findPersonById, toPublicPerson } from "../utils/personUtils.js";
 import { resolvePaperclipIdentity } from "../services/paperclipIdentity.js";
 import bcrypt from "bcryptjs";
 import { signJwt } from "../utils/jwt.js";
-import { clearSessionCookie, setSessionCookie } from "../utils/sessionCookie.js";
+import { clearSessionCookie, SESSION_TTL_S, setSessionCookie } from "../utils/sessionCookie.js";
 import crypto from "crypto";
 import multer from "multer";
 import path from "path";
@@ -64,17 +64,18 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
  * it could only be meaningless or wrong, and a claim nothing reads is a claim
  * something will eventually start reading again by mistake.
  */
-const signToken = (person: any) =>
-    signJwt({ id: person._id, email: person.email }, { expiresIn: "1h" });
+const tokenClaims = (person: any) => ({ id: person._id, email: person.email });
+const signToken = (person: any) => signJwt(tokenClaims(person), { expiresIn: SESSION_TTL_S });
 
 /**
- * Sign a token, put it in this environment's session cookie (#69), and return
- * it for the response body, which bearer clients keep reading.
+ * Sign the person in (#69): put a session-cookie token in this environment's
+ * cookie, and return a separate token for the response body, which bearer
+ * clients keep reading. Only the cookie's token is marked (#212), so it's
+ * refused as a bearer; the body's works as one, as before.
  */
 const issueSession = (res: express.Response, person: any) => {
-    const token = signToken(person);
-    setSessionCookie(res, token);
-    return token;
+    setSessionCookie(res, tokenClaims(person));
+    return signToken(person);
 };
 
 /** The user object the client stores. Capability comes from explicit columns. */

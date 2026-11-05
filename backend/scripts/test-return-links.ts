@@ -216,9 +216,11 @@ async function main() {
     check("verifying returns a token and the person, as login does",
       verified.status === 200 && typeof verified.json.token === "string" && verified.json.user?.email === player.email,
       `${verified.status} ${JSON.stringify(verified.json).slice(0, 160)}`);
-    check("...and sets the session cookie holding that token",
-      !!verified.json.token && issued.startsWith(`${COOKIE}=${verified.json.token};`), issued || "(none)");
-    const me = await call("GET", "/api/users/profile", { headers: { cookie: `${COOKIE}=${verified.json.token}` } });
+    // The cookie holds its own token, not the body's (#212: it's marked so it works only as the cookie).
+    const cookieToken = decodeURIComponent(issued.slice(COOKIE.length + 1).split(";")[0] ?? "");
+    check("...and sets the session cookie",
+      !!verified.json.token && cookieToken.split(".").length === 3, issued || "(none)");
+    const me = await call("GET", "/api/users/profile", { headers: { cookie: `${COOKIE}=${cookieToken}` } });
     check("...which signs the new player in", me.status === 200 && me.json.email === player.email, `${me.status}`);
 
     const again = await call("POST", "/api/users/verify-email", { body: { token: verifyToken } });

@@ -709,12 +709,13 @@ export async function attachLiveChannel(
     }
     /* ---------------- end access ---------------- */
 
-    async function authenticate(conn: Connection, token: unknown) {
+    /** `fromCookie`: the token came in the session cookie, the only place its marked token (#212) is accepted. */
+    async function authenticate(conn: Connection, token: unknown, fromCookie: boolean) {
         let personId: string | null = null;
         let exp: unknown;
         try {
             if (typeof token !== "string" || !token) throw new Error("no token");
-            const decoded = verifyJwt(token);
+            const decoded = verifyJwt(token, { fromCookie });
             exp = decoded.exp;
             personId = await resolveAccountId(String(decoded.id));
         } catch {
@@ -749,9 +750,9 @@ export async function attachLiveChannel(
             else ws.close(CLOSE_UNAUTHORIZED, "auth timeout");
         }, authTimeoutMs);
 
-        const startAuth = (token: unknown) => {
+        const startAuth = (token: unknown, fromCookie = false) => {
             authStarted = true;
-            authenticate(conn, token)
+            authenticate(conn, token, fromCookie)
                 .catch((err) => {
                     console.error("[live] auth failed unexpectedly:", err);
                     if (ws.readyState === WebSocket.OPEN) ws.close(1011, "server error");
@@ -761,10 +762,13 @@ export async function attachLiveChannel(
 
         // The query parameter is accepted but not preferred: URLs end up in logs.
         // Then the session cookie (#107), which needs no frame at all. Either
-        // one starts auth now, so a first frame that follows is ignored.
+        // one starts auth now, so a first frame that follows is ignored. Only
+        // the cookie may carry the cookie's marked token (#212): in the query
+        // or a first frame it's refused, as it is as a bearer over HTTP.
         const queryToken = new URL(req.url ?? "/", "http://live").searchParams.get("token");
-        const upgradeToken = queryToken || readUpgradeSessionCookie(req);
-        if (upgradeToken) startAuth(upgradeToken);
+        const cookieToken = queryToken ? null : readUpgradeSessionCookie(req);
+        if (queryToken) startAuth(queryToken);
+        else if (cookieToken) startAuth(cookieToken, true);
 
         ws.on("message", (data: RawData) => {
             conn.alive = true;

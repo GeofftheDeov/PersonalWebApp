@@ -83,7 +83,9 @@ async function main() {
     check("nobody signed in gets a 401", nobody.status === 401, `${nobody.status}`);
   } finally {
     await pool.query(`DELETE FROM accounts WHERE id = ANY($1)`, [[admin.id, player.id]]);
-    server.close();
+    // Closed before exiting: exiting mid-close trips a libuv assertion on Windows.
+    server.closeAllConnections();
+    await new Promise<void>((r) => server.close(() => r()));
     await pool.end();
   }
 

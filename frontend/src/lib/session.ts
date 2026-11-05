@@ -1,11 +1,10 @@
 "use client";
 
+import { createSessionClient, type SessionState } from '@gtd/shared/session';
 import {
-    createSessionClient,
     useRequiredSession as useRequiredSharedSession,
     useSession as useSharedSession,
-    type SessionState,
-} from '@gtd/shared/session';
+} from '@gtd/shared/session/react';
 
 export { canAdmin, canPaperclip, type Capabilities, type SessionState, type SessionUser } from '@gtd/shared/session';
 
@@ -17,6 +16,15 @@ export { canAdmin, canPaperclip, type Capabilities, type SessionState, type Sess
  * login was only stored there (before this shipped) logs in once more.
  */
 export const session = createSessionClient();
+
+// Logins from before #210 left the JWT and the user object in localStorage.
+// Nothing reads them now; drop them so they don't linger in the browser.
+if (typeof window !== 'undefined') {
+    try {
+        window.localStorage.removeItem('token');
+        window.localStorage.removeItem('user');
+    } catch { /* storage blocked: nothing was kept there either */ }
+}
 
 /** The session, for any component. `loading` until the backend answers. */
 export const useSession = (): SessionState => useSharedSession(session);

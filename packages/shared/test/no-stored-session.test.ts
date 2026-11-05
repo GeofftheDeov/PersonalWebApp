@@ -20,8 +20,10 @@ const APPS = ["frontend"];
 
 const RULES: { name: string; pattern: RegExp }[] = [
   {
+    // Reading or writing. Removing is allowed: the portfolio drops what
+    // logins from before #210 left there.
     name: "the token or the user in localStorage",
-    pattern: /localStorage\s*(?:\.\s*(?:getItem|setItem|removeItem)\s*\(\s*['"`](?:token|user)['"`]|\[\s*['"`](?:token|user)['"`]\s*\]|\.\s*(?:token|user)\b)/,
+    pattern: /localStorage\s*(?:\.\s*(?:getItem|setItem)\s*\(\s*['"`](?:token|user)['"`]|\[\s*['"`](?:token|user)['"`]\s*\]|\.\s*(?:token|user)\b)/,
   },
   { name: "localStorage.clear() (logout clears the cookie through the session client)", pattern: /localStorage\s*\.\s*clear\s*\(/ },
   { name: "a bearer header built in the browser", pattern: /Bearer\s*\$\{|['"`]Bearer ['"`]\s*\+/ },
@@ -48,7 +50,6 @@ test("the scan catches each of the old patterns", () => {
   const samples = [
     "const t = localStorage.getItem('token');",
     'localStorage.setItem("user", JSON.stringify(u));',
-    "localStorage.removeItem(`token`);",
     "const u = localStorage['user'];",
     "localStorage.token",
     "localStorage.clear();",
@@ -56,7 +57,7 @@ test("the scan catches each of the old patterns", () => {
     "'Authorization': 'Bearer ' + TOKEN",
   ];
   for (const s of samples) assert.equal(findings("sample", s).length, 1, s);
-  for (const fine of ["localStorage.getItem('theme')", "sessionStorage.getItem('prevRouteIndex')", "// the cookie carries the auth"]) {
+  for (const fine of ["localStorage.getItem('theme')", "window.localStorage.removeItem('token');","sessionStorage.getItem('prevRouteIndex')", "// the cookie carries the auth"]) {
     assert.deepEqual(findings("sample", fine), [], fine);
   }
 });

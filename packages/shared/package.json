@@ -7,7 +7,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./api": "./src/api/index.ts",
-    "./session": "./src/session/index.ts"
+    "./session": "./src/session/index.ts",
+    "./session/react": "./src/session/react.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

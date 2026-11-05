@@ -12,4 +12,3 @@ export {
   type SessionState,
   type SessionUser,
 } from "./client";
-export { useRequiredSession, useSession } from "./react";

@@ -8,10 +8,10 @@ import { memberName } from '@/lib/memberName';
 import SessionQuests from '@/components/SessionQuests';
 import SessionTorch from '@/components/SessionTorch';
 import SessionAttendance from '@/components/SessionAttendance';
-import { gmTitleOf } from '@/lib/campaigns';
+import { gmTitleOf, isCampaignGameMaster } from '@/lib/campaigns';
 import { ApiError } from '@gtd/shared/api';
 import { api, getOrNull } from '@/lib/api';
-import { canAdmin, useSession } from '@/lib/session';
+import { useSession } from '@/lib/session';
 
 const INPUT_CLS = "w-full p-3 border-4 border-black bg-white text-black font-permanent text-base uppercase focus:border-yellow-400 outline-none";
 const LABEL_CLS = "block text-teal-400 font-permanent uppercase text-xs mb-1";
@@ -97,10 +97,7 @@ export default function SessionDetailPage() {
     // The campaign's Game Master (or an admin), vs. anyone with GM control of
     // this session (isGM), which includes a one-session stand-in (#89).
     // Display only: the server enforces it.
-    const isCampaignGM = Boolean(me && (canAdmin(caps) || memberRows.some((m: any) =>
-        m.status === 'Game Master' &&
-        ((m.email && me.email && m.email.toLowerCase() === me.email.toLowerCase()) || (m.playerId && m.playerId === me.id))
-    )));
+    const isCampaignGM = isCampaignGameMaster(memberRows, me, caps);
     const myResponse = readyCheck?.responses?.find((r: any) => r.playerId === me?.id);
     const memberName = (m: any) => {
         if (m.firstName || m.lastName) return `${m.firstName || ''} ${m.lastName || ''}`.trim();

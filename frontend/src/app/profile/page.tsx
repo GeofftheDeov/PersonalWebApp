@@ -9,6 +9,9 @@ import { ApiError } from '@gtd/shared/api';
 import { api, errorOf, getOrNull } from '@/lib/api';
 import { session, useRequiredSession } from '@/lib/session';
 
+/** The fields the Info form edits, and so the only ones it saves. */
+const PROFILE_FIELDS = ['name', 'handle', 'phone', 'discordHandle', 'discordId'] as const;
+
 export default function ProfilePage() {
     // Signed out goes to log in and comes back here (#210). The person comes
     // from the session client, which asks the backend; after an edit it asks again.
@@ -132,7 +135,11 @@ export default function ProfilePage() {
 
     const updateProfile = async (e: React.FormEvent) => {
         e.preventDefault();
-        const saved = await api.put('/api/users/profile', profileData).then(() => true, () => false);
+        // Only what the form edits: the rest of the row (friends, sync
+        // stamps...) may have moved since the page loaded, and writing it back
+        // would undo that.
+        const edits = Object.fromEntries(PROFILE_FIELDS.filter(f => profileData[f] !== undefined).map(f => [f, profileData[f]]));
+        const saved = await api.put('/api/users/profile', edits).then(() => true, () => false);
 
         if (saved) {
             await session.refresh().catch(() => {});

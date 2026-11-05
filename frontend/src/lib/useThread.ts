@@ -65,8 +65,6 @@ export interface UseThreadOptions {
     onSent?: (message: LiveMessage) => void;
 }
 
-/** The signed-in account id from the session client, or null. Used for "mine" alignment only. */
-export const myAccountId = currentUserId;
 
 const newClientId = (): string => {
     try {
@@ -126,7 +124,7 @@ export function useThread(threadKey: string | null, { pageSize = 50, markRead, o
         if (!msgs.length) return;
         const absorbed = new Map<string, string>(); // message id → pending key
         if (echo) {
-            const me = myAccountId();
+            const me = currentUserId();
             const waiting = pendingRef.current.filter((p) => p.state === 'sending');
             for (const m of msgs) {
                 if (m.sender?.id !== me || sentRef.current.has(m.id)) continue;
@@ -316,7 +314,7 @@ export function useThread(threadKey: string | null, { pageSize = 50, markRead, o
     const send = useCallback((text: string, files: File[] = []): boolean => {
         const body = text.trim();
         if ((!body && !files.length) || !threadKey) return false;
-        const me = myAccountId();
+        const me = currentUserId();
         const entry: ThreadEntry = {
             key: newClientId(), id: null, sender: { id: me ?? '', name: 'You' }, body,
             createdAt: new Date().toISOString(), state: 'sending',

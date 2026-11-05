@@ -67,7 +67,12 @@ export async function pcFetch<T = unknown>(
       typeof body === 'object' && body !== null && 'error' in body
         ? String((body as any).error)
         : `Upstream ${res.status}`;
-    if (res.status === 401 || res.status === 403) msg += ' — Paperclip rejected PAPERCLIP_API_KEY';
+    // Paperclip refusing our key is a gateway failure, not the caller's: the
+    // routes relay this status, and the browser reads a 401 as its own
+    // session ending and sends the person to log in (#210).
+    if (res.status === 401 || res.status === 403) {
+      return { error: `${msg} — Paperclip rejected PAPERCLIP_API_KEY`, status: 502 };
+    }
     return { error: msg, status: res.status };
   }
 

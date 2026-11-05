@@ -273,8 +273,47 @@ test("ensure asks once; refresh asks again", async () => {
   assert.equal(profileReads(), 2);
 });
 
-test("a backend that can't answer leaves a first ask signed out rather than loading forever", async () => {
-  const session = createSessionClient({ fetch: async () => { throw new TypeError("fetch failed"); } });
+test("a backend that can't answer isn't 'signed out': it stays loading and asks again until it answers", async () => {
+  const b = browser();
+  await page(b).session.login("gm@example.test", PASSWORD);
+  let down = 2;
+  const visits: string[] = [];
+  const session = createSessionClient({
+    baseUrl: origin,
+    fetch: (input, init) => (down-- > 0 ? Promise.reject(new TypeError("fetch failed")) : b.fetch(input, init)),
+    navigate: (url) => { visits.push(url); },
+    currentUrl: () => "/dashboard",
+    retryDelayMs: () => 5,
+  });
   await session.ensure();
-  assert.equal(session.getState().status, "signedOut");
+  assert.equal(session.getState().status, "loading", "a deploy or an outage doesn't sign anyone out");
+  const signedIn = new Promise<void>((resolve) => session.subscribe(() => {
+    if (session.getState().status === "signedIn") resolve();
+  }));
+  await signedIn;
+  assert.deepEqual(visits, []);
+});
+
+test("capabilities failing alone still leave the person signed in, with no extra links", async () => {
+  const b = browser();
+  await page(b).session.login("gm@example.test", PASSWORD);
+  const session = createSessionClient({
+    baseUrl: origin,
+    fetch: (input, init) => (String(input).endsWith("/me/capabilities")
+      ? Promise.resolve(new Response(JSON.stringify({ error: "boom" }), { status: 500 }))
+      : b.fetch(input, init)),
+  });
+  const state = await session.ensure();
+  assert.equal(state.status, "signedIn");
+  assert.ok(!canAdmin(state.capabilities));
+  assert.ok(!canPaperclip(state.capabilities));
+});
+
+test("logout signs out at once, before the backend answers", async () => {
+  const b = browser();
+  const { session } = page(b);
+  await session.login("gm@example.test", PASSWORD);
+  const done = session.logout();
+  assert.equal(session.getState().status, "signedOut", "a page navigated to straight after logout sees nobody");
+  await done;
 });

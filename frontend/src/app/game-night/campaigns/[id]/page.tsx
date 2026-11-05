@@ -11,10 +11,10 @@ import CampaignBanner from '@/components/CampaignBanner';
 import BannerEditor from '@/components/BannerEditor';
 import NoticeBoard, { ComingUp, useNoticeBoard } from '@/components/NoticeBoard';
 import { sessionWhen } from '@/lib/sessions';
-import { DEFAULT_GM_TITLE, gmTitleOf, roleLabel } from '@/lib/campaigns';
+import { DEFAULT_GM_TITLE, gmTitleOf, isCampaignGameMaster, roleLabel } from '@/lib/campaigns';
 import { ApiError } from '@gtd/shared/api';
 import { api, errorOf, getOrNull } from '@/lib/api';
-import { canAdmin, useSession, type Capabilities, type SessionUser } from '@/lib/session';
+import { canAdmin, useSession } from '@/lib/session';
 
 interface Session {
     _id: string;
@@ -53,20 +53,6 @@ const statusColor = (status: string) => {
 };
 
 const toDateInput = (d?: string) => d ? new Date(d).toISOString().split('T')[0] : '';
-
-/**
- * Is the signed-in person the Game Master of this campaign (or an admin)?
- * From the session client (#210), so it can't outlive the session. Display
- * only: the server enforces it.
- */
-const computeIsGM = (members: Member[], me: SessionUser | null, caps: Capabilities | null) => {
-    if (!me) return false;
-    if (canAdmin(caps)) return true;
-    return members.some(m =>
-        m.status === 'Game Master' &&
-        ((m.email && me.email && m.email.toLowerCase() === me.email.toLowerCase()) || (m.playerId && m.playerId === me.id))
-    );
-};
 
 const Toggle = ({ on, onClick, label, icon }: { on: boolean; onClick: () => void; label: string; icon?: React.ReactNode }) => (
     <button type="button" role="switch" aria-checked={on} onClick={onClick} className="flex items-center gap-3 w-fit">
@@ -143,7 +129,7 @@ export default function CampaignDetailPage() {
 
     // Display only: the server enforces all three. Planning settings belong
     // to the campaign's owner or an admin (#57).
-    const isGM = computeIsGM(members, me, caps);
+    const isGM = isCampaignGameMaster(members, me, caps);
     const isAdmin = canAdmin(caps);
     const isOwner = Boolean((me?.id && campaign?.owner === me.id) || isAdmin);
 

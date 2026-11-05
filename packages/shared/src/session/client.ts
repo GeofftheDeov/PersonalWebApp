@@ -111,6 +111,12 @@ export interface SessionClientOptions {
   currentUrl?: () => string;
   /** How to go to the login page. Default: `window.location.assign`. */
   navigate?: (url: string) => void;
+  /**
+   * When the backend can't say who's signed in (offline, a deploy, a 5xx),
+   * how long to wait before asking again, by attempt. Default: 2 s doubling
+   * to 30 s.
+   */
+  retryDelayMs?: (attempt: number) => number;
 }
 
 export interface SessionClient {
@@ -129,7 +135,7 @@ export interface SessionClient {
   login(email: string, password: string): Promise<SessionUser>;
   /** Log in with a Google ID token, as `login`. */
   loginWithGoogle(idToken: string): Promise<SessionUser>;
-  /** Clear the cookie on the backend (both sites), then the client's state. */
+  /** Signed out here at once, then the backend clears the cookie (both sites). */
   logout(): Promise<void>;
   /**
    * The session ended (a 401 from any call): signed out, then off to the
@@ -187,32 +193,49 @@ export function createSessionClient(options: SessionClientOptions = {}): Session
     }
   }
 
+  const signedOutBy = (err: unknown) => err instanceof ApiError && (err.status === 401 || err.status === 404);
+
   /** Who the cookie says is signed in. Throws on anything but a clean answer or a 401. */
   async function ask(): Promise<SessionState> {
     try {
       const [profile, caps] = await Promise.all([
         api.get<Record<string, unknown>>("/api/users/profile"),
-        api.get<Partial<Capabilities>>("/api/users/me/capabilities"),
+        // Capabilities only decide what to show. If they alone fail, the
+        // person is still signed in; they just see no admin or Paperclip links.
+        api.get<Partial<Capabilities>>("/api/users/me/capabilities")
+          .catch((err) => { if (signedOutBy(err)) throw err; return null; }),
       ]);
       return { status: "signedIn", user: toUser(profile ?? {}), capabilities: { ...NO_CAPABILITIES, ...caps } };
     } catch (err) {
-      if (err instanceof ApiError && (err.status === 401 || err.status === 404)) return SIGNED_OUT;
+      if (signedOutBy(err)) return SIGNED_OUT;
       throw err;
     }
   }
 
+  const retryDelay = options.retryDelayMs ?? ((attempt: number) => Math.min(2000 * 2 ** attempt, 30_000));
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let retries = 0;
+
   function refresh(): Promise<SessionState> {
     asked = true;
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
     const gen = generation;
     const p = ask().then(
       (next) => {
+        retries = 0;
         if (gen === generation) set(next);
         return state;
       },
       (err) => {
-        // The backend couldn't say (offline, a 5xx). Keep what's known; a
-        // first ask with no answer counts as signed out, so pages don't spin.
-        if (gen === generation && state.status === "loading") set(SIGNED_OUT);
+        // The backend couldn't say (offline, a deploy, a 5xx). That isn't
+        // "signed out": keep what's known, and while nothing is known yet,
+        // stay loading and ask again, rather than sending someone with a
+        // good cookie to log in.
+        if (gen === generation && state.status === "loading") {
+          retryTimer = setTimeout(() => { retryTimer = null; refresh().catch(() => {}); }, retryDelay(retries++));
+          // Never the only thing keeping a process (a test, a script) alive.
+          (retryTimer as { unref?: () => void }).unref?.();
+        }
         throw err;
       },
     ).finally(() => { if (inflight === p) inflight = null; });
@@ -226,8 +249,15 @@ export function createSessionClient(options: SessionClientOptions = {}): Session
     return refresh().catch(() => state);
   }
 
+  /** A login, logout or expiry settles the question: stop asking again. */
+  function supersede(): number {
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+    retries = 0;
+    return ++generation;
+  }
+
   async function establish(path: string, body: unknown): Promise<SessionUser> {
-    const gen = ++generation;
+    const gen = supersede();
     // The reply's token is for bearer clients; the cookie that came with it is ours.
     await api.post(path, body);
     if (gen !== generation) throw new Error("Signed in elsewhere in the meantime");
@@ -266,17 +296,15 @@ export function createSessionClient(options: SessionClientOptions = {}): Session
     login: (email, password) => establish("/api/users/login", { email, password }),
     loginWithGoogle: (idToken) => establish("/api/users/google-login", { idToken }),
     async logout() {
-      generation++;
+      supersede();
       asked = true;
-      try {
-        await api.post("/api/users/logout");
-      } finally {
-        // Signed out here whatever the backend said: the person asked to be.
-        set(SIGNED_OUT);
-      }
+      // Signed out here at once, whatever the backend says: the person asked
+      // to be, and a page they're sent to next mustn't still see them.
+      set(SIGNED_OUT);
+      await api.post("/api/users/logout");
     },
     expire() {
-      generation++;
+      supersede();
       asked = true;
       set(SIGNED_OUT);
       redirectToLogin();

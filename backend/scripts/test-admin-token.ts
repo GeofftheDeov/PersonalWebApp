@@ -25,7 +25,7 @@ import type { AddressInfo } from "net";
 import crypto from "crypto";
 import pool from "../db/index.js";
 import userRoutes from "../routes/userRoutes.js";
-import { signJwt, verifyJwt } from "../utils/jwt.js";
+import { COOKIE_TOKEN_CLAIM, signJwt, verifyJwt } from "../utils/jwt.js";
 
 if (!/(\/\/|@)(127\.0\.0\.1|localhost)[:/]/.test(process.env.DATABASE_URL ?? "")) {
   console.error("\n  Refusing to run: DATABASE_URL must be a local throwaway database.\n");
@@ -61,14 +61,18 @@ async function main() {
   const { rows: [player] } = await pool.query(
     `INSERT INTO accounts (id, name, email, is_verified)
      VALUES (gen_random_uuid(), 'T210 Player', $1, true) RETURNING id, email`, [`t210-player-${tag}@example.test`]);
-  const cookieFor = (p: { id: string; email: string }) => `${NAME}=${signJwt({ id: p.id, email: p.email }, { expiresIn: "1h" })}`;
+  // As login issues it since #212: marked as a cookie token, so it is refused as a bearer.
+  const cookieFor = (p: { id: string; email: string }) =>
+    `${NAME}=${signJwt({ id: p.id, email: p.email, [COOKIE_TOKEN_CLAIM]: true }, { expiresIn: "1h" })}`;
 
   try {
     const minted = await call("POST", "/api/users/me/admin-token", { cookie: cookieFor(admin), "x-requested-with": "gtd" });
     check("an admin signed in by the cookie gets a token", minted.status === 200 && typeof minted.json.token === "string",
       `${minted.status} ${JSON.stringify(minted.json)}`);
     if (typeof minted.json.token === "string") {
-      check("the token names the admin", String(verifyJwt(minted.json.token).id) === admin.id);
+      const claims = verifyJwt(minted.json.token);
+      check("the token names the admin", String(claims.id) === admin.id);
+      check("the token is unmarked, so it works as a bearer (#212)", !(COOKIE_TOKEN_CLAIM in claims));
       const asBearer = await call("GET", "/api/users/profile", { authorization: `Bearer ${minted.json.token}` });
       check("the token works as a bearer", asBearer.status === 200 && asBearer.json.email === admin.email, `${asBearer.status}`);
     }

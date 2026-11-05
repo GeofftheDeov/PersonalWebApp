@@ -1,13 +1,18 @@
 import type { Request, Response } from "express";
 import { isDevEnv } from "./env.js";
+import { COOKIE_TOKEN_CLAIM, signJwt } from "./jwt.js";
 
 /**
  * The session cookie (#69, cross-site login).
  *
- * Login puts the same JWT it returns in the response body into an HttpOnly
- * cookie, so the portfolio and Hearthside, which sit on sibling subdomains and
- * proxy /api to this one backend, share one login. Bearer auth stays for the
- * Electron and React Native clients and the scripts.
+ * Login puts a JWT in an HttpOnly cookie, so the portfolio and Hearthside,
+ * which sit on sibling subdomains and proxy /api to this one backend, share
+ * one login. Bearer auth stays for the Electron and React Native clients and
+ * the scripts, which read a second token from the response body.
+ *
+ * The cookie's token is not the body's (#212): it carries COOKIE_TOKEN_CLAIM,
+ * and verifyJwt refuses that anywhere but the cookie. The cookie reaches
+ * Paperclip too, and its token mustn't work there as a bearer.
  *
  * Every host (both environments, plus Paperclip) shares only the parent
  * domain, so both environments' cookies reach every host. Each environment
@@ -25,8 +30,8 @@ import { isDevEnv } from "./env.js";
  * modules load before server.ts runs dotenv.config().
  */
 
-/** Matches the token's own expiresIn ("1h") in userRoutes. */
-const MAX_AGE_MS = 60 * 60 * 1000;
+/** The cookie and its token last as long as a login token ("1h" in userRoutes). */
+const MAX_AGE_S = 60 * 60;
 
 /**
  * The header a cookie-authenticated write must carry (CSRF). All the
@@ -56,11 +61,16 @@ function cookieOptions() {
     };
 }
 
-/** Issue the session cookie for a freshly signed token. No-op when the cookie is off. */
-export function setSessionCookie(res: Response, token: string): void {
+/**
+ * Sign a session-cookie token for these claims (who the person is) and issue
+ * the cookie. The token is marked (#212), so it works only as the cookie. No-op
+ * when the cookie is off.
+ */
+export function setSessionCookie(res: Response, claims: { id: unknown; email: unknown }): void {
     const name = sessionCookieName();
     if (!name) return;
-    res.cookie(name, token, { ...cookieOptions(), maxAge: MAX_AGE_MS });
+    const token = signJwt({ ...claims, [COOKIE_TOKEN_CLAIM]: true }, { expiresIn: MAX_AGE_S });
+    res.cookie(name, token, { ...cookieOptions(), maxAge: MAX_AGE_S * 1000 });
 }
 
 /** Clear it on the same name, domain and path it was set with. */

@@ -32,14 +32,18 @@ export interface EventMap {
     };
 
     /**
-     * Campaign membership or details changed. Membership changes go through
-     * services/accessEvents.ts (#105); the live channel recomputes the threads
-     * of the people they affect.
+     * Campaign membership, ownership or details changed. Membership and
+     * ownership changes go through services/accessEvents.ts (#105, #130); the
+     * live channel recomputes the threads of the people they affect.
      */
     "campaign.changed": {
         campaignId: string;
-        action: "created" | "updated" | "member-added" | "member-removed" | "deleted";
-        /** Who joined or left (member-added, member-removed), or who created it (created). */
+        action: "created" | "updated" | "member-added" | "member-removed" | "owner-changed" | "deleted";
+        /**
+         * Who joined or left (member-added, member-removed), who created it
+         * (created), or the new owner (owner-changed; absent when the campaign
+         * became admin-managed).
+         */
         personId?: string;
     };
 

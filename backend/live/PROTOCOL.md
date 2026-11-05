@@ -38,11 +38,11 @@ When auth succeeds, the server answers:
 { "type": "ready", "v": 1, "threads": ["campaign:<id>", "dm:<a>:<b>"] }
 ```
 
-`threads` lists the thread keys this socket will receive events for: every campaign the person belongs to, whatever its status, plus one DM thread per friend. Admins get no extra campaigns. A thread missing from `threads` gets no live events on this socket, so clients should show it as not live (the web client's `threadStatus` reports `unavailable`).
+`threads` lists the thread keys this socket will receive events for: every campaign the person belongs to, whatever its status, plus one DM thread per friend. Admins also get every campaign under admin management: one with no owner, or one they own (#130). They get no other campaigns they don't belong to. A thread missing from `threads` gets no live events on this socket, so clients should show it as not live (the web client's `threadStatus` reports `unavailable`).
 
 ### Access changes on an open socket (#105)
 
-The set isn't fixed at connect. When the person joins or leaves a campaign (accepting an invite, joining by link, being added or removed by the GM, leaving), a campaign of theirs is deleted, or they become or stop being friends with someone, the server sends **another `ready`** on the same socket, with the whole new `threads` list. Nothing else changes: same connection, no reconnect, `v` as before.
+The set isn't fixed at connect. When the person joins or leaves a campaign (accepting an invite, joining by link, being added or removed by the GM, leaving), a campaign of theirs is deleted, they become or stop being friends with someone, or (for an admin) a campaign moves into or out of admin management because its owner changed, the server sends **another `ready`** on the same socket, with the whole new `threads` list. Nothing else changes: same connection, no reconnect, `v` as before.
 
 - Losing access takes effect as soon as the server hears of the change: nothing published after it (a message, typing, `thread.updated`) reaches that socket for that thread, even before the new `ready` arrives. After unfriending, sending a DM to the former friend is refused with 403.
 - Gaining access takes effect when the new `ready` arrives. Events from before it aren't replayed, so refetch a thread that just became available, and the thread list. (The web client calls `onReconnect` for exactly those: the newly available threads and the person-level subscribers. `LiveClient.onThreads` reports every new set.)
@@ -129,7 +129,7 @@ Added with #103. While someone types in a thread, their client sends
 
 at most once every **3 seconds**, and only while the draft has text. Sending a message resets that, so the first keystroke of the next message announces at once. The server:
 
-- drops the frame silently (the socket stays open) if the thread key is missing or malformed, if it isn't one of the threads this socket's `ready` listed, or if the person can no longer access the thread (the same `canAccessThread` check the REST endpoints use). So an admin reading a campaign they aren't a member of can't type in it;
+- drops the frame silently (the socket stays open) if the thread key is missing or malformed, if it isn't one of the threads this socket's `ready` listed, or if the person can no longer access the thread (the same `canAccessThread` check the REST endpoints use). So an admin reading a campaign they aren't a member of, and don't manage, can't type in it;
 - drops frames for one thread on one socket that arrive less than 250 ms after the last one it accepted, before any access check (flood control; a well-behaved client never comes that close);
 - otherwise publishes it on the event bus's ephemeral path (`letters.typing`, Pub/Sub only), so it reaches the thread on every backend task. It is never written to the database or to a Redis stream.
 

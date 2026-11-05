@@ -37,6 +37,15 @@ export async function publishMembershipChanged(
     });
 }
 
+/**
+ * A campaign's owner changed (#130): `ownerId` took it over, or nobody did
+ * (null: it's admin-managed now). Admins follow the campaigns under admin
+ * management, so the live channel recomputes the threads of every admin.
+ */
+export async function publishOwnerChanged(campaignId: string, ownerId: string | null): Promise<void> {
+    await publishMembershipChanged(campaignId, "owner-changed", ownerId);
+}
+
 /** Two people became friends (added) or stopped being friends (removed). */
 export async function publishFriendshipChanged(a: string, b: string, action: "added" | "removed"): Promise<void> {
     await publishSafely("friendship.changed", { personIds: [String(a), String(b)], action });

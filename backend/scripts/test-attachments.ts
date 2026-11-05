@@ -56,9 +56,11 @@ async function account(handle: string, appRole: "user" | "admin" = "user"): Prom
   return { id: rows[0].id, email: rows[0].email };
 }
 
-async function campaign(title: string): Promise<string> {
+/** Owned by `owner`: a campaign with no owner is admin-managed, which admins follow (#130). */
+async function campaign(title: string, owner: Person): Promise<string> {
   const { rows } = await pool.query(
-    `INSERT INTO campaigns (title, status) VALUES ($1, 'In Progress') RETURNING id`, [`t104 ${title} ${RUN}`]);
+    `INSERT INTO campaigns (title, status, owner_id) VALUES ($1, 'In Progress', $2) RETURNING id`,
+    [`t104 ${title} ${RUN}`, owner.id]);
   created.campaigns.push(rows[0].id);
   return rows[0].id;
 }
@@ -144,10 +146,10 @@ async function main() {
     const stranger = await account("stranger");
     const admin = await account("admin", "admin");
 
-    const camp = await campaign("Tomb of Annihilation");
+    const camp = await campaign("Tomb of Annihilation", gm);
     await member(camp, gm, "Game Master");
     await member(camp, player);
-    const other = await campaign("Other table");
+    const other = await campaign("Other table", player);
     await member(other, player);
     await befriend(player, friend);
 

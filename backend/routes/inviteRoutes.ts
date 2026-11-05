@@ -5,6 +5,7 @@ import CampaignInvite from "../models/CampaignInvite.js";
 import CampaignMember from "../models/CampaignMember.js";
 import { auth } from "../middleware/auth.js";
 import { getAuthorizedCampaignIds } from "../utils/gameNightPlannerUtils.js";
+import { gameNightLinks } from "../utils/frontendSites.js";
 import { notify, resolveNotifications } from "../utils/notify.js";
 import { publishMembershipChanged } from "../services/accessEvents.js";
 import { findPersonById, personDisplayName, toPublicPerson } from "../utils/personUtils.js";
@@ -70,6 +71,7 @@ router.post("/", auth, async (req: any, res) => {
             type: "campaign_invite",
             title: `@${inviterName} invited you to "${campaign.title}"`,
             body: campaign.description || undefined,
+            link: gameNightLinks.invite(String(campaignId)),
             sourceKey: `invite:${invite._id}`,
             meta: { inviteId: String(invite._id), campaignId: String(campaignId) },
         });
@@ -166,7 +168,7 @@ router.put("/:id/respond", auth, async (req: any, res) => {
         await notify(invite.from, {
             type: "system",
             title: `@${myName} ${invite.status} your invite to "${campaignTitle}"`,
-            link: invite.status === "accepted" ? `/game-night/campaigns/${campaignId}` : undefined,
+            link: invite.status === "accepted" ? gameNightLinks.campaign(campaignId) : undefined,
         });
 
         res.json({ message: `Invite ${invite.status}`, invite });

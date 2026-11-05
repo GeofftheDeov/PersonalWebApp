@@ -32,6 +32,7 @@ import pool, { withTransaction } from "../db/index.js";
 import { isUuid } from "../db/model.js";
 import { bus } from "../events/index.js";
 import type { EventMap } from "../events/events.js";
+import { gameNightLinks } from "../utils/frontendSites.js";
 import { notify } from "../utils/notify.js";
 import { personDisplayName } from "../utils/personUtils.js";
 import { campaignParty } from "./availabilityStore.js";
@@ -273,7 +274,7 @@ export async function announceAssigned(q: QuestJson, assignedBy: string | null, 
             type: "system",
             title: `New quest: ${q.title}`,
             body: `${q.session.campaign.title} — for "${q.session.title}".`,
-            link: `/game-night/sessions/${q.sessionId}#quests`,
+            link: gameNightLinks.sessionQuests(q.sessionId),
             sourceKey: `quest:${q.id}`,
             meta: { questId: q.id, sessionId: q.sessionId, campaignId: q.session.campaign.id },
         });

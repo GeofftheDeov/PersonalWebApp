@@ -54,6 +54,11 @@ export function portfolioSite(): FrontendSite {
         ?? (toSite("portfolio", DEFAULT_FRONTEND_URL) as FrontendSite);
 }
 
+/** Hearthside at HEARTHSIDE_URL, or null in an environment that doesn't have it yet. */
+export function hearthsideSite(): FrontendSite | null {
+    return toSite("hearthside", process.env.HEARTHSIDE_URL);
+}
+
 /** Every site on this environment's allowlist, the portfolio's own origin first. */
 export function frontendSites(): FrontendSite[] {
     const sites = [portfolioSite()];
@@ -61,9 +66,58 @@ export function frontendSites(): FrontendSite[] {
         const site = toSite("portfolio", origin);
         if (site) sites.push(site);
     }
-    const hearthside = toSite("hearthside", process.env.HEARTHSIDE_URL);
+    const hearthside = hearthsideSite();
     if (hearthside) sites.push(hearthside);
     return sites;
+}
+
+/**
+ * Game Night pages as the backend links to them (#214): in bell notifications,
+ * the quest-reminder email, Table Talk posts and calendar events.
+ *
+ * With HEARTHSIDE_URL set, an absolute link on Hearthside, on Hearthside's
+ * paths. Without it, the portfolio's relative /game-night/... path, as before
+ * Hearthside, which the portfolio's 308 redirects (#234) later send on.
+ */
+function gameNightLink(path: string): string {
+    const hearthside = hearthsideSite();
+    return hearthside ? `${hearthside.origin}${path}` : `/game-night${path}`;
+}
+
+export const gameNightLinks = {
+    campaign: (campaignId: string) => gameNightLink(`/campaigns/${campaignId}`),
+    noticeBoard: (campaignId: string) => gameNightLink(`/campaigns/${campaignId}#notice-board`),
+    session: (sessionId: string) => gameNightLink(`/sessions/${sessionId}`),
+    sessionQuests: (sessionId: string) => gameNightLink(`/sessions/${sessionId}#quests`),
+    /**
+     * A campaign invite's page on Hearthside. Undefined without Hearthside:
+     * the invite's bell entry had no link before, and is answered in the bell.
+     */
+    invite: (campaignId: string): string | undefined => {
+        const hearthside = hearthsideSite();
+        return hearthside ? `${hearthside.origin}/join/${campaignId}` : undefined;
+    },
+};
+
+/**
+ * What a session's Discord and Google Calendar events (and its shareable
+ * Google link's `details`) say: the session's Hearthside page. Undefined
+ * without Hearthside, so the events carry no description, as since #213.
+ */
+export function sessionEventDescription(sessionId: string): string | undefined {
+    return hearthsideSite() ? gameNightLinks.session(sessionId) : undefined;
+}
+
+/**
+ * Whether a description is exactly what sessionEventDescription writes on
+ * this environment: its Hearthside session page and nothing else. The calendar
+ * link scrub (utils/prepNotes.ts) keeps only that, so an agenda, which could
+ * contain anything, is never mistaken for it.
+ */
+export function isSessionEventDescription(description: string): boolean {
+    const hearthside = hearthsideSite();
+    if (!hearthside || !description.startsWith(`${hearthside.origin}/sessions/`)) return false;
+    return /^[0-9a-f-]{36}$/i.test(description.slice(`${hearthside.origin}/sessions/`.length));
 }
 
 /** The allowed site serving `host`, or null when the host isn't on the allowlist. */

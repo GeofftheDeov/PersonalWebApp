@@ -1,5 +1,6 @@
 import Session from "../models/Session.js";
 import Campaign from "../models/Campaign.js";
+import { gameNightLinks } from "./frontendSites.js";
 import { notify } from "../utils/notify.js";
 import { postTableTalk } from "./tableTalk.js";
 import { findCampaignPeopleIds } from "./personUtils.js";
@@ -54,7 +55,7 @@ async function sendReadyCheck(session: any) {
     const campaign = session.campaign;
     const campaignId = String(campaign?._id ?? session.campaign);
     const title = campaign?.title ?? "your campaign";
-    const sessionLink = `/game-night/sessions/${session._id}`;
+    const sessionLink = gameNightLinks.session(String(session._id));
     const startTime = new Date(session.date).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 
     // Stamp first — better to occasionally miss a notification than to spam

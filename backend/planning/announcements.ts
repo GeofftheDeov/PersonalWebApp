@@ -33,12 +33,13 @@
 import pool from "../db/index.js";
 import { bus } from "../events/index.js";
 import type { EventMap } from "../events/events.js";
+import { gameNightLinks } from "../utils/frontendSites.js";
 import { notify } from "../utils/notify.js";
 import { postTableTalk } from "../utils/tableTalk.js";
 import { campaignParty } from "./availabilityStore.js";
 import { gameMasterIds } from "./planner.js";
 
-export const noticeBoardLink = (campaignId: string) => `/game-night/campaigns/${campaignId}#notice-board`;
+const noticeBoardLink = gameNightLinks.noticeBoard;
 
 async function loadSession(sessionId: string) {
     const { rows: [s] } = await pool.query(

@@ -39,6 +39,7 @@
 import type pg from "pg";
 import pool from "../db/index.js";
 import { bus } from "../events/index.js";
+import { gameNightLinks } from "../utils/frontendSites.js";
 import { notify as realNotify } from "../utils/notify.js";
 import { sendEmail as realSendEmail, type OutgoingEmail } from "../services/emailService.js";
 
@@ -161,19 +162,20 @@ export async function runQuestReminders(db: Db, now: Date, deps: ReminderDeps = 
         const dueAt: Date = claim.due_at;
         const when = formatWhen(dueAt, q.time_zone || "UTC");
         const left = timeLeft(+dueAt - +now);
-        const path = `/game-night/sessions/${q.session_id}#quests`;
+        const link = gameNightLinks.sessionQuests(q.session_id);
         const title = `Reminder: ${q.title}`;
         const body = `Due ${left} (${when}) — "${q.session_title}", ${q.campaign_title}.`;
 
         await notify(q.assignee_id, {
-            type: "system", title, body, link: path,
+            type: "system", title, body, link,
             sourceKey: `quest-reminder:${q.id}`,
             meta: { questId: q.id, sessionId: q.session_id, campaignId: q.campaign_id, offsetMinutes: claim.offset_minutes },
         });
 
         let emailed = false;
         if (q.email) {
-            const url = `${process.env.FRONTEND_URL ?? ""}${path}`;
+            // Hearthside's links are absolute; the portfolio's path needs its host.
+            const url = link.startsWith("/") ? `${process.env.FRONTEND_URL ?? ""}${link}` : link;
             try {
                 await sendEmail({
                     to: q.email,

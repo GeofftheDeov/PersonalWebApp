@@ -6,7 +6,9 @@
   "sideEffects": false,
   "exports": {
     ".": "./src/index.ts",
-    "./api": "./src/api/index.ts"
+    "./api": "./src/api/index.ts",
+    "./session": "./src/session/index.ts",
+    "./session/react": "./src/session/react.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -14,8 +16,12 @@
   },
   "devDependencies": {
     "@types/node": "^20",
+    "@types/react": "^18.3.27",
     "fast-glob": "^3.3.3",
     "tsx": "^4.21.0",
     "typescript": "^5"
+  },
+  "peerDependencies": {
+    "react": "^18"
   }
 }

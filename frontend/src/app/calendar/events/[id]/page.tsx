@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Calendar, ArrowLeft, Clock } from 'lucide-react';
+import { ApiError } from '@gtd/shared/api';
+import { api } from '@/lib/api';
 
 const statusBadge = (status: string) => {
     const cls =
@@ -21,16 +23,14 @@ export default function EventDetailPage() {
     const [event, setEvent] = useState<any>(null);
     const [loading, setLoading] = useState(true);
 
-    const token = () => localStorage.getItem('token');
-
     useEffect(() => {
         if (!id) return;
         const fetchEvent = async () => {
-            const res = await fetch(`/api/events/${id}`, { headers: { Authorization: `Bearer ${token()}` } });
-            if (res.status === 401) { localStorage.clear(); router.push('/login'); return; }
-            if (res.ok) {
-                setEvent(await res.json());
-            } else {
+            try {
+                setEvent(await api.get(`/api/events/${id}`));
+            } catch (err) {
+                // A 401 has already sent the person to log in.
+                if (err instanceof ApiError && err.status === 401) return;
                 router.push('/calendar');
             }
             setLoading(false);

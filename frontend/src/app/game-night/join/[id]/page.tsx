@@ -4,6 +4,9 @@ import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Map, Users, ArrowLeft, UserPlus, Check, Crown } from 'lucide-react';
+import { ApiError } from '@gtd/shared/api';
+import { api, errorOf, getOrNull } from '@/lib/api';
+import { useRequiredSession } from '@/lib/session';
 
 const statusColor = (status: string) => {
     if (status === 'In Progress') return 'bg-teal-500 text-white';
@@ -24,63 +27,40 @@ export default function JoinCampaignPage() {
     const [alreadyMember, setAlreadyMember] = useState(false);
     const [error, setError] = useState('');
 
-    const token = () => localStorage.getItem('token');
+    // Signed out goes to log in, and comes back to this invite (#210).
+    const { status, user } = useRequiredSession();
+    const userEmail = user?.email ?? null;
 
     useEffect(() => {
-        const t = token();
-        if (!t) {
-            router.push(`/login?redirect=/game-night/join/${id}`);
-            return;
-        }
-        const headers = { Authorization: `Bearer ${t}` };
+        if (status !== 'signedIn') return;
         Promise.all([
-            fetch(`/api/campaigns/${id}`, { headers }),
-            fetch(`/api/campaigns/${id}/members`, { headers }),
-        ]).then(async ([campRes, membRes]) => {
-            if (campRes.status === 401) { localStorage.clear(); router.push('/login'); return; }
-            if (!campRes.ok) { setError('Campaign not found.'); setLoading(false); return; }
-            const c = await campRes.json();
+            api.get<any>(`/api/campaigns/${id}`).catch((err) => err as Error),
+            getOrNull<any[]>(`/api/campaigns/${id}/members`),
+        ]).then(([c, members]) => {
+            if (c instanceof ApiError && c.status === 401) return;
+            if (c instanceof Error) { setError('Campaign not found.'); return; }
             setCampaign(c);
-            if (membRes.ok) {
-                const members = await membRes.json();
+            if (members) {
                 setMemberCount(members.length);
-                const userEmail = getUserEmail(t);
                 if (userEmail && members.some((m: any) => m.email?.toLowerCase() === userEmail.toLowerCase())) {
                     setAlreadyMember(true);
                 }
             }
         }).catch(() => setError('Failed to load campaign.'))
           .finally(() => setLoading(false));
-    }, [id, router]);
-
-    const getUserEmail = (t: string): string | null => {
-        try {
-            const payload = JSON.parse(atob(t.split('.')[1]));
-            return payload.email || null;
-        } catch {
-            return null;
-        }
-    };
+    }, [id, status, userEmail]);
 
     const handleJoin = async () => {
         setJoining(true);
         setError('');
         try {
-            const res = await fetch(`/api/campaigns/${id}/join`, {
-                method: 'POST',
-                headers: { Authorization: `Bearer ${token()}` },
-            });
-            if (res.status === 409) {
-                setAlreadyMember(true);
-            } else if (res.ok) {
-                setJoined(true);
-                setTimeout(() => router.push(`/game-night/campaigns/${id}`), 1500);
-            } else {
-                const data = await res.json();
-                setError(data.error || 'Failed to join campaign.');
-            }
-        } catch {
-            setError('Something went wrong. Please try again.');
+            await api.post(`/api/campaigns/${id}/join`);
+            setJoined(true);
+            setTimeout(() => router.push(`/game-night/campaigns/${id}`), 1500);
+        } catch (err) {
+            if (err instanceof ApiError && err.status === 409) setAlreadyMember(true);
+            else if (err instanceof ApiError) setError(errorOf(err, 'Failed to join campaign.'));
+            else setError('Something went wrong. Please try again.');
         } finally {
             setJoining(false);
         }

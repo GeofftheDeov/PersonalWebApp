@@ -5,6 +5,7 @@ import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, User, Map, Crown, Shield, Gamepad2, Calendar, Lock } from 'lucide-react';
 import { gmTitleOf } from '@/lib/campaigns';
+import { api, errorOf } from '@/lib/api';
 
 interface SharedCampaign {
     _id: string;
@@ -43,16 +44,10 @@ export default function PlayerProfilePage() {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        const token = localStorage.getItem('token');
-        if (!token) { router.push('/login'); return; }
-        fetch(`/api/users/players/${id}`, { headers: { Authorization: `Bearer ${token}` } })
-            .then(async res => {
-                if (res.status === 401) { localStorage.clear(); router.push('/login'); return; }
-                const data = await res.json().catch(() => ({}));
-                if (res.ok) setProfile(data);
-                else setError(data.error || 'Could not load this profile');
-            })
-            .catch(() => setError('Could not load this profile'))
+        // Signed out, this 401s and the session sends the person to log in and back (#210).
+        api.get<PlayerProfile>(`/api/users/players/${id}`)
+            .then(setProfile)
+            .catch((err) => setError(errorOf(err, 'Could not load this profile')))
             .finally(() => setLoading(false));
     }, [id, router]);
 

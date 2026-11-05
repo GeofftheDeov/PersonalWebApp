@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Sword, Skull, ChevronRight } from 'lucide-react';
+import { api, errorOf } from '@/lib/api';
 
 export interface PartyCharacter {
     _id: string;
@@ -27,15 +28,9 @@ export default function CampaignCharacters({ campaignId }: { campaignId: string 
 
     useEffect(() => {
         const controller = new AbortController();
-        fetch(`/api/tabletop/characters?campaign=${encodeURIComponent(campaignId)}`, {
-            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
-            signal: controller.signal,
-        })
-            .then(async res => {
-                if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Could not load characters.');
-                setCharacters(await res.json());
-            })
-            .catch(err => { if (err.name !== 'AbortError') setError(err.message); });
+        api.get<PartyCharacter[]>(`/api/tabletop/characters?campaign=${encodeURIComponent(campaignId)}`, { signal: controller.signal })
+            .then(setCharacters)
+            .catch(err => { if (err.name !== 'AbortError') setError(errorOf(err, 'Could not load characters.')); });
         return () => controller.abort();
     }, [campaignId]);
 

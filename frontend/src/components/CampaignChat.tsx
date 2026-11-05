@@ -9,7 +9,8 @@ import { MessageSquare, Send, WifiOff, Bold, Italic, Code, List, ListOrdered } f
 import { campaignThreadKey } from '@/lib/realtime/threadKeys';
 import { useTyping } from '@/lib/realtime/useTyping';
 import { usePresence } from '@/lib/realtime/usePresence';
-import { myAccountId, useThread } from '@/lib/useThread';
+import { useThread } from '@/lib/useThread';
+import { useSession } from '@/lib/session';
 import { useThreadScroll } from '@/lib/useThreadScroll';
 import { AttachButton, DraftAttachments, MessageAttachments, useAttachmentDraft } from './MessageAttachments';
 
@@ -86,7 +87,7 @@ const ToolbarBtn = ({
  */
 export default function CampaignChat({ campaignId }: { campaignId: string }) {
     const scrollRef = useRef<HTMLDivElement>(null);
-    const myId = myAccountId();
+    const myId = useSession().user?.id ?? null;
 
     const threadKey = campaignId ? campaignThreadKey(campaignId) : null;
     // "Theo is writing…" (#103): announce while the draft has text; others' indicators below the history.

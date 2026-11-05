@@ -4,6 +4,8 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ChevronDown, ChevronRight, Pause, Play, Activity, Send } from 'lucide-react';
+import { ApiError } from '@gtd/shared/api';
+import { api, getOrNull } from '@/lib/api';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -39,13 +41,6 @@ interface OrgNode {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-const token = () => (typeof window !== 'undefined' ? localStorage.getItem('token') : null);
-
-const authHeaders = (): Record<string, string> => {
-  const t = token();
-  return t ? { Authorization: `Bearer ${t}` } : {};
-};
 
 const centsToDisplay = (cents?: number) =>
   cents == null ? '—' : `$${(cents / 100).toFixed(2)}`;
@@ -83,12 +78,7 @@ function AgentDetail({
   const doAction = async (path: string, label: string) => {
     setBusy(true);
     try {
-      const res = await fetch(`/api/paperclip/agents/${agent.id}/${path}`, {
-        method: 'POST',
-        headers: authHeaders(),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error((body as any)?.error ?? `${label} failed`);
+      await api.post(`/api/paperclip/agents/${agent.id}/${path}`);
       onAction(`${label} sent for ${agent.name ?? agent.id}`);
     } catch (err: any) {
       onAction(`Error: ${err.message}`);
@@ -307,26 +297,22 @@ export default function OrgChartPage() {
   const loadOrg = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const t = token();
-    if (!t) { router.push('/login'); return; }
+    // Signed out, the read below 401s and the session sends the person to log in and back (#210).
     // The type-based pre-check that used to live here read `user.type` from
     // localStorage, which after the account merge is "Account" for everybody --
     // it would have bounced every visitor, including the one who has access.
     // The server's requirePaperclipAccess gate decides, and the 403 below acts on it.
 
     try {
-      const headers = { Authorization: `Bearer ${t}` };
-      const [orgRes, agentsRes] = await Promise.all([
-        fetch('/api/paperclip/org', { headers }),
-        fetch('/api/paperclip/agents', { headers }),
+      const [data, agentList] = await Promise.all([
+        api.get<any>('/api/paperclip/org').catch((err) => err as Error),
+        // Agent details are enrichment only — the tree still renders without them.
+        getOrNull<Agent[]>('/api/paperclip/agents'),
       ]);
-      if (orgRes.status === 401) { router.push('/login'); return; }
-      if (orgRes.status === 403) { router.push('/dashboard'); return; }
-      const data = await orgRes.json();
-      if (!orgRes.ok) throw new Error((data as any)?.error ?? 'Failed to load org');
+      if (data instanceof ApiError && data.status === 401) return;
+      if (data instanceof ApiError && data.status === 403) { router.push('/dashboard'); return; }
+      if (data instanceof Error) throw data;
 
-      // Agent details are enrichment only — the tree still renders without them.
-      const agentList = agentsRes.ok ? await agentsRes.json().catch(() => []) : [];
       const agentsById = new Map<string, Agent>(
         (Array.isArray(agentList) ? agentList : []).map((a: Agent) => [a.id, a])
       );

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { LiveClient, type LiveMessage, type LiveStatus, type ThreadStatus } from './liveClient';
+import { session } from '../session';
 
 export type { LiveMessage, LiveStatus, ThreadStatus } from './liveClient';
 export { campaignThreadKey, dmThreadKey } from './threadKeys';
@@ -15,7 +16,7 @@ export { campaignThreadKey, dmThreadKey } from './threadKeys';
  *   });
  *
  * The socket opens with the first subscriber and closes a few seconds after
- * the last one unmounts. It reads the JWT from localStorage at each connect.
+ * the last one unmounts. The session cookie authenticates it (#107, #210).
  */
 
 let shared: LiveClient | null = null;
@@ -25,15 +26,29 @@ export function getLiveClient(): LiveClient {
     if (!shared) {
         shared = new LiveClient({
             url: () => `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/api/live`,
-            getToken: () => {
-                try { return window.localStorage.getItem('token'); } catch { return null; }
-            },
+            // The browser has no token (#210): the session cookie authenticates
+            // the upgrade (#107), so no auth frame is sent.
+            getToken: () => null,
+            cookieAuth: true,
         });
-        // A socket closed for an expired token (4001) stays closed; once the
-        // person signs in again (this tab or another), pick up the new token.
+        // A socket refused for an expired session (4001) stays closed; once
+        // the person signs in again, connect with the new cookie. Signing out
+        // closes it: the server would otherwise keep it open as them.
+        // Signing in as someone else without logging out first reconnects
+        // too, so the socket never carries the previous person's threads.
         const client = shared;
-        window.addEventListener('authChange', () => client.resume());
-        window.addEventListener('storage', (e) => { if (e.key === 'token' || e.key === null) client.resume(); });
+        let connectedAs: string | null = null;
+        session.subscribe(() => {
+            const { status, user } = session.getState();
+            if (status === 'signedIn') {
+                if (connectedAs !== null && connectedAs !== user.id) client.close();
+                connectedAs = user.id;
+                client.resume();
+            } else if (status === 'signedOut') {
+                connectedAs = null;
+                client.close();
+            }
+        });
     }
     return shared;
 }

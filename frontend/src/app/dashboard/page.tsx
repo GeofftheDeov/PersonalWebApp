@@ -6,93 +6,43 @@ import Link from 'next/link';
 import CalendarModal from '@/components/CalendarModal';
 import Footer from "@/components/Footer";
 import GameNightSummary from "@/components/GameNightSummary";
+import { api } from '@/lib/api';
+import { useRequiredSession } from '@/lib/session';
 
 
 export default function DashboardPage() {
     const router = useRouter();
-    const [user, setUser] = useState<any>(null);
+    // Signed out goes to log in and comes back here (#210).
+    const { user } = useRequiredSession();
     const [tasks, setTasks] = useState<any>([]);
     const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
     const [isCalendarOpen, setIsCalendarOpen] = useState(false);
     const [calendarTarget, setCalendarTarget] = useState<{ type: 'new' | 'edit', taskId?: string } | null>(null);
 
-    const handleAuthError = () => {
-        localStorage.clear();
-        window.dispatchEvent(new Event('authChange'));
-        router.push('/login');
-    };
-
+    const signedIn = !!user;
     useEffect(() => {
-        const token = localStorage.getItem('token');
-        const userData = localStorage.getItem('user');
-
-        if (!token || !userData) {
-            router.push('/login');
-            return;
-        }
-
-        const parsedUser = JSON.parse(userData);
-        setUser(parsedUser);
-        console.info("User loaded:", parsedUser.userNumber);
-
-        const fetchTasks = async () => {
-            const response = await fetch(`/api/tasks`, {
-                method: 'GET',
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                },
-            });
-
-            if (response.status === 401) {
-                handleAuthError();
-                return;
-            }
-
-            const data = await response.json();            
-            setTasks(data);
-        };
-        fetchTasks();
-    }, [router]);
+        if (!signedIn) return;
+        // A 401 ends the session and goes to log in (lib/api.ts).
+        api.get('/api/tasks').then(setTasks, () => {});
+    }, [signedIn]);
 
     if (!user) {
         return <div className="min-h-screen flex items-center justify-center"><span className="text-4xl font-permanent text-teal-600">LOADING...</span></div>;
     }
 
     const deleteTask = async (taskId: string) => {
-        const response = await fetch(`/api/tasks/${taskId}`, {
-            method: 'DELETE',
-            headers: {
-                'Authorization': `Bearer ${localStorage.getItem('token')}`
-            },
-        });
+        const deleted = await api.delete(`/api/tasks/${taskId}`).then(() => true, () => false);
 
-        if (response.status === 401) {
-            handleAuthError();
-            return;
-        }
-
-        if (response.ok) {
+        if (deleted) {
             const updatedTasks = tasks.filter((task: any) => task._id !== taskId);
             setTasks(updatedTasks);
         }
     };
 
     const updateTask = async (taskId: string, taskData: any) => {
-        const response = await fetch(`/api/tasks/${taskId}`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${localStorage.getItem('token')}`
-            },
-            body: JSON.stringify(taskData)
-        });
+        const saved = await api.put(`/api/tasks/${taskId}`, taskData).then(() => true, () => false);
 
-        if (response.status === 401) {
-            handleAuthError();
-            return;
-        }
-
-        if (response.ok) {
+        if (saved) {
             const updatedTasks = tasks.map((task: any) => task._id === taskId ? taskData : task);
             setTasks(updatedTasks);
         }
@@ -160,24 +110,11 @@ export default function DashboardPage() {
                                 const status = formData.get('status');
                                 const ownerId = user.id;
                                 const ownerName = user.name;
-                                const token = localStorage.getItem('token');
 
-                                const response = await fetch(`/api/tasks`, {
-                                    method: 'POST',
-                                    headers: {
-                                        'Content-Type': 'application/json',
-                                        'Authorization': `Bearer ${token}`
-                                    },
-                                    body: JSON.stringify({ title, description, dueDate, status, ownerId, ownerName })
-                                });
-                                
-                                if (response.status === 401) {
-                                    handleAuthError();
-                                    return;
-                                }
+                                const data = await api.post<any>(`/api/tasks`, { title, description, dueDate, status, ownerId, ownerName })
+                                    .catch(() => null);
 
-                                if (response.ok) {
-                                    const data = await response.json();
+                                if (data) {
                                     const newTask = data.task;
                                     setTasks((prev: any) => [...prev, newTask]);
                                     (e.target as HTMLFormElement).reset();
@@ -248,19 +185,11 @@ export default function DashboardPage() {
                                             const status = formData.get('status');
                                             const ownerId = user.id;
                                             const ownerName = user.name;
-                                            const token = localStorage.getItem('token');
 
-                                            const response = await fetch(`/api/tasks/${task._id}`, {
-                                                method: 'PUT',
-                                                headers: {
-                                                    'Content-Type': 'application/json',
-                                                    'Authorization': `Bearer ${token}`
-                                                },
-                                                body: JSON.stringify({ title, description, dueDate, status, ownerId, ownerName })
-                                            });
-                                            
-                                            if (response.ok) {
-                                                const newTask = await response.json();
+                                            const newTask = await api.put(`/api/tasks/${task._id}`, { title, description, dueDate, status, ownerId, ownerName })
+                                                .catch(() => null);
+
+                                            if (newTask) {
                                                 setTasks(tasks.map((t: any) => t._id === task._id ? newTask : t));
                                                 (e.target as HTMLFormElement).reset();
                                                 setEditingTaskId(null);

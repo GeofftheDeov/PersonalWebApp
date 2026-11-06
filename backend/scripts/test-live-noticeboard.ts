@@ -46,7 +46,7 @@ type LiveClientLike = {
   close(): void;
 };
 type LiveClientCtor = new (opts: { url: string; getToken: () => string | null; WebSocket: unknown }) => LiveClientLike;
-const LIVE_CLIENT = new URL("../../frontend/src/lib/realtime/liveClient.ts", import.meta.url).href;
+const LIVE_CLIENT = new URL("../../packages/shared/src/realtime/liveClient.ts", import.meta.url).href;
 
 let pass = 0, fail = 0;
 function check(name: string, ok: boolean, detail = "") {

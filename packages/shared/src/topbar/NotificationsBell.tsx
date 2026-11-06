@@ -4,8 +4,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Bell, Check, MessageSquare, UserPlus, Map, Info, X, CheckCheck } from 'lucide-react';
-import { api } from '../lib/api';
-import { useSession } from '../lib/session';
+import type { Letters } from '../letters/letters';
+import { useSession } from '../session/react';
 
 interface Notification {
   _id: string;
@@ -33,7 +33,9 @@ const TYPE_BG: Record<Notification['type'], string> = {
   system: 'bg-zinc-300',
 };
 
-export default function NotificationsBell() {
+/** The top bar's bell (#211): notifications, with friend requests and campaign invites answered in place. */
+export default function NotificationsBell({ letters }: { letters: Letters }) {
+  const { api, session } = letters;
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -41,7 +43,7 @@ export default function NotificationsBell() {
   const [busy, setBusy] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
-  const signedIn = useSession().status === 'signedIn';
+  const signedIn = useSession(session).status === 'signedIn';
 
   const fetchNotifications = useCallback(async () => {
     try {
@@ -51,7 +53,7 @@ export default function NotificationsBell() {
     } catch {
       /* polling — next tick will retry */
     }
-  }, []);
+  }, [api]);
 
   useEffect(() => {
     if (!signedIn) return;

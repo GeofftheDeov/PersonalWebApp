@@ -1,4 +1,4 @@
-import { ApiError, createApiClient } from '@gtd/shared/api';
+import { createApiClient } from '@gtd/shared/api';
 import { session } from './session';
 
 /**
@@ -23,9 +23,6 @@ export const getOrNull = <T,>(path: string): Promise<T | null> =>
 
 /**
  * What to show for a failed call: the server's own `error` when it sent one,
- * else `fallback` (a network failure's "Failed to fetch" is no help to anyone).
+ * else `fallback`.
  */
-export function errorOf(err: unknown, fallback: string): string {
-    const said = err instanceof ApiError ? (err.body as { error?: unknown } | undefined)?.error : undefined;
-    return typeof said === 'string' && said ? said : fallback;
-}
+export { errorOf } from '@gtd/shared/api';

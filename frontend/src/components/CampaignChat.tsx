@@ -6,13 +6,9 @@ import StarterKit from '@tiptap/starter-kit';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MessageSquare, Send, WifiOff, Bold, Italic, Code, List, ListOrdered } from 'lucide-react';
-import { campaignThreadKey } from '@/lib/realtime/threadKeys';
-import { useTyping } from '@/lib/realtime/useTyping';
-import { usePresence } from '@/lib/realtime/usePresence';
-import { useThread } from '@/lib/useThread';
+import { AttachButton, DraftAttachments, MessageAttachments } from '@gtd/shared/topbar';
+import { campaignThreadKey, useAttachmentDraft, usePresence, useThread, useThreadScroll, useTyping } from '@/lib/letters';
 import { useSession } from '@/lib/session';
-import { useThreadScroll } from '@/lib/useThreadScroll';
-import { AttachButton, DraftAttachments, MessageAttachments, useAttachmentDraft } from './MessageAttachments';
 
 /** Older messages stored the sender's email as the name — show the handle-ish local part instead. */
 const senderLabel = (s: { name?: string }) => {
@@ -83,7 +79,8 @@ const ToolbarBtn = ({
 
 /**
  * Table Talk on a campaign page. History, live updates, send and mark-read all
- * come from useThread, the same hook the dock's thread view uses.
+ * come from useThread (@gtd/shared/letters/react), the same hook the top bar's
+ * dock and Hearthside's Letters use.
  */
 export default function CampaignChat({ campaignId }: { campaignId: string }) {
     const scrollRef = useRef<HTMLDivElement>(null);

@@ -1,7 +1,7 @@
 /**
  * The live channel client (#98, spec #58): one WebSocket per person, shared by
  * every thread on the page. Headless and framework-free, with no imports, so
- * #69's shared package can lift it as is and a backend test can drive it with
+ * both sites share it (#211) and a backend test can drive it with
  * the `ws` package. The wire protocol is in backend/live/PROTOCOL.md.
  *
  * - Authenticates with the JWT in the first frame (`{ type: "auth", v, token }`),

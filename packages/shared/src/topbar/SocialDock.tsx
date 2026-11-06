@@ -4,11 +4,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import { Users, UserPlus, MessageCircle, X, Search, Check, Trash2, ExternalLink, ArrowLeft, Map, MessageSquare, User as UserIcon } from 'lucide-react';
-import ChatThread, { ChatChannel } from './ChatThread';
-import { useThreads, threadKeyFor, ThreadFilter, ThreadSummary } from '../lib/useThreads';
-import { ApiError } from '@gtd/shared/api';
-import { api, errorOf } from '../lib/api';
-import { useSession } from '../lib/session';
+import ChatThread, { type ChatChannel } from './ChatThread';
+import { useThreads } from '../letters/useThreads';
+import type { Letters } from '../letters/letters';
+import type { ThreadFilter, ThreadSummary } from '../letters/types';
+import { ApiError, errorOf } from '../api';
+import { useSession } from '../session/react';
 
 interface Friend {
   _id: string;
@@ -55,15 +56,17 @@ const chatFor = (t: ThreadSummary): ActiveChat => ({
   title: t.kind === 'dm' ? `@${t.title}` : t.title,
 });
 
-export default function SocialDock() {
+/** The top bar's social dock (#211): chats (Letters), friends, requests and adding a friend by handle. */
+export default function SocialDock({ letters }: { letters: Letters }) {
+  const { api, session } = letters;
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'chats' | 'friends' | 'requests' | 'add'>('chats');
   const [friends, setFriends] = useState<Friend[]>([]);
   const [incomingRequests, setIncomingRequests] = useState<Request[]>([]);
   const [activeChat, setActiveChat] = useState<ActiveChat | null>(null);
   const [chatFilter, setChatFilter] = useState<ThreadFilter>('all');
-  const { threads, totalUnread, markRead, refresh: refreshThreads } = useThreads({ filter: chatFilter });
-  const signedIn = useSession().status === 'signedIn';
+  const { threads, totalUnread, markRead, refresh: refreshThreads } = useThreads(letters, { filter: chatFilter });
+  const signedIn = useSession(session).status === 'signedIn';
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Friend[]>([]);
   const [searchError, setSearchError] = useState('');
@@ -292,10 +295,11 @@ export default function SocialDock() {
                       </div>
                       <div className="flex-grow min-h-0 flex flex-col">
                         <ChatThread
+                          letters={letters}
                           channel={activeChat.channel}
                           placeholder={activeChat.channel.kind === 'campaign' ? 'MESSAGE THE PARTY…' : `MESSAGE ${activeChat.title.toUpperCase()}…`}
                           onLatestMessage={(messageId) => {
-                            const key = threadKeyFor(activeChat.channel.kind, activeChat.channel.id);
+                            const key = letters.threadKeyFor(activeChat.channel.kind, activeChat.channel.id);
                             if (key) markRead(key, messageId);
                           }}
                         />

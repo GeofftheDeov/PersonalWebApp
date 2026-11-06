@@ -1,10 +1,10 @@
 /**
  * Typing indicators (#103, spec #58): "Theo is writing…".
  *
- * Headless and framework-free, with no imports, like liveClient.ts: #69's
- * shared package can lift it as is, and the backend test
+ * Headless and framework-free, with no imports, like liveClient.ts: both
+ * sites share it (#211), and the backend test
  * (backend/scripts/test-live-typing.ts) drives it with a real LiveClient and
- * an injected clock. The React wrapper is `useTyping` in useTyping.ts.
+ * an injected clock. The React wrapper is `useTyping` in react.ts.
  *
  * One TypingTracker per open thread view:
  *   - `typing()` on every keystroke. It sends a `typing` frame at most once

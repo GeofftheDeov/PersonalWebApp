@@ -14,7 +14,7 @@
  *   - automated posts: the ready check arrives live like any other message;
  *   - heartbeat: `ping` every 25 seconds by default, and a socket that stops
  *     answering is dropped while one that answers stays;
- *   - the shared realtime client (frontend/src/lib/realtime/liveClient.ts):
+ *   - the shared realtime client (packages/shared/src/realtime/liveClient.ts):
  *     it connects, delivers per-thread, and after the network drops and comes
  *     back it reconnects on its own and tells the thread to refetch, which
  *     then shows what was sent in the meantime.
@@ -50,7 +50,7 @@ type LiveClientLike = {
 type LiveClientCtor = new (opts: {
   url: string; getToken: () => string | null; WebSocket: unknown; backoff?: { baseMs?: number; maxMs?: number };
 }) => LiveClientLike;
-const LIVE_CLIENT = new URL("../../frontend/src/lib/realtime/liveClient.ts", import.meta.url).href;
+const LIVE_CLIENT = new URL("../../packages/shared/src/realtime/liveClient.ts", import.meta.url).href;
 
 if (!/(\/\/|@)(127\.0\.0\.1|localhost)[:/]/.test(process.env.DATABASE_URL ?? "")) {
   console.error("\n  Refusing to run: DATABASE_URL must be a local throwaway database.\n");

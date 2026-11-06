@@ -3,7 +3,8 @@
 import { useRef, useState } from 'react';
 import { Send, WifiOff } from 'lucide-react';
 import { threadKeyFor } from '../lib/useThreads';
-import { myAccountId, useThread } from '../lib/useThread';
+import { useThread } from '../lib/useThread';
+import { useSession } from '../lib/session';
 import { useThreadScroll } from '../lib/useThreadScroll';
 import { useTyping } from '../lib/realtime/useTyping';
 import { AttachButton, DraftAttachments, MessageAttachments, useAttachmentDraft } from './MessageAttachments';
@@ -34,7 +35,7 @@ export default function ChatThread({ channel, placeholder, onLatestMessage }: {
     const [draft, setDraft] = useState('');
     const files = useAttachmentDraft();
     const scrollRef = useRef<HTMLDivElement>(null);
-    const myId = myAccountId();
+    const myId = useSession().user?.id ?? null;
 
     const threadKey = channel.id ? threadKeyFor(channel.kind, channel.id) : null;
     // "Theo is writing…" (#103): announce while the draft has text; others' indicators beside the badge.

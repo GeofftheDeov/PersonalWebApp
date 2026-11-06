@@ -4,6 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveThread, type LiveMessage, type ThreadStatus } from './realtime/useLiveThread';
 import type { MessageAttachment } from './realtime/liveClient';
 import { uploadAttachment } from './attachments';
+import { ApiError } from '@gtd/shared/api';
+import { api, errorOf } from './api';
+import { currentUserId } from './session';
 
 /**
  * One open thread (#101, spec #58), headless: history paging, the live
@@ -62,17 +65,6 @@ export interface UseThreadOptions {
     onSent?: (message: LiveMessage) => void;
 }
 
-const token = () => (typeof window !== 'undefined' ? localStorage.getItem('token') : null);
-
-/** The signed-in account id from the JWT, or null. Used for "mine" alignment only. */
-export function myAccountId(): string | null {
-    try {
-        const t = token();
-        return t ? JSON.parse(atob(t.split('.')[1]))?.id ?? null : null;
-    } catch {
-        return null;
-    }
-}
 
 const newClientId = (): string => {
     try {
@@ -97,13 +89,8 @@ const byTime = (a: ThreadEntry, b: ThreadEntry) =>
     a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : (a.id ?? '') < (b.id ?? '') ? -1 : 1;
 
 async function postRead(threadKey: string, messageId: string) {
-    const t = token();
-    if (!t) return;
-    await fetch(`/api/threads/${encodeURIComponent(threadKey)}/read`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t}` },
-        body: JSON.stringify({ messageId }),
-    }).catch(() => { /* the next open marks it again */ });
+    await api.post(`/api/threads/${encodeURIComponent(threadKey)}/read`, { messageId })
+        .catch(() => { /* the next open marks it again */ });
 }
 
 export function useThread(threadKey: string | null, { pageSize = 50, markRead, onSent }: UseThreadOptions = {}) {
@@ -137,7 +124,7 @@ export function useThread(threadKey: string | null, { pageSize = 50, markRead, o
         if (!msgs.length) return;
         const absorbed = new Map<string, string>(); // message id → pending key
         if (echo) {
-            const me = myAccountId();
+            const me = currentUserId();
             const waiting = pendingRef.current.filter((p) => p.state === 'sending');
             for (const m of msgs) {
                 if (m.sender?.id !== me || sentRef.current.has(m.id)) continue;
@@ -162,13 +149,10 @@ export function useThread(threadKey: string | null, { pageSize = 50, markRead, o
     }, []);
 
     const fetchPage = useCallback(async (key: string, before?: string) => {
-        const t = token();
-        if (!t) throw new Error('Sign in to see this conversation');
         const qs = `?limit=${pageSize}${before ? `&before=${encodeURIComponent(before)}` : ''}`;
-        const res = await fetch(`${messagesUrl(key)}${qs}`, { headers: { Authorization: `Bearer ${t}` } });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data?.error || 'Could not load messages');
-        return { messages: (data.messages ?? []) as LiveMessage[], hasMore: !!data.hasMore };
+        const data = await api.get<{ messages?: LiveMessage[]; hasMore?: boolean }>(`${messagesUrl(key)}${qs}`)
+            .catch((err) => { throw new Error(errorOf(err, 'Could not load messages')); });
+        return { messages: data?.messages ?? [], hasMore: !!data?.hasMore };
     }, [pageSize]);
 
     /**
@@ -280,7 +264,7 @@ export function useThread(threadKey: string | null, { pageSize = 50, markRead, o
         try {
             for (let i = 0; i < files.length; i++) {
                 if (keys[i]) continue;
-                keys[i] = await uploadAttachment(threadKey, files[i], token());
+                keys[i] = await uploadAttachment(threadKey, files[i]);
                 if (gen === generation.current) {
                     const done = [...keys];
                     setPending((prev) => prev.map((p) => (p.key === entry.key ? { ...p, uploadedKeys: done } : p)));
@@ -292,18 +276,20 @@ export function useThread(threadKey: string | null, { pageSize = 50, markRead, o
             return;
         }
         try {
-            const res = await fetch(messagesUrl(threadKey), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-                body: JSON.stringify({
+            let data: { message?: LiveMessage } | undefined;
+            try {
+                data = await api.post(messagesUrl(threadKey), {
                     body: entry.body,
                     clientId: entry.key,
                     ...(files.length ? { attachments: keys } : {}),
-                }),
-            });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok || !data?.message) {
-                settle({ state: 'failed', error: data?.error || `Not sent (${res.status})` });
+                });
+            } catch (err) {
+                if (!(err instanceof ApiError)) throw err;
+                settle({ state: 'failed', error: errorOf(err, `Not sent (${err.status})`) });
+                return;
+            }
+            if (!data?.message) {
+                settle({ state: 'failed', error: 'Not sent' });
                 return;
             }
             if (gen !== generation.current) return;
@@ -328,7 +314,7 @@ export function useThread(threadKey: string | null, { pageSize = 50, markRead, o
     const send = useCallback((text: string, files: File[] = []): boolean => {
         const body = text.trim();
         if ((!body && !files.length) || !threadKey) return false;
-        const me = myAccountId();
+        const me = currentUserId();
         const entry: ThreadEntry = {
             key: newClientId(), id: null, sender: { id: me ?? '', name: 'You' }, body,
             createdAt: new Date().toISOString(), state: 'sending',

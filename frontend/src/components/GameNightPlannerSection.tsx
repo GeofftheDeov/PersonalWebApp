@@ -3,6 +3,8 @@
 import React, { useEffect, useState } from 'react';
 import { Sword, Book, Map, Users, Calendar, Plus, Save } from 'lucide-react';
 import { sessionWhen } from '@/lib/sessions';
+import { api, getOrNull } from '@/lib/api';
+import { session } from '@/lib/session';
 
 interface Session {
     _id: string;
@@ -41,15 +43,14 @@ export default function GameNightPlannerSection() {
 
     const fetchData = async () => {
         try {
-            const token = localStorage.getItem('token');
-            const [sessRes, charRes, campRes] = await Promise.all([
-                fetch('/api/tabletop/sessions', { headers: { 'Authorization': `Bearer ${token}` } }),
-                fetch('/api/tabletop/characters', { headers: { 'Authorization': `Bearer ${token}` } }),
-                fetch('/api/campaigns', { headers: { 'Authorization': `Bearer ${token}` } })
+            const [sess, chars, camps] = await Promise.all([
+                getOrNull<Session[]>('/api/tabletop/sessions'),
+                getOrNull<Character[]>('/api/tabletop/characters'),
+                getOrNull<Campaign[]>('/api/campaigns'),
             ]);
-            if (sessRes.ok) setSessions(await sessRes.json());
-            if (charRes.ok) setCharacters(await charRes.json());
-            if (campRes.ok) setCampaigns(await campRes.json());
+            if (sess) setSessions(sess);
+            if (chars) setCharacters(chars);
+            if (camps) setCampaigns(camps);
         } catch (err) {
             console.error("Failed to fetch tabletop data:", err);
         } finally {
@@ -64,27 +65,18 @@ export default function GameNightPlannerSection() {
     const handlePrepareSession = async (e: React.FormEvent) => {
         e.preventDefault();
         try {
-            const token = localStorage.getItem('token');
-            const userStr = localStorage.getItem('user');
-            if (!userStr) return;
-            const user = JSON.parse(userStr);
+            const user = session.getState().user;
+            if (!user) return;
 
             const payload = {
                 ...formData,
-                ownerId: user.id || user._id,
+                ownerId: user.id,
                 ownerName: user.name,
             };
 
-            const response = await fetch('/api/tabletop/prepare-session', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify(payload)
-            });
+            const ok = await api.post('/api/tabletop/prepare-session', payload).then(() => true, () => false);
 
-            if (response.ok) {
+            if (ok) {
                 setIsShowPrepareForm(false);
                 setFormData({ title: '', campaignId: '', date: '', agenda: '', location: '' });
                 fetchData(); // Refresh list

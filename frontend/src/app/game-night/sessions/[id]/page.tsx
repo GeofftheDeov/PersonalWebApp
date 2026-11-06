@@ -8,7 +8,10 @@ import { memberName } from '@/lib/memberName';
 import SessionQuests from '@/components/SessionQuests';
 import SessionTorch from '@/components/SessionTorch';
 import SessionAttendance from '@/components/SessionAttendance';
-import { gmTitleOf } from '@/lib/campaigns';
+import { gmTitleOf, isCampaignGameMaster } from '@/lib/campaigns';
+import { ApiError } from '@gtd/shared/api';
+import { api, getOrNull } from '@/lib/api';
+import { useSession } from '@/lib/session';
 
 const INPUT_CLS = "w-full p-3 border-4 border-black bg-white text-black font-permanent text-base uppercase focus:border-yellow-400 outline-none";
 const LABEL_CLS = "block text-teal-400 font-permanent uppercase text-xs mb-1";
@@ -30,77 +33,48 @@ export default function SessionDetailPage() {
     const [editing, setEditing] = useState(false);
     const [saving, setSaving] = useState(false);
     const [form, setForm] = useState<any>({});
-    // The campaign's Game Master (or an admin), vs. anyone with GM control of
-    // this session, which includes a one-session stand-in (#89).
-    const [isCampaignGM, setIsCampaignGM] = useState(false);
-    const [members, setMembers] = useState<any[]>([]);
+    // Every member row, inactive ones too (sent to GMs only), for who's a GM.
+    const [memberRows, setMemberRows] = useState<any[]>([]);
     const [readySaving, setReadySaving] = useState(false);
-
-    const token = () => localStorage.getItem('token');
+    // Who's signed in, from the session client (#210), so it can't outlive the session.
+    const { user: me, capabilities: caps } = useSession();
 
     useEffect(() => {
-        const t = token();
-        if (!t) { router.push('/login'); return; }
-        fetch(`/api/tabletop/sessions/${id}`, { headers: { Authorization: `Bearer ${t}` } })
-            .then(async res => {
-                if (res.status === 401) { localStorage.clear(); router.push('/login'); return; }
-                if (res.ok) {
-                    const s = await res.json();
-                    setSession(s);
-                    setForm({ title: s.title, date: toDatetimeInput(s.date), endDate: toDatetimeInput(s.endDate), location: s.location || '', isOnline: !!s.isOnline,
-                        // Prep notes come back only to those who may read and write them (#213); otherwise they aren't sent.
-                        ...('agenda' in s ? { agenda: s.agenda || '' } : {}), summary: s.summary || '', vodUrl: s.vodUrl || '' });
-                    // Sessions are GM-only to edit — check the viewer's campaign role.
-                    if (s.campaign?._id) {
-                        try {
-                            const mRes = await fetch(`/api/campaigns/${s.campaign._id}/members`, { headers: { Authorization: `Bearer ${t}` } });
-                            if (mRes.ok) {
-                                const memberRows = await mRes.json();
-                                // Inactive players (#37, sent to GMs only) aren't part of a session.
-                                setMembers(memberRows.filter((m: any) => m.isActive !== false));
-                                const me = JSON.parse(localStorage.getItem('user') || 'null');
-                                setIsCampaignGM(Boolean(me && (me.appRole === 'admin' || memberRows.some((m: any) =>
-                                    m.status === 'Game Master' &&
-                                    ((m.email && me.email && m.email.toLowerCase() === me.email.toLowerCase()) || (m.playerId && m.playerId === me.id))
-                                ))));
-                            }
-                        } catch { /* edit stays hidden */ }
-                    }
-                } else router.push('/game-night');
+        api.get<any>(`/api/tabletop/sessions/${id}`)
+            .then(async s => {
+                setSession(s);
+                setForm({ title: s.title, date: toDatetimeInput(s.date), endDate: toDatetimeInput(s.endDate), location: s.location || '', isOnline: !!s.isOnline,
+                    // Prep notes come back only to those who may read and write them (#213); otherwise they aren't sent.
+                    ...('agenda' in s ? { agenda: s.agenda || '' } : {}), summary: s.summary || '', vodUrl: s.vodUrl || '' });
+                // Sessions are GM-only to edit — check the viewer's campaign role.
+                if (s.campaign?._id) {
+                    const rows = await getOrNull<any[]>(`/api/campaigns/${s.campaign._id}/members`);
+                    if (rows) setMemberRows(rows); // else edit stays hidden
+                }
             })
-            .catch(() => router.push('/game-night'))
+            // A 401 has already sent the person to log in and back (#210).
+            .catch((err) => { if (!(err instanceof ApiError && err.status === 401)) router.push('/game-night'); })
             .finally(() => setLoading(false));
     }, [id, router]);
 
     const refreshSession = async () => {
-        const res = await fetch(`/api/tabletop/sessions/${id}`, { headers: { Authorization: `Bearer ${token()}` } });
-        if (res.ok) setSession(await res.json());
+        const s = await getOrNull(`/api/tabletop/sessions/${id}`);
+        if (s) setSession(s);
     };
 
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
         setSaving(true);
-        const res = await fetch(`/api/tabletop/sessions/${id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-            body: JSON.stringify(form),
-        });
-        if (res.ok) { setSession(await res.json()); setEditing(false); }
+        const saved = await api.put(`/api/tabletop/sessions/${id}`, form).catch(() => null);
+        if (saved) { setSession(saved); setEditing(false); }
         setSaving(false);
     };
 
     const handleReady = async (ready: boolean) => {
         setReadySaving(true);
         try {
-            const res = await fetch(`/api/tabletop/sessions/${id}/ready`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-                body: JSON.stringify({ ready }),
-            });
-            if (res.ok) {
-                const data = await res.json();
-                setSession((prev: any) => ({ ...prev, readyCheck: data.readyCheck }));
-            }
+            const data = await api.post<{ readyCheck: unknown }>(`/api/tabletop/sessions/${id}/ready`, { ready }).catch(() => null);
+            if (data) setSession((prev: any) => ({ ...prev, readyCheck: data.readyCheck }));
         } finally {
             setReadySaving(false);
         }
@@ -118,7 +92,12 @@ export default function SessionDetailPage() {
         readyCheck?.sentAt && sessionDate &&
         Date.now() < sessionDate.getTime() + 4 * 60 * 60 * 1000
     );
-    const me = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('user') || 'null') : null;
+    // Inactive players (#37, sent to GMs only) aren't part of a session.
+    const members = memberRows.filter((m: any) => m.isActive !== false);
+    // The campaign's Game Master (or an admin), vs. anyone with GM control of
+    // this session (isGM), which includes a one-session stand-in (#89).
+    // Display only: the server enforces it.
+    const isCampaignGM = isCampaignGameMaster(memberRows, me, caps);
     const myResponse = readyCheck?.responses?.find((r: any) => r.playerId === me?.id);
     const memberName = (m: any) => {
         if (m.firstName || m.lastName) return `${m.firstName || ''} ${m.lastName || ''}`.trim();

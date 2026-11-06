@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { api, errorOf } from '@/lib/api';
 
 export default function CreateAccountPage() {
     const router = useRouter();
@@ -35,19 +36,8 @@ export default function CreateAccountPage() {
         }
 
         try {
-            const response = await fetch(`/api/leads`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(formData),
-            });
-
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.error || 'Failed to create account');
-            }
+            const data = await api.post<any>(`/api/leads`, formData)
+                .catch((err) => { throw new Error(errorOf(err, 'Failed to create account')); });
 
             setFormData({
                 firstName: '',

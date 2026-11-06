@@ -9,6 +9,8 @@ import Link from 'next/link';
 import { sessionWhen } from '@/lib/sessions';
 import { DEFAULT_GM_TITLE } from '@/lib/campaigns';
 import CampaignBanner from '@/components/CampaignBanner';
+import { api, errorOf, getOrNull } from '@/lib/api';
+import { session } from '@/lib/session';
 
 interface Campaign {
     _id: string;
@@ -84,23 +86,17 @@ export default function GameNightPage() {
     });
 
     const fetchAll = async () => {
-        const token = localStorage.getItem('token');
-        if (!token) { router.push('/login'); return; }
         setLoading(true);
         try {
-            const [campRes, sessRes, charRes] = await Promise.all([
-                fetch('/api/campaigns', { headers: { Authorization: `Bearer ${token}` } }),
-                fetch('/api/tabletop/sessions', { headers: { Authorization: `Bearer ${token}` } }),
-                fetch('/api/tabletop/characters', { headers: { Authorization: `Bearer ${token}` } }),
+            // Signed out, these 401 and the session sends the person to log in and back (#210).
+            const [camps, sess, chars] = await Promise.all([
+                getOrNull<Campaign[]>('/api/campaigns'),
+                getOrNull<Session[]>('/api/tabletop/sessions'),
+                getOrNull<Character[]>('/api/tabletop/characters'),
             ]);
-            if (campRes.status === 401 || sessRes.status === 401 || charRes.status === 401) {
-                localStorage.clear();
-                router.push('/login');
-                return;
-            }
-            if (campRes.ok) setCampaigns(await campRes.json());
-            if (sessRes.ok) setSessions(await sessRes.json());
-            if (charRes.ok) setCharacters(await charRes.json());
+            if (camps) setCampaigns(camps);
+            if (sess) setSessions(sess);
+            if (chars) setCharacters(chars);
         } catch (err) {
             console.error('Failed to fetch game night data:', err);
         } finally {
@@ -112,20 +108,14 @@ export default function GameNightPage() {
 
     const handleCreateCampaign = async (e: React.FormEvent) => {
         e.preventDefault();
-        const token = localStorage.getItem('token');
-        const res = await fetch('/api/campaigns', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            body: JSON.stringify(campaignForm),
-        });
-        if (res.ok) {
+        try {
+            await api.post('/api/campaigns', campaignForm);
             setShowCreateCampaign(false);
             setCampaignForm(EMPTY_CAMPAIGN);
             setCampaignError(null);
             fetchAll();
-        } else {
-            const err = await res.json().catch(() => ({}));
-            setCampaignError(err.error || 'Failed to create campaign');
+        } catch (err) {
+            setCampaignError(errorOf(err, 'Failed to create campaign'));
         }
     };
 
@@ -152,12 +142,8 @@ export default function GameNightPage() {
         }
         setSavingSession(true);
         setSessionError(null);
-        const token = localStorage.getItem('token');
         try {
-            const res = await fetch('/api/tabletop/sessions', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({
+            const created = await api.post<{ warnings?: string[] }>('/api/tabletop/sessions', {
                     title: sessionForm.title,
                     campaign: sessionForm.campaignId,
                     date: sessionForm.date,
@@ -168,20 +154,13 @@ export default function GameNightPage() {
                     summary: sessionForm.summary,
                     createDiscordEvent: sessionForm.createDiscordEvent,
                     createGoogleEvent: sessionForm.createGoogleEvent,
-                }),
             });
-            if (res.ok) {
-                const created = await res.json();
-                setSessionWarnings(created.warnings || []);
-                setShowCreateSession(false);
-                setSessionForm(EMPTY_SESSION);
-                fetchAll();
-            } else {
-                const err = await res.json().catch(() => ({}));
-                setSessionError(err.error || 'Failed to create session');
-            }
-        } catch {
-            setSessionError('Failed to create session');
+            setSessionWarnings(created?.warnings || []);
+            setShowCreateSession(false);
+            setSessionForm(EMPTY_SESSION);
+            fetchAll();
+        } catch (err) {
+            setSessionError(errorOf(err, 'Failed to create session'));
         } finally {
             setSavingSession(false);
         }
@@ -189,22 +168,15 @@ export default function GameNightPage() {
 
     const handleCreateCharacter = async (e: React.FormEvent) => {
         e.preventDefault();
-        const token = localStorage.getItem('token');
-        const userStr = localStorage.getItem('user');
-        const user = userStr ? JSON.parse(userStr) : {};
-        const res = await fetch('/api/tabletop/characters', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            body: JSON.stringify({
-                name: characterForm.name,
-                class: characterForm.class,
-                level: characterForm.level,
-                campaign: characterForm.campaignId || undefined,
-                gameType: characterForm.gameType,
-                player: user.id || user._id,
-            }),
-        });
-        if (res.ok) {
+        const ok = await api.post('/api/tabletop/characters', {
+            name: characterForm.name,
+            class: characterForm.class,
+            level: characterForm.level,
+            campaign: characterForm.campaignId || undefined,
+            gameType: characterForm.gameType,
+            player: session.getState().user?.id,
+        }).then(() => true, () => false);
+        if (ok) {
             setShowCreateCharacter(false);
             setCharacterForm({ name: '', class: '', level: 1, campaignId: '', gameType: '' });
             fetchAll();

@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Check, Pencil, X, Pause, Play, RefreshCw } from 'lucide-react';
+import { ApiError } from '@gtd/shared/api';
+import { api } from '@/lib/api';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -18,12 +20,6 @@ interface Agent {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-const token = () => (typeof window !== 'undefined' ? localStorage.getItem('token') : null);
-const ah = (): Record<string, string> => {
-  const t = token();
-  return t ? { Authorization: `Bearer ${t}` } : {};
-};
 
 const centsToDisplay = (c?: number) =>
   c == null ? '—' : `$${(c / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -85,13 +81,7 @@ function AgentRow({
     const cents = Math.round(dollars * 100);
     setSaving(true);
     try {
-      const res = await fetch(`/api/paperclip/agents/${agent.id}/budget`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', ...ah() },
-        body: JSON.stringify({ budgetMonthlyCents: cents }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error((data as any)?.error ?? 'Save failed');
+      const data = await api.patch(`/api/paperclip/agents/${agent.id}/budget`, { budgetMonthlyCents: cents });
       onUpdated({ ...agent, budgetMonthlyCents: cents, ...(data as Partial<Agent>) });
       setEditing(false);
       onToast(`Budget updated for ${agent.name ?? agent.id}`);
@@ -105,12 +95,7 @@ function AgentRow({
   const doAction = async (action: 'pause' | 'resume') => {
     setActionBusy(true);
     try {
-      const res = await fetch(`/api/paperclip/agents/${agent.id}/${action}`, {
-        method: 'POST',
-        headers: ah(),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error((data as any)?.error ?? `${action} failed`);
+      const data = await api.post(`/api/paperclip/agents/${agent.id}/${action}`);
       onUpdated({ ...agent, status: action === 'pause' ? 'paused' : 'active', ...(data as Partial<Agent>) });
       onToast(`${action === 'pause' ? 'Paused' : 'Resumed'} ${agent.name ?? agent.id}`);
     } catch (err: any) {
@@ -230,10 +215,7 @@ function CostsSection() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/paperclip/costs', { headers: ah() });
-      const data = await res.json();
-      if (!res.ok) throw new Error((data as any)?.error ?? 'Failed to load costs');
-      setCosts(data);
+      setCosts(await api.get('/api/paperclip/costs'));
       setLoaded(true);
     } catch (err: any) {
       setError(err.message);
@@ -347,8 +329,7 @@ export default function BudgetsPage() {
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3500); };
 
   const loadAgents = useCallback(async () => {
-    const t = token();
-    if (!t) { router.push('/login'); return; }
+    // Signed out, the read below 401s and the session sends the person to log in and back (#210).
     // The type-based pre-check that used to live here read `user.type` from
     // localStorage, which after the account merge is "Account" for everybody --
     // it would have bounced every visitor, including the one who has access.
@@ -356,11 +337,10 @@ export default function BudgetsPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/paperclip/agents', { headers: ah() });
-      if (res.status === 401) { router.push('/login'); return; }
-      if (res.status === 403) { router.push('/dashboard'); return; }
-      const data = await res.json();
-      if (!res.ok) throw new Error((data as any)?.error ?? 'Failed to load agents');
+      const data = await api.get<any>('/api/paperclip/agents').catch((err) => err as Error);
+      if (data instanceof ApiError && data.status === 401) return;
+      if (data instanceof ApiError && data.status === 403) { router.push('/dashboard'); return; }
+      if (data instanceof Error) throw data;
       const list: Agent[] = Array.isArray(data) ? data : (data?.agents ?? data?.items ?? []);
       setAgents(list);
     } catch (err: any) {

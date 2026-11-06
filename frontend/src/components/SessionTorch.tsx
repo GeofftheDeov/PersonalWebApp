@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import { Flame, Undo2 } from 'lucide-react';
+import { ApiError } from '@gtd/shared/api';
+import { api, errorOf } from '@/lib/api';
 
 /**
  * The one-session torch pass (#57, #89): who's standing in as this session's
@@ -44,13 +46,11 @@ export default function SessionTorch({ sessionId, gmTitle, party, gameMasterIds,
         setBusy(true);
         setError(null);
         try {
-            const res = await fetch(`/api/planning/sessions/${sessionId}/torch`, {
-                method,
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
-                body: body === undefined ? undefined : JSON.stringify(body),
-            });
-            if (!res.ok) setError((await res.json().catch(() => ({}))).error || 'Something went wrong.');
-            else setTo('');
+            const failed = await api.request(`/api/planning/sessions/${sessionId}/torch`, { method, body })
+                .then(() => null, (err) => err);
+            if (!failed) setTo('');
+            else if (failed instanceof ApiError) setError(errorOf(failed, 'Something went wrong.'));
+            else throw failed;
             await onChanged();
         } catch {
             setError('Could not reach the server.');

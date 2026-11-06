@@ -6,16 +6,16 @@ import { useEffect, useRef, useState } from 'react';
 import { Menu, X, ChevronDown } from 'lucide-react';
 import SocialDock from './SocialDock';
 import NotificationsBell from './NotificationsBell';
-import { useCapabilities, canAdmin, canPaperclip } from '../lib/capabilities';
+import { api } from '../lib/api';
+import { canAdmin, canPaperclip, session, useSession } from '../lib/session';
 
 export default function Navigation() {
   const router = useRouter();
   const pathname = usePathname();
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [token, setToken] = useState<string | null>(null);
-  // Capability comes from the server, not from the `user` object in
-  // localStorage. See lib/capabilities.ts for why.
-  const caps = useCapabilities(token);
+  // Who's signed in, and what they may do, come from the session client,
+  // which asks the server (#210). See @gtd/shared/session.
+  const { status, capabilities: caps } = useSession();
+  const isLoggedIn = status === 'signedIn';
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [paperclipOpen, setPaperclipOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -23,21 +23,6 @@ export default function Navigation() {
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const paperclipRef = useRef<HTMLDivElement>(null);
   const moreRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const checkAuth = () => {
-      const t = localStorage.getItem('token');
-      setIsLoggedIn(!!t);
-      setToken(t);
-    };
-    checkAuth();
-    window.addEventListener('storage', checkAuth);
-    window.addEventListener('authChange', checkAuth);
-    return () => {
-      window.removeEventListener('storage', checkAuth);
-      window.removeEventListener('authChange', checkAuth);
-    };
-  }, []);
 
   // Close desktop dropdowns on route change
   useEffect(() => {
@@ -72,14 +57,27 @@ export default function Navigation() {
   }, []);
 
   const handleLogout = () => {
-    // Clears the parent-domain session cookie too (#69), so the other site is
-    // logged out as well. Fire and forget: local state goes either way.
-    fetch('/api/users/logout', { method: 'POST' }).catch(() => {});
-    localStorage.clear();
-    setIsLoggedIn(false);
+    // Clears the parent-domain session cookie (#69), so the other site is
+    // logged out as well. The client's state goes either way.
+    session.logout().catch(() => {});
     setIsMenuOpen(false);
-    window.dispatchEvent(new Event('authChange'));
     router.push('/');
+  };
+
+  // The admin portal is server-rendered and still takes a bearer token in its
+  // URL. The browser holds none (#210), so ask for one as the link is opened.
+  const openAdmin = async (e: { preventDefault(): void }) => {
+    e.preventDefault();
+    closeMenu();
+    const tab = window.open('', '_blank');
+    if (tab) tab.opener = null;
+    try {
+      const { token } = await api.post<{ token: string }>('/api/users/me/admin-token');
+      if (tab) tab.location.href = `/admin?token=${encodeURIComponent(token)}`;
+      else window.location.href = `/admin?token=${encodeURIComponent(token)}`;
+    } catch {
+      tab?.close();
+    }
   };
 
   const closeMenu = () => {
@@ -161,9 +159,8 @@ export default function Navigation() {
               {/* Admin portal — app_role only. The server agrees (#43). */}
               {canAdmin(caps) && (
                 <a
-                  href={`/admin?token=${token}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                  href="/admin"
+                  onClick={openAdmin}
                   className={linkCls}
                 >
                   <span className="relative z-10 group-hover:text-teal-600 transition-colors uppercase">ADMIN</span>
@@ -245,10 +242,8 @@ export default function Navigation() {
 
               {canAdmin(caps) && (
                 <a
-                  href={`/admin?token=${token}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={closeMenu}
+                  href="/admin"
+                  onClick={openAdmin}
                   className={mobileLinkCls}
                 >
                   ADMIN

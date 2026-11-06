@@ -24,7 +24,8 @@
  * CLI does. test-phase2-emit-sql.ts holds it row-for-row to runBackfill.
  *
  * Landing tables are never written. Reversal is
- * `TRUNCATE accounts, account_source_links` — see #34, which is why this is
+ * `TRUNCATE accounts, account_source_links CASCADE` (every other table that
+ * references accounts was empty, or the backfill refused) — see #34, which is why this is
  * safe to re-run and why re-running is expected rather than exceptional.
  */
 import fs from "fs";
@@ -168,8 +169,8 @@ const UNRESOLVED_SQL = `
     ), refs AS (
       SELECT 'friend_requests.from_user' AS site, from_user AS pid FROM friend_requests
       UNION ALL SELECT 'friend_requests.to_user', to_user FROM friend_requests
-      UNION ALL SELECT 'campaign_invites.from_user', from_user FROM campaign_invites
-      UNION ALL SELECT 'campaign_invites.to_user', to_user FROM campaign_invites
+      UNION ALL SELECT 'campaign_invites.from_account_id', from_account_id FROM campaign_invites
+      UNION ALL SELECT 'campaign_invites.to_account_id', to_account_id FROM campaign_invites
       UNION ALL SELECT 'notifications.user_id', user_id FROM notifications
       UNION ALL SELECT 'characters.player_id', player_id FROM characters
       UNION ALL SELECT 'player_sessions.player_id', player_id FROM player_sessions
@@ -209,6 +210,52 @@ const TIER_MAP_SQL = `
 /** The manual admin pin (#34). Without it a Salesforce Profile change silently revokes admin overnight and there is no route back in via the UI. */
 const ADMIN_PIN_SQL = `UPDATE accounts SET app_role = 'admin', app_role_source = 'manual' WHERE id = $1`;
 
+/**
+ * Empties `accounts` and `account_source_links` for a fresh backfill, and
+ * refuses when that would take anything else with it.
+ *
+ * Every table with an FK to `accounts` (and, transitively, every table
+ * referencing those) must be truncated alongside it, or Postgres refuses. A
+ * bare CASCADE would do that silently, announced by nothing louder than a psql
+ * NOTICE. `person_outbox` was the first such table: from Phase 3 on it holds
+ * real pending Salesforce writes. Since Phase 3 the list is long (friend
+ * requests, campaign members, threads, ...), and it keeps growing, so it is
+ * read from the catalog rather than spelled out here (#236). Any of them
+ * holding a row means the database is past Phase 2: refuse rather than
+ * discard. Otherwise they are empty, and naming them in the TRUNCATE costs
+ * nothing.
+ *
+ * One block, run as-is by runBackfill and emitted as-is by backfillSql.
+ */
+const CLEAR_ACCOUNTS_SQL = `DO $$
+DECLARE
+  rels regclass[];
+  rel regclass;
+  n bigint;
+BEGIN
+  WITH RECURSIVE dep(oid) AS (
+    SELECT 'accounts'::regclass::oid
+    UNION
+    SELECT c.conrelid FROM pg_constraint c JOIN dep ON c.confrelid = dep.oid WHERE c.contype = 'f'
+  )
+  SELECT array_agg(oid::regclass ORDER BY oid::regclass::text) INTO rels FROM dep;
+
+  SELECT count(*) INTO n FROM person_outbox;
+  IF n > 0 THEN
+    RAISE EXCEPTION 'person_outbox holds % queued Salesforce write-back(s); truncating accounts would discard them. Drain the outbox first.', n;
+  END IF;
+
+  rels := array_remove(array_remove(rels, 'accounts'::regclass), 'account_source_links'::regclass);
+  FOREACH rel IN ARRAY rels LOOP
+    EXECUTE format('SELECT count(*) FROM %s', rel) INTO n;
+    IF n > 0 THEN
+      RAISE EXCEPTION '% holds % row(s) that reference accounts; truncating accounts would discard them. The backfill only runs on a database still in Phase 2.', rel, n;
+    END IF;
+  END LOOP;
+
+  EXECUTE 'TRUNCATE ' || array_to_string(ARRAY['accounts', 'account_source_links'] || rels::text[], ', ');
+END $$`;
+
 export async function runBackfill(
   client: pg.PoolClient,
   rows: MergeRow[],
@@ -217,20 +264,7 @@ export async function runBackfill(
   const log = opts.log ?? (() => {});
   const { groups, excluded } = validate(rows);
 
-  // `person_outbox` has an FK to `accounts`, so a bare CASCADE here also
-  // truncates the Salesforce write-back queue — announced by nothing louder
-  // than a psql NOTICE. It is empty in Phase 2, but this script is built to be
-  // re-run, and from Phase 3 on that queue holds real pending writes. Refuse
-  // rather than discard, and name the table being truncated instead of letting
-  // CASCADE reach it implicitly.
-  const { rows: queued } = await client.query(
-    `SELECT count(*)::int AS n FROM person_outbox`);
-  if (queued[0].n > 0) {
-    throw new Error(
-      `person_outbox holds ${queued[0].n} queued Salesforce write-back(s); ` +
-      `truncating accounts would discard them. Drain the outbox first.`);
-  }
-  await client.query("TRUNCATE accounts, account_source_links, person_outbox");
+  await client.query(CLEAR_ACCOUNTS_SQL);
 
   let accounts = 0;
   let links = 0;
@@ -405,12 +439,6 @@ export function backfillSql(rows: MergeRow[], adminId: string): string[] {
 
   const out: string[] = [];
 
-  out.push(`DO $$ BEGIN
-  IF (SELECT count(*) FROM person_outbox) > 0 THEN
-    RAISE EXCEPTION 'person_outbox holds % queued Salesforce write-back(s); truncating accounts would discard them. Drain the outbox first.',
-      (SELECT count(*) FROM person_outbox);
-  END IF;
-END $$`);
 
   // runBackfill throws on a missing source row as it reads it; do the same, up front.
   out.push(`DO $$ BEGIN
@@ -418,7 +446,7 @@ ${kept.flatMap(([gid, members]) => members.map((m) =>
     `  IF NOT EXISTS (SELECT 1 FROM ${m.source_table} WHERE id = ${lit(m.source_id)}) THEN RAISE EXCEPTION ${lit(`group ${gid}: ${m.source_table} row ${m.source_id} not found`)}; END IF;`)).join("\n")}
 END $$`);
 
-  out.push("TRUNCATE accounts, account_source_links, person_outbox");
+  out.push(CLEAR_ACCOUNTS_SQL);
 
   for (const [, members] of kept) {
     const ordered = precedence(members);
@@ -566,7 +594,7 @@ async function main() {
     }
     if (apply) {
       await client.query("COMMIT");
-      console.log("\n  COMMITTED. Reverse with: TRUNCATE accounts, account_source_links;\n");
+      console.log("\n  COMMITTED. Reverse with: TRUNCATE accounts, account_source_links CASCADE; (the tables it reaches were empty: the backfill checked)\n");
     } else {
       await client.query("ROLLBACK");
       console.log("\n  Dry run complete — rolled back. Re-run with --apply to keep it.\n");

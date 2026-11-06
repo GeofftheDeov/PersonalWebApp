@@ -69,8 +69,7 @@ router.get('/callback', async (req: any, res: Response) => {
         const { code, state, error } = req.query as { code?: string; state?: string; error?: string };
         if (!state) return res.redirect(`${frontend}/profile?gcal=error`);
 
-        const decoded = verifyJwt(state);
-        if (decoded.purpose !== 'gcal-connect') throw new Error('Bad state');
+        const decoded = verifyJwt(state, { purpose: 'gcal-connect' });
         if (RETURN_TABS.has(decoded.back)) tab = `&tab=${decoded.back}`;
         if (error) return res.redirect(`${frontend}/profile?gcal=denied${tab}`);
         if (!code) return res.redirect(`${frontend}/profile?gcal=error${tab}`);

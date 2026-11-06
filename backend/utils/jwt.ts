@@ -54,11 +54,42 @@ export function signJwt(payload: object, options?: SignOptions): string {
 }
 
 /**
- * Verify a token against the configured secret. Throws when the token is
- * malformed, expired, signed with anything else, or the secret is unusable.
+ * What a token is for (#240). Every kind of token is signed with the one
+ * secret, so the signature alone can't tell them apart: a Google Calendar
+ * OAuth state, which travels through Google's redirect URL, used to open every
+ * door a login does. A login (session) token carries no `purpose` claim; every
+ * other kind names its own, and each verifier asks for the kind it expects.
+ *
+ *   - "session": login tokens (bearer, `?token=` on /admin and /db, the live
+ *     channel, the session cookie). The default.
+ *   - "gcal-connect": the Google Calendar OAuth `state`, good for /callback only.
+ *   - "account-sync": the Salesforce batch token (scripts/generateJWT.ts), good
+ *     for /api/accounts only.
  */
-export function verifyJwt(token: string): JwtPayload {
+export type TokenPurpose = "session" | "gcal-connect" | "account-sync";
+
+/** The kind of token `decoded` is: its `purpose` claim, or "session" when it has none. */
+export function tokenPurpose(decoded: JwtPayload): string {
+    return decoded.purpose === undefined ? "session" : String(decoded.purpose);
+}
+
+/**
+ * Verify a token against the configured secret. Throws when the token is
+ * malformed, expired, signed with anything else, or the secret is unusable,
+ * and when it is not for `purpose` (one kind, or any of a list). Without
+ * `purpose` only a session token passes, so a caller that forgets to ask still
+ * refuses the other kinds.
+ */
+export function verifyJwt(
+    token: string,
+    { purpose = "session" }: { purpose?: TokenPurpose | readonly TokenPurpose[] } = {},
+): JwtPayload {
     const decoded = jwt.verify(token, secret(), { algorithms: ["HS256"] });
     if (typeof decoded === "string") throw new Error("Token payload is not an object");
+    const allowed: readonly string[] = typeof purpose === "string" ? [purpose] : purpose;
+    const actual = tokenPurpose(decoded);
+    if (!allowed.includes(actual)) {
+        throw new Error(`A ${actual} token is not accepted here (wants ${allowed.join(" or ")})`);
+    }
     return decoded;
 }

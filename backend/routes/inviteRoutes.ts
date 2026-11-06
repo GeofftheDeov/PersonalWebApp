@@ -71,7 +71,6 @@ router.post("/", auth, async (req: any, res) => {
             type: "campaign_invite",
             title: `@${inviterName} invited you to "${campaign.title}"`,
             body: campaign.description || undefined,
-            link: gameNightLinks.invite(String(campaignId)),
             sourceKey: `invite:${invite._id}`,
             meta: { inviteId: String(invite._id), campaignId: String(campaignId) },
         });

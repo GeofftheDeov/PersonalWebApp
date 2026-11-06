@@ -89,10 +89,10 @@ router.post("/sessions", auth, async (req: any, res) => {
         }
 
         const session = new Session({ title, campaign, date, endDate, location, isOnline, agenda, summary, vodUrl });
-        // Saved first: the events link to the session's page, which needs its id (#214).
-        await session.save();
+        // With events to make, saved first: they link to the session's page, which needs its id (#214).
+        if (createDiscordEvent || createGoogleEvent) await session.save();
         // Never the agenda, the GM's Prep notes (#213): the session's Hearthside page, if any (#214).
-        const description = sessionEventDescription(String(session._id));
+        const description = session._id ? sessionEventDescription(String(session._id)) : undefined;
 
         const warnings: string[] = [];
 
@@ -147,7 +147,7 @@ router.post("/sessions", auth, async (req: any, res) => {
             }
         }
 
-        await session.save();   // the events' ids and the shareable link
+        await session.save();   // the session, or with events their ids and the shareable link
         res.status(201).json({ ...session.toObject(), warnings });
     } catch (error: any) {
         res.status(500).json({ error: "Failed to create session", details: error.message });

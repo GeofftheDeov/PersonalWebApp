@@ -91,14 +91,6 @@ export const gameNightLinks = {
     noticeBoard: (campaignId: string) => gameNightLink(`/campaigns/${campaignId}#notice-board`),
     session: (sessionId: string) => gameNightLink(`/sessions/${sessionId}`),
     sessionQuests: (sessionId: string) => gameNightLink(`/sessions/${sessionId}#quests`),
-    /**
-     * A campaign invite's page on Hearthside. Undefined without Hearthside:
-     * the invite's bell entry had no link before, and is answered in the bell.
-     */
-    invite: (campaignId: string): string | undefined => {
-        const hearthside = hearthsideSite();
-        return hearthside ? `${hearthside.origin}/join/${campaignId}` : undefined;
-    },
 };
 
 /**
@@ -108,18 +100,6 @@ export const gameNightLinks = {
  */
 export function sessionEventDescription(sessionId: string): string | undefined {
     return hearthsideSite() ? gameNightLinks.session(sessionId) : undefined;
-}
-
-/**
- * Whether a description is exactly what sessionEventDescription writes on
- * this environment: its Hearthside session page and nothing else. The calendar
- * link scrub (utils/prepNotes.ts) keeps only that, so an agenda, which could
- * contain anything, is never mistaken for it.
- */
-export function isSessionEventDescription(description: string): boolean {
-    const hearthside = hearthsideSite();
-    if (!hearthside || !description.startsWith(`${hearthside.origin}/sessions/`)) return false;
-    return /^[0-9a-f-]{36}$/i.test(description.slice(`${hearthside.origin}/sessions/`.length));
 }
 
 /** The allowed site serving `host`, or null when the host isn't on the allowlist. */

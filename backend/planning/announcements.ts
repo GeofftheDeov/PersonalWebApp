@@ -39,8 +39,6 @@ import { postTableTalk } from "../utils/tableTalk.js";
 import { campaignParty } from "./availabilityStore.js";
 import { gameMasterIds } from "./planner.js";
 
-const noticeBoardLink = gameNightLinks.noticeBoard;
-
 async function loadSession(sessionId: string) {
     const { rows: [s] } = await pool.query(
         `SELECT s.id, s.title, s.campaign_id, s.is_online, s.date, s.location, s.gm_override_id,
@@ -83,7 +81,7 @@ const where = (s: any) => s.venue_name || s.location || "a place to be confirmed
 async function notifyParty(s: any, except: string | undefined, title: string, body: string) {
     const party = await campaignParty(s.campaign_id);
     await Promise.all(party.filter((p) => p.id !== except).map((p) => notify(p.id, {
-        type: "system", title, body, link: noticeBoardLink(s.campaign_id),
+        type: "system", title, body, link: gameNightLinks.noticeBoard(s.campaign_id),
         sourceKey: `planning:${s.id}`, meta: { sessionId: s.id, campaignId: s.campaign_id },
     })));
 }
@@ -91,7 +89,7 @@ async function notifyParty(s: any, except: string | undefined, title: string, bo
 async function notifyGameMasters(s: any, title: string, body: string) {
     const ids = await gameMasterIds(pool, s.campaign_id, s.gm_override_id);
     await Promise.all(ids.map((id) => notify(id, {
-        type: "system", title, body, link: noticeBoardLink(s.campaign_id),
+        type: "system", title, body, link: gameNightLinks.noticeBoard(s.campaign_id),
         sourceKey: `planning-gm:${s.id}`, meta: { sessionId: s.id, campaignId: s.campaign_id },
     })));
 }
@@ -99,7 +97,7 @@ async function notifyGameMasters(s: any, title: string, body: string) {
 async function onStageChanged(e: EventMap["planning.stage_changed"]) {
     const s = await loadSession(e.sessionId);
     if (!s) return;
-    const board = noticeBoardLink(s.campaign_id);
+    const board = gameNightLinks.noticeBoard(s.campaign_id);
 
     if (e.status === "planning" && e.stage === "night" && e.nightChange === "reopened") {
         // Not a kickoff: a confirmed night is being changed, and it stands until a
@@ -176,7 +174,7 @@ async function onPollOpened(e: EventMap["planning.poll_opened"]) {
     const s = await loadSession(e.sessionId);
     if (!s) return;
     const { rows: [{ n }] } = await pool.query(`SELECT count(*)::int AS n FROM poll_options WHERE poll_id = $1`, [e.pollId]);
-    const board = noticeBoardLink(s.campaign_id);
+    const board = gameNightLinks.noticeBoard(s.campaign_id);
     if (e.kind === "night") {
         await notifyParty(s, e.actorId, `Vote: when can you play "${s.title}"?`,
             `${n} nights shortlisted. Tick every one you can make.`);
@@ -218,7 +216,7 @@ async function onTorchPassed(e: EventMap["campaign.torch_passed"]) {
     await notify(e.toId, {
         type: "system", title: `You're the ${s.gm_title} for "${s.title}"`,
         body: `${s.campaign_title} — you have the torch for this session only.`,
-        link: noticeBoardLink(s.campaign_id), meta: { sessionId: s.id, campaignId: s.campaign_id },
+        link: gameNightLinks.noticeBoard(s.campaign_id), meta: { sessionId: s.id, campaignId: s.campaign_id },
     });
 }
 

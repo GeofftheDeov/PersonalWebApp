@@ -3,16 +3,17 @@
  *
  * With HEARTHSIDE_URL set, the links the backend hands out point straight at
  * Hearthside, on Hearthside's paths (no /game-night prefix):
- *   - bell notifications: the Notice Board, a campaign, a session, its quests,
- *     and a campaign invite (/join/:campaignId, which had no link before);
+ *   - bell notifications: the Notice Board, a campaign, a session and its
+ *     quests (a campaign invite still has no link: it's answered in the bell);
  *   - the quest-reminder email;
  *   - the ready check's bell and its Table Talk post;
  *   - Discord and Google Calendar event descriptions, and the shareable Google
  *     link's `details`: the session's Hearthside page, which players keep
- *     (scrubCalendarLink drops anything else, such as an old agenda).
+ *     (scrubCalendarLink drops anything else, such as an old agenda; see
+ *     test-prep-notes).
  * With it unset, every link is what the backend generated before: relative
  * /game-night/... paths, the reminder email on FRONTEND_URL, no event
- * description (a night move clears it) and no link on an invite.
+ * description (a night move clears it).
  *
  * Runs the same party through both modes. Installs the integrations fake
  * (testing/fakeIntegrations.ts), mounts the real routers (the planner on the
@@ -263,8 +264,9 @@ async function main() {
         // ── invites ─────────────────────────────────────────────────────────
         const invited = await call("POST", "/api/campaign-invites", "gm", { campaignId: C, toUserId: who.friend.id });
         const inviteBell = await bellEntry("friend", (n) => n.type === "campaign_invite" && n.meta?.campaignId === C);
-        check(on ? "an invite's bell links to the campaign's invite page" : "an invite's bell has no link, as before",
-            invited.status === 201 && inviteBell !== null && (inviteBell.link ?? undefined) === want(`/join/${C}`, undefined),
+        // It's answered in the bell, which a link would navigate away from.
+        check("an invite's bell has no link, as before",
+            invited.status === 201 && inviteBell !== null && inviteBell.link == null,
             { status: invited.status, inviteBell });
         const accepted = await call("PUT", `/api/campaign-invites/${invited.json?.invite?._id}/respond`, "friend", { action: "accept" });
         const acceptBell = await bellEntry("gm", (n) => /accepted your invite/.test(n.title));

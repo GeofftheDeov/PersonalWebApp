@@ -156,6 +156,7 @@ async function main() {
                 ["the page with the agenda after it", `${page}\n${NOTES}`],
                 ["the agenda with the page after it", `${NOTES} ${page}`],
                 ["another host's /sessions/ page", `https://evil.example/sessions/${sid}`],
+                ["another session's Hearthside page", `${HEARTHSIDE}/sessions/${crypto.randomUUID()}`],
                 ["a Hearthside page that isn't a session's", `${HEARTHSIDE}/campaigns/${campaignId}`],
             ] as const) {
                 const got = await playerDetails(details);

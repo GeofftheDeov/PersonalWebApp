@@ -1,6 +1,6 @@
 import CampaignMember from "../models/CampaignMember.js";
 import { isAdmin } from "./gameNightPlannerUtils.js";
-import { isSessionEventDescription } from "./frontendSites.js";
+import { sessionEventDescription } from "./frontendSites.js";
 
 /**
  * Prep notes are the GM's (#213, spec #69). A session's `agenda` is its Game
@@ -43,13 +43,15 @@ export async function prepNotesReader(user: any): Promise<(session: { campaign?:
  * The shareable Google link as anyone but a reader gets it. Until #213 its
  * `details` were only ever the agenda, and links stored then still carry it
  * (perhaps an agenda since edited), so those details are dropped. Since #214
- * they may instead be just the session's Hearthside page, which is kept.
+ * they may instead be exactly this session's Hearthside page (what
+ * sessionEventDescription writes), which is kept; anything else is dropped.
  */
-export function scrubCalendarLink(link: string | null | undefined): string | null | undefined {
+export function scrubCalendarLink(link: string | null | undefined, sessionId: string): string | null | undefined {
     if (!link || !link.includes("details=")) return link;
     try {
         const url = new URL(link);
-        if (isSessionEventDescription(url.searchParams.get("details") ?? "")) return link;
+        const page = sessionEventDescription(sessionId);
+        if (page !== undefined && url.searchParams.get("details") === page) return link;
         url.searchParams.delete("details");
         return url.toString();
     } catch {
@@ -61,7 +63,7 @@ export function scrubCalendarLink(link: string | null | undefined): string | nul
 export function withoutPrepNotes<T extends Record<string, any>>(session: T): Omit<T, "agenda"> {
     const plain: any = typeof session?.toJSON === "function" ? session.toJSON() : { ...session };
     const { agenda: _agenda, ...rest } = plain;
-    if ("googleCalendarLink" in rest) rest.googleCalendarLink = scrubCalendarLink(rest.googleCalendarLink);
+    if ("googleCalendarLink" in rest) rest.googleCalendarLink = scrubCalendarLink(rest.googleCalendarLink, idOf(plain));
     return rest;
 }
 

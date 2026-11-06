@@ -2,6 +2,7 @@ import pool, { query } from "../db/index.js";
 import { isUuid } from "../db/model.js";
 import Campaign from "../models/Campaign.js";
 import { bus } from "../events/index.js";
+import { gameNightLinks } from "../utils/frontendSites.js";
 import { notify } from "../utils/notify.js";
 import { findCampaignPeopleIds, findPersonById, personDisplayName } from "../utils/personUtils.js";
 import { issuedAttachments, withAttachmentUrls, type Attachment, type AttachmentMeta } from "./attachments.js";
@@ -371,7 +372,7 @@ async function notifyCampaignMembers(campaignId: string, senderId: string, sende
                     type: "message",
                     title: `New message in "${campaign?.title || "a campaign"}"`,
                     body: `${senderName}: ${preview(body)}`,
-                    link: `/game-night/campaigns/${campaignId}`,
+                    link: gameNightLinks.campaign(campaignId),
                     sourceKey: campaignThreadKey(campaignId),
                     meta: { campaignId },
                 })),

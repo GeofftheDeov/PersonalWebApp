@@ -20,6 +20,7 @@ import CampaignMember from "../models/CampaignMember.js";
 import { followSessionStarts } from "../planning/questReminders.js";
 import { AttendanceError, confirmAttendance, getAttendance } from "../planning/attendance.js";
 import { forReader, prepNotesReader, withoutPrepNotes } from "../utils/prepNotes.js";
+import { sessionEventDescription } from "../utils/frontendSites.js";
 
 // --- Sessions ---
 router.get("/sessions", auth, async (req: any, res) => {
@@ -88,6 +89,10 @@ router.post("/sessions", auth, async (req: any, res) => {
         }
 
         const session = new Session({ title, campaign, date, endDate, location, isOnline, agenda, summary, vodUrl });
+        // With events to make, saved first: they link to the session's page, which needs its id (#214).
+        if (createDiscordEvent || createGoogleEvent) await session.save();
+        // Never the agenda, the GM's Prep notes (#213): the session's Hearthside page, if any (#214).
+        const description = session._id ? sessionEventDescription(String(session._id)) : undefined;
 
         const warnings: string[] = [];
 
@@ -102,8 +107,8 @@ router.post("/sessions", auth, async (req: any, res) => {
                         botToken: keys.secret,
                         guildId: campaignDoc.discordGuildId as string,
                         channelId: campaignDoc.discordChannelId || undefined,
-                        // No description: the agenda is the GM's Prep notes (#213).
                         name: `${campaignDoc.title}: ${title}`,
+                        description,
                         location: effectiveLocation || undefined,
                         start: new Date(date),
                         end: endDate ? new Date(endDate) : undefined,
@@ -119,8 +124,8 @@ router.post("/sessions", auth, async (req: any, res) => {
         // ── Google Calendar ────────────────────────────────────────────────────
         if (createGoogleEvent) {
             const eventInput = {
-                // No description: the agenda is the GM's Prep notes (#213).
                 title: `${campaignDoc.title}: ${title}`,
+                description,
                 location: effectiveLocation || undefined,
                 start: new Date(date),
                 end: new Date(endDate),
@@ -142,7 +147,7 @@ router.post("/sessions", auth, async (req: any, res) => {
             }
         }
 
-        await session.save();
+        await session.save();   // the session, or with events their ids and the shareable link
         res.status(201).json({ ...session.toObject(), warnings });
     } catch (error: any) {
         res.status(500).json({ error: "Failed to create session", details: error.message });

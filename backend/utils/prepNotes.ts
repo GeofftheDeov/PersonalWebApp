@@ -1,5 +1,6 @@
 import CampaignMember from "../models/CampaignMember.js";
 import { isAdmin } from "./gameNightPlannerUtils.js";
+import { sessionEventDescription } from "./frontendSites.js";
 
 /**
  * Prep notes are the GM's (#213, spec #69). A session's `agenda` is its Game
@@ -10,7 +11,8 @@ import { isAdmin } from "./gameNightPlannerUtils.js";
  * "you may not" (it isn't).
  *
  * Nothing that leaves the app carries it either: Discord and Google Calendar
- * events (and the shareable Google link) are published without it.
+ * events (and the shareable Google link) are published without it. Their
+ * description is the session's Hearthside page instead, when there is one (#214).
  */
 
 const idOf = (ref: any): string => (ref == null ? "" : String(ref._id ?? ref));
@@ -38,16 +40,18 @@ export async function prepNotesReader(user: any): Promise<(session: { campaign?:
 }
 
 /**
- * The shareable Google link without its `details`. Until #213 the details
- * were only ever the agenda, and links stored then still carry it (perhaps an
- * agenda since edited), so anyone but a reader gets the link without them.
- * If a later change puts something else in `details`, this must learn to tell
- * the two apart.
+ * The shareable Google link as anyone but a reader gets it. Until #213 its
+ * `details` were only ever the agenda, and links stored then still carry it
+ * (perhaps an agenda since edited), so those details are dropped. Since #214
+ * they may instead be exactly this session's Hearthside page (what
+ * sessionEventDescription writes), which is kept; anything else is dropped.
  */
-export function scrubCalendarLink(link: string | null | undefined): string | null | undefined {
+export function scrubCalendarLink(link: string | null | undefined, sessionId: string): string | null | undefined {
     if (!link || !link.includes("details=")) return link;
     try {
         const url = new URL(link);
+        const page = sessionEventDescription(sessionId);
+        if (page !== undefined && url.searchParams.get("details") === page) return link;
         url.searchParams.delete("details");
         return url.toString();
     } catch {
@@ -59,7 +63,7 @@ export function scrubCalendarLink(link: string | null | undefined): string | nul
 export function withoutPrepNotes<T extends Record<string, any>>(session: T): Omit<T, "agenda"> {
     const plain: any = typeof session?.toJSON === "function" ? session.toJSON() : { ...session };
     const { agenda: _agenda, ...rest } = plain;
-    if ("googleCalendarLink" in rest) rest.googleCalendarLink = scrubCalendarLink(rest.googleCalendarLink);
+    if ("googleCalendarLink" in rest) rest.googleCalendarLink = scrubCalendarLink(rest.googleCalendarLink, idOf(plain));
     return rest;
 }
 

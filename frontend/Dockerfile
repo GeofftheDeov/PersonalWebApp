@@ -7,9 +7,10 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
 # Every workspace's manifest, so `npm ci` can check them against the lockfile.
-# A new workspace adds its package.json here.
+# A new workspace adds its package.json here (and in hearthside/Dockerfile).
 COPY package.json package-lock.json ./
 COPY frontend/package.json ./frontend/
+COPY hearthside/package.json ./hearthside/
 COPY packages/shared/package.json ./packages/shared/
 RUN npm ci --no-audit --no-fund
 # npm hoists everything to the root today; make sure the runner's copy of the

@@ -57,6 +57,23 @@ services:
     env_file:
       - ./backend/.env
 
+  hearthside:
+    # Hearthside (spec #69), the Game Night planner's own site, on the same
+    # backend. Also built from the repo root, as a workspace.
+    build:
+      context: .
+      dockerfile: hearthside/Dockerfile
+      args:
+        - BACKEND_URL=http://backend:5000
+        - NEXT_PUBLIC_PORTFOLIO_URL=${NEXT_PUBLIC_PORTFOLIO_URL:-http://localhost:3000}
+    ports:
+      - "3002:3002"
+    environment:
+      - NODE_ENV=production
+      - HOSTNAME=0.0.0.0
+    depends_on:
+      - backend
+
   resume-review:
     # Stan's Resume Review project. Built from the sibling repo checkout —
     # requires C:\Users\Geoffrey\Documents\GitHub\resume_review to exist

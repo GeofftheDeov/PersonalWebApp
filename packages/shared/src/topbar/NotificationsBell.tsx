@@ -4,8 +4,9 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Bell, Check, MessageSquare, UserPlus, Map, Info, X, CheckCheck } from 'lucide-react';
-import { api } from '../lib/api';
-import { useSession } from '../lib/session';
+import type { Letters } from '../letters/letters';
+import { useSession } from '../session/react';
+import { notificationTarget } from './notificationLink';
 
 interface Notification {
   _id: string;
@@ -33,7 +34,9 @@ const TYPE_BG: Record<Notification['type'], string> = {
   system: 'bg-zinc-300',
 };
 
-export default function NotificationsBell() {
+/** The top bar's bell (#211): notifications, with friend requests and campaign invites answered in place. */
+export default function NotificationsBell({ letters }: { letters: Letters }) {
+  const { api, session } = letters;
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -41,7 +44,7 @@ export default function NotificationsBell() {
   const [busy, setBusy] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
-  const signedIn = useSession().status === 'signedIn';
+  const signedIn = useSession(session).status === 'signedIn';
 
   const fetchNotifications = useCallback(async () => {
     try {
@@ -51,7 +54,7 @@ export default function NotificationsBell() {
     } catch {
       /* polling — next tick will retry */
     }
-  }, []);
+  }, [api]);
 
   useEffect(() => {
     if (!signedIn) return;
@@ -105,9 +108,14 @@ export default function NotificationsBell() {
 
   const handleClick = (n: Notification) => {
     if (!n.read) markRead(n._id);
-    if (n.link) {
+    // A relative `/game-night/...` path, or an absolute Hearthside URL once
+    // the backend has HEARTHSIDE_URL (#214): the router for this site, a full
+    // page load for the other.
+    const target = notificationTarget(n.link, window.location.href);
+    if (target) {
       setIsOpen(false);
-      router.push(n.link);
+      if (target.kind === 'route') router.push(target.href);
+      else window.location.assign(target.href);
     }
   };
 

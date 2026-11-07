@@ -2,12 +2,13 @@
 
 import { useRef, useState } from 'react';
 import { Send, WifiOff } from 'lucide-react';
-import { threadKeyFor } from '../lib/useThreads';
-import { useThread } from '../lib/useThread';
-import { useSession } from '../lib/session';
-import { useThreadScroll } from '../lib/useThreadScroll';
-import { useTyping } from '../lib/realtime/useTyping';
-import { AttachButton, DraftAttachments, MessageAttachments, useAttachmentDraft } from './MessageAttachments';
+import type { Letters } from '../letters/letters';
+import { useThread } from '../letters/useThread';
+import { useThreadScroll } from '../letters/useThreadScroll';
+import { useAttachmentDraft } from '../letters/useAttachmentDraft';
+import { useTyping } from '../realtime/react';
+import { useSession } from '../session/react';
+import { AttachButton, DraftAttachments, MessageAttachments } from './MessageAttachments';
 
 export interface ChatChannel {
     kind: 'campaign' | 'dm';
@@ -26,7 +27,9 @@ const senderLabel = (s: { name?: string }) => {
  * History, live updates, send and mark-read all come from useThread, the same
  * hook Table Talk on a campaign page uses. Dark styling to sit inside the dock panel.
  */
-export default function ChatThread({ channel, placeholder, onLatestMessage }: {
+export default function ChatThread({ letters, channel, placeholder, onLatestMessage }: {
+    /** The app's Letters (`createLetters`). */
+    letters: Letters;
     channel: ChatChannel;
     placeholder?: string;
     /** Called with the newest message's id whenever it changes while the thread is open (to mark it read). */
@@ -35,12 +38,12 @@ export default function ChatThread({ channel, placeholder, onLatestMessage }: {
     const [draft, setDraft] = useState('');
     const files = useAttachmentDraft();
     const scrollRef = useRef<HTMLDivElement>(null);
-    const myId = useSession().user?.id ?? null;
+    const myId = useSession(letters.session).user?.id ?? null;
 
-    const threadKey = channel.id ? threadKeyFor(channel.kind, channel.id) : null;
+    const threadKey = channel.id ? letters.threadKeyFor(channel.kind, channel.id) : null;
     // "Theo is writing…" (#103): announce while the draft has text; others' indicators beside the badge.
-    const { label: typingText, typing, sent: typingSent } = useTyping(threadKey);
-    const thread = useThread(threadKey, {
+    const { label: typingText, typing, sent: typingSent } = useTyping(letters, threadKey);
+    const thread = useThread(letters, threadKey, {
         markRead: onLatestMessage ? (_key, messageId) => onLatestMessage(messageId) : undefined,
         // A confirmed send (or resend) ends the typing burst, so the next keystroke announces at once.
         onSent: typingSent,

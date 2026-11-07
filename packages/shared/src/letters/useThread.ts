@@ -1,19 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLiveThread, type LiveMessage, type ThreadStatus } from './realtime/useLiveThread';
-import type { MessageAttachment } from './realtime/liveClient';
-import { uploadAttachment } from './attachments';
-import { ApiError } from '@gtd/shared/api';
-import { api, errorOf } from './api';
-import { currentUserId } from './session';
+import { ApiError, errorOf, type ApiClient } from '../api';
+import type { LiveMessage, ThreadStatus } from '../realtime/liveClient';
+import { useLiveThread } from '../realtime/react';
+import type { Letters } from './letters';
+import type { ThreadEntry } from './types';
 
 /**
  * One open thread (#101, spec #58), headless: history paging, the live
  * subscription, send and mark-read, so Table Talk on a campaign page and the
- * dock's thread view behave identically. It renders nothing.
+ * dock's thread view behave identically, on both sites (#211). It renders
+ * nothing. Pass the app's Letters (`createLetters`) first.
  *
- *   const t = useThread(threadKey, { markRead });
+ *   const t = useThread(letters, threadKey, { markRead });
  *   t.messages   // oldest first; your unsent messages last, `sending` or `failed`
  *   t.loadOlder()  t.send(body, files?)  t.resend(key)  t.discard(key)
  *
@@ -29,7 +29,7 @@ import { currentUserId } from './session';
  *   markRead, which also clears the list's count at once); without it the hook
  *   posts the read position itself.
  * - Attachments (#104): `send(body, files)` uploads each file straight to S3
- *   (lib/attachments.ts), then sends the message naming their keys. A message
+ *   (`letters.uploadAttachment`), then sends the message naming their keys. A message
  *   can be files alone. While uploading the entry shows the files by name; a
  *   failed upload fails the send like any other error, and a resend only
  *   uploads what hasn't gone up yet. Check files with attachmentProblem when
@@ -38,25 +38,7 @@ import { currentUserId } from './session';
  *   never for a failed one.
  */
 
-export interface ThreadEntry {
-    /** Stable React key: the clientId for your own sends, else the message id. */
-    key: string;
-    /** The stored message's id; null until the server has it. */
-    id: string | null;
-    sender: { id: string; name: string };
-    body: string;
-    createdAt: string;
-    eventId?: string;
-    /** Stored attachments, each with a read URL (#104). */
-    attachments?: MessageAttachment[];
-    /** Your unsent files, in order (#104). */
-    files?: File[];
-    /** Keys of `files` already uploaded, by index, so a resend doesn't upload them again. */
-    uploadedKeys?: (string | undefined)[];
-    state: 'sent' | 'sending' | 'failed';
-    /** Why a failed send failed. */
-    error?: string;
-}
+export type { ThreadEntry } from './types';
 
 export interface UseThreadOptions {
     pageSize?: number;
@@ -88,12 +70,14 @@ const fromServer = (m: LiveMessage, key = m.id): ThreadEntry => ({
 const byTime = (a: ThreadEntry, b: ThreadEntry) =>
     a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : (a.id ?? '') < (b.id ?? '') ? -1 : 1;
 
-async function postRead(threadKey: string, messageId: string) {
+async function postRead(api: ApiClient, threadKey: string, messageId: string) {
     await api.post(`/api/threads/${encodeURIComponent(threadKey)}/read`, { messageId })
         .catch(() => { /* the next open marks it again */ });
 }
 
-export function useThread(threadKey: string | null, { pageSize = 50, markRead, onSent }: UseThreadOptions = {}) {
+export function useThread(letters: Letters, threadKey: string | null, { pageSize = 50, markRead, onSent }: UseThreadOptions = {}) {
+    const { api, session } = letters;
+    const currentUserId = () => session.getState().user?.id ?? null;
     /** Stored messages by id. */
     const [sent, setSent] = useState<Map<string, ThreadEntry>>(() => new Map());
     /** Your sends the server hasn't confirmed, in the order you sent them. */
@@ -146,14 +130,14 @@ export function useThread(threadKey: string | null, { pageSize = 50, markRead, o
             const keys = new Set(absorbed.values());
             setPending((prev) => prev.filter((p) => !keys.has(p.key)));
         }
-    }, []);
+    }, [session]);
 
     const fetchPage = useCallback(async (key: string, before?: string) => {
         const qs = `?limit=${pageSize}${before ? `&before=${encodeURIComponent(before)}` : ''}`;
         const data = await api.get<{ messages?: LiveMessage[]; hasMore?: boolean }>(`${messagesUrl(key)}${qs}`)
             .catch((err) => { throw new Error(errorOf(err, 'Could not load messages')); });
         return { messages: data?.messages ?? [], hasMore: !!data?.hasMore };
-    }, [pageSize]);
+    }, [api, pageSize]);
 
     /**
      * The latest page. On open, and after every reconnect. After a reconnect it
@@ -239,7 +223,7 @@ export function useThread(threadKey: string | null, { pageSize = 50, markRead, o
         loadLatest();
     }, [loadLatest]);
 
-    const status: ThreadStatus = useLiveThread(threadKey, {
+    const status: ThreadStatus = useLiveThread(letters, threadKey, {
         onMessage: (m) => addSent([m], { echo: true }),
         onReconnect: () => { loadLatest(); },
     });
@@ -264,7 +248,7 @@ export function useThread(threadKey: string | null, { pageSize = 50, markRead, o
         try {
             for (let i = 0; i < files.length; i++) {
                 if (keys[i]) continue;
-                keys[i] = await uploadAttachment(threadKey, files[i]);
+                keys[i] = await letters.uploadAttachment(threadKey, files[i]);
                 if (gen === generation.current) {
                     const done = [...keys];
                     setPending((prev) => prev.map((p) => (p.key === entry.key ? { ...p, uploadedKeys: done } : p)));
@@ -308,7 +292,7 @@ export function useThread(threadKey: string | null, { pageSize = 50, markRead, o
             const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
             settle({ state: 'failed', error: offline ? "Not sent: you're offline" : 'Not sent: no connection to the server' });
         }
-    }, [threadKey]);
+    }, [letters, api, threadKey]);
 
     /** Sends a message, with any files attached. It shows at once; false only when there's nothing to send. */
     const send = useCallback((text: string, files: File[] = []): boolean => {
@@ -323,7 +307,7 @@ export function useThread(threadKey: string | null, { pageSize = 50, markRead, o
         setPending((prev) => [...prev, entry]);
         post(entry);
         return true;
-    }, [threadKey, post]);
+    }, [session, threadKey, post]);
 
     /** Tries a failed send again, with the same clientId so it can't land twice. */
     const resend = useCallback((key: string) => {
@@ -353,8 +337,9 @@ export function useThread(threadKey: string | null, { pageSize = 50, markRead, o
         if (!threadKey || !newest) return;
         if (lastMarked.current.thread === threadKey && lastMarked.current.id === newest) return;
         lastMarked.current = { thread: threadKey, id: newest };
-        (markReadRef.current ?? postRead)(threadKey, newest);
-    }, [threadKey, newest]);
+        if (markReadRef.current) markReadRef.current(threadKey, newest);
+        else postRead(api, threadKey, newest);
+    }, [api, threadKey, newest]);
 
     return { messages, status, loading, loadingOlder, hasMore, error, loadOlder, send, resend, discard };
 }

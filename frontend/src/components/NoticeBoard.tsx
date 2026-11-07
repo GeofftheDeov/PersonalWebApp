@@ -5,8 +5,7 @@ import Link from 'next/link';
 import { ClipboardList, Plus, X, Wifi, FastForward, RotateCcw, Ban, Check, Crown, CalendarClock, MapPin, Home, Store, Utensils } from 'lucide-react';
 import OverlapPicker, { timeRange, type PickedTime } from './OverlapPicker';
 import SessionTorch, { type StandIn } from './SessionTorch';
-import { getLiveClient } from '@/lib/realtime/useLiveThread';
-import { campaignThreadKey } from '@/lib/realtime/threadKeys';
+import { campaignThreadKey, getLiveClient } from '@/lib/letters';
 import { ApiError } from '@gtd/shared/api';
 import { api, errorOf } from '@/lib/api';
 

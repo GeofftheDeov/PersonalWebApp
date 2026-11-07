@@ -3,6 +3,7 @@ export {
   CSRF_HEADER,
   CSRF_VALUE,
   createApiClient,
+  errorOf,
   type ApiCallOptions,
   type ApiClient,
   type ApiClientOptions,

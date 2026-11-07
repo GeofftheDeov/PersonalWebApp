@@ -12,7 +12,7 @@
  *   - a typing frame for a thread the sender can't see is dropped, and a
  *     burst of frames from one socket reaches the thread once;
  *   - typing leaves no database rows and, on Redis, no stream entries;
- *   - the frontend's LiveClient and TypingTracker (frontend/src/lib/realtime/
+ *   - the shared LiveClient and TypingTracker (packages/shared/src/realtime/
  *     typing.ts), on an injected clock: holding a key down sends one frame
  *     every 3 s; the indicator clears 5 s after the last frame, a refresh
  *     extends it, and the typist's message clears it at once; the same in a
@@ -61,8 +61,8 @@ type TypingModule = {
   TYPING_THROTTLE_MS: number;
   TYPING_EXPIRY_MS: number;
 };
-const LIVE_CLIENT = new URL("../../frontend/src/lib/realtime/liveClient.ts", import.meta.url).href;
-const TYPING = new URL("../../frontend/src/lib/realtime/typing.ts", import.meta.url).href;
+const LIVE_CLIENT = new URL("../../packages/shared/src/realtime/liveClient.ts", import.meta.url).href;
+const TYPING = new URL("../../packages/shared/src/realtime/typing.ts", import.meta.url).href;
 
 /** An injected clock: time only moves when the test says so. */
 type Clock = { now(): number; setTimeout(fn: () => void, ms: number): unknown; clearTimeout(handle: unknown): void };

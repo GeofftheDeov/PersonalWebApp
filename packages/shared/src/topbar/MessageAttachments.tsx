@@ -1,15 +1,14 @@
 "use client";
 
-import { useCallback, useRef, useState } from 'react';
 import { FileText, ImageOff, Paperclip, X } from 'lucide-react';
-import type { MessageAttachment } from '@/lib/realtime/liveClient';
-import {
-    ATTACHMENT_ACCEPT, MAX_ATTACHMENTS_PER_MESSAGE, attachmentProblem, formatBytes, isImageType,
-} from '@/lib/attachments';
+import type { MessageAttachment } from '../realtime/liveClient';
+import { ATTACHMENT_ACCEPT, formatBytes, isImageType } from '../letters/attachments';
+import type { AttachmentDraft } from '../letters/useAttachmentDraft';
 
 /**
- * Letters attachments (#104) in the log and in the composer, shared by Table
- * Talk (light) and the dock (dark).
+ * Letters attachments (#104) in the log and in the composer, in the
+ * portfolio's look: Table Talk (light) and the dock (dark). The picking
+ * itself is the headless `useAttachmentDraft` (@gtd/shared/letters/react).
  *
  *   <MessageAttachments attachments={m.attachments} files={m.files} />   in a message bubble
  *   const draft = useAttachmentDraft();                                  in a composer
@@ -69,38 +68,6 @@ export function MessageAttachments({ attachments, files, tone = 'light' }: {
         </div>
     );
 }
-
-/** Files picked for the next message, checked as they're picked. */
-export function useAttachmentDraft() {
-    const [files, setFiles] = useState<File[]>([]);
-    const [error, setError] = useState<string | null>(null);
-    const inputRef = useRef<HTMLInputElement>(null);
-    const filesRef = useRef(files);
-    filesRef.current = files;
-
-    const add = useCallback((picked: FileList | File[] | null) => {
-        const list = Array.from(picked ?? []);
-        if (inputRef.current) inputRef.current.value = ''; // picking the same file again still fires
-        if (!list.length) return;
-        const problems = list.map(attachmentProblem).filter((p): p is string => !!p);
-        const ok = list.filter((f) => !attachmentProblem(f));
-        const room = Math.max(MAX_ATTACHMENTS_PER_MESSAGE - filesRef.current.length, 0);
-        if (ok.length > room) problems.push(`A message can have at most ${MAX_ATTACHMENTS_PER_MESSAGE} attachments.`);
-        setError(problems.length ? problems.join(' ') : null);
-        if (ok.length && room) setFiles((prev) => [...prev, ...ok.slice(0, room)]);
-    }, []);
-
-    const remove = useCallback((index: number) => {
-        setFiles((prev) => prev.filter((_, i) => i !== index));
-        setError(null);
-    }, []);
-
-    const clear = useCallback(() => { setFiles([]); setError(null); }, []);
-
-    return { files, error, add, remove, clear, inputRef, open: () => inputRef.current?.click() };
-}
-
-export type AttachmentDraft = ReturnType<typeof useAttachmentDraft>;
 
 /** The paperclip button and its hidden file input. */
 export function AttachButton({ draft, className }: { draft: AttachmentDraft; className?: string }) {

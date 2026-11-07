@@ -1,14 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { campaignThreadKey, dmThreadKey } from './realtime/threadKeys';
-import { getLiveClient } from './realtime/useLiveThread';
-import type { ThreadRead, ThreadUpdate } from './realtime/liveClient';
-import { api, errorOf } from './api';
-import { currentUserId, session, useSession } from './session';
+import type { ThreadRead, ThreadUpdate } from '../realtime/liveClient';
+import { useSession } from '../session/react';
+import { errorOf } from '../api';
+import type { Letters } from './letters';
+import type { ThreadFilter, ThreadSummary } from './types';
 
 /**
- * Letters thread list (#100, spec #58), headless.
+ * Letters thread list (#100, spec #58), headless. Shared by both sites (#211):
+ * pass the app's Letters (`createLetters`).
  *
  * Wraps GET /api/threads and POST /api/threads/:threadKey/read. It renders
  * nothing, so the social dock and any later Letters panel can draw it however
@@ -21,31 +22,6 @@ import { currentUserId, session, useSession } from './session';
  * triggers a refetch, and so does every reconnect, since the server replays
  * nothing. No polling.
  */
-
-export type ThreadFilter = 'all' | 'campaigns' | 'friends';
-
-export interface ThreadSummary {
-  /** `campaign:<campaign id>` or `dm:<sorted id pair>`. */
-  threadKey: string;
-  kind: 'campaign' | 'dm';
-  /** What to open: the campaign id, or the friend's account id. */
-  targetId: string;
-  title: string;
-  /** Up to two initials to draw an avatar from. */
-  avatarHint: string;
-  /** "Campaign · 5 in the party" or "Friend". */
-  subtitle: string;
-  /** ISO time of the newest message, or null if nobody has written yet. */
-  lastActivityAt: string | null;
-  unreadCount: number;
-}
-
-/** The thread key for a campaign chat or a DM with a friend, matching the server's. */
-export function threadKeyFor(kind: 'campaign' | 'dm', id: string): string | null {
-  if (kind === 'campaign') return campaignThreadKey(id);
-  const me = currentUserId();
-  return me ? dmThreadKey(me, id) : null;
-}
 
 const matches = (filter: ThreadFilter) => (t: ThreadSummary) =>
   filter === 'all' || (filter === 'campaigns' ? t.kind === 'campaign' : t.kind === 'dm');
@@ -68,9 +44,10 @@ const MISSING_REFETCH_MS = 300;
  * `thread.read` then clears it on the person's other devices). `refresh`
  * refetches the whole list.
  */
-export function useThreads({ filter = 'all', enabled = true }:
+export function useThreads(letters: Letters, { filter = 'all', enabled = true }:
   { filter?: ThreadFilter; enabled?: boolean } = {}) {
-  const signedIn = useSession().status === 'signedIn';
+  const { api, session } = letters;
+  const signedIn = useSession(session).status === 'signedIn';
   const [all, setAll] = useState<ThreadSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -130,7 +107,7 @@ export function useThreads({ filter = 'all', enabled = true }:
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [api, session]);
 
   /** Refetch soon, once per burst of frames that need it. */
   const scheduleRefresh = useCallback(() => {
@@ -182,7 +159,7 @@ export function useThreads({ filter = 'all', enabled = true }:
 
   useEffect(() => {
     if (!enabled || !signedIn) return;
-    const client = getLiveClient();
+    const client = letters.liveClient();
     refresh();
     // Nothing is replayed after a reconnect, so refetch then.
     const unsubscribe = client.subscribePerson({
@@ -203,7 +180,7 @@ export function useThreads({ filter = 'all', enabled = true }:
       if (refetchTimer.current) clearTimeout(refetchTimer.current);
       refetchTimer.current = null;
     };
-  }, [enabled, signedIn, refresh, applyUpdate, applyRead]);
+  }, [letters, enabled, signedIn, refresh, applyUpdate, applyRead]);
 
   const markRead = useCallback(async (threadKey: string, messageId: string) => {
     if (!threadKey || !messageId || marked.current.get(threadKey) === messageId) return;
@@ -217,7 +194,7 @@ export function useThreads({ filter = 'all', enabled = true }:
       markedAt.current.delete(threadKey);
       refresh(); // put the real count back
     }
-  }, [refresh]);
+  }, [api, refresh]);
 
   const threads = useMemo(() => all.filter(matches(filter)), [all, filter]);
   const totalUnread = useMemo(() => all.reduce((n, t) => n + (t.unreadCount || 0), 0), [all]);

@@ -31,6 +31,3 @@ export const useSession = (): SessionState => useSharedSession(session);
 
 /** The session, for a page only a signed-in person may see: signed out goes to log in and back. */
 export const useRequiredSession = (): SessionState => useRequiredSharedSession(session);
-
-/** The signed-in account's id, or null. For "is this mine" outside React state. */
-export const currentUserId = (): string | null => session.getState().user?.id ?? null;

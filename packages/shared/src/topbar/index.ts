@@ -9,7 +9,8 @@
  * The attachment pieces are here too, since the dock's thread view draws them
  * in the same look; the portfolio's Table Talk uses them as well.
  */
-export { default as TopBar, type TopBarProps, type TopBarSite } from "./TopBar";
+export { default as TopBar, type TopBarProps } from "./TopBar";
+export { topBarLinks, type TopBarLinks, type TopBarSite } from "./links";
 export { default as NotificationsBell } from "./NotificationsBell";
 export { default as SocialDock } from "./SocialDock";
 export { default as ChatThread, type ChatChannel } from "./ChatThread";

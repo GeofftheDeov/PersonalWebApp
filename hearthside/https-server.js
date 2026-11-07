@@ -46,6 +46,9 @@ const handle = app.getRequestHandler();
 // listener ourselves, below. Left alone, Next attaches it lazily to whichever
 // server served the first page request, and only to that one.
 app.didWebSocketSetup = true;
+// Pages wait for this: until Next is prepared its handler isn't there, and a
+// request that came in early would fail with a 500. (/health doesn't wait.)
+const prepared = app.prepare();
 
 // The JWT can ride in a ?token= query (the backend's own pages); keep it out of the logs.
 const redact = (url) => url.replace(/([?&]token=)[^&]+/, '$1***');
@@ -61,6 +64,7 @@ const requestHandler = async (req, res) => {
     try {
         const parsedUrl = parse(req.url, true);
         console.log(`[HEARTHSIDE] ${req.method} ${redact(req.url)}`);
+        await prepared;
         await handle(req, res, parsedUrl);
     } catch (err) {
         console.error('Error occurred handling', redact(req.url), err);
@@ -91,7 +95,7 @@ if (secondaryPort) {
     });
 }
 
-app.prepare().then(() => {
+prepared.then(() => {
     console.log('-> Hearthside: app prepared.');
     if (typeof app.upgradeHandler === 'function') {
         for (const server of servers) {

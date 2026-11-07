@@ -1,6 +1,10 @@
-/* Hearthside's own CSS, after the design system's (tokens.css, then components.css, both imported by the
-   layout). Hearthside's pages are styled by the design system, under the `hs-app` body class; Tailwind is
-   only for the shared top bar (tailwind.config.js). */
+/* Hearthside's global CSS, the one stylesheet the layout imports. Hearthside's pages are styled by the design
+   system, under the `hs-app` body class; Tailwind is only for the shared top bar (tailwind.config.js).
+   The design system's generated stylesheet and component stylesheet come first, in that order, then
+   Hearthside's own additions below. They're imported here rather than from the layout because Next doesn't
+   keep separate CSS imports in order (in development it put tokens.css last). */
+@import "../design-system/tokens.css";
+@import "../design-system/components.css";
 
 /* Tailwind for the top bar. With preflight off, `base` is only Tailwind's own --tw-* defaults, which its
    utilities read; the utilities are all scoped under .hs-topbar. */

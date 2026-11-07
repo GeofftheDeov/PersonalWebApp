@@ -94,8 +94,12 @@ test("compiled, Hearthside's CSS has no Tailwind reset and every utility sits un
 test("the design system's stylesheets are the global CSS, and the layout puts hs-app on the body", () => {
   const layout = fs.readFileSync(path.join(APP, "src", "app", "layout.tsx"), "utf8");
   const imports = [...layout.matchAll(/^import\s+["']([^"']+\.css)["'];/gm)].map((m) => m[1]);
-  assert.deepEqual(imports, ["@/design-system/tokens.css", "@/design-system/components.css", "./globals.css"],
-    "tokens, then the components, then the app's own CSS");
+  assert.deepEqual(imports, ["./globals.css"], "one stylesheet, so Next can't reorder them");
+  const globals = fs.readFileSync(path.join(APP, "src", "app", "globals.css"), "utf8");
+  const cssImports = [...globals.matchAll(/^@import\s+["']([^"']+)["'];/gm)].map((m) => m[1]);
+  assert.deepEqual(cssImports, ["../design-system/tokens.css", "../design-system/components.css"],
+    "tokens, then the components, ahead of the app's own CSS");
+  assert.ok(globals.indexOf("@import") < globals.indexOf("@tailwind"), "@import comes first");
   assert.match(layout, /<body[^>]*className=\{[^}]*hs-app/);
   const tokens = fs.readFileSync(path.join(APP, "src", "design-system", "tokens.css"), "utf8");
   assert.match(tokens, /--ground:\s*#1a130e/);

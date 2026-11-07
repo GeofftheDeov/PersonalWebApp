@@ -10,7 +10,8 @@
  * outside: who gets `agenda` back from the session read, the session lists
  * and the planning reads; who may write it; and that no Discord or Google
  * Calendar event (or the shareable link) carries it, with an event published
- * before this change losing it when it is next updated.
+ * before this change losing it when it is next updated. A shareable link whose
+ * details are only the session's Hearthside page (#214) keeps them.
  *
  *   DATABASE_URL=postgresql://postgres@127.0.0.1:5433/pwatest npx tsx scripts/test-prep-notes.ts
  */
@@ -134,6 +135,38 @@ async function main() {
                     !decodeURIComponent(r.json.googleCalendarLink.replace(/\+/g, " ")).includes(NOTES), r.json.googleCalendarLink);
         }
         check("the outsider still can't read the session at all (403)", (await call("GET", `/api/tabletop/sessions/${sid}`, "outsider")).status === 403);
+
+        // Since #214 a link's details may be the session's Hearthside page, which players keep.
+        const HEARTHSIDE = "https://hearthside.geoffthedeov.net";
+        const page = `${HEARTHSIDE}/sessions/${sid}`;
+        const withDetails = (details: string) => buildGoogleCalendarLink({
+            title: "Ashen Crown: Old night", description: details, location: "Online",
+            start: new Date(slot(0).start), end: new Date(slot(0).end),
+        });
+        const playerDetails = async (details: string) => {
+            await pool.query(`UPDATE game_sessions SET google_calendar_link = $2 WHERE id = $1`, [sid, withDetails(details)]);
+            const link = (await call("GET", `/api/tabletop/sessions/${sid}`, "p1")).json?.googleCalendarLink;
+            return typeof link === "string" ? new URL(link).searchParams.get("details") : "(no link)";
+        };
+        process.env.HEARTHSIDE_URL = HEARTHSIDE;
+        try {
+            check("with HEARTHSIDE_URL set, a player keeps details that are just the session's Hearthside page",
+                (await playerDetails(page)) === page);
+            for (const [what, details] of [
+                ["the page with the agenda after it", `${page}\n${NOTES}`],
+                ["the agenda with the page after it", `${NOTES} ${page}`],
+                ["another host's /sessions/ page", `https://evil.example/sessions/${sid}`],
+                ["another session's Hearthside page", `${HEARTHSIDE}/sessions/${crypto.randomUUID()}`],
+                ["a Hearthside page that isn't a session's", `${HEARTHSIDE}/campaigns/${campaignId}`],
+            ] as const) {
+                const got = await playerDetails(details);
+                check(`...but not ${what}`, got === null, got);
+            }
+        } finally {
+            delete process.env.HEARTHSIDE_URL;
+        }
+        check("with HEARTHSIDE_URL unset, even a Hearthside page in the details is dropped", (await playerDetails(page)) === null);
+        await pool.query(`UPDATE game_sessions SET google_calendar_link = $2 WHERE id = $1`, [sid, oldLink]);
 
         const { rows: [noNotes] } = await pool.query(
             `INSERT INTO game_sessions (title, campaign_id, date, is_online) VALUES ('No notes yet', $1, $2, true) RETURNING id`,

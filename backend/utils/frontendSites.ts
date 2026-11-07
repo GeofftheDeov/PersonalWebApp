@@ -18,7 +18,9 @@ import type { Request } from "express";
  *   HEARTHSIDE_URL     Hearthside's origin (https://hearthside.geoffthedeov.net,
  *                      https://deov.hearthside.geoffthedeov.net). Unset until
  *                      Hearthside is deployed, and then no host counts as
- *                      Hearthside.
+ *                      Hearthside. Setting it also points every Game Night
+ *                      link the backend generates at Hearthside (#214,
+ *                      gameNightLinks below).
  *
  * Read per call, not at import: route modules load before server.ts runs
  * dotenv.config().
@@ -54,6 +56,11 @@ export function portfolioSite(): FrontendSite {
         ?? (toSite("portfolio", DEFAULT_FRONTEND_URL) as FrontendSite);
 }
 
+/** Hearthside at HEARTHSIDE_URL, or null in an environment that doesn't have it yet. */
+export function hearthsideSite(): FrontendSite | null {
+    return toSite("hearthside", process.env.HEARTHSIDE_URL);
+}
+
 /** Every site on this environment's allowlist, the portfolio's own origin first. */
 export function frontendSites(): FrontendSite[] {
     const sites = [portfolioSite()];
@@ -61,9 +68,38 @@ export function frontendSites(): FrontendSite[] {
         const site = toSite("portfolio", origin);
         if (site) sites.push(site);
     }
-    const hearthside = toSite("hearthside", process.env.HEARTHSIDE_URL);
+    const hearthside = hearthsideSite();
     if (hearthside) sites.push(hearthside);
     return sites;
+}
+
+/**
+ * Game Night pages as the backend links to them (#214): in bell notifications,
+ * the quest-reminder email, Table Talk posts and calendar events.
+ *
+ * With HEARTHSIDE_URL set, an absolute link on Hearthside, on Hearthside's
+ * paths. Without it, the portfolio's relative /game-night/... path, as before
+ * Hearthside, which the portfolio's 308 redirects (#234) later send on.
+ */
+function gameNightLink(path: string): string {
+    const hearthside = hearthsideSite();
+    return hearthside ? `${hearthside.origin}${path}` : `/game-night${path}`;
+}
+
+export const gameNightLinks = {
+    campaign: (campaignId: string) => gameNightLink(`/campaigns/${campaignId}`),
+    noticeBoard: (campaignId: string) => gameNightLink(`/campaigns/${campaignId}#notice-board`),
+    session: (sessionId: string) => gameNightLink(`/sessions/${sessionId}`),
+    sessionQuests: (sessionId: string) => gameNightLink(`/sessions/${sessionId}#quests`),
+};
+
+/**
+ * What a session's Discord and Google Calendar events (and its shareable
+ * Google link's `details`) say: the session's Hearthside page. Undefined
+ * without Hearthside, so the events carry no description, as since #213.
+ */
+export function sessionEventDescription(sessionId: string): string | undefined {
+    return hearthsideSite() ? gameNightLinks.session(sessionId) : undefined;
 }
 
 /** The allowed site serving `host`, or null when the host isn't on the allowlist. */

@@ -21,6 +21,7 @@ import type pg from "pg";
 import { withTransaction } from "../db/index.js";
 import { isUuid } from "../db/model.js";
 import { bus } from "../events/index.js";
+import { gameNightLinks } from "../utils/frontendSites.js";
 import { notify } from "../utils/notify.js";
 import { postTableTalk } from "../utils/tableTalk.js";
 import { campaignParty } from "./availabilityStore.js";
@@ -101,7 +102,7 @@ export async function passTorchPermanently(actorId: string, campaignId: string, 
             type: "system", title: `You're the ${c.gm_title} of ${c.title} now`,
             body: (from ? `${name(from)} passed you the torch.` : "The torch has been passed to you.") +
                 (c.owner_id ? "" : " You own the campaign now, too."),
-            link: `/game-night/campaigns/${campaignId}`, meta: { campaignId },
+            link: gameNightLinks.campaign(campaignId), meta: { campaignId },
         });
         await postTableTalk(campaignId, `**The torch has passed.** ${name(to)} is the ${c.gm_title} now` +
             (from ? `, taking over from ${name(from)}.` : "."));

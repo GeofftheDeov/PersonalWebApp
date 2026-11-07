@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Bell, Check, MessageSquare, UserPlus, Map, Info, X, CheckCheck } from 'lucide-react';
 import type { Letters } from '../letters/letters';
 import { useSession } from '../session/react';
+import { notificationTarget } from './notificationLink';
 
 interface Notification {
   _id: string;
@@ -107,9 +108,14 @@ export default function NotificationsBell({ letters }: { letters: Letters }) {
 
   const handleClick = (n: Notification) => {
     if (!n.read) markRead(n._id);
-    if (n.link) {
+    // A relative `/game-night/...` path, or an absolute Hearthside URL once
+    // the backend has HEARTHSIDE_URL (#214): the router for this site, a full
+    // page load for the other.
+    const target = notificationTarget(n.link, window.location.href);
+    if (target) {
       setIsOpen(false);
-      router.push(n.link);
+      if (target.kind === 'route') router.push(target.href);
+      else window.location.assign(target.href);
     }
   };
 

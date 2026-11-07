@@ -80,6 +80,17 @@ test("signing in resumes it, signing out closes it", () => {
   assert.deepEqual(calls, ["resume", "close", "resume"]);
 });
 
+test("a socket first made while someone is signed in is theirs: the next person gets a fresh one", () => {
+  // The usual case: the session is known before the dock or Table Talk first
+  // asks for the client, so no change notification names the first person.
+  const { session, set } = fakeSession(signedIn("acc-1"));
+  const { made, createClient } = recordingClient();
+  createLiveConnection({ session, url: () => "ws://t211.test/api/live", createClient }).liveClient();
+  const { calls } = made[0];
+  set(signedIn("acc-2"));
+  assert.deepEqual(calls, ["close", "resume"]);
+});
+
 test("someone else signing in without a sign-out first gets a fresh socket", () => {
   const { session, set } = fakeSession(signedIn("acc-1"));
   const { made, createClient } = recordingClient();

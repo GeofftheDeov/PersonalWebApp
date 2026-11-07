@@ -22,9 +22,11 @@ import path from "node:path";
 
 const APPS = ["frontend"];
 const SHARED_SRC = path.resolve(__dirname, "../src");
-/** Rules a file of this package may break, by its path under src. */
-const SHARED_EXEMPT: Record<string, string[]> = {
-  [path.join("api", "client.ts")]: ["a bearer header built in the browser"],
+/** The exact lines of this package that may break a rule, by file under src: one, the API client's `getToken` path. */
+const SHARED_ALLOWED: Record<string, { rule: string; line: string }[]> = {
+  [path.join("api", "client.ts")]: [
+    { rule: "a bearer header built in the browser", line: 'if (token) headers.set("Authorization", `Bearer ${token}`);' },
+  ],
 };
 
 const RULES: { name: string; pattern: RegExp }[] = [
@@ -47,11 +49,13 @@ function sourceFiles(dir: string): string[] {
 }
 
 /** Every rule a piece of source breaks, as "file:line  rule". */
-function findings(file: string, source: string, exempt: string[] = []): string[] {
+function findings(file: string, source: string, allowed: { rule: string; line: string }[] = []): string[] {
   const out: string[] = [];
   source.split(/\r?\n/).forEach((line, i) => {
     for (const rule of RULES) {
-      if (!exempt.includes(rule.name) && rule.pattern.test(line)) out.push(`${file}:${i + 1}  ${rule.name}`);
+      if (!rule.pattern.test(line)) continue;
+      if (allowed.some((a) => a.rule === rule.name && a.line === line.trim())) continue;
+      out.push(`${file}:${i + 1}  ${rule.name}`);
     }
   });
   return out;
@@ -89,7 +93,15 @@ test("@gtd/shared keeps no session in localStorage, and only its API client buil
   assert.ok(files.length > 0, "the package has source files");
   const found = files.flatMap((f) => {
     const rel = path.relative(SHARED_SRC, f);
-    return findings(rel, fs.readFileSync(f, "utf8"), SHARED_EXEMPT[rel]);
+    return findings(rel, fs.readFileSync(f, "utf8"), SHARED_ALLOWED[rel]);
   });
   assert.deepEqual(found, [], `use the session client (@gtd/shared/session) instead`);
+});
+
+test("the API client's allowance covers its getToken line and nothing else", () => {
+  const allowed = SHARED_ALLOWED[path.join("api", "client.ts")];
+  const getTokenLine = '    if (token) headers.set("Authorization", `Bearer ${token}`);';
+  assert.deepEqual(findings("client.ts", getTokenLine, allowed), []);
+  const fromStorage = '    headers.set("Authorization", `Bearer ${localStorage.getItem("jwt")}`);';
+  assert.equal(findings("client.ts", fromStorage, allowed).length, 1);
 });

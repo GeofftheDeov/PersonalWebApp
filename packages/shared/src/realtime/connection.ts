@@ -43,8 +43,9 @@ export function createLiveConnection(options: LiveConnectionOptions): LiveSource
       // person signs in again, connect with the new cookie. Signing out closes
       // it: the server would otherwise keep it open as them. Signing in as
       // someone else without logging out first reconnects too, so the socket
-      // never carries the previous person's threads.
-      let connectedAs: string | null = null;
+      // never carries the previous person's threads. The socket is whoever
+      // is signed in now, since no change will be announced for them.
+      let connectedAs: string | null = session.getState().user?.id ?? null;
       session.subscribe(() => {
         const { status, user } = session.getState();
         if (status === "signedIn") {

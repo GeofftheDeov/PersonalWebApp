@@ -19,10 +19,12 @@ export interface NoticeSheetProps extends HTMLAttributes<HTMLElement> {
 export default function NoticeSheet({ seed, className, children, ...rest }: NoticeSheetProps) {
   const ref = useRef<HTMLElement>(null);
   const sheet = useRef<SheetHandle | null>(null);
+  // The seed the paper was last drawn with, so an unchanged seed doesn't redraw it.
+  const drawnSeed = useRef(seed);
 
   useEffect(() => {
     if (!ref.current) return;
-    const s = mountSheet(ref.current, { seed });
+    const s = mountSheet(ref.current, { seed: drawnSeed.current });
     sheet.current = s;
     return () => {
       s.destroy();
@@ -32,6 +34,8 @@ export default function NoticeSheet({ seed, className, children, ...rest }: Noti
   }, []);
 
   useEffect(() => {
+    if (seed === drawnSeed.current) return;
+    drawnSeed.current = seed;
     sheet.current?.setSeed(seed);
   }, [seed]);
 

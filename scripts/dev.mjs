@@ -19,6 +19,7 @@
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -34,13 +35,15 @@ function backendEnv() {
     console.error("[dev] backend/.env is missing: copy backend/.env.example and fill it in.");
     process.exit(1);
   }
-  const env = {};
-  for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
-    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
-    if (!m) continue;
-    env[m[1]] = m[2].replace(/^(['"])(.*)\1$/, "$2");
+  // Read with the backend's own dotenv, so values mean what they mean to the backend.
+  let dotenv;
+  try {
+    dotenv = createRequire(path.join(ROOT, "backend", "package.json"))("dotenv");
+  } catch {
+    console.error("[dev] the backend's dependencies are missing: run `npm install` in backend/.");
+    process.exit(1);
   }
-  return env;
+  return dotenv.parse(fs.readFileSync(file));
 }
 
 const fromBackend = backendEnv();

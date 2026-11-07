@@ -10,9 +10,11 @@
 #                              http://localhost:5000: the backend container in
 #                              the same ECS task. docker-compose passes
 #                              http://backend:5000.
-#   NEXT_PUBLIC_PORTFOLIO_URL  the portfolio's origin, for the top bar's
-#                              portfolio items: https://geoffthedeov.net (prod),
-#                              https://deov.geoffthedeov.net (dev).
+#   NEXT_PUBLIC_PORTFOLIO_URL  required: the portfolio's origin, for the top
+#                              bar's portfolio items: https://geoffthedeov.net
+#                              (prod), https://deov.geoffthedeov.net (dev). No
+#                              default, so an image can't ship with localhost
+#                              links; docker-compose passes http://localhost:3000.
 
 # Install dependencies only when needed
 FROM node:20-alpine AS deps
@@ -32,7 +34,8 @@ RUN mkdir -p hearthside/node_modules
 FROM deps AS builder
 WORKDIR /app
 ARG BACKEND_URL=http://localhost:5000
-ARG NEXT_PUBLIC_PORTFOLIO_URL=http://localhost:3000
+ARG NEXT_PUBLIC_PORTFOLIO_URL
+RUN test -n "$NEXT_PUBLIC_PORTFOLIO_URL" || (echo "Build with --build-arg NEXT_PUBLIC_PORTFOLIO_URL=<the portfolio's origin>" >&2; exit 1)
 ENV BACKEND_URL=$BACKEND_URL
 ENV NEXT_PUBLIC_PORTFOLIO_URL=$NEXT_PUBLIC_PORTFOLIO_URL
 ENV NEXT_TELEMETRY_DISABLED=1

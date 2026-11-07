@@ -9,8 +9,18 @@
  * there; local Docker builds pass http://backend:5000 (docker-compose.yml).
  * Under `npm run dev` it's read when the dev server starts.
  *
+ * NEXT_PUBLIC_PORTFOLIO_URL (src/lib/config.ts) is checked here, so a bad
+ * value fails the build rather than every page once deployed.
+ *
  * @type {import('next').NextConfig}
  */
+const portfolioUrl = process.env.NEXT_PUBLIC_PORTFOLIO_URL;
+if (portfolioUrl) {
+    let ok = false;
+    try { ok = ['http:', 'https:'].includes(new URL(portfolioUrl).protocol); } catch { /* not a URL */ }
+    if (!ok) throw new Error(`NEXT_PUBLIC_PORTFOLIO_URL must be the portfolio's http(s) origin, e.g. https://geoffthedeov.net (got ${JSON.stringify(portfolioUrl)})`);
+}
+
 const nextConfig = {
     swcMinify: false,
     // Lint isn't a build gate in either app yet (see the portfolio's config).

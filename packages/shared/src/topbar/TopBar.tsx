@@ -46,8 +46,15 @@ export default function TopBar({ site, letters, portfolioUrl }: TopBarProps) {
   const pathname = usePathname();
   const links = topBarLinks(site, portfolioUrl);
   // Hearthside's Login comes back to the page it was opened from; the
-  // portfolio's is unchanged.
+  // portfolio's is unchanged. The href has the path (it renders on the
+  // server too); the click takes the query and anchor as well.
   const loginHref = site === 'hearthside' ? session.loginUrl(pathname ?? '/') : '/login';
+  const openLogin = (e: { preventDefault(): void }) => {
+    closeMenu();
+    if (site !== 'hearthside') return;
+    e.preventDefault();
+    router.push(session.loginUrl());
+  };
   // Who's signed in, and what they may do, come from the session client,
   // which asks the server (#210). See @gtd/shared/session.
   const { status, capabilities: caps } = useSession(session);
@@ -215,7 +222,7 @@ export default function TopBar({ site, letters, portfolioUrl }: TopBarProps) {
           )}
 
           {!isLoggedIn && (
-            <Link href={loginHref} className={linkCls}>
+            <Link href={loginHref} onClick={openLogin} className={linkCls}>
               <span className="relative z-10 group-hover:text-teal-600 transition-colors uppercase">LOGIN</span>
               <div className={`${decorationCls} rotate-1`} />
             </Link>
@@ -289,7 +296,7 @@ export default function TopBar({ site, letters, portfolioUrl }: TopBarProps) {
               <button onClick={handleLogout} className={mobileLinkCls}>LOGOUT</button>
             </>
           ) : (
-            <Link href={loginHref} onClick={closeMenu} className={mobileLinkCls}>LOGIN</Link>
+            <Link href={loginHref} onClick={openLogin} className={mobileLinkCls}>LOGIN</Link>
           )}
 
           <div className="mt-8 flex items-center gap-4">

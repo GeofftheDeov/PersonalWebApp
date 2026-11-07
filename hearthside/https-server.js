@@ -14,6 +14,10 @@
 // and 3001 in the same ECS task, so Hearthside keeps clear of both.
 // SECONDARY_PORT adds a second listener, as the portfolio has, if a target
 // group ever needs one.
+// The address: in production HOSTNAME (the image sets 0.0.0.0, for the ALB);
+// in development 127.0.0.1, as the portfolio's `next dev -H 127.0.0.1`, or
+// DEV_HOST. Development ignores HOSTNAME, which shells like Git Bash set to
+// the machine's name.
 const dev = process.env.NODE_ENV !== 'production' && !process.argv.includes('--production');
 // Before Next loads: it reads NODE_ENV as it starts.
 if (!dev) process.env.NODE_ENV = 'production';
@@ -22,7 +26,7 @@ const { createServer: createHttpServer } = require('http');
 const { parse } = require('url');
 const next = require('next');
 
-const hostname = process.env.HOSTNAME || '0.0.0.0';
+const hostname = dev ? process.env.DEV_HOST || '127.0.0.1' : process.env.HOSTNAME || '0.0.0.0';
 const port = parseInt(process.env.PORT, 10) || 3002;
 const secondaryPort = parseInt(process.env.SECONDARY_PORT, 10) || null;
 

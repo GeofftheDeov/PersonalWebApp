@@ -1,4 +1,6 @@
+const fs = require('fs');
 const { createServer: createHttpServer } = require('http');
+const { createServer: createHttpsServer } = require('https');
 const { parse } = require('url');
 const next = require('next');
 
@@ -6,6 +8,15 @@ const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOSTNAME || '0.0.0.0';
 const port = parseInt(process.env.PORT, 10) || 3000;
 const secondaryPort = parseInt(process.env.SECONDARY_PORT, 10) || 3001;
+// TLS_CERT_FILE and TLS_KEY_FILE (PEM files), both set: serve HTTPS rather
+// than HTTP. The end-to-end tests (e2e/) do, so the browser keeps the backend's
+// Secure session cookie as it does in prod. Deployed, the ALB terminates TLS
+// and these stay unset.
+const tls = process.env.TLS_CERT_FILE && process.env.TLS_KEY_FILE
+    ? { cert: fs.readFileSync(process.env.TLS_CERT_FILE), key: fs.readFileSync(process.env.TLS_KEY_FILE) }
+    : null;
+const scheme = tls ? 'https' : 'http';
+const createServer = (handler) => (tls ? createHttpsServer(tls, handler) : createHttpServer(handler));
 
 // Log but do NOT exit: a single failed render inside Next.js (which surfaces
 // as an unhandled rejection) was killing the whole server, failing ALB health
@@ -19,7 +30,7 @@ process.on('unhandledRejection', (reason) => {
 });
 
 console.log(`-> Starting server in ${dev ? 'development' : 'production'} mode...`);
-console.log(`-> Target: http://${hostname}:${port}`);
+console.log(`-> Target: ${scheme}://${hostname}:${port}`);
 
 console.log("-> Initializing Next.js app object...");
 const app = next({ dev, hostname, port });
@@ -52,8 +63,8 @@ const requestHandler = async (req, res) => {
 };
 
 console.log("-> Creating HTTP servers...");
-const httpServer = createHttpServer(requestHandler);
-const secondaryServer = createHttpServer(requestHandler);
+const httpServer = createServer(requestHandler);
+const secondaryServer = createServer(requestHandler);
 
 // The ALB keeps idle connections to this server open for its idle timeout
 // (120 s on dev and prod, raised for the live channel's WebSockets, #106).
@@ -66,11 +77,11 @@ for (const server of [httpServer, secondaryServer]) {
 }
 
 httpServer.listen(port, hostname, () => {
-    console.log(`> Server Ready on http://${hostname}:${port}`);
+    console.log(`> Server Ready on ${scheme}://${hostname}:${port}`);
 });
 
 secondaryServer.listen(secondaryPort, hostname, () => {
-    console.log(`> Appending Listener on http://${hostname}:${secondaryPort}`);
+    console.log(`> Appending Listener on ${scheme}://${hostname}:${secondaryPort}`);
 });
 
 console.log("-> Preparing Next.js app (compilation)...");

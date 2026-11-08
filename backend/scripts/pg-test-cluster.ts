@@ -80,7 +80,11 @@ export async function ensureCluster(): Promise<void> {
   console.log(`  starting the test cluster on 127.0.0.1:${PORT}`);
   // stdio must not be piped: the server inherits it and outlives pg_ctl, which
   // would keep a pipe open forever. Its output goes to server.log instead.
-  const opts = `-p ${PORT} -c listen_addresses=127.0.0.1 -c fsync=off -c synchronous_commit=off -c full_page_writes=off`;
+  // Off Windows the socket goes in the cluster's home: Debian's and Ubuntu's
+  // builds default to /var/run/postgresql, which only their postgres user may
+  // write (the CI runner's case, .github/workflows/e2e.yml).
+  const socket = process.platform === "win32" ? "" : ` -c unix_socket_directories=${HOME}`;
+  const opts = `-p ${PORT} -c listen_addresses=127.0.0.1 -c fsync=off -c synchronous_commit=off -c full_page_writes=off${socket}`;
   const r = spawnSync(path.join(bin, "pg_ctl"), ["start", "-w", "-D", DATA, "-l", path.join(HOME, "server.log"), "-o", opts], { stdio: "ignore" });
   // Another run (a parallel worktree's) may have started it a moment before us.
   if (r.status !== 0 && !(await clusterUp())) throw new Error(`pg_ctl start failed; see ${path.join(HOME, "server.log")}`);

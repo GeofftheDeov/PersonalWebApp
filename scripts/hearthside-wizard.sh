@@ -571,6 +571,8 @@ else
   note "now: $(js 'console.log(JSON.parse(IN).map(l=>l.containerName+":"+l.containerPort+" → "+l.targetGroupArn.split("/")[1]).join(", "))' <<<"$LBS")"
   note "new: $(js 'console.log(JSON.parse(IN).map(l=>l.containerName+":"+l.containerPort+" → "+l.targetGroupArn.split("/")[1]).join(", "))' <<<"$NEW_LBS")"
   warn "This starts a rolling deployment of the $ENV_NAME service (as a deploy does)."
+  note "From then on ECS also health-checks Hearthside: if it stops answering /health, ECS"
+  note "replaces the whole task (backend and portfolio too), as it already does for the portfolio."
   change "Update the service:" aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
     --load-balancers "$NEW_LBS" --query 'service.deployments[0].rolloutState' --output text \
     || stop "Hearthside isn't reachable until the service registers its tasks in $TG_NAME."

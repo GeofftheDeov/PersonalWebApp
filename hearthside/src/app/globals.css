@@ -1,0 +1,86 @@
+/* Hearthside's global CSS, the one stylesheet the layout imports. Hearthside's pages are styled by the design
+   system, under the `hs-app` body class; Tailwind is only for the shared top bar (tailwind.config.js).
+   The design system's generated stylesheet and component stylesheet come first, in that order, then
+   Hearthside's own additions below. They're imported here rather than from the layout because Next doesn't
+   keep separate CSS imports in order (in development it put tokens.css last). */
+@import "../design-system/tokens.css";
+@import "../design-system/components.css";
+
+/* Tailwind for the top bar. With preflight off, `base` is only Tailwind's own --tw-* defaults, which its
+   utilities read; the utilities are all scoped under .hs-topbar. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------- The page ---------- */
+body.hs-app{margin:0;min-height:100vh;-webkit-font-smoothing:antialiased}
+.hs-app{
+  color-scheme:dark;
+  /* The design system's faces, self-hosted (src/app/fonts.ts), ahead of the names tokens.css gives. */
+  --font-display:var(--hs-font-fell-sc),var(--hs-font-fell),"IM Fell English SC","IM Fell English",Georgia,serif;
+  --font-story:var(--hs-font-fell),"IM Fell English",Georgia,serif;
+  --font-body:var(--hs-font-alegreya),"Alegreya Sans",system-ui,sans-serif;
+  --font-label:var(--hs-font-alegreya-sc),var(--hs-font-alegreya),"Alegreya Sans SC","Alegreya Sans",system-ui,sans-serif;
+}
+.hs-floor-host{display:contents}
+.hs-page-head a{color:var(--accent)}
+.hs-app .hs-sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* The shell's gutter: 16px, or the notch's safe area if that's wider. */
+.hs-shell-wrap{padding-block:16px 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+
+/* A page's back link (BackLink), in the amber button. */
+.hs-back{align-self:flex-start;display:inline-flex;align-items:center;gap:6px;height:34px;font-size:15px;white-space:nowrap;text-decoration:none}
+.hs-back-m{display:none}
+
+/* ---------- The shell on phones ----------
+   Under 760px the nav folds behind a menu button on the left of the row under the top bar, with the page's
+   back link on the right (from the campaign-page prototype). This replaces the design system's 2 x 2 nav grid,
+   which also makes room for five places. */
+.hs-burger{display:none}
+@media (max-width:759px){
+  .hs-bar{position:relative;flex-wrap:nowrap;justify-content:flex-start;gap:12px;align-self:stretch}
+  .hs-bar .hs-burger{display:grid;width:40px;height:40px;flex:none;place-items:center;padding:0;cursor:pointer;color:var(--gold-hi);
+    border-radius:var(--radius);border:1px solid var(--gold-line);background:radial-gradient(130% 90% at 50% 0%,var(--leather-hi),var(--leather));
+    box-shadow:var(--shadow-panel)}
+  .hs-bar .hs-burger svg{width:22px;height:22px}
+  .hs-bar .hs-burger[aria-expanded="true"]{border-color:var(--gold)}
+  .hs-brand{font-size:24px}
+  .hs-bar .hs-back-m{display:inline-flex;margin-left:auto;flex:none}
+  .hs-page .hs-back{display:none}
+  /* The one column aligns items to its start, so anything whose content doesn't push it wide would shrink. */
+  .hs-page > *,.hs-quests-sec,.hs-letters-col{align-self:stretch}
+  .hs-bar .hs-nav{display:none;position:absolute;z-index:30;top:calc(100% + 8px);left:0;width:min(260px,100%);flex-direction:column}
+  .hs-bar.is-open .hs-nav{display:flex}
+}
+
+/* ---------- The top bar ----------
+   The shared GeofftheDeov bar keeps the portfolio's look (light and dark) on Hearthside. Its wrapper takes no
+   box of its own (so the bar stays sticky against the page) but sets the portfolio's type, and a reset
+   scoped to the bar stands in for the Tailwind preflight the portfolio has and Hearthside turns off. */
+.hs-topbar{display:contents;font-family:var(--hs-font-inter),"Inter",system-ui,sans-serif;font-size:16px;line-height:1.5;
+  color:#171717;-webkit-font-smoothing:antialiased;text-align:left;letter-spacing:normal}
+@media (prefers-color-scheme:dark){.hs-topbar{color:#ededed}}
+.hs-topbar *,.hs-topbar ::before,.hs-topbar ::after{box-sizing:border-box;border-width:0;border-style:solid;border-color:#e5e7eb}
+.hs-topbar h1,.hs-topbar h2,.hs-topbar h3,.hs-topbar h4,.hs-topbar h5,.hs-topbar h6{font-size:inherit;font-weight:inherit}
+.hs-topbar a{color:inherit;text-decoration:inherit}
+.hs-topbar b,.hs-topbar strong{font-weight:bolder}
+.hs-topbar button,.hs-topbar input,.hs-topbar select,.hs-topbar textarea{font-family:inherit;font-feature-settings:inherit;
+  font-variation-settings:inherit;font-size:100%;font-weight:inherit;line-height:inherit;letter-spacing:inherit;color:inherit;margin:0;padding:0}
+.hs-topbar button,.hs-topbar select{text-transform:none}
+.hs-topbar button,.hs-topbar [type=button],.hs-topbar [type=submit]{-webkit-appearance:button;background-color:transparent;background-image:none}
+.hs-topbar h1,.hs-topbar h2,.hs-topbar h3,.hs-topbar h4,.hs-topbar h5,.hs-topbar h6,.hs-topbar p,.hs-topbar blockquote,
+.hs-topbar pre,.hs-topbar figure,.hs-topbar dl,.hs-topbar dd,.hs-topbar hr{margin:0}
+.hs-topbar ol,.hs-topbar ul,.hs-topbar menu{list-style:none;margin:0;padding:0}
+.hs-topbar textarea{resize:vertical}
+.hs-topbar input::placeholder,.hs-topbar textarea::placeholder{opacity:1;color:#9ca3af}
+.hs-topbar button,.hs-topbar [role=button]{cursor:pointer}
+.hs-topbar :disabled{cursor:default}
+.hs-topbar img,.hs-topbar svg,.hs-topbar video,.hs-topbar canvas,.hs-topbar audio,.hs-topbar iframe{display:block;vertical-align:middle}
+.hs-topbar img,.hs-topbar video{max-width:100%;height:auto}
+.hs-topbar [hidden]{display:none}
+/* The design system's amber focus ring is for its own controls; the bar keeps the browser's. */
+.hs-topbar :focus-visible{outline:revert;outline-offset:revert}
+/* The portfolio's classes the bar uses, from its global CSS. */
+.hs-topbar .font-permanent{font-family:var(--hs-font-marker),"Permanent Marker",cursive}
+.hs-topbar .custom-scrollbar{scrollbar-width:thin}

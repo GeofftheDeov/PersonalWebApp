@@ -20,7 +20,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 
-const APPS = ["frontend"];
+const APPS = ["frontend", "hearthside"];
 const SHARED_SRC = path.resolve(__dirname, "../src");
 /** The exact lines of this package that may break a rule, by file under src: one, the API client's `getToken` path. */
 const SHARED_ALLOWED: Record<string, { rule: string; line: string }[]> = {

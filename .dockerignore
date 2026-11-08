@@ -1,5 +1,5 @@
 # For images built from the repo root: the portfolio (frontend/Dockerfile,
-# #209) and, later, Hearthside. The backend and Paperclip build from their own
+# #209) and Hearthside (hearthside/Dockerfile, #216). The backend and Paperclip build from their own
 # folders and use their own .dockerignore.
 
 # Installed and built inside the image, never copied from the host.

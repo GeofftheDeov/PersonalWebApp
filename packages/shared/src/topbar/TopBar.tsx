@@ -9,19 +9,23 @@ import NotificationsBell from './NotificationsBell';
 import type { Letters } from '../letters/letters';
 import { canAdmin, canPaperclip } from '../session/client';
 import { useSession } from '../session/react';
+import { topBarLinks, type TopBarSite } from './links';
 
-/** Which site the bar is on. */
-export type TopBarSite = 'portfolio' | 'hearthside';
+export type { TopBarSite };
 
 export interface TopBarProps {
   /**
-   * Which site it's on. Only the portfolio's behaviour is built so far (#211);
-   * Hearthside's links, login, bell filter and Campaigns tab come with #220,
-   * and until then 'hearthside' behaves like 'portfolio'.
+   * Which site it's on. On Hearthside (#216) the portfolio's items go to
+   * `portfolioUrl`, "Game Night" is Hearthside's `/`, Login is Hearthside's
+   * `/login` returning to the page, and Admin doesn't show (see `topBarLinks`).
+   * The bell's filter and the social menu's Campaigns tab are #220's; until
+   * then they behave as on the portfolio.
    */
   site: TopBarSite;
   /** The app's Letters (`createLetters`), which carries its API and session clients. */
   letters: Letters;
+  /** The portfolio's origin, e.g. `https://geoffthedeov.net`. Required on Hearthside. */
+  portfolioUrl?: string;
 }
 
 /**
@@ -34,11 +38,23 @@ export interface TopBarProps {
  * since `letters` can't cross from a server component.
  *
  *   <TopBar site="portfolio" letters={letters} />
+ *   <TopBar site="hearthside" letters={letters} portfolioUrl="https://geoffthedeov.net" />
  */
-export default function TopBar({ letters }: TopBarProps) {
+export default function TopBar({ site, letters, portfolioUrl }: TopBarProps) {
   const { api, session } = letters;
   const router = useRouter();
   const pathname = usePathname();
+  const links = topBarLinks(site, portfolioUrl);
+  // Hearthside's Login comes back to the page it was opened from; the
+  // portfolio's is unchanged. The href has the path (it renders on the
+  // server too); the click takes the query and anchor as well.
+  const loginHref = site === 'hearthside' ? session.loginUrl(pathname ?? '/') : '/login';
+  const openLogin = (e: { preventDefault(): void }) => {
+    closeMenu();
+    if (site !== 'hearthside') return;
+    e.preventDefault();
+    router.push(session.loginUrl());
+  };
   // Who's signed in, and what they may do, come from the session client,
   // which asks the server (#210). See @gtd/shared/session.
   const { status, capabilities: caps } = useSession(session);
@@ -122,20 +138,20 @@ export default function TopBar({ letters }: TopBarProps) {
   return (
     <nav className="sticky top-0 z-50 w-full border-b-4 border-black bg-white dark:bg-black dark:border-white">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-        <Link href="/" onClick={closeMenu} className="text-2xl font-black tracking-tighter text-black dark:text-white hover:skew-x-2 transition-transform">
+        <Link href={links.home} onClick={closeMenu} className="text-2xl font-black tracking-tighter text-black dark:text-white hover:skew-x-2 transition-transform">
           GEOFF<span className="text-teal-600">THE</span>DEV
         </Link>
 
         {/* Desktop Menu */}
         <div className="hidden md:flex gap-8 items-center">
-          <Link href="/about" className={linkCls}>
+          <Link href={links.about} className={linkCls}>
             <span className="relative z-10 group-hover:text-teal-600 transition-colors uppercase">ABOUT</span>
             <div className={`${decorationCls} rotate-1`} />
           </Link>
 
           {isLoggedIn && (
             <>
-              <Link href="/dashboard" className={linkCls}>
+              <Link href={links.dashboard} className={linkCls}>
                 <span className="relative z-10 group-hover:text-teal-600 transition-colors uppercase">DASHBOARD</span>
                 <div className={`${decorationCls} -rotate-1`} />
               </Link>
@@ -155,9 +171,9 @@ export default function TopBar({ letters }: TopBarProps) {
                   </button>
                   {paperclipOpen && (
                     <div className="absolute top-full left-0 mt-2 min-w-[9rem] border-4 border-black bg-white dark:bg-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] z-50 flex flex-col">
-                      <Link href="/paperclip/org" onClick={() => setPaperclipOpen(false)} className={dropdownItemCls} tabIndex={0}>ORG</Link>
-                      <Link href="/paperclip/issues" onClick={() => setPaperclipOpen(false)} className={dropdownItemCls} tabIndex={0}>ISSUES</Link>
-                      <Link href="/paperclip/budgets" onClick={() => setPaperclipOpen(false)} className={dropdownItemCls} tabIndex={0}>BUDGETS</Link>
+                      <Link href={links.paperclip.org} onClick={() => setPaperclipOpen(false)} className={dropdownItemCls} tabIndex={0}>ORG</Link>
+                      <Link href={links.paperclip.issues} onClick={() => setPaperclipOpen(false)} className={dropdownItemCls} tabIndex={0}>ISSUES</Link>
+                      <Link href={links.paperclip.budgets} onClick={() => setPaperclipOpen(false)} className={dropdownItemCls} tabIndex={0}>BUDGETS</Link>
                     </div>
                   )}
                 </div>
@@ -177,14 +193,14 @@ export default function TopBar({ letters }: TopBarProps) {
                 </button>
                 {moreOpen && (
                   <div className="absolute top-full left-0 mt-2 min-w-[10rem] border-4 border-black bg-white dark:bg-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] z-50 flex flex-col">
-                    <Link href="/profile" onClick={() => setMoreOpen(false)} className={dropdownItemCls} tabIndex={0}>PROFILE</Link>
-                    <Link href="/game-night" onClick={() => setMoreOpen(false)} className={dropdownItemCls} tabIndex={0}>GAME NIGHT</Link>
+                    <Link href={links.profile} onClick={() => setMoreOpen(false)} className={dropdownItemCls} tabIndex={0}>PROFILE</Link>
+                    <Link href={links.gameNight} onClick={() => setMoreOpen(false)} className={dropdownItemCls} tabIndex={0}>GAME NIGHT</Link>
                   </div>
                 )}
               </div>
 
               {/* Admin portal — app_role only. The server agrees (#43). */}
-              {canAdmin(caps) && (
+              {links.admin && canAdmin(caps) && (
                 <a
                   href="/admin"
                   onClick={openAdmin}
@@ -206,7 +222,7 @@ export default function TopBar({ letters }: TopBarProps) {
           )}
 
           {!isLoggedIn && (
-            <Link href="/login" className={linkCls}>
+            <Link href={loginHref} onClick={openLogin} className={linkCls}>
               <span className="relative z-10 group-hover:text-teal-600 transition-colors uppercase">LOGIN</span>
               <div className={`${decorationCls} rotate-1`} />
             </Link>
@@ -226,11 +242,11 @@ export default function TopBar({ letters }: TopBarProps) {
       {/* Mobile Menu Overlay */}
       {isMenuOpen && (
         <div className="fixed inset-0 top-[76px] z-40 bg-white dark:bg-black p-8 md:hidden flex flex-col items-center justify-center gap-8 overflow-y-auto border-t-4 border-black dark:border-white">
-          <Link href="/about" onClick={closeMenu} className={mobileLinkCls}>ABOUT</Link>
+          <Link href={links.about} onClick={closeMenu} className={mobileLinkCls}>ABOUT</Link>
 
           {isLoggedIn ? (
             <>
-              <Link href="/dashboard" onClick={closeMenu} className={mobileLinkCls}>DASHBOARD</Link>
+              <Link href={links.dashboard} onClick={closeMenu} className={mobileLinkCls}>DASHBOARD</Link>
 
               {canPaperclip(caps) && (
                 <div className="flex flex-col items-center gap-3">
@@ -243,9 +259,9 @@ export default function TopBar({ letters }: TopBarProps) {
                   </button>
                   {mobilePaperclipOpen && (
                     <div className="flex flex-col items-center gap-3 pt-1">
-                      <Link href="/paperclip/org" onClick={closeMenu} className={mobileSubLinkCls}>ORG</Link>
-                      <Link href="/paperclip/issues" onClick={closeMenu} className={mobileSubLinkCls}>ISSUES</Link>
-                      <Link href="/paperclip/budgets" onClick={closeMenu} className={mobileSubLinkCls}>BUDGETS</Link>
+                      <Link href={links.paperclip.org} onClick={closeMenu} className={mobileSubLinkCls}>ORG</Link>
+                      <Link href={links.paperclip.issues} onClick={closeMenu} className={mobileSubLinkCls}>ISSUES</Link>
+                      <Link href={links.paperclip.budgets} onClick={closeMenu} className={mobileSubLinkCls}>BUDGETS</Link>
                     </div>
                   )}
                 </div>
@@ -261,13 +277,13 @@ export default function TopBar({ letters }: TopBarProps) {
                 </button>
                 {mobileMoreOpen && (
                   <div className="flex flex-col items-center gap-3 pt-1">
-                    <Link href="/profile" onClick={closeMenu} className={mobileSubLinkCls}>PROFILE</Link>
-                    <Link href="/game-night" onClick={closeMenu} className={mobileSubLinkCls}>GAME NIGHT</Link>
+                    <Link href={links.profile} onClick={closeMenu} className={mobileSubLinkCls}>PROFILE</Link>
+                    <Link href={links.gameNight} onClick={closeMenu} className={mobileSubLinkCls}>GAME NIGHT</Link>
                   </div>
                 )}
               </div>
 
-              {canAdmin(caps) && (
+              {links.admin && canAdmin(caps) && (
                 <a
                   href="/admin"
                   onClick={openAdmin}
@@ -280,7 +296,7 @@ export default function TopBar({ letters }: TopBarProps) {
               <button onClick={handleLogout} className={mobileLinkCls}>LOGOUT</button>
             </>
           ) : (
-            <Link href="/login" onClick={closeMenu} className={mobileLinkCls}>LOGIN</Link>
+            <Link href={loginHref} onClick={openLogin} className={mobileLinkCls}>LOGIN</Link>
           )}
 
           <div className="mt-8 flex items-center gap-4">

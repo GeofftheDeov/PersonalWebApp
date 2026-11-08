@@ -17,7 +17,7 @@ import path from "node:path";
 import fg from "fast-glob";
 
 const SHARED_SRC = path.resolve(__dirname, "../src");
-const APPS = ["frontend"];
+const APPS = ["frontend", "hearthside"];
 
 type Content = string[] | { relative?: boolean; files: (string | { raw: string })[] };
 

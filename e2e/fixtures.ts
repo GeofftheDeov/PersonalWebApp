@@ -66,17 +66,23 @@ export const test = base.extend<Options & Fixtures, WorkerFixtures>({
       const { setCookie } = await backendCall(stack.backend, "POST", "/api/users/login", { body: { email: person.email, password: person.password } });
       const issued = setCookie.find((c) => c.startsWith(`${stack.cookie.name}=`));
       if (!issued) throw new Error(`Login set no ${stack.cookie.name} cookie: ${JSON.stringify(setCookie)}`);
-      const value = issued.slice(stack.cookie.name.length + 1).split(";")[0];
-      // As the backend set it (stack.cookie.domain, Secure, HttpOnly, Lax), so the browser treats it alike.
+      // Planted with the attributes the backend sent, so the browser treats it as it would the real one.
+      const [pair, ...parts] = issued.split(";").map((p) => p.trim());
+      const attrs = new Map(parts.map((p) => {
+        const eq = p.indexOf("=");
+        return eq < 0 ? [p.toLowerCase(), ""] : [p.slice(0, eq).toLowerCase(), p.slice(eq + 1)];
+      }));
+      const maxAge = Number(attrs.get("max-age"));
+      const sameSite = ({ strict: "Strict", lax: "Lax", none: "None" } as const)[(attrs.get("samesite") ?? "lax").toLowerCase() as "lax"];
       await context.addCookies([{
         name: stack.cookie.name,
-        value,
-        domain: stack.cookie.domain,
-        path: "/",
-        httpOnly: true,
-        secure: true,
-        sameSite: "Lax",
-        expires: Math.floor(Date.now() / 1000) + 60 * 60,
+        value: pair.slice(stack.cookie.name.length + 1),
+        domain: attrs.get("domain") ?? new URL(stack.portfolio).hostname,
+        path: attrs.get("path") ?? "/",
+        httpOnly: attrs.has("httponly"),
+        secure: attrs.has("secure"),
+        sameSite: sameSite ?? "Lax",
+        expires: Number.isFinite(maxAge) ? Math.floor(Date.now() / 1000) + maxAge : -1,
       }]);
     });
   },

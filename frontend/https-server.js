@@ -12,6 +12,8 @@ const secondaryPort = parseInt(process.env.SECONDARY_PORT, 10) || 3001;
 // than HTTP. The end-to-end tests (e2e/) do, so the browser keeps the backend's
 // Secure session cookie as it does in prod. Deployed, the ALB terminates TLS
 // and these stay unset.
+// One without the other would quietly serve HTTP, and the browser would drop the cookie.
+if (!process.env.TLS_CERT_FILE !== !process.env.TLS_KEY_FILE) throw new Error('Set both TLS_CERT_FILE and TLS_KEY_FILE, or neither.');
 const tls = process.env.TLS_CERT_FILE && process.env.TLS_KEY_FILE
     ? { cert: fs.readFileSync(process.env.TLS_CERT_FILE), key: fs.readFileSync(process.env.TLS_KEY_FILE) }
     : null;

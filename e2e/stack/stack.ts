@@ -62,6 +62,8 @@ interface Server {
   name: string;
   child: ChildProcess;
   log: string;
+  /** Its exit code once it has exited (-1 for a signal), else null. */
+  exited: number | null;
 }
 
 const running = new Set<Server>();
@@ -93,7 +95,9 @@ function startServer(name: string, script: string[], cwd: string, env: NodeJS.Pr
     detached: process.platform !== "win32",
   });
   fs.closeSync(fd);
-  const server = { name, child, log };
+  const server: Server = { name, child, log, exited: null };
+  // Recorded from the start: a server can die long before anyone waits for it.
+  child.once("exit", (code) => { server.exited = code ?? -1; });
   running.add(server);
   return server;
 }
@@ -140,14 +144,15 @@ async function makeCertificate(dir: string): Promise<{ cert: string; key: string
   return { cert, key };
 }
 
+/** Runs a backend script; resolves with its stdout. */
 function runBackendScript(args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [TSX, ...args], { cwd: BACKEND, windowsHide: true });
-    let out = "";
+    let out = "", err = "";
     child.stdout.on("data", (d) => (out += d));
-    child.stderr.on("data", (d) => (out += d));
+    child.stderr.on("data", (d) => (err += d));
     child.on("error", reject);
-    child.on("close", (code) => (code === 0 ? resolve(out.trim()) : reject(new Error(`backend ${args.join(" ")} failed:\n${out}`))));
+    child.on("close", (code) => (code === 0 ? resolve(out) : reject(new Error(`backend ${args.join(" ")} failed:\n${out}${err}`))));
   });
 }
 
@@ -175,10 +180,8 @@ function probe(url: string, host?: string): Promise<number> {
 /** Waits for a server to answer 200, failing early (with its log) if it exits. */
 async function waitFor(server: Server, url: string, ms: number, host?: string) {
   const deadline = Date.now() + ms;
-  let exited: number | null = null;
-  server.child.once("exit", (code) => { exited = code ?? -1; });
   for (;;) {
-    if (exited !== null) throw new Error(`${server.name} exited (${exited}) before it was ready. Its log, ${server.log}:\n${tail(server.log)}`);
+    if (server.exited !== null) throw new Error(`${server.name} exited (${server.exited}) before it was ready. Its log, ${server.log}:\n${tail(server.log)}`);
     if ((await probe(url, host)) === 200) return;
     if (Date.now() > deadline) throw new Error(`${server.name} wasn't ready at ${url} after ${ms / 1000}s. Its log, ${server.log}:\n${tail(server.log)}`);
     await new Promise((r) => setTimeout(r, 500));
@@ -252,7 +255,9 @@ export async function startStack(): Promise<{ stack: Stack; stop: () => Promise<
     }, logs);
     servers.push(hearthsideServer);
 
-    databaseUrl = (await runBackendScript(["scripts/e2e-database.ts", "create"])).split(/\r?\n/).pop()!;
+    const created = await runBackendScript(["scripts/e2e-database.ts", "create"]);
+    databaseUrl = created.match(/^postgresql:\/\/\S+$/m)?.[0] ?? "";
+    if (!databaseUrl) throw new Error(`e2e-database.ts printed no database URL:\n${created}`);
     const cookie = { name: PROD.cookieName, domain: `.${PARENT_DOMAIN}` };
     const backendServer = startServer("backend", [TSX, path.join(BACKEND, "server.ts")], logs, {
       ...base,

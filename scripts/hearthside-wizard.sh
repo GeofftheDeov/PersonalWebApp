@@ -502,9 +502,10 @@ else
   DEREG=$(aws elbv2 describe-target-group-attributes --target-group-arn "$FRONTEND_TG_ARN" \
     --query "Attributes[?Key=='deregistration_delay.timeout_seconds'].Value | [0]" --output text)
   if ! none "$DEREG"; then
-    aws elbv2 modify-target-group-attributes --target-group-arn "$TG_ARN" \
-      --attributes "Key=deregistration_delay.timeout_seconds,Value=$DEREG" >/dev/null
-    pass "deregistration delay ${DEREG}s, as the portfolio's"
+    change "Give it the portfolio's deregistration delay (${DEREG}s):" aws elbv2 modify-target-group-attributes \
+      --target-group-arn "$TG_ARN" --attributes "Key=deregistration_delay.timeout_seconds,Value=$DEREG" \
+      --query 'length(Attributes)' --output text \
+      || warn "left at the default (300s): deploys wait longer for old Hearthside tasks to drain"
   fi
 fi
 [[ -n "$TG_ARN" ]] || stop "Target group $TG_NAME not found."
@@ -586,16 +587,16 @@ else
     --load-balancers "$NEW_LBS" --query 'service.deployments[0].rolloutState' --output text \
     || stop "Hearthside isn't reachable until the service registers its tasks in $TG_NAME."
 fi
-say "Waiting for the service to settle and Hearthside's target to turn healthy (a few minutes)..."
+say "Waiting for the service to settle and Hearthside's target to turn healthy (up to 20 minutes)..."
 HEALTH=""
-for _ in $(seq 1 40); do
+for _ in $(seq 1 80); do
   HEALTH=$(aws elbv2 describe-target-health --target-group-arn "$TG_ARN" --query 'TargetHealthDescriptions[].TargetHealth.State' --output text)
   some_healthy "$HEALTH" && break
   printf '  %s%s%s\n' "$DIM" "targets: ${HEALTH:-none yet}" "$RESET"
   sleep 15
 done
 some_healthy "$HEALTH" \
-  || stop "$TG_NAME has no healthy target ($HEALTH). See: aws elbv2 describe-target-health --target-group-arn $TG_ARN"
+  || stop "$TG_NAME has no healthy target after 20 minutes ($HEALTH). If the service is still deploying, re-run later. See: aws elbv2 describe-target-health --target-group-arn $TG_ARN"
 pass "$TG_NAME targets: $HEALTH"
 FRONT_HEALTH=$(aws elbv2 describe-target-health --target-group-arn "$FRONTEND_TG_ARN" --query 'TargetHealthDescriptions[].TargetHealth.State' --output text)
 some_healthy "$FRONT_HEALTH" && pass "the portfolio's targets: $FRONT_HEALTH" \
@@ -829,7 +830,8 @@ say "HEARTHSIDE_LIVE on the GitHub '$GH_ENV' environment is the switch. At the n
 step "the backend's HEARTHSIDE_URL=https://$HOST: Game Night links (bell, emails, calendar and"
 say "    Discord events) point at Hearthside (#214), and $HOST joins the allowed sites for reset,"
 say "    verify and Google Calendar return links (#215);"
-step "the portfolio's NEXT_PUBLIC_HEARTHSIDE_URL, for its Hearthside links and /game-night redirects (#234)."
+step "the portfolio's NEXT_PUBLIC_HEARTHSIDE_URL build arg. Nothing reads it yet: the portfolio's"
+say "    /game-night redirects and Hearthside links read it once #234 lands, and go live with this switch."
 say "SESSION_COOKIE_ORIGINS already lists https://$HOST, so the live channel accepts its cookie:"
 ORIGINS=$(aws ecs describe-task-definition --task-definition "$TASK_DEF_ARN" \
   --query "taskDefinition.containerDefinitions[?name=='backend'] | [0].environment[?name=='SESSION_COOKIE_ORIGINS'].value | [0]" --output text)
@@ -851,9 +853,21 @@ RUNNING_URL=$(aws ecs describe-task-definition --task-definition "$TASK_DEF_ARN"
 if [[ "$NOW_LIVE" == true && "$RUNNING_URL" != "https://$HOST" ]]; then
   say "The running backend doesn't have it yet (HEARTHSIDE_URL='${RUNNING_URL/None/}'); it needs a deploy."
   [[ "$ENV_NAME" == prod ]] && note "A prod deploy is followed, as always, by the job that rebases dev onto main and redeploys dev."
+  DISPATCHED_AT=$(node -e 'console.log(new Date(Date.now()-60e3).toISOString())' | tr -d '\r')
+  DISPATCHED="" RUN_ID=""
   if change "Deploy $ENV_NAME now:" gh workflow run "$WORKFLOW" --ref "$DEPLOY_REF" --repo "$REPO"; then
-    sleep 5
-    RUN_ID=$(gh run list --workflow "$WORKFLOW" --repo "$REPO" --limit 1 --json databaseId --jq '.[0].databaseId')
+    DISPATCHED=yes
+    # The run this dispatch made: a workflow_dispatch run on $DEPLOY_REF
+    # created since just before it (GitHub takes a few seconds to list it).
+    for _ in $(seq 1 12); do
+      sleep 5
+      RUN_ID=$(gh run list --workflow "$WORKFLOW" --repo "$REPO" --event workflow_dispatch --branch "$DEPLOY_REF" \
+        --limit 5 --json databaseId,createdAt \
+        | js 'const r=JSON.parse(IN).filter(r=>r.createdAt>=process.argv[1]).sort((a,b)=>a.createdAt<b.createdAt?1:-1)[0]; console.log(r?r.databaseId:"")' "$DISPATCHED_AT") || RUN_ID=""
+      [[ -n "$RUN_ID" ]] && break
+    done
+  fi
+  if [[ -n "${RUN_ID:-}" ]]; then
     note "run: https://github.com/$REPO/actions/runs/$RUN_ID"
     if confirm "Watch it until it finishes (10-60 minutes)?"; then
       gh run watch "$RUN_ID" --repo "$REPO" --exit-status >/dev/null || stop "The deploy failed: https://github.com/$REPO/actions/runs/$RUN_ID"
@@ -861,6 +875,8 @@ if [[ "$NOW_LIVE" == true && "$RUNNING_URL" != "https://$HOST" ]]; then
       RUNNING_URL=$(aws ecs describe-task-definition --task-definition "$TD" \
         --query "taskDefinition.containerDefinitions[?name=='backend'] | [0].environment[?name=='HEARTHSIDE_URL'].value | [0]" --output text)
     fi
+  elif [[ -n "$DISPATCHED" ]]; then
+    SKIPPED+=("the $ENV_NAME deploy was dispatched but its run didn't show up; find it at https://github.com/$REPO/actions/workflows/$WORKFLOW")
   else
     SKIPPED+=("deploy $ENV_NAME so the switch applies: gh workflow run $WORKFLOW --ref $DEPLOY_REF --repo $REPO")
   fi

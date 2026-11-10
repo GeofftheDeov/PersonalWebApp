@@ -61,5 +61,5 @@ Hearthside (3002), behind one ALB that picks the container by host. Pushes to `d
 
 Hearthside's load balancer rule, certificate, DNS and Google origins are set up by hand, once per environment, with
 `scripts/hearthside-wizard.sh dev` (then `prod`). Its last stage turns on `HEARTHSIDE_LIVE`, the GitHub environment
-variable that gives the backend `HEARTHSIDE_URL` and the portfolio its Hearthside links. Until then the Hearthside
-container runs but nothing routes or links to it.
+variable that gives the backend `HEARTHSIDE_URL` and the portfolio's build `NEXT_PUBLIC_HEARTHSIDE_URL` (for its
+redirects to Hearthside, #234). Until then the Hearthside container runs but nothing routes or links to it.

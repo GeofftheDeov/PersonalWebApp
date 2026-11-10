@@ -9,14 +9,15 @@
  * run-tests.ts's template, which every `npm test` drops and rebuilds: a
  * parallel run in another worktree could pull that out from under a clone.
  *
- * `create` also drops the pwae2e_ databases more than six hours old, which runs
- * that were killed before their teardown left behind. No run lasts that long.
+ * `create` also drops the pwae2e_ databases more than a day old, which runs
+ * that were killed before their teardown left behind. No run lasts that long,
+ * not even one held open in Playwright's UI mode overnight.
  */
 import crypto from "crypto";
 import { connect, ensureCluster, loadSchema, url } from "./pg-test-cluster.js";
 
 const PREFIX = "pwae2e_";
-const STALE_S = 6 * 60 * 60;
+const STALE_S = 24 * 60 * 60;
 
 async function create() {
   await ensureCluster();

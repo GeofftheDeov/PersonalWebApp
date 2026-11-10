@@ -51,7 +51,10 @@ export async function connect(db = "postgres"): Promise<pg.Client> {
 const samePath = (a: string, b: string) =>
   path.resolve(a).replace(/\\/g, "/").toLowerCase() === path.resolve(b).replace(/\\/g, "/").toLowerCase();
 
-/** Resolves when the cluster answers on PORT; throws if something else holds the port. False when nothing does. */
+/**
+ * True when the cluster answers on PORT; false when nothing does yet (or it's
+ * still starting); throws if something else holds the port.
+ */
 async function clusterUp(): Promise<boolean> {
   try {
     const c = await connect();
@@ -62,7 +65,8 @@ async function clusterUp(): Promise<boolean> {
     }
     return true;
   } catch (e: any) {
-    if (e.code === "ECONNREFUSED") return false;
+    // 57P03: "the database system is starting up", say by a parallel run.
+    if (e.code === "ECONNREFUSED" || e.code === "57P03") return false;
     throw e.message?.startsWith("Port ") ? e : new Error(`Port ${PORT} answers but not as the test cluster: ${e.message}`);
   }
 }
@@ -80,14 +84,18 @@ export async function ensureCluster(): Promise<void> {
   console.log(`  starting the test cluster on 127.0.0.1:${PORT}`);
   // stdio must not be piped: the server inherits it and outlives pg_ctl, which
   // would keep a pipe open forever. Its output goes to server.log instead.
-  // Off Windows the socket goes in the cluster's home: Debian's and Ubuntu's
-  // builds default to /var/run/postgresql, which only their postgres user may
-  // write (the CI runner's case, .github/workflows/e2e.yml).
-  const socket = process.platform === "win32" ? "" : ` -c unix_socket_directories=${HOME}`;
+  // Off Windows the socket goes in /tmp: Debian's and Ubuntu's builds default
+  // to /var/run/postgresql, which only their postgres user may write (the CI
+  // runner's case, .github/workflows/e2e.yml).
+  const socket = process.platform === "win32" ? "" : " -c unix_socket_directories=/tmp";
   const opts = `-p ${PORT} -c listen_addresses=127.0.0.1 -c fsync=off -c synchronous_commit=off -c full_page_writes=off${socket}`;
   const r = spawnSync(path.join(bin, "pg_ctl"), ["start", "-w", "-D", DATA, "-l", path.join(HOME, "server.log"), "-o", opts], { stdio: "ignore" });
-  // Another run (a parallel worktree's) may have started it a moment before us.
-  if (r.status !== 0 && !(await clusterUp())) throw new Error(`pg_ctl start failed; see ${path.join(HOME, "server.log")}`);
+  if (r.status === 0) return;
+  // Another run (a parallel worktree's) may be starting it at the same moment.
+  for (const deadline = Date.now() + 30_000; Date.now() < deadline; await new Promise(res => setTimeout(res, 500))) {
+    if (await clusterUp()) return;
+  }
+  throw new Error(`pg_ctl start failed; see ${path.join(HOME, "server.log")}`);
 }
 
 export function stopCluster(): number {

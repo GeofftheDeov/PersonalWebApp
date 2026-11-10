@@ -1,0 +1,5 @@
+node_modules/
+# Each run's server logs and certificate (stack/stack.ts).
+.stack/
+test-results/
+playwright-report/

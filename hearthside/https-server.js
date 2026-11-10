@@ -14,6 +14,7 @@
 // and 3001 in the same ECS task, so Hearthside keeps clear of both.
 // SECONDARY_PORT adds a second listener, as the portfolio has, if a target
 // group ever needs one.
+// TLS_CERT_FILE and TLS_KEY_FILE serve HTTPS instead (below).
 // The address: in production HOSTNAME (the image sets 0.0.0.0, for the ALB);
 // in development 127.0.0.1, as the portfolio's `next dev -H 127.0.0.1`, or
 // DEV_HOST. Development ignores HOSTNAME, which shells like Git Bash set to
@@ -22,13 +23,26 @@ const dev = process.env.NODE_ENV !== 'production' && !process.argv.includes('--p
 // Before Next loads: it reads NODE_ENV as it starts.
 if (!dev) process.env.NODE_ENV = 'production';
 
+const fs = require('fs');
 const { createServer: createHttpServer } = require('http');
+const { createServer: createHttpsServer } = require('https');
 const { parse } = require('url');
 const next = require('next');
 
 const hostname = dev ? process.env.DEV_HOST || '127.0.0.1' : process.env.HOSTNAME || '0.0.0.0';
 const port = parseInt(process.env.PORT, 10) || 3002;
 const secondaryPort = parseInt(process.env.SECONDARY_PORT, 10) || null;
+// TLS_CERT_FILE and TLS_KEY_FILE (PEM files), both set: serve HTTPS rather
+// than HTTP. The end-to-end tests (e2e/) do, so the browser keeps the backend's
+// Secure session cookie as it does in prod. Deployed, the ALB terminates TLS
+// and these stay unset.
+// One without the other would quietly serve HTTP, and the browser would drop the cookie.
+if (!process.env.TLS_CERT_FILE !== !process.env.TLS_KEY_FILE) throw new Error('Set both TLS_CERT_FILE and TLS_KEY_FILE, or neither.');
+const tls = process.env.TLS_CERT_FILE && process.env.TLS_KEY_FILE
+    ? { cert: fs.readFileSync(process.env.TLS_CERT_FILE), key: fs.readFileSync(process.env.TLS_KEY_FILE) }
+    : null;
+const scheme = tls ? 'https' : 'http';
+const createServer = (handler) => (tls ? createHttpsServer(tls, handler) : createHttpServer(handler));
 
 // Log but do NOT exit: a single failed render inside Next.js (which surfaces
 // as an unhandled rejection) would otherwise kill the whole server, failing
@@ -41,7 +55,7 @@ process.on('unhandledRejection', (reason) => {
     console.error('ERROR: Unhandled Rejection, reason:', reason);
 });
 
-console.log(`-> Hearthside: starting in ${dev ? 'development' : 'production'} mode on http://${hostname}:${port}`);
+console.log(`-> Hearthside: starting in ${dev ? 'development' : 'production'} mode on ${scheme}://${hostname}:${port}`);
 
 const app = next({ dev, hostname, port, dir: __dirname });
 const handle = app.getRequestHandler();
@@ -81,8 +95,8 @@ const requestHandler = async (req, res) => {
     }
 };
 
-const servers = [createHttpServer(requestHandler)];
-if (secondaryPort) servers.push(createHttpServer(requestHandler));
+const servers = [createServer(requestHandler)];
+if (secondaryPort) servers.push(createServer(requestHandler));
 
 // The ALB keeps idle connections to this server open for its idle timeout
 // (120 s on dev and prod, raised for the live channel's WebSockets, #106).
@@ -95,11 +109,11 @@ for (const server of servers) {
 }
 
 servers[0].listen(port, hostname, () => {
-    console.log(`> Hearthside ready on http://${hostname}:${port}`);
+    console.log(`> Hearthside ready on ${scheme}://${hostname}:${port}`);
 });
 if (secondaryPort) {
     servers[1].listen(secondaryPort, hostname, () => {
-        console.log(`> Hearthside also listening on http://${hostname}:${secondaryPort}`);
+        console.log(`> Hearthside also listening on ${scheme}://${hostname}:${secondaryPort}`);
     });
 }
 

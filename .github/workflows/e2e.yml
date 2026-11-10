@@ -1,0 +1,76 @@
+name: End-to-end tests
+# The Playwright suite in e2e/ (#218, spec #69's seam 1), on pull requests that
+# touch either app, the package they share, the backend or the suite.
+#
+# It needs no service containers: like `npm run e2e` anywhere, it starts its
+# own stack (a database on the private test cluster, the backend and both apps
+# on free ports) and stops it after. The cluster uses the runner image's
+# PostgreSQL binaries, which aren't on the PATH, so PG_BIN points at them.
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+    paths:
+      - 'frontend/**'
+      - 'hearthside/**'
+      - 'packages/**'
+      - 'backend/**'
+      - 'e2e/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/e2e.yml'
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  e2e:
+    name: End-to-end (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+            e2e/package-lock.json
+      - name: Install dependencies
+        # The root workspace (both apps and packages/*), then the backend and
+        # the suite, which keep their own lockfiles.
+        run: |
+          npm ci --no-audit --no-fund
+          npm ci --no-audit --no-fund --prefix backend
+          npm ci --no-audit --no-fund --prefix e2e
+      - name: Install Chromium
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+      - name: Find PostgreSQL
+        run: echo "PG_BIN=$(ls -d /usr/lib/postgresql/*/bin | sort -V | tail -n 1)" >> "$GITHUB_ENV"
+      - name: Typecheck the suite
+        working-directory: e2e
+        run: npm run typecheck
+      - name: Run
+        run: npm run e2e
+      - name: Keep the report, traces and server logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-report
+          # .stack holds each run's server logs.
+          include-hidden-files: true
+          path: |
+            e2e/playwright-report
+            e2e/test-results
+            e2e/.stack
+          retention-days: 7

@@ -1,7 +1,7 @@
 {
   "name": "personal-web-app",
   "private": true,
-  "description": "npm workspace: the portfolio (frontend), Hearthside, and the code they share (packages/*). The backend and Paperclip keep their own lockfiles.",
+  "description": "npm workspace: the portfolio (frontend), Hearthside, and the code they share (packages/*). The backend, Paperclip and the end-to-end suite (e2e/, `npm run e2e`) keep their own lockfiles.",
   "workspaces": [
     "frontend",
     "hearthside",
@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm test --workspaces --if-present"
+    "test": "npm test --workspaces --if-present",
+    "e2e": "npm --prefix e2e run e2e --"
   }
 }

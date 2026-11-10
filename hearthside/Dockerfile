@@ -15,6 +15,9 @@
 #                              (prod), https://deov.geoffthedeov.net (dev). No
 #                              default, so an image can't ship with localhost
 #                              links; docker-compose passes http://localhost:3000.
+#   NEXT_PUBLIC_GOOGLE_CLIENT_ID  optional: the Google OAuth client for Google
+#                              sign-in (#219), the same client as the
+#                              portfolio's. The deploy workflows pass it.
 
 # Install dependencies only when needed
 FROM node:20-alpine AS deps
@@ -38,6 +41,8 @@ ARG NEXT_PUBLIC_PORTFOLIO_URL
 RUN test -n "$NEXT_PUBLIC_PORTFOLIO_URL" || (echo "Build with --build-arg NEXT_PUBLIC_PORTFOLIO_URL=<the portfolio's origin>" >&2; exit 1)
 ENV BACKEND_URL=$BACKEND_URL
 ENV NEXT_PUBLIC_PORTFOLIO_URL=$NEXT_PUBLIC_PORTFOLIO_URL
+ARG NEXT_PUBLIC_GOOGLE_CLIENT_ID
+ENV NEXT_PUBLIC_GOOGLE_CLIENT_ID=$NEXT_PUBLIC_GOOGLE_CLIENT_ID
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY . .
 # next/font downloads the fonts here, so the build needs the network; the

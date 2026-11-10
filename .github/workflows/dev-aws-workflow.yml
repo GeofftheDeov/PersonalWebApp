@@ -14,6 +14,11 @@ env:
   ECS_TASK_DEFINITION: .aws/dev-task-definition.json
   CONTAINER_BACKEND: backend
   CONTAINER_FRONTEND: frontend
+  # Hearthside (spec #69): the third container in the same task, on port 3002.
+  ECR_HEARTHSIDE_REPOSITORY: personal-web-app-hearthside
+  CONTAINER_HEARTHSIDE: hearthside
+  PORTFOLIO_ORIGIN: https://deov.geoffthedeov.net
+  HEARTHSIDE_ORIGIN: https://deov.hearthside.geoffthedeov.net
 
 permissions:
   contents: write
@@ -28,6 +33,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Hearthside runs in the task from its first deploy, but nothing routes
+      # to it until the ALB rule, certificate and DNS exist
+      # (scripts/hearthside-wizard.sh). HEARTHSIDE_LIVE, a variable on the
+      # GitHub "development" environment, is the switch the wizard turns on as
+      # its last stage. On, it sets the backend's HEARTHSIDE_URL (#214's links,
+      # #215's site allowlist) and the portfolio's NEXT_PUBLIC_HEARTHSIDE_URL
+      # (#234's redirects). Off or unset, both are empty, so no link or
+      # redirect leads to a host that isn't serving yet.
+      - name: Read the Hearthside switch
+        id: hearthside
+        env:
+          HEARTHSIDE_LIVE: ${{ vars.HEARTHSIDE_LIVE }}
+        run: |
+          case "$HEARTHSIDE_LIVE" in
+            true)
+              echo "url=$HEARTHSIDE_ORIGIN" >> "$GITHUB_OUTPUT"
+              echo "Hearthside is live: HEARTHSIDE_URL=$HEARTHSIDE_ORIGIN" ;;
+            ""|false)
+              echo "url=" >> "$GITHUB_OUTPUT"
+              echo "Hearthside isn't live yet: HEARTHSIDE_URL stays empty" ;;
+            *)
+              echo "::error::The development environment's HEARTHSIDE_LIVE must be true or false (got '$HEARTHSIDE_LIVE')"
+              exit 1 ;;
+          esac
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -40,6 +70,25 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
+
+      # Hearthside's images have their own ECR repository, shared by dev and
+      # prod like the others. The first deploy with Hearthside creates it; if
+      # the deploy user may not, stop here, before any build or migration, and
+      # let the wizard's first stage create it.
+      - name: Make sure Hearthside's image repository exists
+        run: |
+          if out=$(aws ecr describe-repositories --repository-names "$ECR_HEARTHSIDE_REPOSITORY" 2>&1); then
+            echo "ECR repository $ECR_HEARTHSIDE_REPOSITORY exists."
+          elif ! grep -q RepositoryNotFoundException <<<"$out"; then
+            echo "$out"
+            echo "::error::Couldn't check for ECR repository $ECR_HEARTHSIDE_REPOSITORY (above)."
+            exit 1
+          elif aws ecr create-repository --repository-name "$ECR_HEARTHSIDE_REPOSITORY" >/dev/null; then
+            echo "Created ECR repository $ECR_HEARTHSIDE_REPOSITORY."
+          else
+            echo "::error::No ECR repository $ECR_HEARTHSIDE_REPOSITORY, and the deploy user can't create it. Run 'scripts/hearthside-wizard.sh dev' (its stage 2 creates it), then re-run this deploy."
+            exit 1
+          fi
 
       # Schema migrations (backend/db/migrations, scripts/apply-migration.ts).
       # Dry-run now, so a migration that fails on dev's data stops the deploy
@@ -95,8 +144,27 @@ jobs:
             -t $ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:dev \
             --build-arg NEXT_PUBLIC_GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }} \
             --build-arg NEXT_PUBLIC_API_URL=https://deov.geoffthedeov.net/api \
+            --build-arg NEXT_PUBLIC_HEARTHSIDE_URL=${{ steps.hearthside.outputs.url }} \
             --push .
           echo "image=$ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Build, tag, and push Hearthside image to Amazon ECR
+        id: build-hearthside-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        # From the repo root, like the portfolio (#216). Its /api rewrites go
+        # to the backend container in the same task (the Dockerfile's default
+        # BACKEND_URL), and the top bar links back to the portfolio's origin.
+        run: |
+          docker buildx build --platform linux/amd64 \
+            -f hearthside/Dockerfile \
+            -t $ECR_REGISTRY/$ECR_HEARTHSIDE_REPOSITORY:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_HEARTHSIDE_REPOSITORY:dev \
+            --build-arg NEXT_PUBLIC_PORTFOLIO_URL=$PORTFOLIO_ORIGIN \
+            --build-arg NEXT_PUBLIC_GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }} \
+            --push .
+          echo "image=$ECR_REGISTRY/$ECR_HEARTHSIDE_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
       - name: Fill in the new backend image ID in the Amazon ECS task definition
         id: backend-task-def
@@ -129,6 +197,7 @@ jobs:
             SESSION_COOKIE_NAME=gtd_session_deov
             SESSION_COOKIE_DOMAIN=.geoffthedeov.net
             SESSION_COOKIE_ORIGINS=https://deov.geoffthedeov.net,https://deov.hearthside.geoffthedeov.net
+            HEARTHSIDE_URL=${{ steps.hearthside.outputs.url }}
 
       - name: Fill in the new frontend image ID in the Amazon ECS task definition
         id: frontend-task-def
@@ -137,6 +206,14 @@ jobs:
           task-definition: ${{ steps.backend-task-def.outputs.task-definition }}
           container-name: ${{ env.CONTAINER_FRONTEND }}
           image: ${{ steps.build-frontend-image.outputs.image }}
+
+      - name: Fill in the new Hearthside image ID in the Amazon ECS task definition
+        id: hearthside-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ steps.frontend-task-def.outputs.task-definition }}
+          container-name: ${{ env.CONTAINER_HEARTHSIDE }}
+          image: ${{ steps.build-hearthside-image.outputs.image }}
 
       - name: Apply pending migrations to the dev database
         working-directory: backend
@@ -148,7 +225,7 @@ jobs:
       - name: Deploy Amazon ECS task definition
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
-          task-definition: ${{ steps.frontend-task-def.outputs.task-definition }}
+          task-definition: ${{ steps.hearthside-task-def.outputs.task-definition }}
           service: ${{ env.ECS_SERVICE }}
           cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true

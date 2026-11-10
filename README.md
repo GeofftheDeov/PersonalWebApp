@@ -54,3 +54,12 @@ Both images build from the repo root: `docker build -f frontend/Dockerfile .` an
 ## Deployment
 
 The application is containerized with Docker. Use `docker-compose up` to run the entire stack locally in containers.
+
+Dev and prod each run as one ECS task with three containers: the backend (5000), the portfolio (3000/3001) and
+Hearthside (3002), behind one ALB that picks the container by host. Pushes to `dev` deploy dev
+(`dev-aws-workflow.yml`) and pushes to `main` deploy prod (`backend-aws-workflow.yml`); both build all three images.
+
+Hearthside's load balancer rule, certificate, DNS and Google origins are set up by hand, once per environment, with
+`scripts/hearthside-wizard.sh dev` (then `prod`). Its last stage turns on `HEARTHSIDE_LIVE`, the GitHub environment
+variable that gives the backend `HEARTHSIDE_URL` and the portfolio's build `NEXT_PUBLIC_HEARTHSIDE_URL` (for its
+redirects to Hearthside, #234). Until then the Hearthside container runs but nothing routes or links to it.

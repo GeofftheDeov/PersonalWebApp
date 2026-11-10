@@ -29,6 +29,10 @@ name: Deploy to Amazon ECS
 on:
   push:
     branches: [ "main" ]
+  # To redeploy main by hand, e.g. after turning the Hearthside switch on
+  # (scripts/hearthside-wizard.sh prod). Only main deploys: the job below
+  # refuses any other ref.
+  workflow_dispatch:
 
 env:
   AWS_REGION: us-east-2                   # set this to your preferred AWS region, e.g. us-west-1
@@ -40,10 +44,17 @@ env:
                                                # file, e.g. .aws/task-definition.json
   CONTAINER_BACKEND: backend                   # set this to the backend container name
   CONTAINER_FRONTEND: frontend                 # set this to the frontend container name
+  # Hearthside (spec #69): the third container in the same task, on port 3002.
+  ECR_HEARTHSIDE_REPOSITORY: personal-web-app-hearthside
+  CONTAINER_HEARTHSIDE: hearthside
+  PORTFOLIO_ORIGIN: https://geoffthedeov.net
+  HEARTHSIDE_ORIGIN: https://hearthside.geoffthedeov.net
 
 jobs:
   deploy:
     name: Deploy
+    # workflow_dispatch can name any branch; prod only ever deploys main.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production
     permissions:
@@ -52,6 +63,31 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v4
+
+    # Hearthside runs in the task from its first deploy, but nothing routes to
+    # it until the ALB rule and DNS exist (scripts/hearthside-wizard.sh).
+    # HEARTHSIDE_LIVE, a variable on the GitHub "production" environment, is
+    # the switch the wizard turns on as its last stage. On, it sets the
+    # backend's HEARTHSIDE_URL (#214's links, #215's site allowlist) and the
+    # portfolio's NEXT_PUBLIC_HEARTHSIDE_URL (#234's redirects). Off or unset,
+    # both are empty, so no link or redirect leads to a host that isn't
+    # serving yet.
+    - name: Read the Hearthside switch
+      id: hearthside
+      env:
+        HEARTHSIDE_LIVE: ${{ vars.HEARTHSIDE_LIVE }}
+      run: |
+        case "$HEARTHSIDE_LIVE" in
+          true)
+            echo "url=$HEARTHSIDE_ORIGIN" >> "$GITHUB_OUTPUT"
+            echo "Hearthside is live: HEARTHSIDE_URL=$HEARTHSIDE_ORIGIN" ;;
+          ""|false)
+            echo "url=" >> "$GITHUB_OUTPUT"
+            echo "Hearthside isn't live yet: HEARTHSIDE_URL stays empty" ;;
+          *)
+            echo "::error::The production environment's HEARTHSIDE_LIVE must be true or false (got '$HEARTHSIDE_LIVE')"
+            exit 1 ;;
+        esac
 
     # The Postgres cutover (#45) ships this task definition with a placeholder
     # for the DATABASE_URL secret ARN, filled in only once the secret exists
@@ -77,6 +113,25 @@ jobs:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
+
+    # Hearthside's images have their own ECR repository, shared by dev and
+    # prod like the others. The first deploy with Hearthside creates it; if
+    # the deploy user may not, stop here, before any build or migration, and
+    # let the wizard's first stage create it.
+    - name: Make sure Hearthside's image repository exists
+      run: |
+        if out=$(aws ecr describe-repositories --repository-names "$ECR_HEARTHSIDE_REPOSITORY" 2>&1); then
+          echo "ECR repository $ECR_HEARTHSIDE_REPOSITORY exists."
+        elif ! grep -q RepositoryNotFoundException <<<"$out"; then
+          echo "$out"
+          echo "::error::Couldn't check for ECR repository $ECR_HEARTHSIDE_REPOSITORY (above)."
+          exit 1
+        elif aws ecr create-repository --repository-name "$ECR_HEARTHSIDE_REPOSITORY" >/dev/null; then
+          echo "Created ECR repository $ECR_HEARTHSIDE_REPOSITORY."
+        else
+          echo "::error::No ECR repository $ECR_HEARTHSIDE_REPOSITORY, and the deploy user can't create it. Run 'scripts/hearthside-wizard.sh prod' (its stage 2 creates it), then re-run this deploy."
+          exit 1
+        fi
 
     # Schema migrations (backend/db/migrations, scripts/apply-migration.ts).
     # Dry-run now, so a migration that fails on prod's data stops the deploy
@@ -195,8 +250,31 @@ jobs:
           -t $ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:prod \
           --build-arg NEXT_PUBLIC_GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }} \
           --build-arg NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }} \
+          --build-arg NEXT_PUBLIC_HEARTHSIDE_URL=${{ steps.hearthside.outputs.url }} \
           --push .
         echo "image=$ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+    - name: Build, tag, and push Hearthside image to Amazon ECR
+      id: build-hearthside-image
+      timeout-minutes: 45
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: ${{ github.sha }}
+      # From the repo root, like the portfolio (#216). Its /api rewrites go to
+      # the backend container in the same task (the Dockerfile's default
+      # BACKEND_URL), and the top bar links back to the portfolio's origin.
+      run: |
+        docker buildx build --platform linux/arm64 \
+          -f hearthside/Dockerfile \
+          --cache-from type=gha,scope=hearthside \
+          --cache-to type=gha,mode=max,scope=hearthside \
+          --provenance=false \
+          -t $ECR_REGISTRY/$ECR_HEARTHSIDE_REPOSITORY:$IMAGE_TAG \
+          -t $ECR_REGISTRY/$ECR_HEARTHSIDE_REPOSITORY:prod \
+          --build-arg NEXT_PUBLIC_PORTFOLIO_URL=$PORTFOLIO_ORIGIN \
+          --build-arg NEXT_PUBLIC_GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }} \
+          --push .
+        echo "image=$ECR_REGISTRY/$ECR_HEARTHSIDE_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
     - name: Fill in the new backend image ID in the Amazon ECS task definition
       id: backend-task-def
@@ -222,6 +300,7 @@ jobs:
           SESSION_COOKIE_DOMAIN=.geoffthedeov.net
           SESSION_COOKIE_ORIGINS=https://geoffthedeov.net,https://www.geoffthedeov.net,https://hearthside.geoffthedeov.net
           PORTFOLIO_ORIGINS=https://www.geoffthedeov.net
+          HEARTHSIDE_URL=${{ steps.hearthside.outputs.url }}
 
     - name: Fill in the new frontend image ID in the Amazon ECS task definition
       id: frontend-task-def
@@ -230,6 +309,14 @@ jobs:
         task-definition: ${{ steps.backend-task-def.outputs.task-definition }}
         container-name: ${{ env.CONTAINER_FRONTEND }}
         image: ${{ steps.build-frontend-image.outputs.image }}
+
+    - name: Fill in the new Hearthside image ID in the Amazon ECS task definition
+      id: hearthside-task-def
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
+      with:
+        task-definition: ${{ steps.frontend-task-def.outputs.task-definition }}
+        container-name: ${{ env.CONTAINER_HEARTHSIDE }}
+        image: ${{ steps.build-hearthside-image.outputs.image }}
 
     - name: Apply pending migrations to the prod database
       working-directory: backend
@@ -241,7 +328,7 @@ jobs:
     - name: Deploy Amazon ECS task definition
       uses: aws-actions/amazon-ecs-deploy-task-definition@v2
       with:
-        task-definition: ${{ steps.frontend-task-def.outputs.task-definition }}
+        task-definition: ${{ steps.hearthside-task-def.outputs.task-definition }}
         service: ${{ env.ECS_SERVICE }}
         cluster: ${{ env.ECS_CLUSTER }}
         wait-for-service-stability: true

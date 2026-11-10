@@ -23,9 +23,15 @@ WORKDIR /app
 ARG BACKEND_URL=http://localhost:5000
 ARG NEXT_PUBLIC_API_URL
 ARG NEXT_PUBLIC_GOOGLE_CLIENT_ID
+# Hearthside's origin (spec #69), for the portfolio's links to it and its 308
+# redirects of /game-night/... (#234). Empty means Hearthside isn't live in
+# this environment yet: treat "" as unset. The deploy workflows pass it only
+# once the environment's HEARTHSIDE_LIVE switch is on (scripts/hearthside-wizard.sh).
+ARG NEXT_PUBLIC_HEARTHSIDE_URL
 ENV BACKEND_URL=$BACKEND_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_GOOGLE_CLIENT_ID=$NEXT_PUBLIC_GOOGLE_CLIENT_ID
+ENV NEXT_PUBLIC_HEARTHSIDE_URL=$NEXT_PUBLIC_HEARTHSIDE_URL
 COPY . .
 RUN npm run build --workspace frontend
 

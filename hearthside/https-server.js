@@ -58,9 +58,13 @@ const prepared = app.prepare();
 const redact = (url) => url.replace(/([?&]token=)[^&]+/, '$1***');
 
 const requestHandler = async (req, res) => {
-    // Immediate health check response (even if Next.js isn't ready)
+    // Immediate health check response (even if Next.js isn't ready). The
+    // portfolio answers these too, so X-Served-By says which site answered:
+    // scripts/hearthside-wizard.sh checks it to prove the ALB rule and DNS
+    // reach this container and not the portfolio's.
     if (req.url === '/health' || req.url === '/ping') {
         res.statusCode = 200;
+        res.setHeader('X-Served-By', 'hearthside');
         res.end('ok');
         return;
     }

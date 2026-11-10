@@ -77,8 +77,12 @@ jobs:
       # let the wizard's first stage create it.
       - name: Make sure Hearthside's image repository exists
         run: |
-          if aws ecr describe-repositories --repository-names "$ECR_HEARTHSIDE_REPOSITORY" >/dev/null 2>&1; then
+          if out=$(aws ecr describe-repositories --repository-names "$ECR_HEARTHSIDE_REPOSITORY" 2>&1); then
             echo "ECR repository $ECR_HEARTHSIDE_REPOSITORY exists."
+          elif ! grep -q RepositoryNotFoundException <<<"$out"; then
+            echo "$out"
+            echo "::error::Couldn't check for ECR repository $ECR_HEARTHSIDE_REPOSITORY (above)."
+            exit 1
           elif aws ecr create-repository --repository-name "$ECR_HEARTHSIDE_REPOSITORY" >/dev/null; then
             echo "Created ECR repository $ECR_HEARTHSIDE_REPOSITORY."
           else

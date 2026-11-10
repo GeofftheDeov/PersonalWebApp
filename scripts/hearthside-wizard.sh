@@ -408,8 +408,10 @@ pause
 stage "Hearthside's image repository and container"
 say "The deploy builds Hearthside into ECR repository $ECR_REPO and runs it as the"
 say "'$CONTAINER' container in the $ENV_NAME task. Nothing routes to it yet."
-if aws ecr describe-repositories --repository-names "$ECR_REPO" >/dev/null 2>&1; then
+if ECR_OUT=$(aws ecr describe-repositories --repository-names "$ECR_REPO" 2>&1); then
   pass "ECR repository $ECR_REPO exists"
+elif ! grep -q RepositoryNotFoundException <<<"$ECR_OUT"; then
+  stop "Couldn't check for ECR repository $ECR_REPO: $ECR_OUT"
 else
   warn "No ECR repository $ECR_REPO. The deploy creates it if it may; create it here if the deploy failed on it."
   change "Create the repository (mutable tags, like the portfolio's: :dev and :prod move):" \
@@ -429,8 +431,15 @@ if none "$IMAGE"; then
   exit 1
 fi
 pass "task definition ${TASK_DEF_ARN##*/} runs $IMAGE"
-TASK=$(aws ecs list-tasks --cluster "$CLUSTER" --service-name "$SERVICE" --desired-status RUNNING --query 'taskArns[0]' --output text)
-STATUS=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK" --query "tasks[0].containers[?name=='$CONTAINER'].lastStatus | [0]" --output text 2>/dev/null || true)
+# A task of the current task definition: during a rolling deploy an older
+# task (without Hearthside) may still be running beside it.
+TASKS=$(aws ecs list-tasks --cluster "$CLUSTER" --service-name "$SERVICE" --desired-status RUNNING --query 'taskArns' --output text)
+TASK="" STATUS=""
+if [[ -n "$TASKS" && "$TASKS" != None ]]; then
+  # shellcheck disable=SC2086
+  read -r TASK STATUS < <(aws ecs describe-tasks --cluster "$CLUSTER" --tasks $TASKS \
+    --query "tasks[?taskDefinitionArn=='$TASK_DEF_ARN'] | [0].[taskArn, containers[?name=='$CONTAINER'].lastStatus | [0]]" --output text 2>/dev/null) || true
+fi
 if [[ "$STATUS" == RUNNING ]]; then
   pass "the $CONTAINER container is RUNNING in task ${TASK##*/}"
 else

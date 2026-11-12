@@ -112,9 +112,11 @@ body.hs-app{margin:0;min-height:100vh;-webkit-font-smoothing:antialiased}
 .hs-roster-sec{display:flex;flex-direction:column;gap:16px;min-width:0}
 .hs-roster-sec > .hs-sec{margin:0}
 .hs-status-strip{padding:6px}
-.hs-status-strip .hs-tabs{padding:0 8px;border-bottom:0;overflow-x:auto;scrollbar-width:none}
+.hs-status-strip .hs-tabs{padding:0 8px;border-bottom:0}
 .hs-status-strip .hs-tabs button{white-space:nowrap;padding-inline:8px}
 .hs-status-strip .hs-count{color:var(--muted);font-family:var(--font-body);font-size:12px;margin-left:2px}
+/* Phones: the four tabs don't fit in a row, so they make two. */
+@media (max-width:479px){.hs-status-strip .hs-tabs{display:grid;grid-template-columns:1fr 1fr}}
 .hs-roster{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:16px;container:hs-roster/inline-size}
 .hs-roster-empty{margin:0;padding:28px 16px;text-align:center;color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow)}
 /* At least 4:1, so a whole banner shows; it grows if the panel needs room, and the banner covers it. */

@@ -13,7 +13,9 @@ test("logging in on the portfolio logs you in on Hearthside, with a Secure cooki
   await page.getByPlaceholder("name@example.com").fill(player.email);
   await page.getByPlaceholder("••••••••").fill(player.password);
   await page.getByRole("button", { name: "SIGN IN", exact: true }).click();
-  await expect(page).toHaveURL(/\/dashboard$/);
+  // The dashboard's first visit compiles it (dev mode), which under the whole suite's load can take most of
+  // 15s: give it the navigation budget (playwright.config.ts), not the assertion one.
+  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 45_000 });
 
   const cookie = (await context.cookies()).find((c) => c.name === stack.cookie.name);
   expect(cookie).toMatchObject({ domain: stack.cookie.domain, secure: true, httpOnly: true, sameSite: "Lax" });

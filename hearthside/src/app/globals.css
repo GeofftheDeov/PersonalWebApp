@@ -54,6 +54,108 @@ body.hs-app{margin:0;min-height:100vh;-webkit-font-smoothing:antialiased}
   .hs-bar.is-open .hs-nav{display:flex}
 }
 
+/* ---------- Dialogs and forms (GildedDialog; #223) ----------
+   Not in the design system yet: these follow the campaign-page prototype. A dialog is gilded leather over a
+   dimmed room; only its content scrolls (the frame's corner flourishes reach past the panel). Fields on leather
+   follow the message composer (surface, line, radius). */
+.hs-dialog{width:min(100% - 32px,480px);max-width:none;max-height:none;padding:0;margin:auto;border:0;background:transparent;color:var(--text);overflow:visible}
+.hs-dialog.is-wide{width:min(100% - 32px,720px)}
+.hs-dialog::backdrop{background:rgba(10,6,3,.72);backdrop-filter:blur(2px)}
+.hs-dialog-pad{padding:14px 16px;max-height:calc(100dvh - 48px);overflow:hidden auto;overscroll-behavior:contain}
+.hs-dialog-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px}
+.hs-dialog-head h2{margin:0;font-family:var(--font-display);font-weight:400;font-size:21px;color:var(--text);text-wrap:balance}
+.hs-dialog-x{flex:none;width:30px;height:30px;padding:0;background:transparent;border:1px solid var(--line);border-radius:var(--radius);color:var(--muted);cursor:pointer;font-size:15px}
+.hs-dialog-x:hover{color:var(--text);border-color:var(--gold-line)}
+.hs-dialog-text{margin:0;font-size:16px;line-height:1.45}
+.hs-form{display:flex;flex-direction:column;gap:12px}
+.hs-field{display:flex;flex-direction:column;gap:4px;min-width:0}
+.hs-field > span{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.06em;color:var(--muted)}
+.hs-input{width:100%;min-width:0;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:8px 10px;color:var(--text);font:inherit;color-scheme:dark}
+.hs-input:focus{outline:none;border-color:var(--accent)}
+.hs-input:is(textarea){resize:vertical;min-height:70px;line-height:1.45}
+.hs-grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr));gap:12px}
+.hs-fine{margin:0;font-size:13px;color:var(--muted);line-height:1.45}
+.hs-alert{margin:0;font-size:13px;color:#f0a58f}
+.hs-actions{display:flex;gap:8px;flex-wrap:wrap}
+.hs-actions .hs-btn-amber,.hs-actions .hs-ghost{height:34px}
+.hs-btn-amber:disabled{opacity:.6;cursor:default}
+.hs-ghost{display:inline-flex;align-items:center;background:transparent;border:1px solid var(--line);color:var(--text);border-radius:var(--radius);padding:0 12px;height:30px;
+  cursor:pointer;font-family:var(--font-label);font-weight:500;letter-spacing:.04em}
+.hs-ghost:hover{border-color:var(--gold-line);color:var(--gold-hi)}
+.hs-ghost:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ---------- Campaign banners (CampaignBanner) ----------
+   4:1: the uploaded picture, or a dyed cloth with the campaign's initials stitched in gold. */
+.hs-banner{position:relative;aspect-ratio:4/1;width:100%;overflow:hidden;border-radius:2px;background:var(--leather);container-type:inline-size}
+.hs-banner img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+.hs-cloth{position:absolute;inset:0;display:grid;place-items:center;
+  background:
+    repeating-linear-gradient(45deg,rgba(0,0,0,.12) 0 1px,transparent 1px 5px),
+    repeating-linear-gradient(-45deg,rgba(255,255,255,.035) 0 1px,transparent 1px 5px),
+    radial-gradient(120% 140% at 15% 100%,rgba(255,179,107,.18),transparent 55%),
+    linear-gradient(160deg,var(--c1),var(--c2))}
+.hs-cloth::after{content:"";position:absolute;inset:8px;border:1px dashed rgba(246,221,150,.45);border-radius:2px}
+.hs-cloth span{font-family:var(--font-display);font-size:clamp(22px,6cqw,54px);letter-spacing:.12em;color:var(--gold-hi);opacity:.85;text-shadow:0 1px 0 rgba(0,0,0,.6)}
+
+/* ---------- Campaign status (StatusPill) ---------- */
+.hs-status{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.06em;
+  padding:3px 10px;border-radius:var(--radius-full);white-space:nowrap;border:1px solid var(--line);color:var(--muted)}
+.hs-status.is-live{border-color:rgba(229,161,58,.55);color:var(--accent)}
+.hs-status.is-live::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--firelight);box-shadow:0 0 6px var(--firelight)}
+.hs-status.is-done{background:var(--moss);border-color:var(--moss);color:var(--accent-ink)}
+.hs-when{font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.04em;color:var(--muted);font-variant-numeric:tabular-nums}
+
+/* ---------- The Campaigns page (layout B, "Roster"; #223) ---------- */
+.hs-campaigns-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+.hs-campaigns-head > div{min-width:0}
+.hs-campaigns-head .hs-new{height:36px;font-size:15px}
+.hs-roster-sec{display:flex;flex-direction:column;gap:16px;min-width:0}
+.hs-roster-sec > .hs-sec{margin:0}
+.hs-status-strip{padding:6px}
+.hs-status-strip .hs-tabs{padding:0 8px;border-bottom:0}
+.hs-status-strip .hs-tabs button{white-space:nowrap;padding-inline:8px}
+.hs-status-strip .hs-count{color:var(--muted);font-family:var(--font-body);font-size:12px;margin-left:2px}
+/* Phones: the four tabs don't fit in a row, so they make two. */
+@media (max-width:479px){.hs-status-strip .hs-tabs{display:grid;grid-template-columns:1fr 1fr}}
+.hs-roster{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:16px;container:hs-roster/inline-size}
+.hs-roster-empty{margin:0;padding:28px 16px;text-align:center;color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow)}
+/* At least 4:1, so a whole banner shows; it grows if the panel needs room, and the banner covers it. */
+.hs-roster-card{position:relative;aspect-ratio:4/1;min-width:0;padding:16px;display:flex;align-items:center;
+  border-radius:var(--radius-panel);outline:1px solid var(--gold-line);outline-offset:-1px;box-shadow:var(--shadow-panel);overflow:hidden}
+.hs-roster-card > .hs-banner{position:absolute;inset:0;aspect-ratio:auto;border-radius:0}
+.hs-roster-card > .hs-banner .hs-cloth{place-items:center end;padding-right:6%}
+.hs-roster-card > .hs-banner .hs-cloth::after{inset:6px}
+.hs-roster-info{position:relative;z-index:1;width:min(60%,440px);min-width:0;padding:14px 18px 15px;display:flex;flex-direction:column;gap:4px}
+.hs-roster-info h3{margin:0;font-family:var(--font-story);font-weight:400;font-size:22px;line-height:1.15;overflow-wrap:anywhere;text-wrap:balance}
+.hs-roster-title{color:var(--text);text-decoration:none}
+.hs-roster-title:hover{color:var(--gold-hi)}
+.hs-roster-meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;margin-bottom:2px}
+.hs-roster-desc{margin:0;color:var(--muted);font-size:14px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.hs-banner-tools{position:absolute;right:14px;bottom:14px;z-index:2;display:flex;gap:6px}
+.hs-banner-tool{background:rgba(26,19,14,.78);color:var(--text);border:1px solid var(--gold-line);border-radius:var(--radius);padding:4px 10px;
+  font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.04em;cursor:pointer;backdrop-filter:blur(2px);white-space:nowrap}
+.hs-banner-tool:hover{border-color:var(--gold);color:var(--gold-hi)}
+/* A narrow card (the shell's middle column on a laptop): the tools stack, so they stay clear of the panel. */
+@container hs-roster (max-width:560px){.hs-banner-tools{flex-direction:column;align-items:flex-end}}
+/* Phones: the banner is a strip across the top (the whole 4:1), the panel spans the card below it. */
+@media (max-width:619px){
+  .hs-roster-card{aspect-ratio:auto;flex-direction:column;align-items:stretch;padding:calc(25% + 4px) 10px 10px}
+  .hs-roster-card > .hs-banner{inset:0 0 auto;aspect-ratio:4/1}
+  .hs-roster-card > .hs-banner .hs-cloth{place-items:center;padding:0}
+  .hs-roster-info{width:auto}
+  .hs-banner-tools{top:10px;right:10px;bottom:auto;flex-direction:row}
+}
+
+/* The banner cropper (BannerEditor). */
+.hs-crop{position:relative;aspect-ratio:4/1;width:100%;overflow:hidden;background:var(--ground-2);border-radius:2px;outline:1px dashed var(--gold-line);outline-offset:2px;touch-action:none;user-select:none}
+.hs-crop:not(.is-empty){cursor:grab}
+.hs-crop img{position:absolute;left:0;top:0;max-width:none;pointer-events:none}
+.hs-crop-pick{position:absolute;inset:0;display:grid;place-items:center;cursor:pointer;font-family:var(--font-label);letter-spacing:.06em;color:var(--muted)}
+.hs-crop-pick:hover,.hs-crop-pick:focus-within{color:var(--gold-hi)}
+.hs-crop-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px}
+.hs-zoom{flex:1;min-width:12rem;display:flex;gap:10px;align-items:center;font-family:var(--font-label);font-size:13px;color:var(--muted)}
+.hs-zoom input{flex:1;min-width:0;accent-color:var(--accent)}
+
 /* ---------- The top bar ----------
    The shared GeofftheDeov bar keeps the portfolio's look (light and dark) on Hearthside. Its wrapper takes no
    box of its own (so the bar stays sticky against the page) but sets the portfolio's type, and a reset

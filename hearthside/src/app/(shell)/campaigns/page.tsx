@@ -57,8 +57,12 @@ export default function CampaignsPage() {
     ]).then(([s, c]) => { if (s && c) setTally({ sessions: s.length, characters: c.length }); });
   }, [status, load]);
 
-  const setBanner = (id: string, banner: Banner) =>
+  // A banner saved or removed: show it on its card and close its dialog. Only that dialog: the save may
+  // finish after the dialog was closed with Escape and another opened.
+  const setBanner = (id: string, banner: Banner) => {
     setCampaigns((list) => list && list.map((c) => (c._id === id ? { ...c, ...banner } : c)));
+    setOpen((o) => (o && o.kind !== 'new' && o.campaign._id === id ? null : o));
+  };
 
   const all = campaigns ?? [];
   const counts = countByStatus(all);
@@ -121,14 +125,14 @@ export default function CampaignsPage() {
         <BannerEditor
           campaignId={open.campaign._id}
           onClose={() => setOpen(null)}
-          onSaved={(b) => { setBanner(open.campaign._id, b); setOpen(null); }}
+          onSaved={(b) => setBanner(open.campaign._id, b)}
         />
       )}
       {open?.kind === 'remove' && (
         <RemoveBannerDialog
           campaign={open.campaign}
           onClose={() => setOpen(null)}
-          onRemoved={(b) => { setBanner(open.campaign._id, b); setOpen(null); }}
+          onRemoved={(b) => setBanner(open.campaign._id, b)}
         />
       )}
     </>

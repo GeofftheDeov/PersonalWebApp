@@ -29,12 +29,20 @@ export default function GildedDialog({ title, onClose, wide = false, children }:
   const titleId = useId();
   const close = useRef(onClose);
   close.current = onClose;
+  // Whether the press began on the dimmed room: a drag out of a field that ends there isn't a click on it.
+  const pressedRoom = useRef(false);
 
   useEffect(() => {
     const d = ref.current;
     if (!d) return;
+    // However the browser closes it (Escape included), tell the parent, which unmounts it.
+    const closed = () => close.current();
+    d.addEventListener('close', closed);
     if (!d.open) d.showModal();
-    return () => { if (d.open) d.close(); };
+    return () => {
+      d.removeEventListener('close', closed);
+      if (d.open) d.close();
+    };
   }, []);
 
   return (
@@ -42,10 +50,9 @@ export default function GildedDialog({ title, onClose, wide = false, children }:
       ref={ref}
       className={wide ? 'hs-dialog is-wide' : 'hs-dialog'}
       aria-labelledby={titleId}
-      // Escape: the parent decides, by unmounting.
-      onCancel={(e) => { e.preventDefault(); close.current(); }}
-      // A click on the dialog itself, not its panel, is on the dimmed room.
-      onClick={(e) => { if (e.target === e.currentTarget) close.current(); }}
+      // The dialog itself, not its panel, is the dimmed room around it.
+      onPointerDown={(e) => { pressedRoom.current = e.target === e.currentTarget; }}
+      onClick={(e) => { if (pressedRoom.current && e.target === e.currentTarget) close.current(); }}
     >
       <GildedPanel className="hs-dialog-panel">
         <div className="hs-dialog-pad">

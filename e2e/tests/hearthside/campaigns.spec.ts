@@ -72,6 +72,11 @@ test("creating a campaign from the dialog adds its card", async ({ page, newPers
   await page.getByRole("button", { name: "New campaign" }).click();
   const dialog = page.getByRole("dialog", { name: "New campaign" });
   await expect(dialog).toBeVisible();
+  // Escape closes it, and it opens again.
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await page.getByRole("button", { name: "New campaign" }).click();
+  await expect(dialog).toBeVisible();
   await dialog.getByLabel("Title").fill("The Drowned Chapel");
   await dialog.getByLabel("Description").fill("Bells ring under the lake.");
   await dialog.getByLabel("Starts").fill("2026-12-05");

@@ -33,6 +33,10 @@ export default function Letters() {
   const [filter, setFilter] = useState<ThreadFilter>('all');
   const { threads, totalUnread, loading, error, markRead } = useThreads({ filter, enabled: signedIn });
   const heading = useRef<HTMLHeadingElement>(null);
+  // The list starts empty and not loading, before its first fetch: don't call that "no letters".
+  const [fetched, setFetched] = useState(false);
+  useEffect(() => { if (loading) setFetched(true); }, [loading]);
+  const settled = fetched && !loading;
 
   // A page opened a thread: bring Letters into view (on a phone it's at the foot of the page).
   useEffect(() => {
@@ -54,7 +58,6 @@ export default function Letters() {
             letter={open}
             markRead={markRead}
             onBack={control.close}
-            summoned={summoned}
           />
         ) : (
           <>
@@ -90,14 +93,14 @@ export default function Letters() {
                 </li>
               ))}
             </ul>
-            {threads.length === 0 && !loading && !error && (
+            {threads.length === 0 && settled && !error && (
               <p className="hs-panel-note">
                 {filter === 'friends'
                   ? 'No letters from friends yet.'
                   : filter === 'campaigns' ? 'No campaigns under way.' : 'No letters yet. Your campaigns’ Table Talk and your friends’ letters land here.'}
               </p>
             )}
-            {threads.length === 0 && loading && <p className="hs-panel-note">Fetching your letters…</p>}
+            {threads.length === 0 && !settled && !error && <p className="hs-panel-note">Fetching your letters…</p>}
             {error && <p className="hs-panel-note hs-panel-error" role="alert">{error}</p>}
           </>
         )}

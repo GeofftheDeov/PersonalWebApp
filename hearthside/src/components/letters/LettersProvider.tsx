@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
 import { initials } from '@/lib/lettersFormat';
 
 /** The thread Letters has open: what it needs to name it before the thread list has it (a first DM). */
@@ -13,6 +13,8 @@ export interface OpenLetter {
   subtitle: string;
   /** Up to two initials for the avatar. */
   avatarHint: string;
+  /** Set when a page asked for this thread (not the list): its compose box takes focus. */
+  summon?: number;
 }
 
 export interface LettersControl {
@@ -44,15 +46,17 @@ export function LettersProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState<OpenLetter | null>(null);
   const [summoned, setSummoned] = useState(0);
 
+  const summons = useRef(0);
   const summon = useCallback((letter: OpenLetter) => {
-    setOpen(letter);
-    setSummoned((n) => n + 1);
+    const n = ++summons.current;
+    setOpen({ ...letter, summon: n });
+    setSummoned(n);
   }, []);
 
   const control = useMemo<LettersControl>(() => ({
     open,
     summoned,
-    show: setOpen,
+    show: (letter) => setOpen({ ...letter, summon: undefined }),
     openDm: (personId, name) =>
       summon({ kind: 'dm', id: personId, title: name, subtitle: 'Friend', avatarHint: initials(name) }),
     openCampaign: (campaignId, title) =>

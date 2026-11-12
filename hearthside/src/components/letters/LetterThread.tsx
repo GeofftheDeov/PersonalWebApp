@@ -17,13 +17,12 @@ const LIVE_LABEL: Record<string, string> = { open: 'Live', connecting: 'Connecti
  * useThreadScroll, useTyping, useAttachmentDraft); this only draws them in
  * the design system's Letters markup.
  */
-export default function LetterThread({ letter, markRead, onBack, summoned }: {
+export default function LetterThread({ letter, markRead, onBack }: {
+  /** The thread; one a page asked for (`summon` set) puts the compose box in focus. */
   letter: OpenLetter;
   /** useThreads' markRead, so the list's count clears at once. */
   markRead: (threadKey: string, messageId: string) => void;
   onBack: () => void;
-  /** Changes when a page asked for this thread: the compose box takes focus. */
-  summoned: number;
 }) {
   const myId = useSession().user?.id ?? null;
   const threadKey = letters.threadKeyFor(letter.kind, letter.id);
@@ -35,7 +34,7 @@ export default function LetterThread({ letter, markRead, onBack, summoned }: {
   const [text, setText] = useState('');
   const input = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { if (summoned) input.current?.focus({ preventScroll: true }); }, [summoned]);
+  useEffect(() => { if (letter.summon) input.current?.focus({ preventScroll: true }); }, [letter.summon]);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();

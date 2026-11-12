@@ -35,8 +35,10 @@ export default function GildedDialog({ title, onClose, wide = false, children }:
   useEffect(() => {
     const d = ref.current;
     if (!d) return;
-    // However the browser closes it (Escape included), tell the parent, which unmounts it.
-    const closed = () => close.current();
+    // However the browser closes it (Escape included), tell the parent, which unmounts it. The event is
+    // queued, so one from an earlier close (React's development double mount closes and reopens it) can
+    // arrive with the dialog open again: that one isn't a close.
+    const closed = () => { if (!d.open) close.current(); };
     d.addEventListener('close', closed);
     if (!d.open) d.showModal();
     return () => {

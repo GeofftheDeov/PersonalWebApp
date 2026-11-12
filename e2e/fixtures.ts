@@ -11,14 +11,15 @@
  *   portfolio    url(path) on the portfolio, for a spec that visits both sites.
  *   hearthside   url(path) on Hearthside.
  *   party        the seeded party (stack/party.ts): gm, players[0..1], outsider, campaign.
- *   signIn       signIn(person): this test's browser is signed in on both sites,
+ *   signIn       signIn(person, context?): this test's browser (or another
+ *                context, for a second person in the same test) is signed in on both sites,
  *                with the backend's own session cookie on the parent domain.
  *   apiAs        apiAs(person): an APIRequestContext on the backend as them
  *                (bearer, so no CSRF header): seed what a test needs through the API.
  *   newPerson    newPerson(name): a fresh account, for a test that changes
  *                someone and so mustn't use the shared party.
  */
-import { test as base, expect, request, type APIRequestContext } from "@playwright/test";
+import { test as base, expect, request, type APIRequestContext, type BrowserContext } from "@playwright/test";
 import crypto from "node:crypto";
 import { bearerFor, backendCall, signUp, type Party, type Person } from "./stack/party";
 import { STACK_ENV, type Stack } from "./stack/stack";
@@ -38,7 +39,7 @@ interface Fixtures {
   portfolio: SiteUrls;
   hearthside: SiteUrls;
   party: Party;
-  signIn: (person: Pick<Person, "email" | "password">) => Promise<void>;
+  signIn: (person: Pick<Person, "email" | "password">, other?: BrowserContext) => Promise<void>;
   apiAs: (person: Pick<Person, "email" | "password">) => Promise<APIRequestContext>;
   newPerson: (name: string) => Promise<Person>;
 }
@@ -61,8 +62,8 @@ export const test = base.extend<Options & Fixtures, WorkerFixtures>({
   hearthside: async ({ stack }, use) => use(siteUrls(stack.hearthside)),
   party: async ({ stack }, use) => use(stack.party),
 
-  signIn: async ({ context, stack }, use) => {
-    await use(async (person) => {
+  signIn: async ({ context: own, stack }, use) => {
+    await use(async (person, context = own) => {
       const { setCookie } = await backendCall(stack.backend, "POST", "/api/users/login", { body: { email: person.email, password: person.password } });
       const issued = setCookie.find((c) => c.startsWith(`${stack.cookie.name}=`));
       if (!issued) throw new Error(`Login set no ${stack.cookie.name} cookie: ${JSON.stringify(setCookie)}`);

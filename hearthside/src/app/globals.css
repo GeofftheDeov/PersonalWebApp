@@ -84,3 +84,57 @@ body.hs-app{margin:0;min-height:100vh;-webkit-font-smoothing:antialiased}
 /* The portfolio's classes the bar uses, from its global CSS. */
 .hs-topbar .font-permanent{font-family:var(--hs-font-marker),"Permanent Marker",cursive}
 .hs-topbar .custom-scrollbar{scrollbar-width:thin}
+
+/* ---------- Letters and Your Quests in the shell (#221) ----------
+   Additions to the design system's Letters and QuestList for what the live panels draw that its static markup
+   doesn't: buttons for thread rows, notes, failed sends, attachments and the draft. Every colour is a token. */
+
+/* Letters stays in view below the sticky top bar (about 72px tall) as the page scrolls. */
+.hs-letters-col{top:calc(env(safe-area-inset-top,0px) + 88px)}
+
+/* A line of quiet text inside a gilded panel: loading, empty, or what went wrong. */
+.hs-panel-note{margin:0;padding:11px 14px;font-size:13px;color:var(--muted)}
+.hs-panel-error,.hs-letters-error{color:var(--firelight)}
+
+/* ---------- Your Quests ---------- */
+.hs-quest-name{overflow-wrap:anywhere}
+.hs-quest-where{display:block;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}
+.hs-quest-where:hover{color:var(--accent)}
+.hs-box:disabled{cursor:default}
+
+/* ---------- Letters: the thread list ---------- */
+.hs-threads{max-height:min(55vh,480px);overflow-y:auto}
+/* Each row is a button (so it's reachable and named), laid out as the design system's row. */
+.hs-threads li{display:block;padding:0}
+.hs-thread-row{display:grid;grid-template-columns:38px minmax(0,1fr) auto;gap:10px;align-items:start;width:100%;
+  padding:11px 14px;border:0;border-radius:0;background:transparent;color:inherit;text-align:left;cursor:pointer}
+.hs-thread-row:hover{background:rgba(229,161,58,.08)}
+.hs-thread-text{display:flex;flex-direction:column;min-width:0}
+.hs-thread-name,.hs-thread-sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ---------- Letters: the open thread ---------- */
+.hs-convo-head{grid-template-columns:auto 38px minmax(0,1fr) auto}
+.hs-convo-head .hs-back{align-self:center;justify-content:center;height:32px;padding:0;font-size:16px}
+.hs-convo-head .hs-thread-name{margin:0;font-family:inherit;font-size:14px;font-weight:500;line-height:1.3}
+.hs-live{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.06em;color:var(--moss);display:inline-flex;align-items:center;gap:6px}
+.hs-live::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.hs-live.is-off{color:var(--muted)}
+.hs-convo{min-height:200px}
+.hs-convo-note{margin:auto 0;text-align:center;font-size:13px;color:var(--muted)}
+.hs-msg{min-width:0;overflow-wrap:anywhere}
+.hs-msg-body{margin:0;white-space:pre-wrap}
+.hs-msg-time{font-size:11px;opacity:.7;margin-left:6px}
+.hs-msg.is-sending{opacity:.65}
+.hs-msg.is-failed{border:1px solid var(--seal)}
+.hs-msg-failed{display:block;margin-top:4px;font-size:12px}
+.hs-msg-failed button{background:none;border:0;padding:0;margin-left:8px;color:inherit;text-decoration:underline;cursor:pointer;font-size:12px}
+.hs-att{color:inherit;text-decoration:none;min-width:0}
+.hs-att-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hs-att small{flex:none;opacity:.7}
+.hs-att-img{display:block;margin-top:6px}
+.hs-att-img img{display:block;max-width:100%;max-height:240px;width:auto;height:auto;border-radius:var(--radius)}
+.hs-draft{display:flex;flex-wrap:wrap;gap:6px;padding:8px 14px 0;background:var(--surface);border-top:1px solid var(--gold-rule)}
+.hs-draft-file{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:2px 8px;border:1px dashed var(--line);border-radius:var(--radius);font-size:12px}
+.hs-draft-file button{background:none;border:0;padding:0;color:var(--muted);cursor:pointer;font-size:14px;line-height:1}
+.hs-compose .hs-btn-amber{height:36px}
+.hs-compose .hs-btn-amber:disabled{opacity:.6;cursor:default}

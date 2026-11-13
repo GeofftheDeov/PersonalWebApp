@@ -11,6 +11,7 @@ import { resolvePaperclipIdentity } from "../services/paperclipIdentity.js";
 import bcrypt from "bcryptjs";
 import { signJwt } from "../utils/jwt.js";
 import { clearSessionCookie, SESSION_TTL_S, setSessionCookie } from "../utils/sessionCookie.js";
+import { clearSignupCookie, setSignupCookie, signedUpHere, VERIFY_SIGN_IN_WINDOW_S } from "../utils/signupCookie.js";
 import crypto from "crypto";
 import multer from "multer";
 import path from "path";
@@ -121,7 +122,10 @@ async function bindPendingInvites(person: any): Promise<void> {
 
 router.post("/register", async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password } = req.body ?? {};
+    if (typeof email !== "string" || !email.trim() || typeof password !== "string" || !password) {
+      return res.status(400).json({ error: "An email and a password are required" });
+    }
     const isDev = isDevEnv();
     const token = isDev ? undefined : crypto.randomBytes(20).toString("hex");
 
@@ -139,6 +143,8 @@ router.post("/register", async (req, res) => {
 
     await user.save();
     await bindPendingInvites(user);
+    // This browser signed the account up, so verifying here may sign it in (#219).
+    if (!isDev) setSignupCookie(res, user._id);
     // The user is already saved, so a mail failure must not turn this into a 500.
     if (!isDev && token) await sendVerificationEmail(email, token, originSite(req).origin).catch((err: any) =>
       console.error("Register: verification email failed:", err.message));
@@ -148,13 +154,15 @@ router.post("/register", async (req, res) => {
       isVerified: isDev
     });
   } catch (error: any) {
+    // accounts.email is unique (citext). Login and forgot-password already say
+    // whether an email has an account, so saying it here gives nothing away.
+    if (error?.code === "23505") {
+      return res.status(409).json({ error: "An account with that email already exists. Sign in, or reset your password." });
+    }
     console.error("Register Error:", error);
     res.status(500).json({ error: "Failed to register user" });
   }
 });
-
-/** How long after signing up a verify link also signs you in: the 24 hours the email promises. */
-const VERIFY_SIGN_IN_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 router.post("/verify-email", async (req, res) => {
     const { token } = req.body;
@@ -176,13 +184,18 @@ router.post("/verify-email", async (req, res) => {
         // Verifying is where a new account first gets a token (#215, #69), so it
         // signs the person in: the session cookie, and the token for bearer
         // clients, as login does. Someone who signed up on Hearthside is then
-        // signed in on both sites. Verification tokens have no expiry column,
-        // so only a link used within the day the email promises signs anyone
-        // in; an older one still verifies, and the person logs in as before.
+        // signed in on both sites. But only in the browser that signed up
+        // (#219): otherwise whoever signed up with your email could have you
+        // click their link into their account. Verification tokens have no
+        // expiry column either, so only a link used within the day the email
+        // promises signs anyone in. Otherwise the email is verified, and the
+        // person logs in next.
         const createdAt = user.createdAt ? new Date(user.createdAt).getTime() : NaN;
-        if (!(Date.now() - createdAt < VERIFY_SIGN_IN_WINDOW_MS)) {
+        const recent = Date.now() - createdAt < VERIFY_SIGN_IN_WINDOW_S * 1000;
+        if (!recent || !signedUpHere(req, user._id)) {
             return res.json({ message: "Email verified successfully" });
         }
+        clearSignupCookie(res);
         res.json({ message: "Email verified successfully", token: issueSession(res, user), user: publicUser(user) });
     } catch (error) {
         console.error("Verify Email Error:", error);

@@ -18,11 +18,16 @@
  *                (bearer, so no CSRF header): seed what a test needs through the API.
  *   newPerson    newPerson(name): a fresh account, for a test that changes
  *                someone and so mustn't use the shared party.
+ *
+ * Helpers, also exported here:
+ *   verifyLinkToken(stack, email)   the token a verify email would carry (the stack sends no mail)
+ *   logInAndPlant(context, backend, person, cookieName, host)   signIn against any backend, e.g. the
+ *                dev environment that stack/dev-environment.ts starts for a test of the two environments' cookies
  */
 import { test as base, expect, request, type APIRequestContext, type BrowserContext } from "@playwright/test";
 import crypto from "node:crypto";
 import { bearerFor, backendCall, signUp, type Party, type Person } from "./stack/party";
-import { STACK_ENV, type Stack } from "./stack/stack";
+import { runBackendScript, STACK_ENV, type Stack } from "./stack/stack";
 
 export type Site = "portfolio" | "hearthside";
 
@@ -64,27 +69,7 @@ export const test = base.extend<Options & Fixtures, WorkerFixtures>({
 
   signIn: async ({ context: own, stack }, use) => {
     await use(async (person, context = own) => {
-      const { setCookie } = await backendCall(stack.backend, "POST", "/api/users/login", { body: { email: person.email, password: person.password } });
-      const issued = setCookie.find((c) => c.startsWith(`${stack.cookie.name}=`));
-      if (!issued) throw new Error(`Login set no ${stack.cookie.name} cookie: ${JSON.stringify(setCookie)}`);
-      // Planted with the attributes the backend sent, so the browser treats it as it would the real one.
-      const [pair, ...parts] = issued.split(";").map((p) => p.trim());
-      const attrs = new Map(parts.map((p) => {
-        const eq = p.indexOf("=");
-        return eq < 0 ? [p.toLowerCase(), ""] : [p.slice(0, eq).toLowerCase(), p.slice(eq + 1)];
-      }));
-      const maxAge = Number(attrs.get("max-age"));
-      const sameSite = ({ strict: "Strict", lax: "Lax", none: "None" } as const)[(attrs.get("samesite") ?? "lax").toLowerCase() as "lax"];
-      await context.addCookies([{
-        name: stack.cookie.name,
-        value: pair.slice(stack.cookie.name.length + 1),
-        domain: attrs.get("domain") ?? new URL(stack.portfolio).hostname,
-        path: attrs.get("path") ?? "/",
-        httpOnly: attrs.has("httponly"),
-        secure: attrs.has("secure"),
-        sameSite: sameSite ?? "Lax",
-        expires: Number.isFinite(maxAge) ? Math.floor(Date.now() / 1000) + maxAge : -1,
-      }]);
+      await logInAndPlant(context, stack.backend, person, stack.cookie.name, new URL(stack.portfolio).hostname);
     });
   },
 
@@ -107,3 +92,42 @@ export const test = base.extend<Options & Fixtures, WorkerFixtures>({
 });
 
 export { expect };
+
+/**
+ * Log `person` in on `backendUrl` and plant the session cookie it issued (`cookieName`) in `context`,
+ * with the attributes the backend sent, so the browser treats it as it would the real one. `host` is
+ * where a cookie without a Domain goes. `signIn` uses it for the stack; a test of another environment
+ * (stack/dev-environment.ts) uses it for that one's backend.
+ */
+export async function logInAndPlant(
+  context: BrowserContext, backendUrl: string, person: Pick<Person, "email" | "password">, cookieName: string, host: string,
+): Promise<void> {
+  const { setCookie } = await backendCall(backendUrl, "POST", "/api/users/login", { body: { email: person.email, password: person.password } });
+  const issued = setCookie.find((c) => c.startsWith(`${cookieName}=`));
+  if (!issued) throw new Error(`Login set no ${cookieName} cookie: ${JSON.stringify(setCookie)}`);
+  const [pair, ...parts] = issued.split(";").map((p) => p.trim());
+  const attrs = new Map(parts.map((p) => {
+    const eq = p.indexOf("=");
+    return eq < 0 ? [p.toLowerCase(), ""] : [p.slice(0, eq).toLowerCase(), p.slice(eq + 1)];
+  }));
+  const maxAge = Number(attrs.get("max-age"));
+  const sameSite = ({ strict: "Strict", lax: "Lax", none: "None" } as const)[(attrs.get("samesite") ?? "lax").toLowerCase() as "lax"];
+  await context.addCookies([{
+    name: cookieName,
+    value: pair.slice(cookieName.length + 1),
+    domain: attrs.get("domain") ?? host,
+    path: attrs.get("path") ?? "/",
+    httpOnly: attrs.has("httponly"),
+    secure: attrs.has("secure"),
+    sameSite: sameSite ?? "Lax",
+    expires: Number.isFinite(maxAge) ? Math.floor(Date.now() / 1000) + maxAge : -1,
+  }]);
+}
+
+/**
+ * The token the verify email would carry for `email`, an account that signed up and isn't verified yet:
+ * the stack sends no mail, so a fresh one is issued in its place (backend/scripts/e2e-database.ts).
+ */
+export async function verifyLinkToken(stack: Stack, email: string): Promise<string> {
+  return (await runBackendScript(["scripts/e2e-database.ts", "verify-token", stack.databaseUrl, email])).trim();
+}

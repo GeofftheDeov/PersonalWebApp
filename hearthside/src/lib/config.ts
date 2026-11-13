@@ -9,3 +9,13 @@
  *                            Default: the portfolio's local dev server.
  */
 export const PORTFOLIO_URL = process.env.NEXT_PUBLIC_PORTFOLIO_URL || 'http://localhost:3000';
+
+/**
+ * NEXT_PUBLIC_GOOGLE_CLIENT_ID  The OAuth client the Google button signs in
+ *                               with: the portfolio's, whose JavaScript
+ *                               origins list each Hearthside host (#217's
+ *                               wizard). Unset (local dev, the E2E stack),
+ *                               the sign-in pages show no Google button and
+ *                               load nothing from Google.
+ */
+export const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';

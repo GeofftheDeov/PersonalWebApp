@@ -30,7 +30,7 @@ test("a gated page sends you to sign in, back again after, and the portfolio is 
   await expect(page.getByRole("heading", { name: "Sign in", level: 1 })).toBeVisible(FIRST_VISIT);
 
   await fillLogin(page, party.players[0]);
-  await expect(page).toHaveURL(/\/campaigns$/);
+  await expect(page).toHaveURL(/\/campaigns$/, FIRST_VISIT);
   await expect(page.getByRole("main").getByRole("heading", { name: "Campaigns", level: 1 })).toBeVisible(FIRST_VISIT);
 
   await page.goto(portfolio.url("/"));
@@ -68,24 +68,21 @@ test("logging out on the portfolio logs you out of Hearthside", async ({ page, c
   await expect(page).toHaveURL(/\/login\?redirect=%2Fcampaigns$/, FIRST_VISIT);
 });
 
-test("when the session expires mid-page, you sign in and come back to that page", async ({ page, context, party, signIn }) => {
+test("after the session expires, you sign in and come back to the page you were on, query and anchor too", async ({ page, context, party, signIn }) => {
   const [player] = party.players;
   await signIn(player);
-  await page.goto("/campaigns");
+  await page.goto("/campaigns?view=t219#roster");
   await expect(page.getByRole("tab", { name: /^All \d+$/ })).toBeVisible(FIRST_VISIT);
 
-  // The cookie lasts as long as its token: when the token expires, the browser drops it.
+  // The cookie lasts as long as its token: when the token expires, the browser drops it. The page's next
+  // call to the backend then finds the session gone, whether that's a background one (the bell's poll) or
+  // the page's own on the next visit; either way it's off to sign in, returning here.
   await context.clearCookies();
-  await page.getByRole("button", { name: "New campaign" }).click();
-  const dialog = page.getByRole("dialog", { name: "New campaign" });
-  await dialog.getByLabel("Title").fill("Never Saved");
-  await dialog.getByLabel("Description").fill("The session ran out first.");
-  await dialog.getByLabel("Starts").fill("2026-12-05");
-  await dialog.getByRole("button", { name: "Create the campaign" }).click();
+  await page.reload();
+  await expect(page).toHaveURL(/\/login\?redirect=%2Fcampaigns%3Fview%3Dt219%23roster$/, FIRST_VISIT);
 
-  await expect(page).toHaveURL(/\/login\?redirect=%2Fcampaigns$/, FIRST_VISIT);
   await fillLogin(page, player);
-  await expect(page).toHaveURL(/\/campaigns$/);
+  await expect(page).toHaveURL(/\/campaigns\?view=t219#roster$/, FIRST_VISIT);
   await expect(page.getByRole("main").getByRole("heading", { name: "Campaigns", level: 1 })).toBeVisible();
 });
 

@@ -96,7 +96,8 @@ body.hs-app{margin:0;min-height:100vh;-webkit-font-smoothing:antialiased}
 .hs-signin-fields{display:contents}
 .hs-signin-fields:disabled .hs-input{opacity:.7}
 .hs-signin-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;margin-top:2px}
-.hs-signin-actions .hs-btn-amber{height:40px;font-size:16px}
+/* The label face on buttons and links alike (`.hs-app button` would otherwise give buttons the body's). */
+.hs-signin-actions .hs-btn-amber{height:40px;font-size:16px;font-family:var(--font-label)}
 .hs-signin-btn{display:inline-flex;align-items:center;text-decoration:none}
 .hs-signin-link,.hs-signin-foot a,.hs-signin-pad .hs-alert a{color:var(--accent)}
 .hs-signin-link{font-size:14.5px}

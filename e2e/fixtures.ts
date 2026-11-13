@@ -18,6 +18,11 @@
  *                (bearer, so no CSRF header): seed what a test needs through the API.
  *   newPerson    newPerson(name): a fresh account, for a test that changes
  *                someone and so mustn't use the shared party.
+ *
+ * Helpers, also exported here:
+ *   verifyLinkToken(stack, email)   the token a verify email would carry (the stack sends no mail)
+ *   logInAndPlant(context, backend, person, cookieName, host)   signIn against any backend, e.g. the
+ *                dev environment that stack/dev-environment.ts starts for a test of the two environments' cookies
  */
 import { test as base, expect, request, type APIRequestContext, type BrowserContext } from "@playwright/test";
 import crypto from "node:crypto";

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import SignInPage from '@/components/auth/SignInPage';
 import { api, errorOf } from '@/lib/api';
 import { session } from '@/lib/session';
@@ -20,6 +20,31 @@ type Outcome =
 const MOVE_ON_MS = 2500;
 
 /**
+ * Each link is posted once per page load, whatever mounts the page (React's
+ * development double mount, a remount): the link works once, and a second post
+ * would answer "invalid".
+ */
+const verifying = new Map<string, Promise<Outcome>>();
+function verifyOnce(token: string): Promise<Outcome> {
+  let outcome = verifying.get(token);
+  if (!outcome) {
+    outcome = (async (): Promise<Outcome> => {
+      try {
+        const reply = await api.post<{ message?: string; user?: unknown }>('/api/users/verify-email', { token });
+        const back = takeReturn(browserStorage());
+        const signedIn = !!reply?.user
+          && (await session.refresh().catch(() => session.getState())).status === 'signedIn';
+        return signedIn ? { kind: 'signedIn', next: back } : { kind: 'verified', next: withReturn('/login', back) };
+      } catch (err) {
+        return { kind: 'failed', message: errorOf(err, 'We couldn’t verify your email.') };
+      }
+    })();
+    verifying.set(token, outcome);
+  }
+  return outcome;
+}
+
+/**
  * The verify link from the signup email lands here (#215, #219). The backend
  * verifies the email either way. It also signs the player in, on both sites,
  * but only in the browser that signed up (its signup cookie) and within the
@@ -31,27 +56,15 @@ function VerifyEmail() {
   const router = useRouter();
   const token = useSearchParams()?.get('token') ?? '';
   const [outcome, setOutcome] = useState<Outcome>({ kind: 'checking' });
-  // The link works once: never post it twice (React's development double mount runs effects twice).
-  const sent = useRef(false);
 
   useEffect(() => {
-    if (sent.current) return;
-    sent.current = true;
     if (!token) {
       setOutcome({ kind: 'failed', message: 'This link has no token. Use the link in your email as it is.' });
       return;
     }
-    (async () => {
-      try {
-        const reply = await api.post<{ message?: string; user?: unknown }>('/api/users/verify-email', { token });
-        const back = takeReturn(browserStorage());
-        const signedIn = !!reply?.user
-          && (await session.refresh().catch(() => session.getState())).status === 'signedIn';
-        setOutcome(signedIn ? { kind: 'signedIn', next: back } : { kind: 'verified', next: withReturn('/login', back) });
-      } catch (err) {
-        setOutcome({ kind: 'failed', message: errorOf(err, 'We couldn’t verify your email.') });
-      }
-    })();
+    let live = true;
+    verifyOnce(token).then((o) => { if (live) setOutcome(o); });
+    return () => { live = false; };
   }, [token]);
 
   useEffect(() => {

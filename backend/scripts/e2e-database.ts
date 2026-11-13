@@ -4,6 +4,7 @@
  *
  *   npx tsx scripts/e2e-database.ts create   build pwae2e_<time>_<random> from db/schema.sql, print its URL
  *   npx tsx scripts/e2e-database.ts drop <url-or-name>
+ *   npx tsx scripts/e2e-database.ts verify-token <url-or-name> <email>   a verify link's token, as the email would carry it
  *
  * It loads schema.sql straight into the new database rather than cloning
  * run-tests.ts's template, which every `npm test` drops and rebuilds: a
@@ -51,10 +52,35 @@ async function drop(target: string) {
   }
 }
 
-const [command, arg] = process.argv.slice(2);
-const run = command === "create" ? create() : command === "drop" && arg ? drop(arg) : null;
+/**
+ * The verify link's token for an account that signed up and isn't verified,
+ * as the email would carry it (#219): the stack sends no mail, and the
+ * database keeps only the token's hash, so this issues a fresh one in its
+ * place and prints it.
+ */
+async function verifyToken(target: string, email: string) {
+  const name = target.split("/").pop() ?? "";
+  if (!/^pwae2e_\d+_[0-9a-f]+$/.test(name)) throw new Error(`Not an end-to-end database: ${target}`);
+  const token = crypto.randomBytes(20).toString("hex");
+  const db = await connect(name);
+  try {
+    const { rowCount } = await db.query(
+      `UPDATE accounts SET email_verification_token = $2 WHERE email = $1 AND is_verified = false`,
+      [email, crypto.createHash("sha256").update(token).digest("hex")]);
+    if (rowCount !== 1) throw new Error(`No unverified account for ${email}`);
+    console.log(token);
+  } finally {
+    await db.end();
+  }
+}
+
+const [command, arg, arg2] = process.argv.slice(2);
+const run = command === "create" ? create()
+  : command === "drop" && arg ? drop(arg)
+  : command === "verify-token" && arg && arg2 ? verifyToken(arg, arg2)
+  : null;
 if (!run) {
-  console.error("Usage: npx tsx scripts/e2e-database.ts create | drop <url-or-name>");
+  console.error("Usage: npx tsx scripts/e2e-database.ts create | drop <url-or-name> | verify-token <url-or-name> <email>");
   process.exit(2);
 }
 run.catch((e) => {

@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState, type FormEvent } from 'react';
 import { ApiError } from '@gtd/shared/api';
 import GoogleButton from '@/components/auth/GoogleButton';
-import SignInPage from '@/components/auth/SignInPage';
+import SignInPage, { SignInForm } from '@/components/auth/SignInPage';
 import { api, errorOf } from '@/lib/api';
 import { session, useSession } from '@/lib/session';
 import { browserStorage, rememberReturn, returnTarget, withReturn } from '@/lib/signIn';
@@ -61,7 +61,7 @@ function SignupForm() {
 
   return (
     <SignInPage title="Join the party" intro="Make an account, then follow the link we email you.">
-      <form className="hs-form" onSubmit={submit}>
+      <SignInForm onSubmit={submit}>
         <label className="hs-field"><span>Your name</span>
           <input className="hs-input" name="name" autoComplete="name" required maxLength={120}
             value={form.name} onChange={set('name')} />
@@ -78,7 +78,7 @@ function SignupForm() {
         <div className="hs-signin-actions">
           <button type="submit" className="hs-btn-amber" disabled={busy}>{busy ? 'Creating…' : 'Create my account'}</button>
         </div>
-      </form>
+      </SignInForm>
       <GoogleButton onCredential={google} text="signup_with" />
       <p className="hs-signin-foot">
         Already at the table? <Link href={withReturn('/login', target)}>Sign in</Link>

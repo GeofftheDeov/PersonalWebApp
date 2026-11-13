@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useState, type FormEvent } from 'react';
 import { ApiError } from '@gtd/shared/api';
-import SignInPage from '@/components/auth/SignInPage';
+import SignInPage, { SignInForm } from '@/components/auth/SignInPage';
 import { api, errorOf } from '@/lib/api';
 
 /**
@@ -45,7 +45,7 @@ export default function ForgotPasswordPage() {
           </div>
         </div>
       ) : (
-        <form className="hs-form" onSubmit={submit}>
+        <SignInForm onSubmit={submit}>
           <label className="hs-field"><span>Email</span>
             <input className="hs-input" type="email" name="email" autoComplete="email" required
               value={email} onChange={(e) => setEmail(e.target.value)} />
@@ -55,7 +55,7 @@ export default function ForgotPasswordPage() {
             <button type="submit" className="hs-btn-amber" disabled={busy}>{busy ? 'Sending…' : 'Send the link'}</button>
             <Link href="/login" className="hs-signin-link">Back to sign in</Link>
           </div>
-        </form>
+        </SignInForm>
       )}
     </SignInPage>
   );

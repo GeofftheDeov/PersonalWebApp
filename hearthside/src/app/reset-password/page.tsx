@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState, type FormEvent } from 'react';
-import SignInPage from '@/components/auth/SignInPage';
+import SignInPage, { SignInForm } from '@/components/auth/SignInPage';
 import { api, errorOf } from '@/lib/api';
 
 /**
@@ -75,7 +75,7 @@ function ResetPassword() {
 
   return (
     <SignInPage title="Set a new password">
-      <form className="hs-form" onSubmit={submit}>
+      <SignInForm onSubmit={submit}>
         <label className="hs-field"><span>New password</span>
           <input className="hs-input" type="password" name="password" autoComplete="new-password" required
             value={password} onChange={(e) => setPassword(e.target.value)} />
@@ -92,7 +92,7 @@ function ResetPassword() {
         <div className="hs-signin-actions">
           <button type="submit" className="hs-btn-amber" disabled={busy}>{busy ? 'Saving…' : 'Set my password'}</button>
         </div>
-      </form>
+      </SignInForm>
     </SignInPage>
   );
 }

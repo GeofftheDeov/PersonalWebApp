@@ -31,9 +31,9 @@ import { ALL_HOSTS, PARENT_DOMAIN, PROD } from "./hosts";
 import { seedParty, type Party } from "./party";
 
 export const REPO = path.resolve(__dirname, "..", "..");
-const BACKEND = path.join(REPO, "backend");
+export const BACKEND = path.join(REPO, "backend");
 const RUNS = path.join(REPO, "e2e", ".stack");
-const TSX = path.join(BACKEND, "node_modules", "tsx", "dist", "cli.mjs");
+export const TSX = path.join(BACKEND, "node_modules", "tsx", "dist", "cli.mjs");
 
 /** What the tests get (through the E2E_STACK environment variable; see fixtures.ts). */
 export interface Stack {
@@ -58,7 +58,7 @@ export const STACK_ENV = "E2E_STACK";
 const APP_READY_MS = 240_000;
 const BACKEND_READY_MS = 60_000;
 
-interface Server {
+export interface Server {
   name: string;
   child: ChildProcess;
   log: string;
@@ -69,7 +69,7 @@ interface Server {
 const running = new Set<Server>();
 
 /** Kills a server and everything it started (Next starts workers). */
-function kill(server: Server) {
+export function kill(server: Server) {
   running.delete(server);
   const { pid } = server.child;
   if (!pid || server.child.exitCode !== null || server.child.signalCode !== null) return;
@@ -83,7 +83,7 @@ function kill(server: Server) {
 // However the runner ends (Ctrl+C included), leave no server behind.
 process.once("exit", () => { for (const s of [...running]) kill(s); });
 
-function startServer(name: string, script: string[], cwd: string, env: NodeJS.ProcessEnv, logs: string): Server {
+export function startServer(name: string, script: string[], cwd: string, env: NodeJS.ProcessEnv, logs: string): Server {
   const log = path.join(logs, `${name}.log`);
   const fd = fs.openSync(log, "a");
   const child = spawn(process.execPath, script, {
@@ -111,7 +111,7 @@ function tail(file: string, lines = 40): string {
 }
 
 /** Distinct free ports, held open together so this run can't get the same one twice. */
-async function freePorts(count: number): Promise<number[]> {
+export async function freePorts(count: number): Promise<number[]> {
   const servers = await Promise.all(Array.from({ length: count }, () => new Promise<net.Server>((resolve, reject) => {
     const s = net.createServer();
     s.once("error", reject);
@@ -145,7 +145,7 @@ async function makeCertificate(dir: string): Promise<{ cert: string; key: string
 }
 
 /** Runs a backend script; resolves with its stdout. */
-function runBackendScript(args: string[]): Promise<string> {
+export function runBackendScript(args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [TSX, ...args], { cwd: BACKEND, windowsHide: true });
     let out = "", err = "";
@@ -178,7 +178,7 @@ function probe(url: string, host?: string): Promise<number> {
 }
 
 /** Waits for a server to answer 200, failing early (with its log) if it exits. */
-async function waitFor(server: Server, url: string, ms: number, host?: string) {
+export async function waitFor(server: Server, url: string, ms: number, host?: string) {
   const deadline = Date.now() + ms;
   for (;;) {
     if (server.exited !== null) throw new Error(`${server.name} exited (${server.exited}) before it was ready. Its log, ${server.log}:\n${tail(server.log)}`);
@@ -207,7 +207,7 @@ function checkInstalled() {
 }
 
 /** The environment without the backend's own settings, which a shell or CI job may carry. */
-function cleanEnv(): NodeJS.ProcessEnv {
+export function cleanEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   const backendSettings = /^(DATABASE_URL|REDIS_URL|EVENT_BUS_|EMAIL_|ALPACA_|ANTHROPIC_|GOOGLE_|PAPERCLIP_|UPLOADS_|SF_|DISCORD_|OBSIDIAN_|VAULT_|SYNC_API_KEY|RUNNER_|AWS_|OS_ASK_|JWT_SECRET|SESSION_COOKIE_|FRONTEND_URL|HEARTHSIDE_URL|PORTFOLIO_ORIGINS|BACKEND_URL|NEXT_PUBLIC_|NODE_ENV|PORT$|HOSTNAME$|DEV_HOST$|SECONDARY_PORT$|TLS_)/;
   for (const key of Object.keys(env)) if (backendSettings.test(key)) delete env[key];

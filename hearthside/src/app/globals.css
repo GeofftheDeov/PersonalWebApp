@@ -92,6 +92,9 @@ body.hs-app{margin:0;min-height:100vh;-webkit-font-smoothing:antialiased}
 .hs-signin-pad h1{margin:0;font-family:var(--font-display);font-weight:400;font-size:26px;line-height:1.15;color:var(--text);text-wrap:balance}
 .hs-signin-intro{margin:-8px 0 0;color:var(--muted);font-size:15px}
 .hs-signin-pad .hs-input{padding:10px 12px;font-size:16px}
+/* SignInForm's fieldset only disables the controls until the page hydrates; the form lays them out. */
+.hs-signin-fields{display:contents}
+.hs-signin-fields:disabled .hs-input{opacity:.7}
 .hs-signin-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;margin-top:2px}
 .hs-signin-actions .hs-btn-amber{height:40px;font-size:16px}
 .hs-signin-btn{display:inline-flex;align-items:center;text-decoration:none}

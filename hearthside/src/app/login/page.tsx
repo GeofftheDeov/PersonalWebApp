@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState, type FormEvent } from 'react';
 import { ApiError } from '@gtd/shared/api';
 import GoogleButton from '@/components/auth/GoogleButton';
-import SignInPage from '@/components/auth/SignInPage';
+import SignInPage, { SignInForm } from '@/components/auth/SignInPage';
 import { errorOf } from '@/lib/api';
 import { session, useSession } from '@/lib/session';
 import { returnTarget, withReturn } from '@/lib/signIn';
@@ -71,7 +71,7 @@ function LoginForm() {
 
   return (
     <SignInPage title="Sign in" intro="Take your seat at the table.">
-      <form className="hs-form" onSubmit={submit}>
+      <SignInForm onSubmit={submit}>
         <label className="hs-field"><span>Email</span>
           <input className="hs-input" type="email" name="email" autoComplete="email" required
             value={email} onChange={(e) => setEmail(e.target.value)} />
@@ -91,7 +91,7 @@ function LoginForm() {
           </button>
           <Link href="/forgot-password" className="hs-signin-link">Forgot your password?</Link>
         </div>
-      </form>
+      </SignInForm>
       <GoogleButton onCredential={google} />
       <p className="hs-signin-foot">
         New to the table? <Link href={withReturn('/signup', target)}>Create an account</Link>

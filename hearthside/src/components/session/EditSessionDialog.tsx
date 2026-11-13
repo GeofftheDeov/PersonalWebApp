@@ -83,7 +83,8 @@ export default function EditSessionDialog({ session, name, onClose, onSave }: {
           <input className="hs-input" maxLength={200} value={form.location} onChange={set('location')} placeholder={form.isOnline ? 'Online' : 'Geoff’s place'} />
         </label>
         <label className="hs-field"><span>Recording link</span>
-          <input className="hs-input" type="url" value={form.vodUrl} onChange={set('vodUrl')} placeholder="https://" />
+          {/* Not type="url": a link saved before Hearthside that the browser wouldn't call a URL mustn't block the save. */}
+          <input className="hs-input" inputMode="url" value={form.vodUrl} onChange={set('vodUrl')} placeholder="https://" />
         </label>
         {error && <p className="hs-alert" role="alert">{error}</p>}
         <div className="hs-actions">

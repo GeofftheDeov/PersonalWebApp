@@ -73,8 +73,8 @@ export default function SessionTabs(props: SessionTabsProps) {
 }
 
 /**
- * Writing in place: a textarea with Save and Cancel. `field` is what's saved
- * (PUT {summary} or {agenda} alone).
+ * Writing in place: a textarea with Save and Cancel. `onSave` sends the one
+ * field it's for (PUT {summary} or {agenda} alone); blank saves as ''.
  */
 function InPlace({ label, initial, placeholder, story, saveLabel, onSave, onDone, hint }: {
   label: string;

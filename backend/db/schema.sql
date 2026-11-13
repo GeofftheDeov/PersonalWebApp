@@ -814,8 +814,12 @@ CREATE TABLE events (
                 CHECK (status IN ('Not Started','In Progress','Completed')),
   start_date  timestamptz,
   end_date    timestamptz,
-  created_at  timestamptz NOT NULL DEFAULT now()
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  -- Who made it (#238, migrations/0009__event-owners.sql). Non-admins see only
+  -- their own; NULL (made before #238) is admin-only.
+  owner_id    uuid REFERENCES accounts(id) ON DELETE CASCADE
 );
+CREATE INDEX events_owner_id_idx ON events (owner_id);
 
 CREATE TABLE tasks (
   id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),

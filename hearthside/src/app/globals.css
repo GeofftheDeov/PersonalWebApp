@@ -84,6 +84,26 @@ body.hs-app{margin:0;min-height:100vh;-webkit-font-smoothing:antialiased}
 .hs-ghost:hover{border-color:var(--gold-line);color:var(--gold-hi)}
 .hs-ghost:focus-within{outline:2px solid var(--accent);outline-offset:2px}
 
+/* ---------- The signing-in pages (SignInPage; #219) ----------
+   On the floor, no rail or Letters: the Hearthside name, then one gilded panel holding the form. */
+.hs-signin{width:min(100%,440px);margin:clamp(8px,6vh,64px) auto 0;display:flex;flex-direction:column;gap:18px}
+.hs-signin-brand{align-self:center;text-align:center;text-decoration:none}
+.hs-signin-pad{padding:18px 18px 20px;display:flex;flex-direction:column;gap:14px}
+.hs-signin-pad h1{margin:0;font-family:var(--font-display);font-weight:400;font-size:26px;line-height:1.15;color:var(--text);text-wrap:balance}
+.hs-signin-intro{margin:-8px 0 0;color:var(--muted);font-size:15px}
+.hs-signin-pad .hs-input{padding:10px 12px;font-size:16px}
+.hs-signin-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;margin-top:2px}
+.hs-signin-actions .hs-btn-amber{height:40px;font-size:16px}
+.hs-signin-btn{display:inline-flex;align-items:center;text-decoration:none}
+.hs-signin-link,.hs-signin-foot a,.hs-signin-pad .hs-alert a{color:var(--accent)}
+.hs-signin-link{font-size:14.5px}
+.hs-signin-foot{margin:0;padding-top:12px;border-top:1px solid var(--gold-rule);font-size:14.5px;color:var(--muted)}
+.hs-signin-or{display:flex;align-items:center;gap:10px;margin:0;font-family:var(--font-label);font-size:13px;letter-spacing:.06em;color:var(--muted)}
+.hs-signin-or::before,.hs-signin-or::after{content:"";flex:1;border-top:1px solid var(--gold-rule)}
+.hs-signin-google{min-height:44px;display:flex;justify-content:center}
+.hs-signin-pad .hs-alert{font-size:14px}
+@media (max-width:479px){.hs-signin-actions .hs-btn-amber{flex:1 1 100%;justify-content:center}}
+
 /* ---------- Campaign banners (CampaignBanner) ----------
    4:1: the uploaded picture, or a dyed cloth with the campaign's initials stitched in gold. */
 .hs-banner{position:relative;aspect-ratio:4/1;width:100%;overflow:hidden;border-radius:2px;background:var(--leather);container-type:inline-size}

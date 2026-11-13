@@ -224,6 +224,17 @@ async function main() {
       unknownSignup.status === 201 && !!unknownSignup.link?.startsWith("https://geoffthedeov.net/verify-email?token="),
       `${unknownSignup.status} ${unknownSignup.link}`);
 
+    // Hearthside's signup form shows the server's `error` (#219).
+    const twice = await call("POST", "/api/users/register", {
+      from: "hearthside.geoffthedeov.net", body: { name: "Again", email: unknownSignup.email, password: "t219-again" } });
+    check("signing up with an email that has an account is a 409 that says so, and sets no signup cookie",
+      twice.status === 409 && /already/i.test(twice.json.error ?? "") && !twice.setCookie.some((c) => c.startsWith(`${SIGNUP_COOKIE}=`)),
+      `${twice.status} ${JSON.stringify(twice.json)}`);
+    const missing = await call("POST", "/api/users/register", { body: { name: "No Password", email: `t219-nopw-${tag}@example.test` } });
+    emails.push(`t219-nopw-${tag}@example.test`);
+    check("signing up without an email or password is a 400",
+      missing.status === 400 && typeof missing.json.error === "string", `${missing.status} ${JSON.stringify(missing.json)}`);
+
     // ── verify-email logs you in, in the browser that signed up ──────────────
     console.log("\nverify-email logs you in, only in the browser that signed up (#219)\n");
     const issuesSession = (r: { setCookie: string[] }) => r.setCookie.some((c) => c.startsWith(`${COOKIE}=`) && !/Max-Age=0|Expires=Thu, 01 Jan 1970/i.test(c));

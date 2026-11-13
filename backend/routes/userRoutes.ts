@@ -122,7 +122,10 @@ async function bindPendingInvites(person: any): Promise<void> {
 
 router.post("/register", async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password } = req.body ?? {};
+    if (typeof email !== "string" || !email.trim() || typeof password !== "string" || !password) {
+      return res.status(400).json({ error: "An email and a password are required" });
+    }
     const isDev = isDevEnv();
     const token = isDev ? undefined : crypto.randomBytes(20).toString("hex");
 
@@ -151,6 +154,11 @@ router.post("/register", async (req, res) => {
       isVerified: isDev
     });
   } catch (error: any) {
+    // accounts.email is unique (citext). Login and forgot-password already say
+    // whether an email has an account, so saying it here gives nothing away.
+    if (error?.code === "23505") {
+      return res.status(409).json({ error: "An account with that email already exists. Sign in, or reset your password." });
+    }
     console.error("Register Error:", error);
     res.status(500).json({ error: "Failed to register user" });
   }

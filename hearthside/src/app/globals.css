@@ -240,3 +240,76 @@ body.hs-app{margin:0;min-height:100vh;-webkit-font-smoothing:antialiased}
 .hs-draft-file button{background:none;border:0;padding:0;color:var(--muted);cursor:pointer;font-size:14px;line-height:1}
 .hs-compose .hs-btn-amber{height:36px}
 .hs-compose .hs-btn-amber:disabled{opacity:.6;cursor:default}
+
+/* ---------- A session's page (layout C, "Around the table", revised; #226) ----------
+   Previous and next above the parchment card, the table under it (#227), then the tabs on gilded leather. */
+/* The back link (BackLink), the first page to use it: the amber button, as wide as its words (the design system's
+   .hs-back is Letters' 32px square), in its own ink (.hs-page-head a would paint it amber on amber). In the phone
+   bar a long label ends in an ellipsis rather than running off the screen. */
+.hs-btn-amber.hs-back{width:auto}
+.hs-page-head a.hs-btn-amber{color:var(--accent-ink)}
+@media (max-width:759px){
+  .hs-bar .hs-brand{flex:none}
+  .hs-bar .hs-btn-amber.hs-back-m{display:block;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;line-height:34px}
+}
+.hs-sess-wait{padding:12px 0}
+.hs-sess-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}
+.hs-sess-steps{display:flex;gap:8px;min-width:0;margin-left:auto}
+.hs-sess-steps .hs-ghost{gap:6px;min-width:0;max-width:min(240px,45vw);height:34px;text-decoration:none;background:rgba(26,19,14,.72)}
+.hs-sess-step-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:759px){.hs-sess-steps{flex:1;justify-content:space-between}.hs-sess-steps .hs-ghost{max-width:48%}}
+
+/* The card: parchment, with the torch's orange as it is on parchment. */
+.hs-sess-card{padding:var(--space-5) var(--space-6) var(--space-6);min-width:0}
+.hs-sess-card .hs-sheet-title{font-size:clamp(26px,4vw,34px);overflow-wrap:anywhere}
+.hs-sess-card-text{min-width:0;flex:1 1 16rem}
+.hs-sess-card .hs-byline{margin:4px 0 0;overflow-wrap:anywhere}
+.hs-sess-card-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.hs-seal.is-planning{background:var(--verdigris)}
+.hs-seal.is-cancelled{background:#5a4a3a}
+.hs-sess-card .hs-btn{text-decoration:none;display:inline-flex;align-items:center}
+.hs-sess-banner{margin-top:12px;padding:10px 12px;border:1.5px solid var(--seal);border-radius:var(--radius);font-size:14.5px;
+  display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;justify-content:space-between}
+.hs-sess-card .hs-sess-link{color:var(--seal)}
+.hs-sess-link{font-family:var(--font-label);font-weight:500;letter-spacing:.04em;color:var(--accent);text-decoration:none}
+.hs-sess-link:hover{text-decoration:underline}
+.hs-sess-torch{margin-top:12px;display:flex;flex-direction:column;gap:8px;font-size:14.5px}
+.hs-sess-torch p,.hs-sess-torch form{margin:0;display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center}
+.hs-sess-torch b{color:#9a4a12;font-weight:500}
+.hs-sess-torch select{max-width:100%;min-width:0;padding:4px 8px;border:1px solid var(--paper-line);border-radius:var(--radius);
+  background:rgba(255,250,235,.55);color:var(--paper-ink);font:inherit;font-size:14px}
+.hs-flame{width:1.1em;height:1.1em;flex:none;color:#9a4a12}
+.hs-btn.is-torch{border-color:#9a4a12;color:#9a4a12}
+.hs-sess-alert{color:var(--seal);font-size:13px}
+
+/* The table's slot: #227 fills it. */
+.hs-sess-table:empty{display:none}
+
+/* The tabs, on leather. */
+.hs-sess-tabs{padding:0;min-width:0}
+.hs-sess-tabs .hs-tabs{overflow-x:auto;scrollbar-width:none}
+.hs-sess-tabs .hs-tabs button{flex:1 0 auto;padding:11px 12px;font-size:14.5px;white-space:nowrap}
+.hs-sess-panel{padding:16px;min-width:0}
+.hs-sess-empty{margin:0;font-size:14.5px;line-height:1.5;color:var(--muted)}
+.hs-sess-muted{color:var(--muted)}
+.hs-sess-slot{border:1.5px dashed var(--gold-rule);border-radius:var(--radius);padding:14px 16px}
+.hs-sess-after{margin-top:12px}
+.hs-sess-before{margin-bottom:10px}
+/* The tale: the story face, with a drop cap. */
+.hs-tale{font-family:var(--font-story);font-size:17px;line-height:1.55;color:var(--text);max-width:66ch;overflow-wrap:anywhere}
+.hs-tale p{margin:0 0 .75em;white-space:pre-line}
+.hs-tale p:last-child{margin-bottom:0}
+.hs-tale p:first-child::first-letter{float:left;font-family:var(--font-display);font-size:3.3em;line-height:.82;padding:6px 7px 0 0;color:var(--accent)}
+.hs-sess-prep{margin:0;font-size:15px;line-height:1.5;white-space:pre-line;max-width:66ch;overflow-wrap:anywhere}
+.hs-sess-write{min-height:150px}
+.hs-sess-write.is-story{font-family:var(--font-story);font-size:16.5px;line-height:1.5}
+.hs-sess-dl{margin:0;display:flex;flex-direction:column}
+.hs-sess-dl > div{display:grid;grid-template-columns:minmax(84px,30%) minmax(0,1fr);gap:10px;padding:7px 0;border-top:1px solid var(--gold-rule);align-items:baseline}
+.hs-sess-dl > div:first-child{border-top:0}
+.hs-sess-dl dt{font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.06em;color:var(--muted);overflow-wrap:anywhere}
+.hs-sess-dl dd{margin:0;font-size:14.5px;overflow-wrap:anywhere}
+.hs-sess-dl dd small{display:block;color:var(--muted);font-size:13px}
+.hs-sess-pill{display:inline-block;font-family:var(--font-label);font-size:12px;font-weight:500;letter-spacing:.06em;padding:1px 8px;
+  border-radius:var(--radius-full);border:1px solid currentColor;color:#f07b2c;white-space:nowrap}
+.hs-sess-check{display:flex;align-items:center;gap:8px;font-size:14.5px;cursor:pointer}
+.hs-sess-check input{accent-color:var(--accent);width:16px;height:16px}

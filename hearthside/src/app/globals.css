@@ -243,8 +243,15 @@ body.hs-app{margin:0;min-height:100vh;-webkit-font-smoothing:antialiased}
 
 /* ---------- A session's page (layout C, "Around the table", revised; #226) ----------
    Previous and next above the parchment card, the table under it (#227), then the tabs on gilded leather. */
-/* The back link is the amber button, as wide as its words (the design system's .hs-back is Letters' 32px square). */
+/* The back link (BackLink), the first page to use it: the amber button, as wide as its words (the design system's
+   .hs-back is Letters' 32px square), in its own ink (.hs-page-head a would paint it amber on amber). In the phone
+   bar a long label ends in an ellipsis rather than running off the screen. */
 .hs-btn-amber.hs-back{width:auto}
+.hs-page-head a.hs-btn-amber{color:var(--accent-ink)}
+@media (max-width:759px){
+  .hs-bar .hs-brand{flex:none}
+  .hs-bar .hs-btn-amber.hs-back-m{display:block;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;line-height:34px}
+}
 .hs-sess-wait{padding:12px 0}
 .hs-sess-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}
 .hs-sess-steps{display:flex;gap:8px;min-width:0;margin-left:auto}

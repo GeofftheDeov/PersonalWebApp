@@ -14,7 +14,11 @@
  *     allowlist, or whose payload was altered, is refused;
  *   - verifying an email logs the person in: a token in the body and the
  *     session cookie, so a player who signed up on Hearthside is signed in on
- *     both sites.
+ *     both sites. Only in the browser that signed up, though (#219): signing
+ *     up sets a short-lived signup cookie bound to the new account, and verify
+ *     signs in only when it carries that cookie. Anywhere else the link still
+ *     verifies, and the person signs in next. Otherwise someone who signed up
+ *     with your email could have you click their link into their account.
  *
  * Mounts the real routers and drives them over HTTP. No mail leaves the
  * machine: nodemailer's transport is swapped for one that records what it was
@@ -77,6 +81,11 @@ const DEV = {
 const useEnv = (env: typeof PROD) => Object.assign(process.env, env);
 
 const COOKIE = "gtd_session_t215";
+const SIGNUP_COOKIE = `${COOKIE}_signup`;
+
+/** `name=value` of the cookie called `name` in these Set-Cookie headers, or "". */
+const cookiePair = (setCookie: string[], name: string) =>
+  setCookie.find((c) => c.startsWith(`${name}=`))?.split(";")[0] ?? "";
 
 /** The link in the last mail sent to `to`. */
 const linkTo = (to: string) => {
@@ -183,7 +192,14 @@ async function main() {
       const res = route === "register"
         ? await call("POST", "/api/users/register", { from, body: { name: "Signup", email, password } })
         : await call("POST", "/api/leads", { from, body: { firstName: "Sign", lastName: "Up", email, password } });
-      return { status: res.status, email, password, link: linkTo(email) };
+      return {
+        status: res.status, email, password, link: linkTo(email),
+        token: new URL(linkTo(email) ?? "http://x/").searchParams.get("token") ?? "",
+        /** The Set-Cookie header for the signup cookie, as the browser that signed up received it. */
+        signupSetCookie: res.setCookie.find((c) => c.startsWith(`${SIGNUP_COOKIE}=`)) ?? "",
+        /** What that browser sends back. */
+        signupCookie: cookiePair(res.setCookie, SIGNUP_COOKIE),
+      };
     };
 
     for (const [envName, env, hosts] of [

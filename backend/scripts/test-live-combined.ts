@@ -227,8 +227,10 @@ async function main() {
     const m2 = (await sendTo(table, gm, `t58 after pat left ${RUN}`)).json?.message;
     check("a new message reaches the newbie on both sockets",
       await until(() => got(s.newbie, m2?.id) === 1 && got(s.newbiePhone, m2?.id) === 1));
-    check("...with thread.updated counting both messages as unread",
-      await until(() => updatesFor(s.newbie, table, m2?.createdAt).some((f) => f.unreadCount === 2)),
+    // Leaving posts "pat left the party." to Table Talk (services/campaignMembership.ts),
+    // so the newbie has three unread: m1, that notice, and m2.
+    check("...with thread.updated counting m1, pat's leaving notice and m2 as unread",
+      await until(() => updatesFor(s.newbie, table, m2?.createdAt).some((f) => f.unreadCount === 3)),
       JSON.stringify(s.newbie.of("thread.updated")));
     s.gm.typing(table);
     check("the GM's typing reaches the newbie", await until(() => s.newbie.of("typing", table).length === 1));

@@ -38,6 +38,7 @@ import adminRoutes from "../routes/adminRoutes.js";
 import { auth } from "../middleware/auth.js";
 import { hashToken } from "../utils/tokenHash.js";
 import { COOKIE_TOKEN_CLAIM } from "../utils/jwt.js";
+import { signupCookieName, signupCookieValue } from "../utils/signupCookie.js";
 import { attachLiveChannel, LIVE_PATH, CLOSE_UNAUTHORIZED, PROTOCOL_VERSION } from "../live/liveChannel.js";
 
 if (!/(\/\/|@)(127\.0\.0\.1|localhost)[:/]/.test(process.env.DATABASE_URL ?? "")) {
@@ -157,7 +158,9 @@ async function main() {
     check("login: both name the same person",
       claims(cookieTok).id === person.id && claims(bodyTok).id === person.id);
 
-    const verified = await call("POST", "/api/users/verify-email", {}, { token: verifyToken });
+    // From the browser that signed up, which verify-email requires to sign in (#219).
+    const signedUpHere = `${signupCookieName()}=${encodeURIComponent(signupCookieValue(newcomer.id, Date.now() + 60_000))}`;
+    const verified = await call("POST", "/api/users/verify-email", { cookie: signedUpHere }, { token: verifyToken });
     const vCookie = cookieToken(verified.setCookie), vBody = String(verified.json.token ?? "");
     check("verify-email: the cookie's token carries the marker, the body's does not",
       verified.status === 200 && marked(vCookie) && !!vBody && !marked(vBody) && claims(vCookie).id === newcomer.id,

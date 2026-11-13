@@ -55,6 +55,7 @@ const { default: userRoutes } = await import("../routes/userRoutes.js");
 const { default: leadRoutes } = await import("../routes/leadRoutes.js");
 const { default: googleCalendarRoutes } = await import("../routes/googleCalendarRoutes.js");
 const { signJwt, verifyJwt } = await import("../utils/jwt.js");
+const { signupCookieValue } = await import("../utils/signupCookie.js");
 
 let pass = 0, fail = 0;
 function check(name: string, ok: boolean, detail: unknown = "") {
@@ -223,41 +224,130 @@ async function main() {
       unknownSignup.status === 201 && !!unknownSignup.link?.startsWith("https://geoffthedeov.net/verify-email?token="),
       `${unknownSignup.status} ${unknownSignup.link}`);
 
-    // ── verify-email logs you in ─────────────────────────────────────────────
-    console.log("\nverify-email logs you in\n");
+    // ── verify-email logs you in, in the browser that signed up ──────────────
+    console.log("\nverify-email logs you in, only in the browser that signed up (#219)\n");
+    const issuesSession = (r: { setCookie: string[] }) => r.setCookie.some((c) => c.startsWith(`${COOKIE}=`) && !/Max-Age=0|Expires=Thu, 01 Jan 1970/i.test(c));
+    /** Verify `token`, sending `cookie` as the browser would (or nothing, as another browser would). */
+    const verify = (token: string, cookie?: string) =>
+      call("POST", "/api/users/verify-email", { from: "hearthside.geoffthedeov.net", body: { token }, headers: cookie ? { cookie } : {} });
+    const isVerified = async (email: string) =>
+      (await pool.query(`SELECT is_verified FROM accounts WHERE email = $1`, [email])).rows[0]?.is_verified === true;
+
     const player = await signUp("register", "hearthside.geoffthedeov.net");
-    const verifyToken = new URL(player.link ?? "http://x/").searchParams.get("token") ?? "";
-    const verified = await call("POST", "/api/users/verify-email", { from: "hearthside.geoffthedeov.net", body: { token: verifyToken } });
+    const attrs = player.signupSetCookie.split(";").map((p) => p.trim().toLowerCase());
+    const maxAge = Number(attrs.find((a) => a.startsWith("max-age="))?.slice(8));
+    check("signing up sets a signup cookie: HttpOnly, Secure, SameSite=Lax, on this host only, for /api/users",
+      !!player.signupCookie && attrs.includes("httponly") && attrs.includes("secure") && attrs.includes("samesite=lax")
+        && !attrs.some((a) => a.startsWith("domain=")) && attrs.includes("path=/api/users"),
+      player.signupSetCookie || "(none)");
+    check("...short-lived: gone within the day the verify email promises",
+      maxAge > 0 && maxAge <= 24 * 60 * 60, player.signupSetCookie);
+    check("...and it isn't the session: signing up signs nobody in", !issuesSession({ setCookie: [player.signupSetCookie] }));
+
+    const verified = await verify(player.token, player.signupCookie);
     const issued = verified.setCookie.find((c) => c.startsWith(`${COOKIE}=`)) ?? "";
-    check("verifying returns a token and the person, as login does",
+    check("verifying in the browser that signed up returns a token and the person, as login does",
       verified.status === 200 && typeof verified.json.token === "string" && verified.json.user?.email === player.email,
       `${verified.status} ${JSON.stringify(verified.json).slice(0, 160)}`);
     // The cookie holds its own token, not the body's (#212: it's marked so it works only as the cookie).
     const cookieToken = decodeURIComponent(issued.slice(COOKIE.length + 1).split(";")[0] ?? "");
-    check("...and sets the session cookie",
-      !!verified.json.token && cookieToken.split(".").length === 3, issued || "(none)");
+    check("...and sets the session cookie, marked as the cookie's own (#212)",
+      cookieToken.split(".").length === 3 && cookieToken !== verified.json.token
+        && (verifyJwt(cookieToken, { fromCookie: true }) as any).cookie === true && !("cookie" in verifyJwt(verified.json.token)),
+      issued || "(none)");
     const me = await call("GET", "/api/users/profile", { headers: { cookie: `${COOKIE}=${cookieToken}` } });
     check("...which signs the new player in", me.status === 200 && me.json.email === player.email, `${me.status}`);
+    check("...and clears the signup cookie, which has done its job",
+      verified.setCookie.some((c) => c.startsWith(`${SIGNUP_COOKIE}=;`) || (c.startsWith(`${SIGNUP_COOKIE}=`) && /Expires=Thu, 01 Jan 1970/i.test(c))),
+      JSON.stringify(verified.setCookie));
 
-    const again = await call("POST", "/api/users/verify-email", { body: { token: verifyToken } });
+    const again = await verify(player.token, player.signupCookie);
     check("a verify link works once: used again it issues no token and no cookie",
-      again.status === 400 && !again.json.token && !again.setCookie.some((c) => c.startsWith(`${COOKIE}=`)),
+      again.status === 400 && !again.json.token && !issuesSession(again),
       `${again.status} ${JSON.stringify(again.json)} ${JSON.stringify(again.setCookie)}`);
 
-    // A verify link from long ago still verifies, but signs nobody in: the
-    // token has no expiry of its own, so it mustn't become a standing login.
+    // The attack this closes: someone signs up with your email and their own
+    // password, and you click the real link. You'd be signed into their account.
+    const victim = await signUp("register", "hearthside.geoffthedeov.net");
+    const elsewhere = await verify(victim.token);
+    check("verifying in another browser (no signup cookie) verifies the email...",
+      elsewhere.status === 200 && await isVerified(victim.email), `${elsewhere.status} ${JSON.stringify(elsewhere.json)}`);
+    check("...but returns only the message: no token, no person, no session cookie",
+      typeof elsewhere.json.message === "string" && !elsewhere.json.token && !elsewhere.json.user && !issuesSession(elsewhere),
+      `${JSON.stringify(elsewhere.json)} ${JSON.stringify(elsewhere.setCookie)}`);
+
+    // Signup cookies that aren't this account's, or aren't genuine.
+    const other = await signUp("register", "hearthside.geoffthedeov.net");
+    const target = await signUp("register", "hearthside.geoffthedeov.net");
+    const theirs = await verify(target.token, other.signupCookie);
+    check("a signup cookie bound to another account signs nobody in (the email is still verified)",
+      theirs.status === 200 && !theirs.json.token && !theirs.json.user && !issuesSession(theirs) && await isVerified(target.email),
+      `${theirs.status} ${JSON.stringify(theirs.json)}`);
+
+    const { rows: [targetRow] } = await pool.query(`SELECT id FROM accounts WHERE email = $1`, [target.email]);
+    const { rows: [otherRow] } = await pool.query(`SELECT id FROM accounts WHERE email = $1`, [other.email]);
+    const forgedTarget = await signUp("register", "hearthside.geoffthedeov.net");
+    const { rows: [forgedRow] } = await pool.query(`SELECT id FROM accounts WHERE email = $1`, [forgedTarget.email]);
+    const otherValue = decodeURIComponent(other.signupCookie.slice(SIGNUP_COOKIE.length + 1));
+    const swapped = otherValue.split(String(otherRow.id)).join(String(forgedRow.id));
+    const forgedVerify = await verify(forgedTarget.token, `${SIGNUP_COOKIE}=${encodeURIComponent(swapped)}`);
+    check("a signup cookie edited to name another account is refused",
+      swapped !== otherValue && forgedVerify.status === 200 && !forgedVerify.json.token && !issuesSession(forgedVerify),
+      `${swapped} ${forgedVerify.status} ${JSON.stringify(forgedVerify.json)}`);
+
+    const expiredFor = await signUp("register", "hearthside.geoffthedeov.net");
+    const { rows: [expiredRow] } = await pool.query(`SELECT id FROM accounts WHERE email = $1`, [expiredFor.email]);
+    const expired = await verify(expiredFor.token, `${SIGNUP_COOKIE}=${encodeURIComponent(signupCookieValue(String(expiredRow.id), Date.now() - 1000))}`);
+    check("an expired signup cookie (genuinely signed, past its time) signs nobody in",
+      expired.status === 200 && !expired.json.token && !issuesSession(expired), `${expired.status} ${JSON.stringify(expired.json)}`);
+
+    const sessionAsSignup = await signUp("register", "hearthside.geoffthedeov.net");
+    const { rows: [sessionRow] } = await pool.query(`SELECT id FROM accounts WHERE email = $1`, [sessionAsSignup.email]);
+    const aJwt = signJwt({ id: sessionRow.id, email: sessionAsSignup.email, cookie: true }, { expiresIn: "1h" });
+    const jwtSignup = await verify(sessionAsSignup.token, `${SIGNUP_COOKIE}=${encodeURIComponent(aJwt)}`);
+    check("a session token passed off as the signup cookie signs nobody in",
+      jwtSignup.status === 200 && !jwtSignup.json.token && !issuesSession(jwtSignup), `${jwtSignup.status} ${JSON.stringify(jwtSignup.json)}`);
+
+    // The signup cookie names an account, so it must be good for nothing else.
+    const fresh = await signUp("register", "hearthside.geoffthedeov.net");
+    const freshValue = decodeURIComponent(fresh.signupCookie.slice(SIGNUP_COOKIE.length + 1));
+    const asBearer = await call("GET", "/api/users/profile", { headers: { authorization: `Bearer ${freshValue}` } });
+    const asSession = await call("GET", "/api/users/profile", { headers: { cookie: `${COOKIE}=${encodeURIComponent(freshValue)}` } });
+    check("the signup cookie is no login: refused as a bearer and as the session cookie",
+      asBearer.status === 401 && asSession.status === 401, `${asBearer.status} ${asSession.status}`);
+    let notAJwt = false;
+    try { verifyJwt(freshValue, { fromCookie: true }); } catch { notAJwt = true; }
+    check("...and isn't a JWT at all, so nothing that takes one can take it", notAJwt, freshValue);
+
+    const lead = await signUp("leads", "hearthside.geoffthedeov.net");
+    const leadVerified = await verify(lead.token, lead.signupCookie);
+    check("the create-account signup (/api/leads) sets the signup cookie too, and its verify signs in",
+      !!lead.signupCookie && leadVerified.status === 200 && leadVerified.json.user?.email === lead.email && issuesSession(leadVerified),
+      `${lead.signupSetCookie || "(no signup cookie)"} ${leadVerified.status}`);
+
+    // A verify link from long ago still verifies, but signs nobody in, even in
+    // the browser that signed up: the token has no expiry of its own, so it
+    // mustn't become a standing login.
     const late = await signUp("register", "hearthside.geoffthedeov.net");
     await pool.query(`UPDATE accounts SET created_at = now() - interval '25 hours' WHERE email = $1`, [late.email]);
-    const lateVerify = await call("POST", "/api/users/verify-email", {
-      body: { token: new URL(late.link ?? "http://x/").searchParams.get("token") } });
-    const { rows: [lateRow] } = await pool.query(`SELECT is_verified FROM accounts WHERE email = $1`, [late.email]);
+    const lateVerify = await verify(late.token, late.signupCookie);
     check("a verify link used over a day after signing up verifies, with no token and no cookie",
-      lateVerify.status === 200 && lateRow?.is_verified === true && !lateVerify.json.token
-        && !lateVerify.setCookie.some((c) => c.startsWith(`${COOKIE}=`)),
-      `${lateVerify.status} ${JSON.stringify(lateVerify.json)} verified=${lateRow?.is_verified}`);
+      lateVerify.status === 200 && await isVerified(late.email) && !lateVerify.json.token && !issuesSession(lateVerify),
+      `${lateVerify.status} ${JSON.stringify(lateVerify.json)}`);
 
     const loginAfter = await call("POST", "/api/users/login", { body: { email: player.email, password: player.password } });
     check("the verified player can log in with their password", loginAfter.status === 200, `${loginAfter.status}`);
+    const victimLogin = await call("POST", "/api/users/login", { body: { email: victim.email, password: victim.password } });
+    check("...and so can one who verified in another browser", victimLogin.status === 200, `${victimLogin.status}`);
+
+    // With the session cookie off (bearer-only), there's no signup cookie, and verify signs nobody in.
+    delete process.env.SESSION_COOKIE_NAME;
+    const noCookies = await signUp("register", "hearthside.geoffthedeov.net");
+    const noCookiesVerify = await verify(noCookies.token);
+    process.env.SESSION_COOKIE_NAME = COOKIE;
+    check("with the session cookie off, signup sets no signup cookie and verify returns only the message",
+      noCookies.signupSetCookie === "" && noCookies.status === 201 && noCookiesVerify.status === 200 && !noCookiesVerify.json.token,
+      `${noCookies.signupSetCookie} ${JSON.stringify(noCookiesVerify.json)}`);
 
     // ── Google Calendar Connect ──────────────────────────────────────────────
     console.log("\nGoogle Calendar Connect\n");

@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import jwt, { type JwtPayload, type SignOptions } from "jsonwebtoken";
 
 /**
@@ -79,4 +80,14 @@ export function verifyJwt(token: string, { fromCookie = false }: { fromCookie?: 
         throw new Error("A session-cookie token is only accepted from the session cookie");
     }
     return decoded;
+}
+
+/**
+ * An HMAC-SHA256 of `data` under the same secret (base64url), kept apart from
+ * every other use of it by `purpose`. For a signed value that must never pass
+ * as a login token: it isn't a JWT, so verifyJwt, and everything behind it,
+ * refuses it. The signup cookie (utils/signupCookie.ts, #219) is one.
+ */
+export function macFor(purpose: string, data: string): string {
+    return crypto.createHmac("sha256", secret()).update(`${purpose}\n${data}`).digest("base64url");
 }

@@ -86,8 +86,13 @@ export function clearSessionCookie(res: Response): void {
  */
 export function readSessionCookie(req: Pick<Request, "headers">): string | null {
     const name = sessionCookieName();
+    return name ? readCookie(req, name) : null;
+}
+
+/** The value of the cookie called `name` in the Cookie header, decoded, or null. */
+export function readCookie(req: Pick<Request, "headers">, name: string): string | null {
     const header = req.headers.cookie;
-    if (!name || !header) return null;
+    if (!header) return null;
     for (const part of header.split(";")) {
         const eq = part.indexOf("=");
         if (eq < 0 || part.slice(0, eq).trim() !== name) continue;

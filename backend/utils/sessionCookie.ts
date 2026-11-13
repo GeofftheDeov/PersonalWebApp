@@ -21,8 +21,7 @@ import { isDevEnv } from "./env.js";
  * Dev and prod also sign with different JWT secrets, so a cookie that crossed
  * over under the right name would still fail verification.
  *
- * Read per call, not at import, for the same reason as utils/jwt.ts: route
- * modules load before server.ts runs dotenv.config().
+ * Read per call, not at import, for the same reason as utils/jwt.ts.
  */
 
 /** Matches the token's own expiresIn ("1h") in userRoutes. */

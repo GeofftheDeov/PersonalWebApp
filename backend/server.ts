@@ -1,6 +1,6 @@
-import dotenv from "dotenv";
+// First, before anything that reads the environment as it loads (#245).
+import "./loadEnv.js";
 import { assertJwtSecretConfigured } from "./utils/jwt.js";
-dotenv.config();
 
 // No JWT secret, no backend — in every environment, not only production (#95).
 try {

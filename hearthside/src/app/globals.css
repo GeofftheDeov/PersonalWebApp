@@ -338,6 +338,110 @@ body.hs-app{margin:0;min-height:100vh;-webkit-font-smoothing:antialiased}
 .hs-sess-check{display:flex;align-items:center;gap:8px;font-size:14.5px;cursor:pointer}
 .hs-sess-check input{accent-color:var(--accent);width:16px;height:16px}
 
+/* ---------- A campaign's page (part 1; #224) ----------
+   prototype/hearthside-campaign-details: the head on the floor (back link, the banner in a gilded frame, the title
+   with its status), the details, their edit form and the party on gilded leather, and the torch in its orange with
+   its flame wherever the Game Master's role changes hands. #225 fills the empty slots (Notice Board, Table Talk,
+   Sessions | Characters); each is hidden while empty. */
+.hs-cp-wait{padding:12px 0}
+.hs-cp-slot:empty{display:none}
+/* The label face on the page's and its dialogs' buttons (`.hs-app button` would otherwise give them the body's). */
+.hs-app :is(.hs-cp-head,.hs-cp-details,.hs-cp-party,.hs-dialog) :is(.hs-btn-amber,.hs-btn-torch,.hs-ghost,.hs-cp-link){font-family:var(--font-label)}
+.hs-cp-head{display:flex;flex-direction:column;gap:14px;min-width:0}
+.hs-cp-banner{padding:6px}
+.hs-cp-banner .hs-banner-tools{top:auto;right:10px;bottom:10px;flex-direction:row}
+.hs-cp-title-row{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+.hs-cp-title{min-width:0}
+.hs-cp-title h1{overflow-wrap:anywhere}
+.hs-cp-kicker{font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow)}
+.hs-cp-title p{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
+.hs-cp-title .hs-status{text-shadow:none;background:rgba(26,19,14,.6)}
+.hs-cp-title .hs-status.is-done{background:var(--moss)}
+.hs-cp-edit{height:34px;font-size:15px;white-space:nowrap}
+.hs-cp-sec-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:10px}
+.hs-cp-sec-row .hs-sec{margin:0;flex:1;min-width:0}
+.hs-cp-sec-row .hs-btn-amber{height:30px;font-size:14px;flex:none}
+.hs-cp-note{margin-bottom:8px}
+
+/* The details, on leather. */
+.hs-cp-details{min-width:0}
+.hs-cp-pad{padding:14px 16px}
+.hs-cp-desc{margin:0 0 14px;font-family:var(--font-story);font-size:18px;line-height:1.45;color:var(--text);max-width:62ch;overflow-wrap:anywhere;white-space:pre-line}
+.hs-cp-facts{margin:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px 20px}
+.hs-cp-facts + .hs-cp-facts{margin-top:14px;padding-top:14px;border-top:1px solid var(--gold-rule)}
+.hs-cp-facts > div{min-width:0}
+.hs-cp-facts dt{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.06em;color:var(--muted)}
+.hs-cp-facts dd{margin:2px 0 0;font-size:15px;color:var(--text);overflow-wrap:anywhere}
+.hs-cp-facts dd a{color:var(--accent)}
+.hs-cp-form-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.hs-cp-form-head h2{margin:0;font-family:var(--font-display);font-weight:400;font-size:21px;color:var(--text)}
+.hs-cp-group{margin:0;padding:12px 0 0;border:0;border-top:1px solid var(--gold-rule);display:flex;flex-direction:column;gap:12px;min-width:0}
+.hs-cp-group legend{float:left;width:100%;padding:0;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--accent)}
+.hs-cp-group legend + *{clear:both}
+
+/* The torch: the flame, and the orange (#f07b2c on leather, #9a4a12 on parchment). Not design-system tokens yet. */
+.hs-app{--torch:#f07b2c;--torch-ink:#9a4a12}
+.hs-cp-flame{width:15px;height:15px;flex:none}
+.hs-cp-torch{display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin-top:4px}
+.hs-cp-link{display:inline-flex;align-items:center;gap:5px;background:none;border:0;padding:0;cursor:pointer;font-size:13px;font-weight:500;letter-spacing:.04em;color:var(--accent)}
+.hs-cp-link:hover{text-decoration:underline}
+.hs-cp-link.is-torch{color:var(--torch)}
+.hs-btn-torch{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border:0;border-radius:var(--radius);cursor:pointer;white-space:nowrap;
+  background:var(--torch);color:var(--accent-ink);font-size:14px;font-weight:500;letter-spacing:.04em}
+.hs-btn-torch:disabled{opacity:.55;cursor:default}
+.hs-cp-torch-form{display:flex;flex-direction:column;gap:6px;width:100%;max-width:280px}
+.hs-cp-torch-form .hs-input{padding:5px 8px;font-size:14px}
+.hs-cp-torch-form .hs-actions .hs-btn-torch,.hs-cp-torch-form .hs-actions .hs-ghost{height:30px}
+
+/* The party beside Table Talk when the page is wide enough (#225 fills Table Talk), as on the portfolio. */
+.hs-cp-split{container-type:inline-size;min-width:0}
+.hs-cp-split-in{display:grid;gap:var(--space-5)}
+@container (min-width:620px){.hs-cp-split-in:has(> [data-slot="table-talk"]:not(:empty)){grid-template-columns:240px minmax(0,1fr);align-items:start}}
+.hs-cp-party{min-width:0}
+.hs-cp-roster{list-style:none;margin:0;padding:0}
+.hs-cp-roster > li{padding:7px 12px;border-top:1px solid var(--gold-rule)}
+.hs-cp-roster > li:first-child{border-top:0}
+.hs-cp-member{display:grid;grid-template-columns:30px minmax(0,1fr);gap:10px;align-items:start}
+.hs-cp-member .hs-avatar{width:30px;height:30px;font-size:14px;margin-top:1px}
+.hs-avatar.is-gm{box-shadow:0 0 0 2px var(--leather),0 0 0 3px var(--gold)}
+.hs-avatar.is-off{background:var(--surface);color:var(--muted)}
+.hs-cp-who{min-width:0}
+.hs-cp-whois{display:flex;flex-direction:column;min-width:0;color:var(--text);text-decoration:none}
+a.hs-cp-whois:hover .hs-cp-name{color:var(--gold-hi)}
+.hs-cp-name{font-weight:500;font-size:15px;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hs-cp-you{color:var(--muted);font-weight:400}
+.hs-cp-role{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.04em;color:var(--accent)}
+.hs-cp-role.is-plain{color:var(--muted)}
+.hs-cp-tools{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px}
+.hs-cp-mini{display:inline-flex;align-items:center;justify-content:center;width:28px;height:24px;padding:0;cursor:pointer;
+  background:transparent;border:1px solid var(--line);border-radius:var(--radius);color:var(--muted)}
+.hs-cp-mini:hover{border-color:var(--gold-line);color:var(--text)}
+.hs-cp-mini.is-warn:hover{border-color:var(--seal);color:#f3b7a5}
+.hs-cp-mini:disabled{opacity:.5;cursor:default}
+.hs-cp-roster > li.hs-cp-inactive-head{position:relative;display:flex;align-items:center;gap:6px;padding:8px 12px 2px;font-family:var(--font-label);font-size:12.5px;letter-spacing:.06em;color:var(--muted)}
+.hs-cp-roster > li.hs-cp-inactive-head + li{border-top:0}
+.hs-cp-roster .is-inactive .hs-cp-name{color:var(--muted)}
+.hs-cp-tip{display:inline-grid;place-items:center;width:16px;height:16px;padding:0;border-radius:50%;border:1px solid var(--muted);background:transparent;color:var(--muted);font-size:11px;line-height:1;cursor:help}
+.hs-cp-tip:hover,.hs-cp-tip:focus-visible{color:var(--text);border-color:var(--text)}
+/* The note about inactive players, as a tooltip under the header: on hover, and on focus for the keyboard. */
+.hs-cp-tip-text{display:none;position:absolute;z-index:5;left:8px;right:8px;top:calc(100% + 4px);padding:8px 10px;border:1px solid var(--gold-line);border-radius:var(--radius);
+  background:var(--ground-2);box-shadow:var(--shadow-panel);font-family:var(--font-body);font-size:13px;letter-spacing:0;line-height:1.45;color:var(--text)}
+.hs-cp-tip:hover + .hs-cp-tip-text,.hs-cp-tip:focus-visible + .hs-cp-tip-text{display:block}
+.hs-cp-roster-foot{padding:10px 12px 12px}
+.hs-ghost.is-warn{gap:6px;color:#e8a08b}
+.hs-ghost.is-warn:hover{border-color:var(--seal);color:#f3b7a5}
+.hs-cp-empty{color:var(--muted);font-size:14px}
+
+/* The invite dialog: the link to copy, then friends to invite. */
+.hs-cp-copy{display:flex;gap:8px}
+.hs-cp-copy .hs-input{flex:1}
+.hs-cp-copy .hs-btn-amber{flex:none;height:38px;padding:0 16px;white-space:nowrap}
+.hs-cp-friends{list-style:none;margin:0;padding:0;max-height:220px;overflow-y:auto}
+.hs-cp-friends li{display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--gold-rule)}
+.hs-cp-friends li:first-child{border-top:0}
+.hs-cp-friend{flex:1;min-width:0}
+.hs-cp-friends .hs-btn-amber,.hs-cp-friends .hs-ghost{height:28px;font-size:13px;flex:none}
+
 /* ---------- The Notice Board (NoticeBoardSheet, PlannerSteps, VoteTally; #222) ----------
    One NoticeSheet per session being planned, on the Hearth and (#225) a campaign's page. What the design system's
    static markup doesn't draw: the ballot's boxes in the tally, notes under its bars, the potluck's buttons,

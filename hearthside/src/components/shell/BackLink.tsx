@@ -15,11 +15,13 @@ export const ShellBackContext = createContext<(target: BackTarget | null) => voi
 /**
  * A page's way back ("← Campaigns"), in the amber button. On wide screens it
  * sits where the page puts it, at the top of the page; under 760px it moves
- * to the right of the shell's row, opposite the menu button.
+ * to the right of the shell's row, opposite the menu button. `full` is a
+ * longer label for the wide button; the phone bar keeps the short one.
  *
  *   <BackLink href="/campaigns">Campaigns</BackLink>
+ *   <BackLink href="/campaigns" full="Back to Campaigns">Campaigns</BackLink>
  */
-export default function BackLink({ href, children }: { href: string; children: string }) {
+export default function BackLink({ href, children, full }: { href: string; children: string; full?: string }) {
   const setBack = useContext(ShellBackContext);
   useEffect(() => {
     setBack({ href, label: children });
@@ -27,7 +29,7 @@ export default function BackLink({ href, children }: { href: string; children: s
   }, [setBack, href, children]);
   return (
     <Link className="hs-btn-amber hs-back" href={href}>
-      ← {children}
+      ← {full ?? children}
     </Link>
   );
 }

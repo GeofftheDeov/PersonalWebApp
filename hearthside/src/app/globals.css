@@ -337,3 +337,62 @@ body.hs-app{margin:0;min-height:100vh;-webkit-font-smoothing:antialiased}
   border-radius:var(--radius-full);border:1px solid currentColor;color:#f07b2c;white-space:nowrap}
 .hs-sess-check{display:flex;align-items:center;gap:8px;font-size:14.5px;cursor:pointer}
 .hs-sess-check input{accent-color:var(--accent);width:16px;height:16px}
+
+/* ---------- The Notice Board (NoticeBoardSheet, PlannerSteps, VoteTally; #222) ----------
+   One NoticeSheet per session being planned, on the Hearth and (#225) a campaign's page. What the design system's
+   static markup doesn't draw: the ballot's boxes in the tally, notes under its bars, the potluck's buttons,
+   fields on parchment (a translucent paper field, as the prototypes draw them) and the sheet's foot. */
+.hs-board{display:flex;flex-direction:column;gap:var(--space-4);min-width:0}
+.hs-board > .hs-sec{margin:0}
+/* Room above each sheet for its pin. */
+.hs-board-sheets{display:flex;flex-direction:column;gap:30px;padding-top:9px;min-width:0}
+.hs-board-empty{font-size:15px}
+.hs-board-empty a{color:var(--accent)}
+.hs-board-sheet{min-width:0;padding:var(--space-5) var(--space-6) var(--space-6)}
+.hs-board-head-text{min-width:0;flex:1 1 16rem}
+.hs-board-sheet .hs-sheet-title{overflow-wrap:anywhere}
+.hs-board-sheet .hs-byline{margin:4px 0 0;overflow-wrap:anywhere}
+.hs-seal.is-tie{background:var(--accent);color:var(--accent-ink)}
+.hs-step-body{min-width:0}
+.hs-step.is-later h4{color:var(--paper-muted)}
+.hs-step .hs-board-line{margin:0 0 6px;font-size:14.5px;color:var(--paper-ink);max-width:none;overflow-wrap:anywhere}
+.hs-step .hs-board-fine{margin:8px 0 0;font-size:13px;color:var(--paper-muted);overflow-wrap:anywhere}
+.hs-step .hs-board-done{margin:8px 0 0;font-size:13.5px;color:#4b6630}
+.hs-board-alert{margin:12px 0 0;color:var(--seal);font-size:14px}
+/* The label face on the sheet's buttons (`.hs-app button` would otherwise give them the body's). */
+.hs-board-sheet .hs-btn{font-family:var(--font-label);font-size:14px;text-decoration:none}
+/* The tally: the option (with the ballot's box) and its count, the bar, then who chose it. */
+.hs-votes{list-style:none;padding:0;margin-bottom:0}
+.hs-vote-what{min-width:0;overflow-wrap:anywhere}
+.hs-vote-who{white-space:nowrap}
+.hs-vote-foot{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;justify-content:space-between;min-width:0}
+.hs-vote-note{font-size:12.5px;color:var(--paper-muted);min-width:0;overflow-wrap:anywhere}
+.hs-board-pick{display:flex;gap:8px;align-items:flex-start;cursor:pointer;min-width:0}
+.hs-board-pick input,.hs-board-choice input{accent-color:var(--paper-ink);width:16px;height:16px;margin:2px 0 0;flex:none}
+.hs-board-venue{display:flex;flex-direction:column;min-width:0}
+.hs-board-venue-name{font-weight:500;overflow-wrap:anywhere}
+.hs-board-venue-sub{font-size:12.5px;color:var(--paper-muted);overflow-wrap:anywhere}
+/* Forms on parchment: suggesting a venue, the potluck's slots. */
+.hs-board-form{display:flex;flex-direction:column;gap:8px;margin-top:12px;padding:12px;border:1.5px dashed var(--paper-line);border-radius:var(--radius)}
+.hs-board-form .hs-btn-row{margin-top:2px}
+.hs-board-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center;min-width:0}
+.hs-board-form .hs-board-row{margin-top:0}
+.hs-board-row .hs-paper-input{flex:1 1 12rem}
+.hs-board-choice{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:14px}
+.hs-board-choice label{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
+.hs-paper-input{width:100%;min-width:0;padding:6px 9px;border:1px solid var(--paper-line);border-radius:var(--radius);
+  background:rgba(255,250,235,.55);color:var(--paper-ink);font:inherit;font-size:14px;color-scheme:light}
+.hs-paper-input:focus{outline:none;border-color:var(--paper-ink)}
+.hs-paper-input::placeholder{color:var(--paper-muted);opacity:.85}
+/* The potluck, on the design system's Ledger. */
+.hs-board-sheet .hs-ledger li{align-items:center}
+.hs-board-slot{min-width:0;overflow-wrap:anywhere}
+.hs-board-slot-who{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;justify-content:flex-end;text-align:right}
+/* The foot: the session's page, the campaign's Notice Board, and the GM's Cancel planning. */
+.hs-board-foot{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;margin-top:16px;padding-top:12px;border-top:1px solid var(--paper-line)}
+.hs-board-sheet .hs-sess-link{color:var(--seal);overflow-wrap:anywhere}
+.hs-board-cancel{margin-left:auto}
+@media (max-width:759px){
+  .hs-board-sheet{padding:var(--space-4) var(--space-4) var(--space-5)}
+  .hs-board-sheet .hs-sheet-title{font-size:23px}
+}

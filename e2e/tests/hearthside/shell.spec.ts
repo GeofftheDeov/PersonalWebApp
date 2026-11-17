@@ -15,7 +15,8 @@ test("Hearthside renders its shell under the top bar", async ({ page }) => {
   const nav = page.getByRole("navigation", { name: "Main" });
   await expect(nav.getByRole("link")).toHaveText(["The Hearth", "Campaigns", "Almanac", "Adventurers", "Your Room"]);
   await expect(nav.getByRole("link", { name: "The Hearth" })).toHaveAttribute("aria-current", "page");
-  await expect(page.getByRole("main").getByRole("heading", { name: "The Hearth" })).toBeVisible();
+  // The Hearth greets the player (#222).
+  await expect(page.getByRole("main").getByRole("heading", { level: 1 })).toHaveText(/^Good (morning|afternoon|evening), Tobin$/);
 });
 
 test.describe("at 375px", () => {
@@ -23,7 +24,8 @@ test.describe("at 375px", () => {
 
   test("nothing scrolls sideways, and the nav opens from its menu button", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("main").getByRole("heading", { name: "The Hearth" })).toBeVisible();
+    await expect(page.getByRole("main").getByRole("heading", { level: 1 })).toHaveText(/^Good (morning|afternoon|evening), Tobin$/);
+    await expect(page.getByRole("region", { name: "The Notice Board" })).toBeVisible();
     const sideways = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(await sideways()).toBeLessThanOrEqual(0);
 

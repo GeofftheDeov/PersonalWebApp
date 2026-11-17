@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import BackLink from '@/components/shell/BackLink';
 import EditSessionDialog from '@/components/session/EditSessionDialog';
+import RoundTable from '@/components/session/RoundTable';
 import SessionCard from '@/components/session/SessionCard';
 import SessionTabs from '@/components/session/SessionTabs';
 import {
@@ -21,8 +22,8 @@ const short = (s: string, n = 22) => (s.length > n ? `${s.slice(0, n - 1).trimEn
 /**
  * A session's page (spec #69, #226): layout C, "Around the table", as
  * prototype/hearthside-session-details revised it, with today's data.
- * Previous and next above the parchment card; the table under it (#227 lays
- * it, at `#quests`); then the tabs: The tale, Details and, for the GM, the
+ * Previous and next above the parchment card; the round table under it
+ * (#227, at `#quests`); then the tabs: The tale, Details and, for the GM, the
  * stand-in and admins, Prep notes.
  */
 export default function SessionPage() {
@@ -33,7 +34,7 @@ export default function SessionPage() {
 }
 
 function SessionView({ id }: { id: string }) {
-  const { state, reload, save } = useSessionPage(id);
+  const { state, reload, save, merge } = useSessionPage(id);
   const [editing, setEditing] = useState(false);
   const [tab, setTab] = useState<SessionTab | null>(null);
   // "Now", for before or after: read once the session is in, so the page doesn't change tab under the reader.
@@ -111,10 +112,15 @@ function SessionView({ id }: { id: string }) {
         onTorchChanged={reload}
       />
 
-      {/* The round table: the GM at its head, the party in their seats, attendance, the ready check and the
-          quest slips. #227 lays it here (and names it "Around the table"); quest links (#quests) already land
-          on it. Until then it's an empty slot with no height. */}
-      <section id="quests" className="hs-sess-table" data-slot="table" />
+      {/* The round table (#227), at #quests: the GM at its head, the party in their seats, attendance, the
+          ready check and the quest slips. Quest links land on it. */}
+      <RoundTable
+        session={session}
+        planning={planning}
+        phase={phase}
+        gmTitle={gmTitle}
+        onReadyCheck={(readyCheck) => merge({ readyCheck })}
+      />
 
       <SessionTabs
         session={session}

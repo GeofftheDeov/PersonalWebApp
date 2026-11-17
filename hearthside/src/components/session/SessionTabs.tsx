@@ -4,6 +4,7 @@ import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import GildedPanel from '@/components/design-system/GildedPanel';
 import { errorOf } from '@/lib/api';
 import { TAB_LABEL, longDay, taleParagraphs, timeSpan, type SessionPhase, type SessionTab } from '@/lib/sessionPage';
+import { recordingUrl } from '@/lib/sessionTable';
 import type { SessionDetail, SessionPatch } from '@/lib/useSessionPage';
 
 export interface SessionTabsProps {
@@ -183,7 +184,9 @@ function DetailsPanel({ session, phase, gmTitle, gmName, standInName, place }: S
       ? <>{standInName} <span className="hs-sess-pill">standing in</span></>
       : gmName ?? <span className="hs-sess-muted">Not known</span>],
   ];
-  if (session.vodUrl) rows.push(['Recording', <a className="hs-sess-link" href={session.vodUrl} {...ext}>Watch the recording ↗</a>]);
+  // Only a web address is followed (a typed `javascript:` link isn't).
+  const recording = recordingUrl(session.vodUrl);
+  if (recording) rows.push(['Recording', <a className="hs-sess-link" href={recording} {...ext}>Watch the recording ↗</a>]);
   if (before && (session.googleCalendarLink || session.discordEventId || session.googleEventId)) {
     const made = [session.discordEventId && 'Discord event made', session.googleEventId && 'On the GM’s Google Calendar'].filter(Boolean).join(' · ');
     rows.push(['Calendar', <>

@@ -67,6 +67,8 @@ export function useSessionTable(sessionId: string, campaignId: string | null) {
       } else {
         const done = await api.post<Quest>(`/api/quests/${enc(q.id)}/done`);
         if (done?.id) setQuest(q.id, () => done);
+        // Yours, but the rail didn't hold it (it hadn't loaded yet): let it catch up.
+        if (q.assignee && q.assignee.id === data.viewer?.id) refreshQuests();
       }
     } catch (err) {
       setQuest(q.id, (x) => ({ ...x, status: q.status }));
@@ -74,7 +76,7 @@ export function useSessionTable(sessionId: string, campaignId: string | null) {
     } finally {
       setTicking((t) => new Set([...t].filter((id) => id !== q.id)));
     }
-  }, [ticking]);
+  }, [ticking, data.viewer]);
 
   /** The GM's "+ quest" on a seat: a quest for that player, due when the session starts. Throws if refused. */
   const addQuest = useCallback(async (assigneeId: string, title: string) => {

@@ -196,7 +196,7 @@ export default function RoundTable({ session, planning, phase, gmTitle, onReadyC
       <div key={s.personId} className={cls} style={{ left: `${places[i].x}%`, top: `${places[i].y}%` }} role="group" aria-label={`${s.name}’s seat`}>
         {draft ? (
           <button type="button" className="hs-seat-who" aria-pressed={draft.has(s.personId)} onClick={() => toggle(s.personId)}
-            aria-label={`${s.name}: ${draft.has(s.personId) ? 'came' : 'away'}`}>
+            aria-label={`${s.adventurer ? `${s.adventurer}, ${s.name}` : s.name}: ${draft.has(s.personId) ? 'came' : 'away'}`}>
             {inner}
           </button>
         ) : (
@@ -230,7 +230,7 @@ export default function RoundTable({ session, planning, phase, gmTitle, onReadyC
         <div className="hs-table-mid"><TableCard card={card} isGM={isGM} /></div>
         {seats.map(seat)}
       </div>
-      {problems.map((p) => <p key={p} className="hs-alert hs-table-alert" role="alert">{p}</p>)}
+      {problems.map((p) => <p key={p} className="hs-alert" role="alert">{p}</p>)}
       {rows.length > 0 && <GildedPanel className="hs-table-strip">{rows}</GildedPanel>}
     </section>
   );

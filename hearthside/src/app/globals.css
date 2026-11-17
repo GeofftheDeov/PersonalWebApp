@@ -362,6 +362,7 @@ body.hs-app{margin:0;min-height:100vh;-webkit-font-smoothing:antialiased}
 /* The label face on the sheet's buttons (`.hs-app button` would otherwise give them the body's). */
 .hs-board-sheet .hs-btn{font-family:var(--font-label);font-size:14px;text-decoration:none}
 /* The tally: the option (with the ballot's box) and its count, the bar, then who chose it. */
+.hs-votes{list-style:none;padding:0;margin-bottom:0}
 .hs-vote-what{min-width:0;overflow-wrap:anywhere}
 .hs-vote-who{white-space:nowrap}
 .hs-vote-foot{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;justify-content:space-between;min-width:0}

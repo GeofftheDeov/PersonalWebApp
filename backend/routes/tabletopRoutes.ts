@@ -234,7 +234,9 @@ router.post("/sessions/:id/ready", auth, async (req: any, res) => {
         } else {
             responses.push({ playerId: String(req.user.id), name, ready, respondedAt: new Date() });
         }
-        session.markModified("readyCheck");
+        // save() writes every field that differs from what was read (db/model.ts), nested
+        // jsonb changes included. Mongo's markModified isn't needed, and since the
+        // Postgres port calling it threw, so no answer was ever recorded (#227).
         await session.save();
 
         res.json({ readyCheck: session.readyCheck });

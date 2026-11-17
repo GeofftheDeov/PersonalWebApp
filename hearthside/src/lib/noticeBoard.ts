@@ -153,8 +153,10 @@ export function currentPoll(state: PlanningState): Poll | null {
 }
 
 /** A party member's name, from the session's party. */
-export const nameIn = (state: PlanningState) => (id: string | null | undefined): string =>
-  state.party.find((p) => p.id === id)?.name ?? (state.session.gmOverride?.id === id ? state.session.gmOverride.name : 'someone');
+export const nameIn = (state: PlanningState) => (id: string | null | undefined): string => {
+  const standIn = state.session.gmOverride;
+  return state.party.find((p) => p.id === id)?.name ?? (standIn && standIn.id === id ? standIn.name : 'someone');
+};
 
 /** Is the viewer at this session's table: in its party, or its stand-in GM? (An admin may see any campaign's board.) */
 export const isMine = (state: PlanningState): boolean =>

@@ -306,8 +306,78 @@ body.hs-app{margin:0;min-height:100vh;-webkit-font-smoothing:antialiased}
 .hs-btn.is-torch{border-color:#9a4a12;color:#9a4a12}
 .hs-sess-alert{color:var(--seal);font-size:13px}
 
-/* The table's slot: #227 fills it. */
-.hs-sess-table:empty{display:none}
+/* The round table (RoundTable; #227), at #quests: seen from above, the GM at its head, the party in seats on brass
+   plates, a card in the middle, each player's quests as paper slips by their seat. Everything on it is sized from the
+   table's width (cqw), so it reads the same on a phone and a desktop. The top is a picture painted once from the
+   session prototype's painter; the shadows under it give it an edge and lift it off the floor. */
+.hs-sess-table{min-width:0;scroll-margin-top:96px;
+  --hs-gild:linear-gradient(135deg,var(--gold-hi) 0%,#b07c2c 22%,#f0cf7a 45%,#7c5318 68%,#e7c06a 88%,#a87228 100%)}
+.hs-table{position:relative;width:100%;max-width:640px;aspect-ratio:1;margin:4px auto 0;container-type:inline-size}
+.hs-table-top{position:absolute;inset:13%;border-radius:50%;background:#3a2414 url("../components/session/round-table.jpg") center/cover;
+  box-shadow:0 4px 0 #3b2210,0 7px 0 #24140a,0 9px 4px rgba(0,0,0,.6),0 36px 60px 6px rgba(0,0,0,.75)}
+.hs-table-top::after{content:"";position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle,rgba(255,179,107,.2),rgba(255,179,107,0) 55%)}
+/* The middle: a gilded card, its front only (the recording and the cinematic are #199's). */
+.hs-table-mid{position:absolute;left:50%;top:50%;width:48%;aspect-ratio:5/4;transform:translate(-50%,-50%);z-index:3}
+.hs-table-card{position:absolute;inset:0;display:flex;flex-direction:column;gap:1cqw;padding:1.4cqw;border:2px solid transparent;border-radius:var(--radius-panel);
+  background:linear-gradient(#17100b,#0e0906) padding-box,var(--hs-gild) border-box;box-shadow:0 14px 30px rgba(0,0,0,.65)}
+.hs-table-card-h{padding:0 .4cqw;font:500 clamp(10px,2.1cqw,13.5px)/1.1 var(--font-label);letter-spacing:.1em;color:var(--gold-hi);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hs-table-say{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1cqw;padding:1cqw 2cqw;text-align:center;
+  border-radius:2px;background:radial-gradient(120% 90% at 50% 100%,rgba(255,179,107,.14),transparent 60%),#0b0705}
+.hs-table-say b{font-family:var(--font-story);font-weight:400;font-size:clamp(14px,4.2cqw,26px);line-height:1.1;color:var(--on-wood-text);overflow-wrap:anywhere}
+.hs-table-say p{margin:0;font-size:clamp(10.5px,2.3cqw,14px);line-height:1.3;color:var(--on-wood-muted)}
+.hs-table-say .hs-btn-amber{display:inline-flex;align-items:center;font-size:clamp(11px,2.4cqw,15px);padding:.8cqw 2.2cqw;line-height:1.25;text-decoration:none}
+.hs-table-card.is-cancelled .hs-table-say b{color:var(--muted)}
+/* The seats, anchored on the portrait (13.6cqw across), so a seat with more slips stays put. */
+.hs-seat{position:absolute;width:22%;transform:translate(-50%,-6.8cqw);display:flex;flex-direction:column;align-items:center;text-align:center;z-index:2}
+.hs-seat-who{display:flex;flex-direction:column;align-items:center;width:100%;background:none;border:0;padding:0;color:inherit;font:inherit;position:relative}
+.hs-seat button.hs-seat-who{cursor:pointer;border-radius:8px}
+.hs-seat button.hs-seat-who:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.hs-avatar.hs-seat-medal{width:62%;height:auto;aspect-ratio:1;font-size:6.5cqw;border:2px solid transparent;color:var(--gold-hi);
+  background:radial-gradient(120% 90% at 15% 100%,rgba(255,179,107,.25),transparent 55%) padding-box,linear-gradient(160deg,#4a3324,#1c120b) padding-box,var(--hs-gild) border-box;
+  box-shadow:0 3px 8px rgba(0,0,0,.55);transition:box-shadow .2s,filter .2s,opacity .2s}
+.hs-seat-plate{margin-top:-1.4cqw;position:relative;z-index:2;max-width:118%;padding:.6cqw 1.6cqw .8cqw;border-radius:2px;
+  background:linear-gradient(180deg,#f4d98e,#d7ab55 55%,#b88834);box-shadow:0 2px 5px rgba(0,0,0,.6);color:var(--accent-ink)}
+.hs-seat-plate b{display:block;font-family:var(--font-story);font-weight:400;font-size:clamp(11px,2.9cqw,16px);line-height:1.1;overflow-wrap:anywhere}
+.hs-seat-plate small{display:block;font:500 clamp(9.5px,2.2cqw,12.5px)/1.2 var(--font-label);letter-spacing:.04em;color:#4a3112;overflow-wrap:anywhere}
+.hs-seat-st{margin-top:.8cqw;font:500 clamp(9.5px,2.3cqw,13px)/1.2 var(--font-label);letter-spacing:.04em;color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow)}
+.hs-seat-flame{margin-top:.6cqw;width:clamp(12px,2.8cqw,18px);height:clamp(12px,2.8cqw,18px);color:var(--torch)}
+.hs-seat.is-head .hs-seat-medal{box-shadow:0 0 0 3px var(--torch),0 0 22px 5px rgba(240,123,44,.5)}
+.hs-seat.is-ready .hs-seat-medal{box-shadow:0 0 0 3px var(--moss),0 0 18px 4px rgba(124,154,85,.6)}
+.hs-seat.is-ready .hs-seat-st{color:#b5d68a}
+.hs-seat.is-not-ready .hs-seat-medal{box-shadow:0 0 0 3px var(--seal),0 0 14px 2px rgba(180,70,44,.5);filter:grayscale(.6)}
+.hs-seat.is-not-ready .hs-seat-st{color:#f0a48c}
+/* Away (once attendance is confirmed, or while the GM taps): an empty grey seat. */
+.hs-seat.is-away .hs-seat-medal{filter:grayscale(1) brightness(.55);opacity:.55;box-shadow:none;color:transparent}
+.hs-seat.is-away .hs-seat-plate{filter:grayscale(.8) brightness(.8)}
+.hs-seat.is-me .hs-seat-plate small{color:#7a3f0c}
+.hs-seat button.hs-seat-who:hover .hs-seat-medal{box-shadow:0 0 0 2px rgba(246,221,150,.9),0 0 22px 6px rgba(255,179,107,.5)}
+/* The GM's own slips sit beside the head of the table. */
+.hs-seat.is-head .hs-seat-slips{position:absolute;left:104%;top:2%;width:120%;margin:0}
+.hs-sess-table .hs-alert{margin:8px 0 0}
+.hs-table-strip{padding:12px 16px;display:flex;flex-direction:column;gap:10px}
+.hs-table-row{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;justify-content:space-between;font-size:14.5px}
+.hs-table-btns{display:flex;flex-wrap:wrap;gap:8px}
+.hs-table-row .hs-btn-amber,.hs-table-row .hs-ghost{height:32px;font-size:14px}
+.hs-table-row .hs-btn-amber:disabled,.hs-table-row .hs-ghost:disabled{opacity:.6;cursor:default}
+
+/* Quest slips (QuestSlips; #227, reused by the Almanac): paper, a little askew, sized in em so a place can scale them. */
+.hs-slips{list-style:none;margin:.6em 0 0;padding:0;display:flex;flex-direction:column;gap:.5em;font-size:13px}
+.hs-slip{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.5em;align-items:start;text-align:left;padding:.45em .6em;border-radius:2px;color:var(--paper-ink);
+  background:linear-gradient(170deg,var(--paper-hi),var(--paper-lo));box-shadow:0 2px 5px rgba(0,0,0,.55);line-height:1.2;transform:rotate(-.8deg)}
+.hs-slip:nth-child(even){transform:rotate(.7deg)}
+.hs-slip .hs-box{width:1.05em;height:1.05em;margin-top:.05em;border-color:var(--paper-muted)}
+.hs-slip-text{min-width:0;overflow-wrap:anywhere}
+.hs-slip .hs-tag{margin-left:.4em;font-size:.85em;border-color:var(--paper-line);color:var(--paper-muted)}
+.hs-slip small{display:block;color:var(--paper-muted);font-size:.88em;margin-top:1px}
+.hs-slip.is-done .hs-slip-title{text-decoration:line-through;color:var(--paper-muted)}
+.hs-slip-tool{display:block}
+.hs-slip-plus{width:100%;background:rgba(20,13,8,.6);border:1px dashed var(--gold-line);border-radius:2px;color:var(--on-wood-muted);cursor:pointer;padding:.35em;
+  font:500 .95em/1.2 var(--font-label);letter-spacing:.04em}
+.hs-slip-plus:hover,.hs-slip-plus:focus-visible{color:var(--gold-hi);border-color:var(--gold)}
+.hs-slip-input{width:100%;min-width:0;font:inherit;padding:.4em .6em;border-radius:2px;border:1px solid var(--gold);background:var(--paper-hi);color:var(--paper-ink)}
+.hs-slip-error{display:block;margin-top:.3em;color:#f0a48c;font-size:.9em;text-shadow:var(--on-wood-shadow)}
+/* At the table: slips as wide as the seat, their type sized from the table. */
+.hs-seat-slips{width:100%;margin-top:1.2cqw;gap:.9cqw;font-size:clamp(10px,1.85cqw,13px)}
 
 /* The tabs, on leather. */
 .hs-sess-tabs{padding:0;min-width:0}

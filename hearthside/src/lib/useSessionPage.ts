@@ -5,6 +5,7 @@ import { ApiError } from '@gtd/shared/api';
 import { api, errorOf, getOrNull } from './api';
 import { useRequiredSession } from './session';
 import type { SessionListItem } from './sessionPage';
+import type { ReadyCheck } from './sessionTable';
 
 /**
  * A session as `GET /api/tabletop/sessions/:id` sends it (the fields the page
@@ -29,6 +30,8 @@ export interface SessionDetail {
   status?: 'planning' | 'scheduled' | 'cancelled' | 'completed' | null;
   /** The one-session stand-in GM's id (#89). */
   gmOverride?: string | null;
+  /** The ready check: who said they're ready (or can't make it). Responses may come before it's sent. */
+  readyCheck?: ReadyCheck | null;
   createdAt?: string | null;
   campaign?: { _id: string; title: string; gmTitle?: string | null; tableLink?: string | null } | null;
 }
@@ -100,5 +103,10 @@ export function useSessionPage(id: string) {
     return saved;
   }, [id]);
 
-  return { state, reload: load, save };
+  /** Shows a change the server has already made (the ready check's answers), without a save. */
+  const merge = useCallback((patch: Partial<SessionDetail>) => {
+    setState((s) => (s.status === 'ready' ? { ...s, session: { ...s.session, ...patch } } : s));
+  }, []);
+
+  return { state, reload: load, save, merge };
 }

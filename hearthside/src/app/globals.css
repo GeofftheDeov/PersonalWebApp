@@ -570,3 +570,115 @@ a.hs-cp-whois:hover .hs-cp-name{color:var(--gold-hi)}
   .hs-board-sheet{padding:var(--space-4) var(--space-4) var(--space-5)}
   .hs-board-sheet .hs-sheet-title{font-size:23px}
 }
+
+/* ---------- Your Room (layout A, "The ledger"; #230) ----------
+   prototype/hearthside-player-profile: the head on the floor (photo in a gilded medallion, name, handle and unique ID,
+   counts, Edit), then a gilded tab strip and one leather panel. The pieces take any person, so another player's page
+   (#231) draws the same head and record. */
+.hs-room-wait{padding:12px 0}
+.hs-app :is(.hs-room-head,.hs-room-panel,.hs-room-tabs) :is(.hs-btn-amber,.hs-ghost,.hs-cp-link){font-family:var(--font-label)}
+.hs-room-head{display:flex;gap:16px;align-items:center;flex-wrap:wrap;min-width:0}
+.hs-room-who{min-width:0;flex:1 1 200px}
+.hs-room-who h1{overflow-wrap:anywhere}
+.hs-room-handle{font-family:var(--font-label);font-size:16px;letter-spacing:.04em;color:var(--accent);text-shadow:var(--on-wood-shadow);overflow-wrap:anywhere}
+.hs-room-handle small{font-family:var(--font-body);letter-spacing:0;font-size:14px;color:var(--on-wood-muted)}
+.hs-page-head p.hs-room-alert{color:#f0a58f}
+.hs-room-acts{display:flex;gap:8px;flex-wrap:wrap}
+.hs-room-edit{height:34px;font-size:15px}
+/* The photo: a face in a gilded medallion, or the initial on dyed cloth. Your own changes on a click. */
+.hs-room-photo{position:relative;display:block;flex:none;width:96px;aspect-ratio:1;border-radius:50%}
+.hs-room-medal{position:absolute;inset:0;display:block;overflow:hidden;border-radius:50%;border:2px solid transparent;container-type:inline-size;
+  background:radial-gradient(120% 90% at 15% 100%,rgba(255,179,107,.2),transparent 55%) padding-box,linear-gradient(160deg,#4a3324,#1c120b) padding-box,
+    linear-gradient(135deg,var(--gold-hi) 0%,#b07c2c 22%,#f0cf7a 45%,#7c5318 68%,#e7c06a 88%,#a87228 100%) border-box;
+  box-shadow:0 3px 8px rgba(0,0,0,.55)}
+.hs-room-medal img{width:100%;height:100%;object-fit:cover;display:block}
+.hs-room-initial{position:absolute;inset:0;display:grid;place-items:center;font-family:var(--font-display);font-size:42cqw;line-height:1;color:var(--gold-hi);opacity:.85}
+.hs-room-photo.is-mine{cursor:pointer}
+.hs-room-photo-hint{position:absolute;inset:0;border-radius:50%;display:grid;place-items:center;padding:8px;text-align:center;line-height:1.2;
+  background:rgba(10,7,4,.62);opacity:0;transition:opacity .15s;font-family:var(--font-label);font-size:13px;letter-spacing:.06em;color:var(--text)}
+.hs-room-photo.is-mine:hover .hs-room-photo-hint,.hs-room-photo.is-mine:focus-within .hs-room-photo-hint,.hs-room-photo.is-busy .hs-room-photo-hint{opacity:1}
+.hs-room-photo:focus-within{outline:2px solid var(--accent);outline-offset:3px}
+/* The tab strip, and the one panel under it. */
+.hs-room-tabs{padding:0 6px}
+.hs-room-tabs .hs-tabs{border-bottom:0;flex-wrap:wrap}
+.hs-room-tabs .hs-tabs button{flex:1 1 auto;padding:10px 8px;font-size:14.5px;white-space:nowrap}
+.hs-room-tabs .hs-tabs button small{font-family:var(--font-body);font-size:12px;letter-spacing:0;color:var(--muted)}
+/* Phones: four tabs make two rows of two. */
+@media (max-width:479px){.hs-room-tabs .hs-tabs{display:grid;grid-template-columns:1fr 1fr}}
+.hs-room-panel{padding:6px;min-width:0}
+.hs-room-sec{padding:12px}
+.hs-room-sec + .hs-room-sec{border-top:1px solid var(--gold-rule)}
+.hs-room-h{margin:0 0 8px;font-family:var(--font-label);font-size:13.5px;font-weight:500;letter-spacing:.1em;color:var(--accent)}
+.hs-room-empty{margin:0;font-size:14.5px;line-height:1.5;color:var(--muted)}
+.hs-room-empty a,.hs-room-link{color:var(--accent)}
+/* The record: a definition list. */
+.hs-room-dl{margin:0;display:flex;flex-direction:column}
+.hs-room-dl > div{display:grid;grid-template-columns:minmax(96px,32%) minmax(0,1fr);gap:10px;padding:7px 0;border-top:1px solid var(--gold-rule);align-items:baseline}
+.hs-room-dl > div:first-child{border-top:0}
+.hs-room-dl dt{font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.06em;color:var(--muted)}
+.hs-room-dl dd{margin:0;font-size:14.5px;overflow-wrap:anywhere}
+.hs-room-dl dd small{display:block;color:var(--muted);font-size:12.5px}
+.hs-room-none{color:var(--muted);font-style:italic}
+.hs-room-lock{margin-left:6px;font-family:var(--font-label);font-size:12px;letter-spacing:.05em;color:var(--muted)}
+.hs-room-mono{font-variant-numeric:tabular-nums;letter-spacing:.02em}
+/* Favourite games: chips. */
+.hs-room-chips{list-style:none;margin:0 0 8px;padding:0;display:flex;flex-wrap:wrap;gap:6px}
+.hs-room-chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:2px 4px 2px 10px;border:1px solid var(--gold-line);border-radius:var(--radius-full);
+  font-size:13.5px;background:rgba(0,0,0,.18);overflow-wrap:anywhere}
+.hs-room-chip.is-ro{padding-right:10px}
+.hs-room-chip button{flex:none;background:none;border:0;color:var(--muted);cursor:pointer;width:22px;height:22px;border-radius:50%;font-size:15px;line-height:1;padding:0}
+.hs-room-chip button:hover{color:var(--text);background:rgba(255,255,255,.06)}
+.hs-room-add{max-width:220px;padding:5px 10px;border-radius:var(--radius-full);font-size:14px}
+/* The record's dialog: the handle's @, and labels that sit apart from their field. */
+.hs-room-at{position:relative;display:block}
+.hs-room-at > span{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--accent);pointer-events:none}
+.hs-room-at .hs-input{padding-left:24px}
+.hs-field > label > span{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.06em;color:var(--muted)}
+.hs-input:disabled{opacity:.6}
+/* Sessions: the campaign filter over both lists, then a row each. */
+.hs-room-filt{display:flex;flex-wrap:wrap;gap:6px;padding:10px 12px;border-bottom:1px solid var(--gold-rule)}
+.hs-room-filt button{display:inline-flex;gap:6px;align-items:center;max-width:100%;background:transparent;border:1px solid var(--gold-line);color:var(--muted);border-radius:var(--radius-full);
+  padding:2px 10px;font-family:var(--font-label);font-size:13px;letter-spacing:.04em;cursor:pointer;text-align:left;overflow-wrap:anywhere}
+.hs-room-filt button[aria-pressed="true"]{color:var(--accent-ink);background:var(--accent);border-color:var(--accent)}
+.hs-room-n{font-family:var(--font-body);font-size:12px;opacity:.8}
+.hs-room-srs{list-style:none;margin:0;padding:0}
+.hs-room-srs li + li{border-top:1px solid var(--gold-rule)}
+.hs-room-sr{display:grid;grid-template-columns:74px minmax(0,1fr);gap:10px;align-items:center;padding:9px 4px;color:inherit;text-decoration:none;border-radius:var(--radius)}
+.hs-room-sr:hover{background:rgba(255,214,140,.05)}
+.hs-room-sr-when{display:flex;flex-direction:column;font-family:var(--font-label);font-size:12.5px;letter-spacing:.04em;color:var(--muted);line-height:1.2;font-variant-numeric:tabular-nums}
+.hs-room-sr-when b{color:var(--text);font-weight:500;font-size:14px}
+.hs-room-sr.is-next .hs-room-sr-when b{color:var(--accent)}
+.hs-room-sr-t{min-width:0;display:flex;flex-direction:column}
+.hs-room-sr-k{font-family:var(--font-label);font-size:12px;letter-spacing:.08em;color:var(--muted);overflow-wrap:anywhere}
+.hs-room-sr-n{font-size:14.5px;font-weight:500;line-height:1.25;overflow-wrap:anywhere}
+.hs-room-sr-as{font-size:13px;color:var(--muted)}
+/* Campaigns: banner cards. */
+.hs-room-ccs{list-style:none;margin:0;padding:8px;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(240px,100%),1fr));gap:10px}
+.hs-room-cc{min-width:0;padding:6px;border:1px solid var(--gold-rule);border-radius:var(--radius);background:rgba(0,0,0,.16)}
+.hs-room-cc:hover{border-color:var(--gold-line)}
+.hs-room-cc .hs-banner .hs-cloth::after{inset:4px}
+.hs-room-cc .hs-banner .hs-cloth span{font-size:clamp(16px,8cqw,26px)}
+.hs-room-cc.is-done .hs-banner{filter:grayscale(.55) brightness(.8)}
+.hs-room-cc-body{padding:10px 6px 4px;display:flex;flex-direction:column;gap:6px}
+.hs-room-cc h3{margin:0;font-family:var(--font-story);font-weight:400;font-size:19px;line-height:1.15;overflow-wrap:anywhere}
+.hs-room-cc h3 a{color:var(--text);text-decoration:none}
+.hs-room-cc h3 a:hover{color:var(--gold-hi)}
+.hs-room-cc-meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px}
+/* Integrations: the portfolio's card. The name and its status on the left, one button on the right, the result under. */
+.hs-room-ig{display:grid;grid-template-columns:40px minmax(0,1fr) auto;gap:6px 12px;align-items:start;padding:14px}
+.hs-room-ig-mark{width:40px;height:40px;border-radius:var(--radius);display:grid;place-items:center;border:1px solid var(--gold-line);background:rgba(0,0,0,.25);color:var(--gold-hi)}
+.hs-room-ig-mark svg{width:22px;height:22px}
+.hs-room-ig-text{min-width:0}
+.hs-room-ig-name{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
+.hs-room-ig-name h3{margin:0;font-family:var(--font-story);font-weight:400;font-size:19px;line-height:1.2}
+.hs-room-ig-sub{margin:2px 0 0;font-size:14px;color:var(--muted);line-height:1.4}
+.hs-room-ig-warn{margin:6px 0 0;padding-left:10px;border-left:2px solid var(--seal);font-size:13.5px;line-height:1.4;color:var(--text)}
+.hs-room-ig-btn{align-self:center;height:34px;min-width:104px;justify-content:center}
+.hs-room-ig-btn:disabled{opacity:.6;cursor:default}
+.hs-room-ig-note{grid-column:2 / -1;margin:4px 0 0;font-size:13.5px;color:var(--accent);overflow-wrap:anywhere}
+.hs-room-pill{display:inline-block;font-family:var(--font-label);font-size:12px;font-weight:500;letter-spacing:.06em;padding:1px 8px;border-radius:var(--radius-full);
+  border:1px solid currentColor;color:var(--muted);white-space:nowrap}
+.hs-room-pill.is-ok{color:var(--moss)}
+.hs-room-pill.is-seal{color:#fff;background:var(--seal);border-color:var(--seal)}
+@media (max-width:479px){.hs-room-ig{grid-template-columns:40px minmax(0,1fr)}.hs-room-ig-btn{grid-column:2;justify-self:start}}
+@media (prefers-reduced-motion:reduce){.hs-room-photo-hint{transition:none}}

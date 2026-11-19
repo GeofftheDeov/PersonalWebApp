@@ -9,7 +9,7 @@ import OverlapPicker from '@/components/noticeboard/OverlapPicker';
 import { api, errorOf } from '@/lib/api';
 import { gmTitleOf, type CampaignDetail } from '@/lib/campaignPage';
 import {
-  attendanceLabel, previousSessions, sessionWhenLabel, type CampaignSession, type PartyCharacter,
+  attendanceLabel, sessionLists, sessionWhenLabel, type CampaignSession, type PartyCharacter,
 } from '@/lib/campaignRecords';
 import { optionWhen, type Board, type Upcoming } from '@/lib/noticeBoard';
 import type { PickedTime } from '@/lib/overlap';
@@ -71,9 +71,10 @@ export default function CampaignRecords({ campaign, isGM, board, boardError, rel
   }, [path]);
 
   const upcoming = board?.upcoming ?? [];
-  const past = sessions ? previousSessions(sessions, upcoming, new Date()) : [];
+  const { previous: past, underWay, later } = sessionLists(sessions ?? [], upcoming, new Date());
+  const comingCount = upcoming.length + underWay.length + later.length;
   const counts: Record<Tab, number | null> = {
-    sessions: board && sessions ? upcoming.length + past.length : null,
+    sessions: board && sessions ? comingCount + past.length : null,
     characters: characters?.length ?? null,
   };
 
@@ -101,13 +102,15 @@ export default function CampaignRecords({ campaign, isGM, board, boardError, rel
 
       <div role="tabpanel" id={panelId('sessions')} aria-labelledby={tabId('sessions')} hidden={tab !== 'sessions'} className="hs-cp-records-in">
         <section aria-labelledby="hs-cp-coming-h">
-          <h3 className="hs-sec" id="hs-cp-coming-h"><span>Coming up</span>{board && <span className="hs-aside">{upcoming.length}</span>}</h3>
+          <h3 className="hs-sec" id="hs-cp-coming-h"><span>Coming up</span>{board && <span className="hs-aside">{comingCount}</span>}</h3>
           {!board ? (
             <p className="hs-note" role={boardError ? 'alert' : undefined}>{boardError ?? 'Checking the calendar…'}</p>
-          ) : upcoming.length ? (
+          ) : comingCount ? (
             <GildedPanel>
               <ul className="hs-cp-rows" aria-label="Coming up">
+                {underWay.map((s) => <ComingRow key={s._id} session={s} underWay />)}
                 {upcoming.map((u) => <UpcomingRow key={u.id} campaignId={id} session={u} onChanged={reloadBoard} />)}
+                {later.map((s) => <ComingRow key={s._id} session={s} />)}
               </ul>
             </GildedPanel>
           ) : (
@@ -217,6 +220,25 @@ function UpcomingRow({ campaignId, session: u, onChanged }: { campaignId: string
           </NoticeSheet>
         </div>
       )}
+    </li>
+  );
+}
+
+/** A session not yet over that the board's Coming up leaves out: under way tonight, with no night yet, or far off. */
+function ComingRow({ session: s, underWay = false }: { session: CampaignSession; underWay?: boolean }) {
+  return (
+    <li>
+      <Link className="hs-cp-row" href={`/sessions/${encodeURIComponent(s._id)}`}>
+        <span className="hs-cp-row-text">
+          <span className="hs-cp-row-title">{s.title || 'Session'}</span>
+          <span className="hs-cp-meta">
+            <span className="hs-cp-when">{s.date ? optionWhen(s.date, s.endDate ?? null) : 'Date TBD'}</span>
+            {underWay && <span className="hs-tag">Under way</span>}
+            <span>{s.isOnline ? 'Online' : s.location || 'In person'}</span>
+          </span>
+        </span>
+        <span className="hs-cp-chev" aria-hidden="true">›</span>
+      </Link>
     </li>
   );
 }

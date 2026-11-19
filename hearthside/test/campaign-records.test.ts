@@ -9,7 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  EMPTY_SESSION_FORM, attendanceLabel, characterGroups, characterLine, playedBy, previousSessions, sessionFormNeeds,
+  EMPTY_SESSION_FORM, attendanceLabel, characterGroups, characterLine, playedBy, sessionFormNeeds, sessionLists,
   sessionFormProblem, sessionPayload, sessionWhenLabel,
   type CampaignSession, type PartyCharacter, type SessionForm,
 } from "../src/lib/campaignRecords";
@@ -19,16 +19,24 @@ const NOW = new Date("2026-11-19T12:00:00Z");
 const s = (id: string, over: Partial<CampaignSession> = {}): CampaignSession => ({ _id: id, title: id, status: "scheduled", ...over });
 const up = (id: string): Upcoming => ({ id, title: id, date: "2026-11-25T19:00:00Z", endDate: null, isOnline: true, canChangeNight: true, venue: null, hostId: null });
 
-test("Previous sessions: not being planned, not coming up, no scheduled night still to come; newest first", () => {
+test("sessions split by their end: over or called off is Previous; tonight's and the board's leftovers stay Coming up", () => {
   const list = [
     s("planning", { status: "planning", date: null }),
     s("next", { date: "2026-11-25T19:00:00Z" }),
+    s("far-off", { date: "2027-02-25T19:00:00Z" }),
+    s("no-night", { date: null }),
     s("later", { date: "2026-12-25T19:00:00Z" }),
     s("old", { date: "2026-10-01T19:00:00Z" }),
+    // Started at 10:00 with no end: over 4 hours later, so still under way at noon.
     s("tonight", { date: "2026-11-19T10:00:00Z" }),
+    s("this-morning", { date: "2026-11-19T07:00:00Z", endDate: "2026-11-19T11:00:00Z" }),
     s("called-off", { status: "cancelled", date: "2026-11-30T19:00:00Z" }),
+    s("marked-played", { status: "completed", date: "2026-11-01T19:00:00Z" }),
   ];
-  assert.deepEqual(previousSessions(list, [up("next")], NOW).map((x) => x._id), ["called-off", "tonight", "old"]);
+  const { previous, underWay, later } = sessionLists(list, [up("next"), up("later")], NOW);
+  assert.deepEqual(previous.map((x) => x._id), ["called-off", "this-morning", "marked-played", "old"]);
+  assert.deepEqual(underWay.map((x) => x._id), ["tonight"]);
+  assert.deepEqual(later.map((x) => x._id), ["far-off", "no-night"]);
 });
 
 test("a previous session's night, and who came", () => {

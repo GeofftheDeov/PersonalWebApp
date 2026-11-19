@@ -1,7 +1,8 @@
 /**
  * A campaign's records (#225, spec #69): Sessions | Characters under the
- * party. Coming up is the board's scheduled sessions still to come; Previous
- * sessions is the rest of the campaign's list; Add a session is the GM's
+ * party. Coming up is the board's scheduled sessions still to come (and any
+ * other session not yet over); Previous sessions is the campaign's past;
+ * Add a session is the GM's
  * dialog; Characters is the party's adventurers. The rules are the
  * portfolio's (`frontend/src/app/game-night/campaigns/[id]/page.tsx` and
  * `CampaignCharacters`); the server enforces all of them. Kept apart from
@@ -12,7 +13,7 @@
  *   POST /api/tabletop/sessions                    the GM adds a session (and its Discord and Google events)
  */
 import type { Upcoming } from './noticeBoard';
-import { fromDatetimeLocal } from './sessionPage';
+import { fromDatetimeLocal, sessionPhase } from './sessionPage';
 
 /** A session as `GET /api/campaigns/:id/sessions` sends it (the fields the list reads). */
 export interface CampaignSession {
@@ -33,16 +34,34 @@ export interface CampaignSession {
 }
 
 /**
- * Previous sessions: the campaign's past, newest first. Not the ones being
- * planned (the Notice Board has those), not the ones under Coming up, and no
- * scheduled session whose night is still to come.
+ * The campaign's sessions, split by `sessionPhase` (the backend never marks
+ * one played, so its end time decides, as on the session page):
+ *
+ * - `previous`: over or called off, newest first.
+ * - `underWay`: started and not yet over (tonight's), which the board's
+ *   Coming up leaves out; they go above it.
+ * - `later`: still to come but not on the board's Coming up (no night yet,
+ *   or past the ten it sends), soonest first and undated last; they go below it.
+ *
+ * Sessions being planned are the Notice Board's, and the board's Coming up
+ * draws its own, so neither list has them.
  */
-export function previousSessions(sessions: readonly CampaignSession[], upcoming: readonly Upcoming[], now: Date): CampaignSession[] {
+export function sessionLists(sessions: readonly CampaignSession[], upcoming: readonly Upcoming[], now: Date) {
   const coming = new Set(upcoming.map((u) => u.id));
-  return sessions
-    .filter((s) => s.status !== 'planning' && !coming.has(s._id)
-      && !(s.status === 'scheduled' && s.date && Date.parse(s.date) > now.getTime()))
-    .sort((a, b) => (b.date ? Date.parse(b.date) : 0) - (a.date ? Date.parse(a.date) : 0));
+  const at = (s: CampaignSession) => (s.date ? Date.parse(s.date) : NaN);
+  const previous: CampaignSession[] = [];
+  const underWay: CampaignSession[] = [];
+  const later: CampaignSession[] = [];
+  for (const s of sessions) {
+    if (s.status === 'planning' || coming.has(s._id)) continue;
+    if (sessionPhase(s, now) !== 'before') previous.push(s);
+    else if (at(s) <= now.getTime()) underWay.push(s);
+    else later.push(s);
+  }
+  previous.sort((a, b) => (at(b) || 0) - (at(a) || 0));
+  underWay.sort((a, b) => at(a) - at(b));
+  later.sort((a, b) => (Number.isNaN(at(a)) ? Infinity : at(a)) - (Number.isNaN(at(b)) ? Infinity : at(b)));
+  return { previous, underWay, later };
 }
 
 const DAY_Y = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' });

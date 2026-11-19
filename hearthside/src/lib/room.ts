@@ -324,3 +324,49 @@ export function roomTab(tab: string | null | undefined, gcal: string | null | un
 
 /** Is `/players/:id` the viewer's own page? Then it's Your Room. */
 export const isOwnPage = (id: string, me: { id: string } | null | undefined): boolean => !!me && !!id && me.id === id;
+
+/* ---------- Another player's page (#231) ---------- */
+
+/**
+ * `GET /api/users/players/:id`: `toPublicPerson`, whether you're friends, and
+ * `sharedCampaigns`, which the page never shows (the profile prototype
+ * decided a visitor sees no campaign list or count; #200 drops it from the API).
+ */
+export type PlayerReply = LedgerPerson & { isFriend?: boolean | null; sharedCampaigns?: unknown };
+
+/** What `toPublicPerson` sends: all another player's page draws. */
+const PUBLIC_FIELDS = [
+  '_id', 'id', 'name', 'handle', 'userNumber', 'recordType', 'profilePicture',
+  'favoriteGames', 'discordId', 'discordHandle', 'createdAt',
+] as const satisfies readonly (keyof LedgerPerson)[];
+
+/**
+ * The person another player's page draws, from the public fields only (so
+ * neither `sharedCampaigns` nor anything private can reach it), and whether
+ * you're friends.
+ */
+export function visitorView(reply: PlayerReply): { person: LedgerPerson; friends: boolean } {
+  const person: LedgerPerson = {};
+  for (const f of PUBLIC_FIELDS) {
+    if (reply[f] !== undefined) (person as Record<string, unknown>)[f] = reply[f];
+  }
+  return { person, friends: reply.isFriend === true };
+}
+
+/** The head's line on another player's page: since when, and no counts (adventurers and sessions together are #200's). */
+export function visitorLine(p: LedgerPerson): string | null {
+  const since = sinceLabel(p.createdAt);
+  return since ? `Since ${since}` : null;
+}
+
+/**
+ * The head's actions on another player's page, in place of Edit. Letters
+ * between two people are friend DMs (the backend refuses anyone else), so
+ * "Write a letter" is a friend's, beside the Friends pill. Anyone else (a
+ * campaign-mate) gets neither, and a line saying why.
+ */
+export function friendship(friends: boolean): { pill: string | null; canWrite: boolean; note: string | null } {
+  return friends
+    ? { pill: 'Friends', canWrite: true, note: null }
+    : { pill: null, canWrite: false, note: 'Letters go between friends.' };
+}

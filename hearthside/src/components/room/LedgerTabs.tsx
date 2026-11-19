@@ -58,7 +58,7 @@ export default function LedgerTabs<T extends string>({ tabs, tab, onTab, label, 
                 onKeyDown={(e) => onKey(e, i)}
               >
                 {t.label}
-                {t.count != null && <small> {t.count}</small>}
+                {t.count != null && <> <small>{t.count}</small></>}
               </button>
             ))}
           </div>

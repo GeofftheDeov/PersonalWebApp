@@ -49,7 +49,6 @@ export default function EditRecordDialog({ person, onClose, onSaved }: {
           <label className="hs-field">
             <span>Handle</span>
             <span className="hs-room-at">
-              <span aria-hidden="true">@</span>
               <input className="hs-input" value={draft.handle} onChange={set('handle')} placeholder="yourhandle" autoComplete="off" />
             </span>
           </label>

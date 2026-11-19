@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from '@gtd/shared/api';
 import { api, errorOf } from '@/lib/api';
 import { PORTFOLIO_URL } from '@/lib/config';
@@ -40,7 +40,11 @@ export default function YourRoom() {
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
 
+  // Read once: React's development double mount runs this twice, and the first run has already cleared the address.
+  const readQuery = useRef(false);
   useEffect(() => {
+    if (readQuery.current) return;
+    readQuery.current = true;
     const q = new URLSearchParams(window.location.search);
     const gcal = q.get('gcal');
     setTab(roomTab(q.get('tab'), gcal));

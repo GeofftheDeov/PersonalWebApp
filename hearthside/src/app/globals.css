@@ -629,9 +629,9 @@ a.hs-cp-whois:hover .hs-cp-name{color:var(--gold-hi)}
 .hs-room-chip button{flex:none;background:none;border:0;color:var(--muted);cursor:pointer;width:22px;height:22px;border-radius:50%;font-size:15px;line-height:1;padding:0}
 .hs-room-chip button:hover{color:var(--text);background:rgba(255,255,255,.06)}
 .hs-room-add{max-width:220px;padding:5px 10px;border-radius:var(--radius-full);font-size:14px}
-/* The record's dialog: the handle's @, and labels that sit apart from their field. */
+/* The record's dialog: the handle's @ (drawn, so it isn't part of the field's name), and labels that sit apart from their field. */
 .hs-room-at{position:relative;display:block}
-.hs-room-at > span{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--accent);pointer-events:none}
+.hs-room-at::before{content:"@";z-index:1;position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--accent);pointer-events:none}
 .hs-room-at .hs-input{padding-left:24px}
 .hs-field > label > span{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.06em;color:var(--muted)}
 .hs-input:disabled{opacity:.6}

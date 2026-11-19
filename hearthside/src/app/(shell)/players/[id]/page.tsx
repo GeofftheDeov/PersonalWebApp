@@ -6,21 +6,26 @@ import { ApiError } from '@gtd/shared/api';
 import LedgerHead from '@/components/room/LedgerHead';
 import LedgerTabs from '@/components/room/LedgerTabs';
 import RecordPanel from '@/components/room/RecordPanel';
+import { useLetters } from '@/components/letters/LettersProvider';
 import { api, errorOf } from '@/lib/api';
-import { isOwnPage, sinceLabel, type LedgerPerson } from '@/lib/room';
+import {
+  displayName, friendship, isOwnPage, personId, visitorLine, visitorView, type LedgerPerson, type PlayerReply,
+} from '@/lib/room';
 import { useRequiredSession } from '@/lib/session';
 
 type Load =
   | { status: 'loading' }
-  | { status: 'ready'; person: LedgerPerson }
+  | { status: 'ready'; person: LedgerPerson; friends: boolean }
   | { status: 'error'; error: string };
 
 /**
- * A player's page, `/players/:id` (spec #69). Your own id is Your Room, so
- * it goes there (#230). Anyone else's is drawn with the ledger's head and
- * record from what `GET /api/users/players/:id` shares (`toPublicPerson`),
- * with no campaigns. "Write a letter", the Friends pill and the rest of it
- * are #231's.
+ * Another player's page, `/players/:id` (#231, spec #69): layout A as a
+ * visitor. Your own id is Your Room, so it goes there (#230). Anyone else's
+ * is the ledger's head and record, drawn from the public fields of
+ * `GET /api/users/players/:id` (`visitorView`), with "Write a letter" and the
+ * Friends pill in place of Edit (`friendship`). It never shows their
+ * campaigns, and has no tab strip until #200 gives it adventurers and
+ * sessions together.
  */
 export default function PlayerPage() {
   const params = useParams();
@@ -41,8 +46,8 @@ function PlayerLedger({ id }: { id: string }) {
   const [load, setLoad] = useState<Load>({ status: 'loading' });
   useEffect(() => {
     let live = true;
-    api.get<LedgerPerson>(`/api/users/players/${encodeURIComponent(id)}`).then(
-      (person) => live && setLoad({ status: 'ready', person }),
+    api.get<PlayerReply>(`/api/users/players/${encodeURIComponent(id)}`).then(
+      (reply) => live && setLoad({ status: 'ready', ...visitorView(reply) }),
       (err) => live && setLoad({
         status: 'error',
         error: err instanceof ApiError && err.status === 404 ? 'There’s no such player.' : errorOf(err, 'Their page couldn’t be loaded.'),
@@ -60,13 +65,32 @@ function PlayerLedger({ id }: { id: string }) {
       </header>
     );
   }
-  const since = sinceLabel(load.person.createdAt);
+  const { person, friends } = load;
   return (
     <>
-      <LedgerHead person={load.person} line={since ? `Since ${since}` : null} />
+      <LedgerHead
+        person={person}
+        line={visitorLine(person)}
+        actions={<VisitorActions id={personId(person) || id} name={displayName(person)} friends={friends} />}
+      />
       <LedgerTabs tabs={[{ id: 'record', label: 'Record' }]} tab="record" onTab={() => {}} label="Their record">
-        <RecordPanel person={load.person} own={false} />
+        <RecordPanel person={person} own={false} />
       </LedgerTabs>
+    </>
+  );
+}
+
+/** In place of Edit: a friend's "Write a letter" (your DM with them in Letters, #221) and the Friends pill. */
+function VisitorActions({ id, name, friends }: { id: string; name: string; friends: boolean }) {
+  const letters = useLetters();
+  const { pill, canWrite, note } = friendship(friends);
+  return (
+    <>
+      {canWrite && (
+        <button type="button" className="hs-btn-amber hs-room-edit" onClick={() => letters.openDm(id, name)}>Write a letter</button>
+      )}
+      {pill && <span className="hs-room-pill is-ok hs-room-friend">{pill}</span>}
+      {note && <p className="hs-room-visit-note">{note}</p>}
     </>
   );
 }

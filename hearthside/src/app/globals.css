@@ -583,8 +583,11 @@ a.hs-cp-whois:hover .hs-cp-name{color:var(--gold-hi)}
 .hs-room-handle{font-family:var(--font-label);font-size:16px;letter-spacing:.04em;color:var(--accent);text-shadow:var(--on-wood-shadow);overflow-wrap:anywhere}
 .hs-room-handle small{font-family:var(--font-body);letter-spacing:0;font-size:14px;color:var(--on-wood-muted)}
 .hs-page-head p.hs-room-alert{color:#f0a58f}
-.hs-room-acts{display:flex;gap:8px;flex-wrap:wrap}
+.hs-room-acts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .hs-room-edit{height:34px;font-size:15px}
+/* Another player's page (#231): the Friends pill on the floor, or the line saying why there's no letter. */
+.hs-room-acts .hs-room-friend{background:rgba(26,19,14,.7)}
+.hs-page-head p.hs-room-visit-note{margin:0;font-size:14px}
 /* The photo: a face in a gilded medallion, or the initial on dyed cloth. Your own changes on a click. */
 .hs-room-photo{position:relative;display:block;flex:none;width:96px;aspect-ratio:1;border-radius:50%}
 .hs-room-medal{position:absolute;inset:0;display:block;overflow:hidden;border-radius:50%;border:2px solid transparent;container-type:inline-size;

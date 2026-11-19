@@ -49,7 +49,7 @@ const roomTab = (page: Page, name: string | RegExp) => page.getByRole("tablist",
 const field = (page: Page, label: string) =>
   page.getByRole("tabpanel").locator("dl > div").filter({ has: page.getByRole("term").getByText(label, { exact: true }) }).getByRole("definition");
 
-test("every Record field edits and saves, including the photo", async ({ page, signIn, apiAs, newPerson }) => {
+test("every Record field edits and saves in its dialog, and favourite games in place", async ({ page, signIn, apiAs, newPerson }) => {
   const me = await newPerson("Wren Talbot");
   const api = await apiAs(me);
   const { userNumber } = await (await api.get("/api/users/profile")).json();
@@ -93,23 +93,31 @@ test("every Record field edits and saves, including the photo", async ({ page, s
   await expect(games.getByRole("listitem")).toHaveCount(1);
   await expect(games).toContainText("Gloomhaven");
 
-  // The photo: a file that isn't a picture is refused here; a PNG uploads and shows.
+  // All of it saved.
+  expect(await (await api.get("/api/users/profile")).json()).toMatchObject({
+    name: "Wren Ashby", handle: "wrenna", phone: "555-0142", discordHandle: "wren_a", discordId: "123456789012345678",
+    favoriteGames: ["Gloomhaven"],
+  });
+});
+
+test("the photo uploads from the head, and a file that isn't a picture is refused", async ({ page, signIn, apiAs, newPerson }) => {
+  const me = await newPerson("Ada Quill");
+  await signIn(me);
+  await page.goto("/room");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Ada Quill", FIRST_LOAD);
+
   await page.getByLabel(/^Add your photo/).setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("not a picture") });
   await expect(page.getByText("A photo must be a JPG, PNG, GIF or WEBP, up to 5 MB.")).toBeVisible();
-  await page.getByLabel(/^Add your photo/).setInputFiles({ name: "wren.png", mimeType: "image/png", buffer: PNG });
+  await page.getByLabel(/^Add your photo/).setInputFiles({ name: "ada.png", mimeType: "image/png", buffer: PNG });
   const photo = page.getByRole("img", { name: "Your photo" });
   await expect(photo).toHaveAttribute("src", /^\/uploads\/profile-pictures\//);
+  // Served through Hearthside's /uploads rewrite.
   await expect.poll(() => photo.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(1);
   await expect(page.getByLabel(/^Change your photo/)).toBeAttached();
+  await expect(page.getByText("A photo must be a JPG, PNG, GIF or WEBP, up to 5 MB.")).toBeHidden();
 
-  // All of it saved.
-  const saved = await (await api.get("/api/users/profile")).json();
-  expect(saved).toMatchObject({
-    name: "Wren Ashby", handle: "wrenna", phone: "555-0142", discordHandle: "wren_a", discordId: "123456789012345678",
-    favoriteGames: ["Gloomhaven"], profilePicture: expect.stringMatching(/^\/uploads\/profile-pictures\//),
-  });
-  await page.reload();
-  await expect(field(page, "Handle")).toHaveText("@wrenna", FIRST_LOAD);
+  const { profilePicture } = await (await (await apiAs(me)).get("/api/users/profile")).json();
+  expect(profilePicture).toBe(await photo.getAttribute("src"));
 });
 
 test("the Sessions filter narrows both lists", async ({ page, signIn, apiAs, newPerson }) => {

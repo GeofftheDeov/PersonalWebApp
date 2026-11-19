@@ -78,6 +78,7 @@ function Games({ list, editor }: { list: string[]; editor?: GamesEditor }) {
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== 'Enter' || !editor) return;
     e.preventDefault();
+    if (busy) return;
     const next = editor.add(list, text);
     if (next.length === list.length) { setText(''); return; }
     save(next, () => setText(''));
@@ -103,7 +104,7 @@ function Games({ list, editor }: { list: string[]; editor?: GamesEditor }) {
           aria-label="Add a favourite game"
           maxLength={60}
           value={text}
-          disabled={busy}
+          aria-busy={busy}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKey}
         />

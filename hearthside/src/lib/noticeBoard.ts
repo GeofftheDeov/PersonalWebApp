@@ -308,3 +308,43 @@ export function hearthLine(sheets: readonly PlanningState[]): string {
   if (mine === n) return `${sessions(n)} ${n === 1 ? 'needs' : 'need'} your vote.`;
   return `${sessions(n)} are being planned, and ${mine === 1 ? 'one needs' : `${mine} need`} your vote.`;
 }
+
+/** How an earlier round ended, under "Earlier rounds". */
+export function roundOutcome(r: Poll): string {
+  if (r.closedReason === 'gm_reshortlisted') return 'replaced by a new shortlist';
+  if (r.closedReason === 'cancelled') return 'cancelled';
+  if (r.result === 'no_quorum') return 'failed: nothing reached quorum';
+  if (r.result === 'tie') return 'tied';
+  if (r.result === 'winner') return 'decided';
+  return 'open';
+}
+
+/** The night rounds before the current one, oldest first: who voted for what stays on record. */
+export const earlierRounds = (state: PlanningState): Poll[] => state.nightRounds.slice(0, -1);
+
+/** The GM's "Plan a session" form (kickoff), all strings. */
+export interface KickoffForm {
+  title: string;
+  agenda: string;
+  isOnline: boolean;
+  foodMode: FoodMode | '';
+  foodOwnerId: string;
+}
+
+export const EMPTY_KICKOFF: KickoffForm = { title: '', agenda: '', isOnline: true, foodMode: '', foodOwnerId: '' };
+
+/** Can it be sent? A title; in person, how the food works, and who provides it if someone does. */
+export const kickoffReady = (k: KickoffForm): boolean =>
+  !!k.title.trim() && (k.isOnline || (!!k.foodMode && (k.foodMode !== 'provided' || !!k.foodOwnerId)));
+
+/** What `POST /api/planning/campaigns/:id/kickoff` takes: food only in person, its owner only when it's provided. */
+export function kickoffPayload(k: KickoffForm) {
+  const foodMode = !k.isOnline && k.foodMode ? k.foodMode : null;
+  return {
+    title: k.title.trim(),
+    agenda: k.agenda,
+    isOnline: k.isOnline,
+    foodMode,
+    ...(foodMode === 'provided' ? { foodOwnerId: k.foodOwnerId } : {}),
+  };
+}

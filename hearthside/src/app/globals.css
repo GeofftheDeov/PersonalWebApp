@@ -571,6 +571,139 @@ a.hs-cp-whois:hover .hs-cp-name{color:var(--gold-hi)}
   .hs-board-sheet .hs-sheet-title{font-size:23px}
 }
 
+/* ---------- A campaign's page (part 2; #225) ----------
+   prototype/hearthside-campaign-details: the Notice Board's sheets on parchment with everything the portfolio's planning
+   cards do (the overlap picker, re-shortlisting, earlier rounds, the torch), Table Talk on leather beside the party, and
+   Sessions | Characters on leather. */
+.hs-app :is(.hs-cp-board,.hs-cp-talk,.hs-cp-records) :is(.hs-btn-amber,.hs-ghost){font-family:var(--font-label)}
+.hs-cp-board .hs-cp-sec-row{margin-bottom:0}
+/* Links to #notice-board land below the sticky top bar. */
+.hs-cp-board{scroll-margin-top:96px}
+.hs-board-agenda{margin:10px 0 0;font-size:14.5px;color:var(--paper-ink);max-width:62ch;white-space:pre-line;overflow-wrap:anywhere}
+.hs-board-agenda b{font-family:var(--font-label);font-weight:500;letter-spacing:.06em;margin-right:6px}
+.hs-board-table{color:inherit;overflow-wrap:anywhere}
+.hs-board-sheet .hs-sess-torch{font-size:14px}
+.hs-board-more{margin-top:14px;padding-top:12px;border-top:1px dotted var(--paper-line)}
+.hs-board-checks{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:14px}
+.hs-board-kickoff{display:flex;flex-direction:column;gap:10px;margin-top:16px}
+.hs-board-where{margin:0;padding:0;border:0;min-width:0}
+.hs-board-where legend{padding:0;margin-bottom:4px;font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.06em;color:var(--paper-muted)}
+.hs-board-where .hs-board-fine{margin:4px 0 0;font-size:13px;color:var(--paper-muted)}
+.hs-board-grow{flex:1 1 10rem}
+/* The earlier rounds, folded at the foot of the night step. */
+.hs-board-rounds{margin-top:12px;padding-top:8px;border-top:1px dotted var(--paper-line);font-size:13px;color:var(--paper-muted)}
+.hs-board-rounds summary{cursor:pointer;font-family:var(--font-label);letter-spacing:.06em;color:var(--paper-ink)}
+.hs-board-rounds ol{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}
+.hs-board-rounds ul{list-style:none;margin:2px 0 0;padding:0}
+.hs-board-rounds li{overflow-wrap:anywhere}
+.hs-board-round{color:var(--paper-ink)}
+.hs-board-rounds .is-won{color:var(--paper-ink);font-weight:500}
+
+/* The overlap picker, on parchment: settings, the best times, the grid (days across, start times down), the shortlist. */
+.hs-pick{display:flex;flex-direction:column;gap:12px;margin-top:6px;min-width:0}
+.hs-pick-set{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:flex-end}
+.hs-pick-field{display:flex;flex-direction:column;gap:3px;min-width:0}
+.hs-pick-field > span{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.06em;color:var(--paper-muted)}
+.hs-pick-set .hs-paper-input{width:auto}
+.hs-pick-quorum{font-size:13px;color:var(--paper-muted);padding-bottom:6px}
+.hs-pick-note{margin:0;padding:8px 10px;border:1px dashed var(--paper-line);border-radius:var(--radius-sheet);font-size:13.5px;color:var(--paper-ink);background:rgba(255,255,255,.18)}
+.hs-pick-h{margin:0 0 6px;font-family:var(--font-label);font-size:14px;font-weight:500;letter-spacing:.06em;color:var(--paper-ink)}
+.hs-pick-best{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:5px}
+.hs-pick-best button{width:100%;text-align:left;display:flex;flex-wrap:wrap;gap:2px 10px;align-items:center;padding:6px 9px;border:1px solid var(--paper-line);border-radius:var(--radius);
+  background:rgba(255,253,245,.3);color:var(--paper-ink);cursor:pointer;font:inherit;font-size:14px}
+.hs-pick-best button:hover{border-color:var(--paper-ink)}
+.hs-pick-best button:disabled{opacity:.55;cursor:default}
+.hs-pick-best button[aria-pressed="true"]{background:var(--paper-ink);color:var(--paper);border-color:var(--paper-ink)}
+.hs-pick-best small{flex-basis:100%;font-size:12px;opacity:.8;overflow-wrap:anywhere}
+.hs-pick-tag{display:inline-block;font-family:var(--font-label);font-size:11.5px;font-weight:500;letter-spacing:.06em;padding:0 7px;border-radius:var(--radius-full);
+  border:1px solid currentColor;opacity:.85;white-space:nowrap}
+.hs-pick-tag.is-ink{opacity:1;background:var(--paper-ink);border-color:var(--paper-ink);color:var(--paper)}
+[aria-pressed="true"] .hs-pick-tag.is-ink{background:var(--paper);color:var(--paper-ink)}
+/* The grid scrolls inside its own frame on a phone; the page never does. */
+.hs-pick-heatwrap{max-width:100%;overflow-x:auto;overscroll-behavior-x:contain}
+.hs-pick-heat{border-collapse:separate;border-spacing:3px;font-size:12px;font-variant-numeric:tabular-nums}
+.hs-pick-heat th{font-family:var(--font-label);font-weight:500;color:var(--paper-ink);letter-spacing:.04em;white-space:nowrap;padding:0 4px}
+.hs-pick-heat th[scope=row]{text-align:right;position:sticky;left:0;z-index:1;background:var(--paper)}
+.hs-pick-heat th[scope=col]{text-align:center;line-height:1.15;padding:0 0 2px}
+.hs-pick-dow{display:block;font-size:11px;color:var(--paper-muted)}
+.hs-pick-heat td{padding:0}
+.hs-pick-heat button,.hs-pick-none{display:block;width:32px;height:26px}
+.hs-pick-heat button{padding:0;border:0;border-radius:var(--radius-sheet);background:var(--heat);color:var(--paper-ink);cursor:pointer;font:inherit;font-size:12px}
+.hs-pick-heat button:disabled{cursor:default}
+.hs-pick-heat button[data-v="0"]{outline:1px solid var(--paper-line);outline-offset:-1px;color:transparent}
+.hs-pick-heat button:is([data-v="3"],[data-v="4"],[data-v="5"]){color:var(--paper)}
+.hs-pick-heat button.is-q{box-shadow:inset 0 0 0 1.5px var(--paper-ink)}
+.hs-pick-heat button.is-q:is([data-v="4"],[data-v="5"]){box-shadow:inset 0 0 0 1.5px var(--paper)}
+.hs-pick-heat button[aria-pressed="true"]{outline:2px solid var(--seal);outline-offset:1px;font-weight:700}
+.hs-pick-heat [data-v="0"]{--heat:var(--heat-0)}.hs-pick-heat [data-v="1"]{--heat:var(--heat-1)}.hs-pick-heat [data-v="2"]{--heat:var(--heat-2)}
+.hs-pick-heat [data-v="3"]{--heat:var(--heat-3)}.hs-pick-heat :is([data-v="4"],[data-v="5"]){--heat:var(--heat-4)}
+.hs-pick-list{padding-top:10px;border-top:1px solid var(--paper-line)}
+.hs-pick-chips{list-style:none;margin:0 0 8px;padding:0;display:flex;flex-wrap:wrap;gap:6px}
+.hs-pick-chips li{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:2px 4px 2px 10px;border-radius:var(--radius-full);background:var(--paper-ink);color:var(--paper);font-size:13px}
+.hs-pick-chips button{flex:none;background:none;border:0;color:inherit;cursor:pointer;width:20px;height:20px;border-radius:50%;padding:0}
+.hs-pick-chips button:hover{background:rgba(255,255,255,.15)}
+
+/* Table Talk: the Letters thread, on leather beside the party, and who's here now above the compose bar. */
+.hs-cp-talk{min-width:0}
+.hs-convo-head.is-flat{grid-template-columns:38px minmax(0,1fr) auto}
+.hs-cp-talk .hs-convo{max-height:420px}
+.hs-cp-here{display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:1px solid var(--gold-rule);background:var(--surface);min-width:0}
+.hs-cp-here > span{font-family:var(--font-label);font-size:12.5px;letter-spacing:.06em;color:var(--muted);flex:none}
+.hs-cp-here ul{display:flex;flex-wrap:wrap;gap:4px;list-style:none;margin:0;padding:0;min-width:0}
+.hs-cp-here .hs-avatar{width:24px;height:24px;font-size:11px}
+
+/* Sessions | Characters: the tabs in a gilded strip, the lists in panels below. */
+.hs-cp-records{display:flex;flex-direction:column;gap:var(--space-5);min-width:0}
+.hs-cp-tabstrip{padding:2px 8px}
+.hs-cp-tabstrip .hs-tabs{border-bottom:0}
+.hs-cp-tabstrip .hs-tabs button small{font-family:var(--font-body);font-size:12px;letter-spacing:0;color:var(--muted);margin-left:6px}
+/* Coming up beside Previous sessions on desktop (the shell's three-column width); stacked on tablets and phones. */
+.hs-cp-records-in{display:grid;gap:var(--space-5);min-width:0}
+.hs-cp-records-in > *{min-width:0}
+.hs-cp-records-in[hidden],.hs-cp-chars-panel[hidden]{display:none}
+@media (min-width:1100px){.hs-cp-records-in{grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:start}}
+.hs-cp-records .hs-sec{font-size:20px}
+.hs-cp-records .hs-cp-sec-row .hs-sec{margin:0}
+.hs-cp-chars-panel{display:flex;flex-direction:column;gap:var(--space-5);min-width:0}
+.hs-cp-rows{list-style:none;margin:0;padding:0}
+.hs-cp-rows > li{border-top:1px solid var(--gold-rule)}
+.hs-cp-rows > li:first-child{border-top:0}
+.hs-cp-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:11px 14px;color:var(--text);text-decoration:none}
+a.hs-cp-row:hover .hs-cp-row-title{color:var(--gold-hi)}
+a.hs-cp-row:hover .hs-cp-chev{color:var(--accent)}
+.hs-cp-row-text{display:flex;flex-direction:column;min-width:0}
+.hs-cp-row-title{font-weight:500;font-size:15px;line-height:1.3;overflow-wrap:anywhere}
+.hs-cp-row-title.is-struck{text-decoration:line-through;text-decoration-color:var(--muted);color:var(--muted)}
+.hs-cp-meta{display:flex;flex-wrap:wrap;gap:2px 10px;align-items:center;margin-top:2px;font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+.hs-cp-meta .hs-tag{margin-left:0}
+.hs-cp-when{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.04em;color:var(--accent);font-variant-numeric:tabular-nums}
+.hs-cp-when.is-planning{color:var(--seal)}
+.hs-cp-when.is-cancelled{color:var(--muted);text-decoration:line-through}
+.hs-cp-flamed{display:inline-flex;align-items:center;gap:4px;color:var(--torch)}
+.hs-cp-sum{margin-top:3px;font-size:13px;color:var(--muted);display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+.hs-cp-chev{color:var(--muted);font-size:18px}
+.hs-cp-row-tools{padding:0 14px 12px;margin-top:-4px}
+.hs-cp-row-sheet{padding:4px 8px 16px}
+.hs-cp-row-sheet .hs-board-sheet{padding-top:20px}
+.hs-cp-change-title{margin:0;font-size:21px}
+.hs-cp-warn{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;padding:10px 14px;margin-bottom:12px}
+.hs-cp-warn p{margin:0;font-size:14px;color:var(--accent);overflow-wrap:anywhere}
+/* The party's adventurers. */
+.hs-cp-chars{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(210px,100%),1fr))}
+.hs-cp-chars a{display:grid;grid-template-columns:38px minmax(0,1fr);gap:10px;align-items:center;padding:11px 14px;border-top:1px solid var(--gold-rule);color:var(--text);text-decoration:none}
+.hs-cp-chars a:hover .hs-cp-row-title{color:var(--gold-hi)}
+.hs-cp-chars.is-former{opacity:.62}
+.hs-avatar.is-char{border-radius:var(--radius);background:var(--surface);color:var(--gold-hi);border:1px solid var(--gold-line)}
+.hs-avatar.is-fallen{color:var(--muted);border-style:dashed}
+/* A switch (the add-session dialog): a track and a knob, then its words. */
+.hs-switch{display:flex;align-items:center;gap:10px;background:none;border:0;padding:0;cursor:pointer;color:var(--text);text-align:left;font:inherit;font-size:14px}
+.hs-switch i{position:relative;width:38px;height:20px;border-radius:var(--radius-full);background:var(--surface);border:1px solid var(--line);flex:none;transition:background .15s}
+.hs-switch i::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--muted);transition:left .15s}
+.hs-switch[aria-checked="true"] i{background:var(--accent);border-color:var(--accent)}
+.hs-switch[aria-checked="true"] i::after{left:20px;background:var(--accent-ink)}
+.hs-switch:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+@media (prefers-reduced-motion:reduce){.hs-switch i,.hs-switch i::after{transition:none}}
+
 /* ---------- Your Room (layout A, "The ledger"; #230) ----------
    prototype/hearthside-player-profile: the head on the floor (photo in a gilded medallion, name, handle and unique ID,
    counts, Edit), then a gilded tab strip and one leather panel. The pieces take any person, so another player's page

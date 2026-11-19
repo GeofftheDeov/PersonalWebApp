@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useId, useState } from 'react';
 import NoticeSheet from '@/components/design-system/NoticeSheet';
 import GildedDialog from '@/components/GildedDialog';
+import SessionTorch from '@/components/session/SessionTorch';
 import { api, errorOf } from '@/lib/api';
 import { nameIn, placeLine, plannerSteps, sheetSeal, type PlanningState } from '@/lib/noticeBoard';
 import { nightLine } from '@/lib/sessionPage';
@@ -27,11 +28,17 @@ const SEAL_CLASS = { vote: 'hs-seal', tie: 'hs-seal is-tie', wait: 'hs-seal is-p
  *
  * `kicker`: the line above the title. The Hearth names the campaign; a
  * campaign's page (#225) needn't.
+ *
+ * `onCampaignPage` (#225): the sheet is on its campaign's own Notice Board,
+ * so it carries everything the portfolio's planning card does: the GM's prep
+ * notes, the one-session torch, the overlap picker for shortlisting and
+ * re-shortlisting nights, re-shortlisting venues, and the earlier rounds.
  */
-export default function NoticeBoardSheet({ state, kicker, onChanged }: {
+export default function NoticeBoardSheet({ state, kicker, onChanged, onCampaignPage = false }: {
   state: PlanningState;
   kicker: string;
   onChanged: () => void | Promise<void>;
+  onCampaignPage?: boolean;
 }) {
   const { session: s, viewer, campaign } = state;
   const gm = viewer.isGameMaster;
@@ -64,10 +71,23 @@ export default function NoticeBoardSheet({ state, kicker, onChanged }: {
         <div className="hs-board-head-text">
           <div className="hs-kicker">{kicker}</div>
           <h3 className="hs-sheet-title" id={titleId}>{s.title}</h3>
-          <p className="hs-byline">{placeLine(state, name)}</p>
+          <p className="hs-byline">
+            {placeLine(state, name)}
+            {onCampaignPage && s.isOnline && (
+              <> · {campaign.tableLink
+                ? <a className="hs-board-table" href={campaign.tableLink} target="_blank" rel="noopener noreferrer">{campaign.tableLink.replace(/^https?:\/\//, '')}</a>
+                : 'no table link set yet'}</>
+            )}
+          </p>
         </div>
         <span className={SEAL_CLASS[seal.tone]}>{seal.label}</span>
       </div>
+
+      {onCampaignPage && s.agenda && <p className="hs-board-agenda"><b>Prep notes</b> {s.agenda}</p>}
+      {onCampaignPage && (s.gmOverride || viewer.canPassTorch) && (
+        <SessionTorch sessionId={s.id} gmTitle={campaign.gmTitle} party={state.party} gameMasterIds={campaign.gameMasterIds}
+          standIn={s.gmOverride} viewerId={viewer.id} canPass={viewer.canPassTorch} onChanged={onChanged} />
+      )}
 
       <PlannerSteps label={`Planning ${s.title}`}>
         {plannerSteps(state).map((step) => (
@@ -83,10 +103,10 @@ export default function NoticeBoardSheet({ state, kicker, onChanged }: {
             }
           >
             {step.key === 'night' && (step.state === 'live'
-              ? <NightStep state={state} busy={busy} act={act} />
+              ? <NightStep state={state} busy={busy} act={act} onCampaignPage={onCampaignPage} />
               : s.date && <p className="hs-board-line">{nightLine(s.date, s.endDate)}</p>)}
             {step.key === 'venue' && (step.state === 'live'
-              ? <VenueStep state={state} busy={busy} act={act} />
+              ? <VenueStep state={state} busy={busy} act={act} onCampaignPage={onCampaignPage} />
               : s.venue
                 ? <p className="hs-board-line"><VenueLine venue={s.venue} name={name} note={s.hostId ? `host: ${s.hostId === viewer.id ? 'you' : name(s.hostId)}` : undefined} /></p>
                 : <p className="hs-board-fine">Once the night is set, the party picks where.</p>)}
@@ -101,7 +121,7 @@ export default function NoticeBoardSheet({ state, kicker, onChanged }: {
 
       <div className="hs-board-foot">
         <Link className="hs-sess-link" href={`/sessions/${s.id}`}>The session’s page →</Link>
-        <Link className="hs-sess-link" href={`/campaigns/${campaign.id}#notice-board`}>{campaign.title}’s Notice Board →</Link>
+        {!onCampaignPage && <Link className="hs-sess-link" href={`/campaigns/${campaign.id}#notice-board`}>{campaign.title}’s Notice Board →</Link>}
         {gm && <button type="button" className="hs-btn hs-board-cancel" disabled={busy} onClick={() => setCancelling(true)}>Cancel planning</button>}
       </div>
 

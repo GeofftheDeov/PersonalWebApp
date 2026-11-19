@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ATTACHMENT_ACCEPT, formatBytes, isImageType } from '@gtd/shared/letters';
 import { letters, useAttachmentDraft, useThread, useThreadScroll, useTyping } from '@/lib/letters';
 import { messageWhen, senderLabel } from '@/lib/lettersFormat';
@@ -15,14 +15,18 @@ const LIVE_LABEL: Record<string, string> = { open: 'Live', connecting: 'Connecti
  * older letters loading as you scroll up), who's writing, and the compose bar
  * with attachments. Everything it does is the shared hooks' (useThread,
  * useThreadScroll, useTyping, useAttachmentDraft); this only draws them in
- * the design system's Letters markup.
+ * the design system's Letters markup. A campaign's page draws its Table Talk
+ * with it too (#225): no way back, and who's here above the compose bar.
  */
-export default function LetterThread({ letter, markRead, onBack }: {
+export default function LetterThread({ letter, markRead, onBack, beforeCompose }: {
   /** The thread; one a page asked for (`summon` set) puts the compose box in focus. */
   letter: OpenLetter;
-  /** useThreads' markRead, so the list's count clears at once. */
-  markRead: (threadKey: string, messageId: string) => void;
-  onBack: () => void;
+  /** useThreads' markRead, so the list's count clears at once. Without it the thread records the read itself. */
+  markRead?: (threadKey: string, messageId: string) => void;
+  /** Back to the thread list; without it there's no back button. */
+  onBack?: () => void;
+  /** Drawn between the log and the compose bar. */
+  beforeCompose?: ReactNode;
 }) {
   const myId = useSession().user?.id ?? null;
   const threadKey = letters.threadKeyFor(letter.kind, letter.id);
@@ -49,8 +53,8 @@ export default function LetterThread({ letter, markRead, onBack }: {
 
   return (
     <>
-      <div className="hs-convo-head">
-        <button type="button" className="hs-back" aria-label="Back to your letters" onClick={onBack}>←</button>
+      <div className={onBack ? 'hs-convo-head' : 'hs-convo-head is-flat'}>
+        {onBack && <button type="button" className="hs-back" aria-label="Back to your letters" onClick={onBack}>←</button>}
         <span className={letter.kind === 'campaign' ? 'hs-avatar is-campaign' : 'hs-avatar'} aria-hidden="true">
           {letter.avatarHint}
         </span>
@@ -78,6 +82,7 @@ export default function LetterThread({ letter, markRead, onBack }: {
         )}
       </div>
 
+      {beforeCompose}
       {(draft.files.length > 0 || draft.error) && (
         <div className="hs-draft">
           {draft.files.map((f, i) => (

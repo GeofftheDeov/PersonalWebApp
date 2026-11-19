@@ -3,7 +3,10 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { nightLine } from '@/lib/sessionPage';
-import { nameIn, optionWhen, voteTally, waitingOn, type PlanningState } from '@/lib/noticeBoard';
+import { earlierRounds, nameIn, optionWhen, voteTally, waitingOn, type PlanningState } from '@/lib/noticeBoard';
+import type { PickedTime } from '@/lib/overlap';
+import EarlierRounds from './EarlierRounds';
+import OverlapPicker from './OverlapPicker';
 import VoteTally from './VoteTally';
 import type { Act } from './NoticeBoardSheet';
 
@@ -12,9 +15,17 @@ import type { Act } from './NoticeBoardSheet';
  * vote closes when everyone has voted or the GM moves it forward. A tie goes
  * to the GM. With no vote open (just kicked off, or no night had enough of
  * the party) the GM shortlists nights from the party's availability, on the
- * campaign's Notice Board (#225), beside the availability grid.
+ * campaign's Notice Board (#225), with the overlap picker; there the GM can
+ * also re-shortlist an open or tied vote, and the earlier rounds stay on
+ * record. The Hearth links to the campaign's board for those instead.
  */
-export default function NightStep({ state, busy, act }: { state: PlanningState; busy: boolean; act: Act }) {
+export default function NightStep({ state, busy, act, onCampaignPage = false }: {
+  state: PlanningState;
+  busy: boolean;
+  act: Act;
+  /** On the campaign's own Notice Board: the overlap picker, re-shortlisting and the earlier rounds. */
+  onCampaignPage?: boolean;
+}) {
   const { session: s, night, viewer, campaign } = state;
   const gm = viewer.isGameMaster;
   const name = nameIn(state);
@@ -30,6 +41,11 @@ export default function NightStep({ state, busy, act }: { state: PlanningState; 
   const saved = useMemo(() => new Set(savedKey.split('|')[1].split(',').filter(Boolean)), [savedKey]);
   const [choice, setChoice] = useState<Set<string>>(saved);
   useEffect(() => setChoice(saved), [saved]);
+  const [reshortlisting, setReshortlisting] = useState(false);
+  const shortlist = async (times: PickedTime[]) => {
+    if (await act(open ? 'reshortlist' : 'shortlist', { options: times })) setReshortlisting(false);
+  };
+  const picking = onCampaignPage && gm && (!open || reshortlisting);
 
   const toggle = (id: string, on: boolean) => setChoice((prev) => {
     const next = new Set(prev);
@@ -47,7 +63,9 @@ export default function NightStep({ state, busy, act }: { state: PlanningState; 
         <p className="hs-board-line">It’s set for {nightLine(s.date, s.endDate)} until a new night is confirmed.</p>
       )}
       {failed && (
-        <p className="hs-board-line">Round {night!.round}: none of those nights had enough of the party (it needed {night!.quorum}).</p>
+        <p className="hs-board-line">
+          Round {night!.round}: none of those nights had enough of the party (it needed {night!.quorum}).{gm && onCampaignPage ? ' Shortlist some new ones.' : ''}
+        </p>
       )}
 
       {open && (
@@ -81,6 +99,10 @@ export default function NightStep({ state, busy, act }: { state: PlanningState; 
               </button>
             )}
             {gm && <button type="button" className="hs-btn" disabled={busy} onClick={() => act('advance')}>Move forward now</button>}
+            {gm && onCampaignPage && (
+              <button type="button" className="hs-btn" aria-expanded={reshortlisting} disabled={busy}
+                onClick={() => setReshortlisting((r) => !r)}>{reshortlisting ? 'Keep these nights' : 'Re-shortlist'}</button>
+            )}
           </div>
           {voted && <p className="hs-board-done" role="status">You’ve voted. You can change it until the vote closes.</p>}
         </form>
@@ -104,14 +126,27 @@ export default function NightStep({ state, busy, act }: { state: PlanningState; 
               };
             })}
           />
-          {gm && <p className="hs-board-fine">Or shortlist new nights: {shortlistLink}</p>}
+          {gm && !onCampaignPage && <p className="hs-board-fine">Or shortlist new nights: {shortlistLink}</p>}
         </>
       )}
 
-      {!open && !tie && (
-        gm ? <p className="hs-board-line">{shortlistLink}</p>
-          : <p className="hs-board-line">The {campaign.gmTitle} is choosing some nights to vote on.</p>
+      {!open && !tie && !failed && !gm && <p className="hs-board-line">The {campaign.gmTitle} is choosing some nights to vote on.</p>}
+      {!open && !tie && gm && !onCampaignPage && <p className="hs-board-line">{shortlistLink}</p>}
+
+      {picking && (
+        <div className={open || tie ? 'hs-board-more' : undefined}>
+          {(open || tie) && <p className="hs-board-line">Or shortlist new nights{open ? ' (this round’s votes are discarded)' : ''}:</p>}
+          <OverlapPicker
+            campaignId={campaign.id}
+            submitting={busy}
+            submitLabel={open || tie ? 'Re-shortlist' : 'Send to the party'}
+            onSubmit={shortlist}
+            onCancel={reshortlisting ? () => setReshortlisting(false) : undefined}
+          />
+        </div>
       )}
+
+      {onCampaignPage && <EarlierRounds rounds={earlierRounds(state)} name={name} />}
     </>
   );
 }

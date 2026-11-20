@@ -351,9 +351,11 @@ router.get("/characters", auth, async (req: any, res) => {
             }));
         }
 
-        const query = campaignIds ? { campaign: { $in: campaignIds } } : {};
+        // Your own characters wherever they are (in no campaign, or one you've
+        // left), and everyone's in the campaigns you sit in (#235).
+        const query = campaignIds ? { $or: [{ player: req.user.id }, { campaign: { $in: campaignIds } }] } : {};
         const characters = await Character.find(query).populate("campaign dungeon");
-        res.json(characters);
+        res.json(characters.map((c: any) => characterOut(c, campaignIds)));
     } catch (error: any) {
         res.status(500).json({ error: "Failed to fetch characters", details: error.message });
     }
@@ -371,12 +373,63 @@ function characterFields(body: any) {
     for (const [key, field] of [["name", "name"], ["class", "class"], ["level", "level"], ["gameType", "gameType"], ["isDead", "isDead"]] as const) {
         if (body?.[key] !== undefined) fields[field] = body[key];
     }
+    if (typeof fields.name === "string") fields.name = fields.name.trim();
     // The forms send "" for "no campaign".
     if (body?.campaign !== undefined) fields.campaign = body.campaign || null;
     return fields;
 }
 
+const MAX_CHARACTER_LEVEL = 20;
+
+/**
+ * What's wrong with a character's fields, or null (#235): one rule for creating
+ * and editing. A name is a non-blank string, a level a whole number from 1 to
+ * 20, class and game text (or null), and fallen true or false. An edit checks
+ * only the fields it sends, and a level left as it was passes, so an older
+ * character outside 1-20 can still be edited.
+ */
+function characterProblem(fields: Record<string, unknown>, existing?: any): string | null {
+    if (existing === undefined || fields.name !== undefined) {
+        if (typeof fields.name !== "string" || !fields.name) return "A character needs a name";
+    }
+    const level = fields.level;
+    if (level !== undefined && !(existing && level === existing.level)) {
+        if (typeof level !== "number" || !Number.isInteger(level) || level < 1 || level > MAX_CHARACTER_LEVEL) {
+            return `level must be a whole number from 1 to ${MAX_CHARACTER_LEVEL}`;
+        }
+    }
+    for (const key of ["class", "gameType"]) {
+        if (fields[key] != null && typeof fields[key] !== "string") return `${key} must be text`;
+    }
+    if (fields.isDead !== undefined && typeof fields.isDead !== "boolean") return "isDead must be true or false";
+    return null;
+}
+
 const idOf = (ref: any) => (ref == null ? null : String(ref._id ?? ref));
+
+/**
+ * A character as this viewer may see it (#235). Its campaign is the whole row
+ * only for an admin or someone in that campaign; anyone else (a friend, a
+ * campaign-mate from elsewhere, the player after leaving it) gets its name and
+ * status, never its table link or Discord ids. A populated player becomes
+ * `{ _id, name, handle }`, as the party's list (`?campaign=`) sends it.
+ */
+function characterOut(character: any, campaignIds: string[] | null) {
+    const obj = character.toObject();
+    const campaignId = idOf(obj.campaign);
+    if (obj.campaign && typeof obj.campaign === "object" && campaignIds !== null && !(campaignId && campaignIds.includes(campaignId))) {
+        obj.campaign = { _id: campaignId, title: obj.campaign.title ?? null, status: obj.campaign.status ?? null };
+    }
+    if (obj.player && typeof obj.player === "object") {
+        obj.player = { _id: idOf(obj.player), name: personDisplayName(obj.player), handle: obj.player.handle ?? null };
+    }
+    return obj;
+}
+
+/** One character, with its campaign and who plays it, as its page reads it. */
+const characterById = (id: string) => Character.findById(id)
+    .populate("campaign dungeon")
+    .populate({ path: "player", select: "handle name firstName lastName" });
 
 async function canSeeCharacter(user: any, campaignIds: string[] | null, character: any): Promise<boolean> {
     if (campaignIds === null) return true;
@@ -398,14 +451,19 @@ async function canSeeCharacter(user: any, campaignIds: string[] | null, characte
 router.post("/characters", auth, async (req: any, res) => {
     try {
         const fields = characterFields(req.body);
-        if (typeof fields.name !== "string" || !fields.name.trim()) return res.status(400).json({ error: "A character needs a name" });
+        const problem = characterProblem(fields);
+        if (problem) return res.status(400).json({ error: problem });
         const campaignIds = await getAuthorizedCampaignIds(req.user);
         if (fields.campaign != null) {
             if (!isUuid(String(fields.campaign))) return res.status(400).json({ error: "campaign must be a campaign id" });
             if (campaignIds && !campaignIds.includes(String(fields.campaign))) return res.status(403).json({ error: "Unauthorized" });
         }
-        // You play what you create. An admin may make one for someone else.
-        const player = campaignIds === null && req.body?.player ? req.body.player : req.user.id;
+        // You play what you create. An admin may make one for someone else, who
+        // must exist: player_id has no foreign key (#235).
+        const player = campaignIds === null && req.body?.player ? String(req.body.player) : String(req.user.id);
+        if (player !== String(req.user.id) && !(await findPersonById(player))) {
+            return res.status(400).json({ error: "player must be someone's id" });
+        }
         const character = new Character({ ...fields, player });
         await character.save();
         res.status(201).json(character);
@@ -417,11 +475,11 @@ router.post("/characters", auth, async (req: any, res) => {
 router.get("/characters/:id", auth, async (req: any, res) => {
     try {
         if (!isUuid(req.params.id)) return res.status(404).json({ error: "Character not found" });
-        const character = await Character.findById(req.params.id).populate("campaign dungeon");
+        const character = await characterById(req.params.id);
         if (!character) return res.status(404).json({ error: "Character not found" });
         const campaignIds = await getAuthorizedCampaignIds(req.user);
         if (!(await canSeeCharacter(req.user, campaignIds, character))) return res.status(403).json({ error: "Unauthorized" });
-        res.json(character);
+        res.json(characterOut(character, campaignIds));
     } catch (error: any) {
         res.status(500).json({ error: "Failed to fetch character", details: error.message });
     }
@@ -437,14 +495,17 @@ router.put("/characters/:id", auth, async (req: any, res) => {
             return res.status(403).json({ error: "Only the character's player can change it" });
         }
         const fields = characterFields(req.body);
+        const problem = characterProblem(fields, existing);
+        if (problem) return res.status(400).json({ error: problem });
         // Moving it needs a seat in the new campaign; leaving it where it is doesn't.
         if (fields.campaign != null && String(fields.campaign) !== idOf(existing.campaign)) {
             if (!isUuid(String(fields.campaign))) return res.status(400).json({ error: "campaign must be a campaign id" });
             if (campaignIds && !campaignIds.includes(String(fields.campaign))) return res.status(403).json({ error: "Unauthorized" });
         }
-        const character = await Character.findByIdAndUpdate(req.params.id, fields, { new: true }).populate("campaign dungeon");
-        if (!character) return res.status(404).json({ error: "Character not found" });
-        res.json(character);
+        const updated = await Character.findByIdAndUpdate(req.params.id, fields, { new: true });
+        if (!updated) return res.status(404).json({ error: "Character not found" });
+        // The reply is the character as its page reads it (GET /characters/:id).
+        res.json(characterOut(await characterById(req.params.id), campaignIds));
     } catch (error: any) {
         res.status(500).json({ error: "Failed to update character", details: error.message });
     }

@@ -44,7 +44,7 @@ const ThreadList = forwardRef<HTMLUListElement, {
                         aria-selected={filter === f.value}
                         aria-controls="dash-threads"
                         onClick={() => onFilter(f.value)}
-                        className={`flex-1 min-w-0 px-2 py-1.5 border-4 border-black font-permanent uppercase text-sm truncate transition-colors ${filter === f.value
+                        className={`flex-1 min-w-0 px-1 sm:px-2 py-1.5 border-4 border-black font-permanent uppercase text-xs sm:text-sm truncate transition-colors ${filter === f.value
                             ? 'bg-black text-white dark:bg-white dark:text-black'
                             : 'bg-white dark:bg-zinc-800 text-black dark:text-white hover:bg-yellow-100 dark:hover:bg-zinc-700 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]'}`}
                     >

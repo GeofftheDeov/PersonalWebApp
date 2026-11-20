@@ -10,6 +10,8 @@ import type { Letters } from '../letters/letters';
 import type { ThreadFilter, ThreadSummary } from '../letters/types';
 import { ApiError, errorOf } from '../api';
 import { useSession } from '../session/react';
+import { hearthsideCampaignPath } from '../hearthside/paths';
+import type { TopBarSite } from './links';
 
 interface Friend {
   _id: string;
@@ -51,21 +53,61 @@ const fmtActivity = (iso: string | null) => {
 const SEARCH_MIN_CHARS = 2;
 const SEARCH_DEBOUNCE_MS = 250;
 
+/** A campaign as `GET /api/campaigns` lists it: what the Campaigns tab shows. */
+interface CampaignRow {
+  _id: string;
+  title: string;
+  status?: string | null;
+}
+
+/** The Campaigns tab's order: in progress, then not started, then completed; the API's order (newest start first) within each. */
+const STATUS_ORDER = ['In Progress', 'Not Started', 'Completed'];
+const statusRank = (c: CampaignRow) => {
+  const i = STATUS_ORDER.indexOf(c.status ?? '');
+  return i < 0 ? STATUS_ORDER.length : i;
+};
+const STATUS_BG: Record<string, string> = {
+  'In Progress': 'bg-teal-500 text-black',
+  'Not Started': 'bg-yellow-400 text-black',
+  Completed: 'bg-zinc-600 text-white',
+};
+
+type DockTab = 'chats' | 'campaigns' | 'friends' | 'requests' | 'add';
+
 const chatFor = (t: ThreadSummary): ActiveChat => ({
   channel: { kind: t.kind, id: t.targetId },
   title: t.kind === 'dm' ? `@${t.title}` : t.title,
 });
 
+export interface SocialDockProps {
+  letters: Letters;
+  /**
+   * Which site it's on (#220). On Hearthside a Campaigns tab (the player's
+   * campaigns with their status, each opening its Hearthside page) takes the
+   * place of Chats, since Letters is on screen in Hearthside's shell. So a
+   * friend's card has no Message button there (their Profile, Hearthside's
+   * `/players/:id`, has "Write a letter"), and the badge counts friend
+   * requests only. The portfolio when left out, where it's unchanged.
+   */
+  site?: TopBarSite;
+}
+
 /** The top bar's social dock (#211): chats (Letters), friends, requests and adding a friend by handle. */
-export default function SocialDock({ letters }: { letters: Letters }) {
+export default function SocialDock({ letters, site = 'portfolio' }: SocialDockProps) {
   const { api, session } = letters;
+  const onHearthside = site === 'hearthside';
+  const tabs: readonly DockTab[] = onHearthside ? ['campaigns', 'friends', 'requests', 'add'] : ['chats', 'friends', 'requests', 'add'];
   const [isOpen, setIsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'chats' | 'friends' | 'requests' | 'add'>('chats');
+  const [activeTab, setActiveTab] = useState<DockTab>(tabs[0]);
+  const [campaigns, setCampaigns] = useState<CampaignRow[] | null>(null);
+  const [campaignsError, setCampaignsError] = useState('');
   const [friends, setFriends] = useState<Friend[]>([]);
   const [incomingRequests, setIncomingRequests] = useState<Request[]>([]);
   const [activeChat, setActiveChat] = useState<ActiveChat | null>(null);
   const [chatFilter, setChatFilter] = useState<ThreadFilter>('all');
-  const { threads, totalUnread, markRead, refresh: refreshThreads } = useThreads(letters, { filter: chatFilter });
+  // Hearthside's dock has no Chats, so it doesn't follow the threads (Letters does).
+  const { threads, totalUnread: threadsUnread, markRead, refresh: refreshThreads } = useThreads(letters, { filter: chatFilter, enabled: !onHearthside });
+  const totalUnread = onHearthside ? 0 : threadsUnread;
   const signedIn = useSession(session).status === 'signedIn';
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Friend[]>([]);
@@ -87,8 +129,21 @@ export default function SocialDock({ letters }: { letters: Letters }) {
   useEffect(() => {
     if (!isOpen || !signedIn) return;
     fetchSocialData();
-    refreshThreads();
-  }, [isOpen, signedIn, refreshThreads]);
+    if (onHearthside) fetchCampaigns();
+    else refreshThreads();
+  }, [isOpen, signedIn, refreshThreads, onHearthside]);
+
+  // Hearthside's Campaigns tab: read each time the dock opens, like friends.
+  const fetchCampaigns = async () => {
+    try {
+      const list = await api.get<CampaignRow[]>('/api/campaigns');
+      // A stable sort: the API's order stays within each status.
+      setCampaigns([...(list ?? [])].sort((a, b) => statusRank(a) - statusRank(b)));
+      setCampaignsError('');
+    } catch (err) {
+      setCampaignsError(errorOf(err, "Couldn't load your campaigns"));
+    }
+  };
 
   const fetchSocialData = async () => {
     const [friendsData, requestsData] = await Promise.all([
@@ -254,7 +309,7 @@ export default function SocialDock({ letters }: { letters: Letters }) {
 
               {/* Tabs */}
               <div className="flex border-b-4 border-black bg-zinc-800">
-                {(['chats', 'friends', 'requests', 'add'] as const).map((tab) => (
+                {tabs.map((tab) => (
                   <button
                     key={tab}
                     onClick={() => { setActiveTab(tab); if (tab !== 'chats') setActiveChat(null); }}
@@ -365,6 +420,49 @@ export default function SocialDock({ letters }: { letters: Letters }) {
                   )
                 )}
 
+                {/* CAMPAIGNS TAB (Hearthside, #220) */}
+                {activeTab === 'campaigns' && (
+                  <div className="space-y-4">
+                    {campaignsError && <p className="text-red-500 text-xs font-black uppercase">{campaignsError}</p>}
+                    {campaigns === null ? (
+                      !campaignsError && <p className="text-center py-6 text-zinc-500 font-bold uppercase text-xs">Loading…</p>
+                    ) : campaigns.length === 0 ? (
+                      <div className="text-center py-6 text-zinc-500 border-4 border-dashed border-zinc-700 font-bold uppercase text-xs">
+                        No campaigns yet.
+                      </div>
+                    ) : (
+                      <ul className="space-y-2" aria-label="Your campaigns">
+                        {campaigns.map((c) => (
+                          <li key={c._id}>
+                            <Link
+                              href={hearthsideCampaignPath(c._id)}
+                              onClick={() => setIsOpen(false)}
+                              className="w-full flex items-center gap-3 p-3 bg-zinc-800 border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-1 hover:translate-y-1 hover:shadow-none transition-all text-left"
+                            >
+                              <div className="p-1.5 border-2 border-black shrink-0 bg-teal-500">
+                                <Map size={14} className="text-white" />
+                              </div>
+                              <p className="min-w-0 flex-grow font-black text-sm truncate uppercase text-white">{c.title}</p>
+                              {c.status && (
+                                <span className={`shrink-0 px-2 py-0.5 border-2 border-black font-black text-[10px] uppercase tracking-widest ${STATUS_BG[c.status] ?? 'bg-zinc-700 text-white'}`}>
+                                  {c.status}
+                                </span>
+                              )}
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <Link
+                      href="/campaigns"
+                      onClick={() => setIsOpen(false)}
+                      className="block text-center py-2 bg-yellow-400 border-2 border-black text-black font-black text-xs uppercase hover:bg-white transition-colors"
+                    >
+                      All campaigns
+                    </Link>
+                  </div>
+                )}
+
                 {/* FRIENDS TAB */}
                 {activeTab === 'friends' && (
                   <div className="space-y-4">
@@ -389,6 +487,7 @@ export default function SocialDock({ letters }: { letters: Letters }) {
                           </div>
                           
                           <div className="flex gap-2">
+                            {!onHearthside && (
                             <button
                               onClick={() => openChat({ channel: { kind: 'dm', id: friend._id }, title: `@${friendLabel(friend)}` })}
                               className="flex-grow flex items-center justify-center gap-2 py-2 bg-teal-500 border-2 border-black text-black font-black text-xs uppercase hover:bg-teal-400 transition-colors"
@@ -396,10 +495,11 @@ export default function SocialDock({ letters }: { letters: Letters }) {
                               <MessageSquare size={14} />
                               MESSAGE
                             </button>
+                            )}
                             <Link
                               href={`/players/${friend._id}`}
                               onClick={() => setIsOpen(false)}
-                              className="flex items-center justify-center gap-2 px-3 py-2 bg-yellow-400 border-2 border-black text-black font-black text-xs uppercase hover:bg-white transition-colors"
+                              className={`${onHearthside ? 'flex-grow ' : ''}flex items-center justify-center gap-2 px-3 py-2 bg-yellow-400 border-2 border-black text-black font-black text-xs uppercase hover:bg-white transition-colors`}
                             >
                               <UserIcon size={14} />
                               PROFILE
@@ -521,7 +621,7 @@ export default function SocialDock({ letters }: { letters: Letters }) {
               {/* Footer */}
               <div className="p-6 bg-black border-t-4 border-zinc-800">
                 <p className="text-[10px] text-zinc-600 font-black uppercase tracking-[0.2em] leading-relaxed">
-                  Connect by handle. Chat right here.<br/>
+                  {onHearthside ? 'Connect by handle. Letters sit beside every page.' : 'Connect by handle. Chat right here.'}<br/>
                   The Personal Web App Social Layer v2.0
                 </p>
               </div>

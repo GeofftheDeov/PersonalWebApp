@@ -7,6 +7,8 @@ import { Bell, Check, MessageSquare, UserPlus, Map, Info, X, CheckCheck } from '
 import type { Letters } from '../letters/letters';
 import { useSession } from '../session/react';
 import { notificationTarget } from './notificationLink';
+import { hearthsideCampaignPath } from '../hearthside/paths';
+import type { TopBarSite } from './links';
 
 interface Notification {
   _id: string;
@@ -34,9 +36,26 @@ const TYPE_BG: Record<Notification['type'], string> = {
   system: 'bg-zinc-300',
 };
 
+export interface NotificationsBellProps {
+  letters: Letters;
+  /**
+   * Which site it's on (#220). On Hearthside the bell asks the backend for
+   * Hearthside's notifications only (`?site=hearthside`: campaign invites,
+   * friend requests and Game Night links), and "mark all read" marks only
+   * those; an old `/game-night/...` link opens its Hearthside page; accepting
+   * a campaign invite goes to the campaign's Hearthside page. The portfolio
+   * when left out, where it shows everything, as before.
+   */
+  site?: TopBarSite;
+  /** The portfolio's origin: on Hearthside, links to the portfolio's own pages open there. */
+  portfolioUrl?: string;
+}
+
 /** The top bar's bell (#211): notifications, with friend requests and campaign invites answered in place. */
-export default function NotificationsBell({ letters }: { letters: Letters }) {
+export default function NotificationsBell({ letters, site = 'portfolio', portfolioUrl }: NotificationsBellProps) {
   const { api, session } = letters;
+  const onHearthside = site === 'hearthside';
+  const siteQuery = onHearthside ? 'site=hearthside' : '';
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -48,13 +67,13 @@ export default function NotificationsBell({ letters }: { letters: Letters }) {
 
   const fetchNotifications = useCallback(async () => {
     try {
-      const data = await api.get<{ notifications?: Notification[]; unreadCount?: number }>('/api/notifications?limit=30');
+      const data = await api.get<{ notifications?: Notification[]; unreadCount?: number }>(`/api/notifications?limit=30${siteQuery ? `&${siteQuery}` : ''}`);
       setNotifications(data?.notifications || []);
       setUnreadCount(data?.unreadCount || 0);
     } catch {
       /* polling — next tick will retry */
     }
-  }, [api]);
+  }, [api, siteQuery]);
 
   useEffect(() => {
     if (!signedIn) return;
@@ -79,7 +98,7 @@ export default function NotificationsBell({ letters }: { letters: Letters }) {
   };
 
   const markAllRead = async () => {
-    await api.put('/api/notifications/read-all').catch(() => {});
+    await api.put(`/api/notifications/read-all${siteQuery ? `?${siteQuery}` : ''}`).catch(() => {});
     fetchNotifications();
   };
 
@@ -100,7 +119,9 @@ export default function NotificationsBell({ letters }: { letters: Letters }) {
     try {
       await api.put(`/api/campaign-invites/${n.meta.inviteId}/respond`, { action }).catch(() => {});
       await markRead(n._id);
-      if (action === 'accept' && n.meta?.campaignId) router.push(`/game-night/campaigns/${n.meta.campaignId}`);
+      if (action === 'accept' && n.meta?.campaignId) {
+        router.push(onHearthside ? hearthsideCampaignPath(n.meta.campaignId) : `/game-night/campaigns/${n.meta.campaignId}`);
+      }
     } finally {
       setBusy(null);
     }
@@ -110,8 +131,9 @@ export default function NotificationsBell({ letters }: { letters: Letters }) {
     if (!n.read) markRead(n._id);
     // A relative `/game-night/...` path, or an absolute Hearthside URL once
     // the backend has HEARTHSIDE_URL (#214): the router for this site, a full
-    // page load for the other.
-    const target = notificationTarget(n.link, window.location.href);
+    // page load for the other. On Hearthside an old `/game-night/...` path
+    // opens its Hearthside page (#220).
+    const target = notificationTarget(n.link, window.location.href, { site, portfolioUrl });
     if (target) {
       setIsOpen(false);
       if (target.kind === 'route') router.push(target.href);

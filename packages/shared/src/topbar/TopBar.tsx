@@ -18,8 +18,9 @@ export interface TopBarProps {
    * Which site it's on. On Hearthside (#216) the portfolio's items go to
    * `portfolioUrl`, "Game Night" is Hearthside's `/`, Login is Hearthside's
    * `/login` returning to the page, and Admin doesn't show (see `topBarLinks`).
-   * The bell's filter and the social menu's Campaigns tab are #220's; until
-   * then they behave as on the portfolio.
+   * Its bell shows only Hearthside's notifications, and its social menu has
+   * a Campaigns tab in place of Chats (#220; see `NotificationsBell` and
+   * `SocialDock`).
    */
   site: TopBarSite;
   /** The app's Letters (`createLetters`), which carries its API and session clients. */
@@ -211,8 +212,8 @@ export default function TopBar({ site, letters, portfolioUrl }: TopBarProps) {
                 </a>
               )}
 
-              <NotificationsBell letters={letters} />
-              <SocialDock letters={letters} />
+              <NotificationsBell letters={letters} site={site} portfolioUrl={portfolioUrl} />
+              <SocialDock letters={letters} site={site} />
 
               <button onClick={handleLogout} className={linkCls}>
                 <span className="relative z-10 group-hover:text-teal-600 transition-colors uppercase">LOGOUT</span>
@@ -300,8 +301,8 @@ export default function TopBar({ site, letters, portfolioUrl }: TopBarProps) {
           )}
 
           <div className="mt-8 flex items-center gap-4">
-            <NotificationsBell letters={letters} />
-            <SocialDock letters={letters} />
+            <NotificationsBell letters={letters} site={site} portfolioUrl={portfolioUrl} />
+            <SocialDock letters={letters} site={site} />
           </div>
         </div>
       )}

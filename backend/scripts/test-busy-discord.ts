@@ -154,11 +154,12 @@ async function main() {
             await call("POST", "/api/friends/link-discord", name, { discordId: discordIdOf[name], discordHandle: `${name}#0001` });
         }
 
-        // The campaign's own session, already on Discord: being interested in it must not block planning it.
+        // The campaign's own session, already on Discord, its night being moved: being interested in it
+        // must not block planning it. (Its night being picked again, it isn't a booked game night either.)
         const ownEventId = `evt-own-${tag}`;
         await pool.query(
-            `INSERT INTO game_sessions (campaign_id, title, date, end_date, is_online, discord_event_id)
-             VALUES ($1, 'Session 3', $2, $3, true, $4)`, [campaigns.main, at(21), at(22), ownEventId]);
+            `INSERT INTO game_sessions (campaign_id, title, date, end_date, is_online, discord_event_id, status, planning_stage)
+             VALUES ($1, 'Session 3', $2, $3, true, $4, 'planning', 'night')`, [campaigns.main, at(21), at(22), ownEventId]);
 
         guilds = {
             [guild.main]: [

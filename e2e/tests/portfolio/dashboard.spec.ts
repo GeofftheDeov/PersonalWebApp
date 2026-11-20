@@ -216,6 +216,8 @@ test.describe("at phone width", () => {
 
     await signIn(cass);
     await page.goto("/dashboard");
+    // The portfolio slides each page in from the side (app/template.tsx), so
+    // the page overflows until that spring settles; poll for the settled width.
     const sideways = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
     // One column: the Profile card above the chats, and no log until one is picked.
@@ -226,7 +228,7 @@ test.describe("at phone width", () => {
     expect(rowBox!.y).toBeGreaterThan(profileBox!.y + profileBox!.height);
     expect(Math.abs(rowBox!.x - profileBox!.x)).toBeLessThan(12);
     await expect(messages(page)).toBeHidden();
-    expect(await sideways()).toBeLessThanOrEqual(0);
+    await expect.poll(sideways).toBeLessThanOrEqual(0);
 
     // Picking it shows the log in the list's place.
     await theRow.click();
@@ -236,7 +238,7 @@ test.describe("at phone width", () => {
     await expect(chats(page)).toBeHidden();
     const logBox = await log.boundingBox();
     expect(Math.abs(logBox!.x - profileBox!.x)).toBeLessThan(12);
-    expect(await sideways()).toBeLessThanOrEqual(0);
+    await expect.poll(sideways).toBeLessThanOrEqual(0);
 
     // Back returns to the list, on the chat it came from.
     await messages(page).getByRole("button", { name: "Back to chats" }).click();

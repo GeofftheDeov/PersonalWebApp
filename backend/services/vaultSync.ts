@@ -1,6 +1,7 @@
 import { execFile } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import { runLoopTick } from '../utils/loopLease.js';
 
 /**
  * Keeps the EFS-mounted Obsidian vault current while the container runs.
@@ -53,8 +54,13 @@ export function pullVault(): Promise<VaultSyncStatus> {
     return inFlight;
 }
 
+/**
+ * Every task mounts the same EFS checkout, so the loop pulls once per tick
+ * across tasks (#133): two pulls at once collide on .git/index.lock. On-demand
+ * pulls (pullVault from routes) aren't gated; they're rare and user-driven.
+ */
 export function startVaultSyncLoop(): void {
     if (!process.env.OBSIDIAN_VAULT_PATH) return;
-    setInterval(() => { void pullVault(); }, PULL_EVERY_MS);
+    setInterval(() => { void runLoopTick('vault-pull', PULL_EVERY_MS, pullVault); }, PULL_EVERY_MS);
     console.log('[BACKEND] Vault pull loop scheduled (every 10 min).');
 }

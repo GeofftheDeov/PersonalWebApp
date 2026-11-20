@@ -15,7 +15,7 @@ import { modelFromEnv } from "../os/haiku.js";
 import { askModel, type Tier2Log } from "../os/tier2.js";
 import { dailyBudgetFromEnv, noteUnloggedSpend } from "../os/budget.js";
 import { logAsk } from "../os/askLog.js";
-import { confirmProposal, createProposal, type Enqueue } from "../os/proposals.js";
+import { CLAIM_STALE_MS, confirmProposal, createProposal, type Enqueue } from "../os/proposals.js";
 import { enqueueRun, isSkill, skillLabel, type SkillId } from "../services/agentRuns.js";
 import { lookupBriefSpeech } from "../os/briefSpeech.js";
 import { centralDay } from "../os/format.js";
@@ -29,7 +29,8 @@ import { BRIEF_DATE } from "../utils/briefs.js";
  *   POST /admin/os/ask            { text, source: 'voice' | 'typed' } -> AskReply (os/ask.ts)
  *   POST /admin/os/ask/confirm    { id } -> { run, created, say }: queues a tier-3 proposal's run
  *                                 (os/proposals.ts); 404 unknown or another account's, 409
- *                                 already confirmed, 410 expired
+ *                                 already confirmed, 410 { reason: 'expired' | 'not_runnable' },
+ *                                 503 claimed by a confirm that hasn't recorded its run (#173)
  *   GET  /admin/os/api/brief/say  ?date=YYYY-MM-DD (default: today, Central) -> the brief's speech
  *                                 (os/briefSpeech.ts): 200 { date, source: 'say'|'top3'|'none',
  *                                 text, status, generated }; 404 { error: 'no brief', date };
@@ -226,8 +227,12 @@ export function createOsRouter({
                         .json({ run: outcome.run, created: outcome.created, say: outcome.say });
                 case "not_found": return res.status(404).json({ error: "no such proposal" });
                 case "already_confirmed": return res.status(409).json({ error: "that proposal was already confirmed" });
-                case "expired": return res.status(410).json({ error: "that proposal has expired" });
-                case "not_runnable": return res.status(410).json({ error: "that skill is no longer runnable" });
+                case "claimed":
+                    return res.status(503).set("Retry-After", String(Math.ceil(CLAIM_STALE_MS / 1000)))
+                        .json({ error: "that proposal is still being confirmed" });
+                // Both final; `reason` tells the page which to say (#173).
+                case "expired": return res.status(410).json({ error: "that proposal has expired", reason: "expired" });
+                case "not_runnable": return res.status(410).json({ error: "that skill is no longer runnable", reason: "not_runnable" });
             }
         } catch (err: any) {
             console.error(`[os] confirming proposal ${id} failed:`, err?.message ?? err);

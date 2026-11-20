@@ -1047,3 +1047,13 @@ CREATE INDEX idx_os_asks_recent ON os_asks (asked_at DESC);
 CREATE INDEX idx_os_asks_tier2 ON os_asks (asked_at) WHERE tier = 2;
 -- At most one queued-or-running run per skill; enqueueRun relies on it (#172).
 CREATE UNIQUE INDEX idx_agent_runs_one_active ON agent_runs (skill) WHERE status IN ('queued','running');
+
+-- ---------- background loop leases (migrations/0008__loop-leases.sql) ----------
+-- One row per setInterval loop that must run once per tick across backend
+-- tasks (#133): a task runs a tick only if it moves next_due forward first.
+
+CREATE TABLE loop_leases (
+  name        text PRIMARY KEY,
+  next_due    timestamptz NOT NULL,
+  claimed_at  timestamptz NOT NULL DEFAULT now()
+);

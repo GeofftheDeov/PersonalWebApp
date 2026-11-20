@@ -1,7 +1,7 @@
 // The 308s that send /game-night/... and /players/:id to Hearthside (#234).
 // Plain JS from the shared package, since this file is require()d before
 // anything is compiled; see its header for the rules.
-const { hearthsideRedirects } = require('@gtd/shared/hearthside/redirects');
+const { hearthsideRedirects } = require('@gtd/shared/hearthside-redirects');
 
 const nextConfig = {
     swcMinify: false,

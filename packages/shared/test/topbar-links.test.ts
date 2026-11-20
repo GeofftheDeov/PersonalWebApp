@@ -29,6 +29,19 @@ test("on the portfolio, a configured portfolio URL changes nothing", () => {
   assert.deepEqual(topBarLinks("portfolio", "https://geoffthedeov.net"), topBarLinks("portfolio"));
 });
 
+test("on the portfolio with Hearthside configured, Game Night goes straight to Hearthside (#234)", () => {
+  assert.deepEqual(topBarLinks("portfolio", undefined, "https://deov.hearthside.geoffthedeov.net/"), {
+    ...topBarLinks("portfolio"),
+    gameNight: "https://deov.hearthside.geoffthedeov.net/",
+  });
+});
+
+test("on the portfolio, a blank or unusable Hearthside setting (the deploy's \"\") keeps Game Night at /game-night", () => {
+  for (const setting of [undefined, null, "", "  ", "not a url", "javascript:alert(1)"]) {
+    assert.equal(topBarLinks("portfolio", undefined, setting).gameNight, "/game-night", String(setting));
+  }
+});
+
 test("on Hearthside, the portfolio's items go to the portfolio host and Game Night stays home", () => {
   assert.deepEqual(topBarLinks("hearthside", "https://deov.geoffthedeov.net"), {
     home: "https://deov.geoffthedeov.net/",

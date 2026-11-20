@@ -1,3 +1,5 @@
+import { hearthsideOrigin } from "../hearthside/paths";
+
 /** Which site the bar is on. */
 export type TopBarSite = "portfolio" | "hearthside";
 
@@ -26,7 +28,10 @@ const PORTFOLIO_PATHS = {
  * Where the top bar's items go (#216, spec #69).
  *
  * - On the portfolio: its own pages, as they always were. "Game Night" is
- *   still `/game-night` until #234 points it at Hearthside.
+ *   Hearthside's home once Hearthside is configured (`hearthsideUrl`, the
+ *   portfolio's build-time `NEXT_PUBLIC_HEARTHSIDE_URL`; #234), straight
+ *   there rather than through the 308 from `/game-night`; until then it's the
+ *   portfolio's own `/game-night`.
  * - On Hearthside: the portfolio's items (the brand, About, Dashboard, the
  *   Paperclip menu, Profile) go to `portfolioUrl`, the portfolio's origin from
  *   the app's configuration; "Game Night" is Hearthside's `/`. Admin doesn't
@@ -36,9 +41,11 @@ const PORTFOLIO_PATHS = {
  * Throws on Hearthside without a usable http(s) `portfolioUrl`, rather than
  * pointing the portfolio's items at Hearthside pages that don't exist.
  */
-export function topBarLinks(site: TopBarSite, portfolioUrl?: string): TopBarLinks {
+export function topBarLinks(site: TopBarSite, portfolioUrl?: string, hearthsideUrl?: string | null): TopBarLinks {
   if (site === "portfolio") {
-    return { ...PORTFOLIO_PATHS, paperclip: { ...PORTFOLIO_PATHS.paperclip }, gameNight: "/game-night", admin: true };
+    const hearthside = hearthsideOrigin(hearthsideUrl);
+    const gameNight = hearthside ? `${hearthside}/` : "/game-night";
+    return { ...PORTFOLIO_PATHS, paperclip: { ...PORTFOLIO_PATHS.paperclip }, gameNight, admin: true };
   }
   const origin = httpOrigin(portfolioUrl);
   if (!origin) throw new Error(`The top bar on Hearthside needs the portfolio URL (got ${JSON.stringify(portfolioUrl)})`);

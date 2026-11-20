@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { CheckSquare, Calendar, ChevronLeft, ChevronRight, AlertCircle, Dices, Check } from 'lucide-react';
 import { questApi, type AlmanacSession } from '@/lib/quests';
 import { api } from '@/lib/api';
+import { gameNightHref } from '@/lib/hearthside';
 
 interface Task {
     _id: string;
@@ -123,7 +124,7 @@ export default function CalendarView() {
     const overdue = tasks.filter(t => t.dueDate && new Date(t.dueDate) < today && t.status !== 'Completed');
 
     const SessionChip = ({ session, compact }: { session: AlmanacSession; compact: boolean }) => {
-        const href = `/game-night/sessions/${session.id}`;
+        const href = gameNightHref(`/game-night/sessions/${session.id}`);
         const open = openQuests(session);
         if (compact) {
             return (

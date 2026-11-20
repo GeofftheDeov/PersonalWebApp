@@ -1,3 +1,8 @@
+// The 308s that send /game-night/... and /players/:id to Hearthside (#234).
+// Plain JS from the shared package, since this file is require()d before
+// anything is compiled; see its header for the rules.
+const { hearthsideRedirects } = require('@gtd/shared/hearthside/redirects');
+
 const nextConfig = {
     swcMinify: false,
     eslint: { ignoreDuringBuilds: true },
@@ -13,6 +18,11 @@ const nextConfig = {
         return [
             // The Paperclip "CFO" console became the issue desk.
             { source: '/paperclip/cfo', destination: '/paperclip/issues', permanent: true },
+            // Game Night moved to Hearthside (spec #69). Only once Hearthside
+            // is configured: NEXT_PUBLIC_HEARTHSIDE_URL, built in like the
+            // portfolio's links to it ("" = not live yet, so the old
+            // /game-night pages keep serving). Read at `next build`.
+            ...hearthsideRedirects(process.env.NEXT_PUBLIC_HEARTHSIDE_URL),
         ];
     },
     async rewrites() {

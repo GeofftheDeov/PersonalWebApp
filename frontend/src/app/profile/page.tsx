@@ -8,6 +8,7 @@ import AvailabilityEditor from '@/components/AvailabilityEditor';
 import { ApiError } from '@gtd/shared/api';
 import { api, errorOf, getOrNull } from '@/lib/api';
 import { session, useRequiredSession } from '@/lib/session';
+import { gameNightHref } from '@/lib/hearthside';
 
 /** The fields the Info form edits, and so the only ones it saves. */
 const PROFILE_FIELDS = ['name', 'handle', 'phone', 'discordHandle', 'discordId'] as const;
@@ -464,7 +465,7 @@ export default function ProfilePage() {
                             {characters.map((c) => (
                                 <Link
                                     key={c._id}
-                                    href={`/game-night/characters/${c._id}`}
+                                    href={gameNightHref(`/game-night/characters/${c._id}`)}
                                     className="block p-5 border-4 border-black dark:border-white bg-zinc-200 dark:bg-slate-800 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] transition-shadow"
                                 >
                                     <div className="flex justify-between items-start gap-3">
@@ -692,7 +693,7 @@ export default function ProfilePage() {
                                 return (
                                     <Link
                                         key={c._id}
-                                        href={`/game-night/campaigns/${c._id}`}
+                                        href={gameNightHref(`/game-night/campaigns/${c._id}`)}
                                         className="block p-5 border-4 border-black dark:border-white bg-zinc-200 dark:bg-slate-800 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] transition-shadow"
                                     >
                                         <p className="font-permanent text-xl text-teal-600 dark:text-yellow-400 uppercase tracking-tight leading-tight">
@@ -723,7 +724,7 @@ export default function ProfilePage() {
                             {sessions.map((s) => (
                                 <Link
                                     key={s.playerSessionId}
-                                    href={`/game-night/sessions/${s.sessionId}`}
+                                    href={gameNightHref(`/game-night/sessions/${s.sessionId}`)}
                                     className="block p-5 border-4 border-black dark:border-white bg-zinc-200 dark:bg-slate-800 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] transition-shadow"
                                 >
                                     <p className="font-permanent text-xl text-teal-600 dark:text-yellow-400 uppercase tracking-tight leading-tight">

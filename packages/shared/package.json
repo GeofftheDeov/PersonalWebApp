@@ -14,6 +14,7 @@
     "./letters": "./src/letters/index.ts",
     "./letters/react": "./src/letters/react.ts",
     "./hearthside": "./src/hearthside/paths.ts",
+    "./hearthside/redirects": "./src/hearthside/redirects.js",
     "./topbar": "./src/topbar/index.ts"
   },
   "scripts": {

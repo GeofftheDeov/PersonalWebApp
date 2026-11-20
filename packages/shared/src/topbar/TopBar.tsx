@@ -28,6 +28,11 @@ export interface TopBarProps {
   /** The portfolio's origin, e.g. `https://geoffthedeov.net`. Required on Hearthside. */
   portfolioUrl?: string;
   /**
+   * On the portfolio, Hearthside's origin when it's configured: "Game Night"
+   * then goes straight there (#234). Unset, it's the portfolio's `/game-night`.
+   */
+  hearthsideUrl?: string | null;
+  /**
    * On Hearthside, a friend's MESSAGE in the social menu: opens your letter
    * with them in Letters (#251). Left out (a page without Letters, such as
    * `/join/:id`), there's no MESSAGE button. See `SocialDock`'s `onMessage`.
@@ -44,14 +49,14 @@ export interface TopBarProps {
  * A client component: mount it from one of the app's own client components,
  * since `letters` can't cross from a server component.
  *
- *   <TopBar site="portfolio" letters={letters} />
+ *   <TopBar site="portfolio" letters={letters} hearthsideUrl="https://hearthside.geoffthedeov.net" />
  *   <TopBar site="hearthside" letters={letters} portfolioUrl="https://geoffthedeov.net" />
  */
-export default function TopBar({ site, letters, portfolioUrl, onMessageFriend }: TopBarProps) {
+export default function TopBar({ site, letters, portfolioUrl, hearthsideUrl, onMessageFriend }: TopBarProps) {
   const { api, session } = letters;
   const router = useRouter();
   const pathname = usePathname();
-  const links = topBarLinks(site, portfolioUrl);
+  const links = topBarLinks(site, portfolioUrl, hearthsideUrl);
   // Hearthside's Login comes back to the page it was opened from; the
   // portfolio's is unchanged. The href has the path (it renders on the
   // server too); the click takes the query and anchor as well.

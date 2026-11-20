@@ -217,18 +217,23 @@ test.describe("at phone width", () => {
     await signIn(cass);
     await page.goto("/dashboard");
     // The portfolio slides each page in from the side (app/template.tsx), so
-    // the page overflows until that spring settles; poll for the settled width.
+    // positions and widths are only meaningful once that spring settles.
     const sideways = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    const settled = () => page.evaluate(() => Array.from(document.body.children).every((el) => {
+      const t = getComputedStyle(el).transform;
+      return t === "none" || t === "matrix(1, 0, 0, 1, 0, 0)";
+    }));
 
     // One column: the Profile card above the chats, and no log until one is picked.
     const profile = page.getByRole("link", { name: /VIEW & EDIT PROFILE/ });
     const theRow = row(page, "t233 A Campaign Whose Name");
     await expect(theRow).toBeVisible(FIRST_LOAD);
+    await expect.poll(settled).toBe(true); // the slide-in has finished
+    expect(await sideways()).toBeLessThanOrEqual(0);
     const [profileBox, rowBox] = await Promise.all([profile.boundingBox(), theRow.boundingBox()]);
     expect(rowBox!.y).toBeGreaterThan(profileBox!.y + profileBox!.height);
     expect(Math.abs(rowBox!.x - profileBox!.x)).toBeLessThan(12);
     await expect(messages(page)).toBeHidden();
-    await expect.poll(sideways).toBeLessThanOrEqual(0);
 
     // Picking it shows the log in the list's place.
     await theRow.click();

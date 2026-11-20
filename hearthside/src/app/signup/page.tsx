@@ -39,7 +39,7 @@ function SignupForm() {
     try {
       await api.post('/api/users/register', { name: form.name.trim(), email: form.email.trim(), password: form.password });
       rememberReturn(browserStorage(), target);
-      router.push('/check-email');
+      router.push(withReturn('/check-email', target));
     } catch (err) {
       setError(errorOf(err, 'We couldn’t create your account. Try again.'));
       setBusy(false);

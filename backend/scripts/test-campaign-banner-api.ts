@@ -159,6 +159,21 @@ async function main() {
         const asOutsider = await call("GET", `/api/campaigns/${cid}`, "outsider");
         check("someone outside the party can still open the campaign (the invite page needs it) but gets no banner URL",
             asOutsider.status === 200 && asOutsider.json.title && asOutsider.json.bannerUrl === null, asOutsider.json);
+
+        // Hearthside's invite page (#232) shows the banner to someone invited while the invite is pending.
+        const { rows: [invite] } = await pool.query(
+            `INSERT INTO campaign_invites (campaign_id, from_account_id, to_account_id) VALUES ($1, $2, $3) RETURNING id`,
+            [cid, who.player.id, who.outsider.id]);
+        const asInvitee = await call("GET", `/api/campaigns/${cid}`, "outsider");
+        check("someone with a pending invite to the campaign gets its banner URL (the invite page shows it)",
+            asInvitee.status === 200 && asInvitee.json.bannerUrl === set1.json.bannerUrl, asInvitee.json);
+        const otherAsInvitee = await call("GET", `/api/campaigns/${other}`, "outsider");
+        check("...but not for a campaign they aren't invited to",
+            otherAsInvitee.status === 200 && otherAsInvitee.json.bannerUrl === null, otherAsInvitee.json);
+        await pool.query(`UPDATE campaign_invites SET status = 'declined' WHERE id = $1`, [invite.id]);
+        const afterDecline = await call("GET", `/api/campaigns/${cid}`, "outsider");
+        check("...and once they've declined it, no banner URL again",
+            afterDecline.status === 200 && afterDecline.json.bannerUrl === null, afterDecline.json);
         const edited = await call("PUT", `/api/campaigns/${cid}`, "owner",
             { title: `Banner ${tag}`, description: "edited", status: "In Progress", startDate: "2026-10-01" });
         check("editing the campaign's details returns it with its banner URL, so the page keeps showing it",

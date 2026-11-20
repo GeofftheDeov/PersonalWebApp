@@ -23,6 +23,12 @@ export default defineConfig<Options>({
   testDir: "./tests",
   globalSetup: "./stack/global-setup.ts",
   fullyParallel: true,
+  // At most 4 at once: the dev-mode apps compile each route on its first
+  // visit, and with 8 workers (half of 16 cores) those compiles queued behind
+  // each other until tests ran past their 60s. 4 workers ran all 70 green, and
+  // faster (5.3 min against ~7). Runners with fewer cores keep Playwright's
+  // default of half of them. `--workers=N` still overrides it.
+  workers: 4,
   forbidOnly: !!process.env.CI,
   // No retries: a test that needs one is flaky, and gets fixed rather than retried.
   retries: 0,

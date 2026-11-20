@@ -7,7 +7,7 @@ import { bus as defaultBus, type EventBus, type EventMap } from "../events/index
 import { verifyJwt } from "../utils/jwt.js";
 import { readUpgradeSessionCookie } from "../utils/sessionCookie.js";
 import { resolveAccountId } from "../utils/accountRefs.js";
-import { campaignThreadKey, dmThreadKey, visibleThreadKeys, type ThreadKey } from "../services/threads.js";
+import { adminIdsAmong, campaignThreadKey, dmThreadKey, visibleThreadKeys, type ThreadKey } from "../services/threads.js";
 import { canAccessThread } from "../services/threads.js";
 import { findPersonById, personDisplayName } from "../utils/personUtils.js";
 import { unreadCounts } from "../services/readState.js";
@@ -26,8 +26,9 @@ import { withAttachmentUrls, type Attachment } from "../services/attachments.js"
  *     the upgrade when the page's Origin is allowed (#107), through
  *     utils/jwt.ts like every other route;
  *   - asks Threads which threads the person can see, at connect and again
- *     whenever a membership or friendship event names them (#105), and
- *     re-sends `ready` when a socket's set changes;
+ *     whenever a membership or friendship event names them (#105), or, for
+ *     admins, when a campaign's owner changes (#130), and re-sends `ready`
+ *     when a socket's set changes;
  *   - closes a socket with 4001 when its token expires (#105), or when its
  *     account is deleted;
  *   - closes every socket with 1012 when its broadcast subscriptions come
@@ -566,13 +567,17 @@ export async function attachLiveChannel(
     // A socket's threads are worked out from Threads (visibleThreadKeys) when
     // it connects, and again for the people an access event names: someone
     // joined or left a campaign, a campaign was deleted, two people became or
-    // stopped being friends. Each socket whose set changed gets a fresh
+    // stopped being friends. A campaign changing owner (#130) moves it into or
+    // out of admin management, which only admins follow, so it recomputes
+    // every connected admin. Each socket whose set changed gets a fresh
     // `ready` listing it, on the same connection.
     //
     // Losing access is applied the moment the event arrives, from the event
     // alone, so nothing published after it (a message, typing) reaches the
     // person who left. Gaining access waits for the recompute, so a thread is
-    // only ever added once the database says so.
+    // only ever added once the database says so. An owner change is the
+    // exception: it waits for the recompute both ways, since an admin who
+    // stops following a campaign can still read it (canAccessThread).
 
     /**
      * People whose threads are being recomputed: `again` when another event
@@ -648,6 +653,17 @@ export async function attachLiveChannel(
         }
     }
 
+    /** Recomputes the threads of every admin with a socket on this process. */
+    async function refreshAdmins() {
+        if (!byPerson.size) return;
+        try {
+            refreshAll(await adminIdsAmong([...byPerson.keys()]));
+        } catch (err: any) {
+            // They catch up on their next connect.
+            console.error("[live] could not find the connected admins:", err?.message);
+        }
+    }
+
     // No `firstSighting`: these are idempotent (a duplicate costs one more
     // recompute), and their ids would crowd message ids out of the seen set.
     unsubscribes.push(
@@ -662,6 +678,8 @@ export async function attachLiveChannel(
                 refreshAll([String(personId)]);
             } else if ((action === "member-added" || action === "created") && personId) {
                 refreshAll([String(personId)]);
+            } else if (action === "owner-changed") {
+                void refreshAdmins();
             }
             // "updated": a campaign's details, not who is in it.
             // The board shows the party and the GM title: whoever still

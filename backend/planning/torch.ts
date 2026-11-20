@@ -21,6 +21,7 @@ import type pg from "pg";
 import { withTransaction } from "../db/index.js";
 import { isUuid } from "../db/model.js";
 import { bus } from "../events/index.js";
+import { publishOwnerChanged } from "../services/accessEvents.js";
 import { notify } from "../utils/notify.js";
 import { postTableTalk } from "../utils/tableTalk.js";
 import { campaignParty } from "./availabilityStore.js";
@@ -91,6 +92,8 @@ export async function passTorchPermanently(actorId: string, campaignId: string, 
 
     const { campaign: c, from, to, owner } = result;
     // After the commit, never inside it: a failing side effect can't undo the pass.
+    // An admin-managed campaign has an owner now, so admins stop following it (#130).
+    if (!c.owner_id) await publishOwnerChanged(campaignId, owner);
     await bus.publish("campaign.torch_passed", {
         campaignId, scope: "campaign", sessionId: null, byId: actorId, fromId: from, toId: to,
     }).catch(() => { /* bus down is non-fatal */ });
@@ -143,6 +146,8 @@ export async function claimTorch(actorId: string, campaignId: string): Promise<T
     });
 
     // After the commit, never inside it: a failing side effect can't undo the claim.
+    // The campaign has an owner now, so admins stop following it (#130).
+    await publishOwnerChanged(campaignId, actorId);
     await bus.publish("campaign.torch_passed", {
         campaignId, scope: "campaign", sessionId: null, byId: actorId, fromId: null, toId: actorId,
     }).catch(() => { /* bus down is non-fatal */ });

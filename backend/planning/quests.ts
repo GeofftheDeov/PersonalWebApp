@@ -9,9 +9,10 @@
  *   createQuests()  the gated API the HTTP routes wrap. The Game Master (the
  *                   campaign's, the session's stand-in, or an admin) creates
  *                   and reassigns quests for party members; a quest's owner or
- *                   the Game Master marks it done. Each mutation runs in a
- *                   transaction with the quest's row locked, then publishes
- *                   its bus event and bell notification after the commit.
+ *                   the Game Master marks it done, or undoes that. Each
+ *                   mutation runs in a transaction with the quest's row
+ *                   locked, then publishes its bus event and bell
+ *                   notification after the commit.
  *
  *   insertQuest / setAssignee / getQuest / announceAssigned
  *                   the ungated building blocks, which take the caller's
@@ -439,6 +440,26 @@ export function createQuests(deps: QuestDeps = { now: () => new Date() }) {
                     effects.push(() => bus.publish("quest.completed", {
                         questId: t.id, sessionId: t.session_id, campaignId: t.campaign_id,
                         assigneeId: t.assignee_id, completedBy: actor.id,
+                    }).catch(() => { /* bus down is non-fatal */ }));
+                }
+                return (await getQuest(db, t.id))!;
+            });
+        },
+
+        /** Undoes `complete`: the same people can tick a done quest back to open. Undoing an open one is harmless. */
+        async reopen(actor: Actor, questId: string): Promise<QuestJson> {
+            return mutate(async (db, effects) => {
+                const t = await lockQuest(db, questId);
+                if (t.assignee_id !== actor.id) {
+                    const role = await roleIn(db, actor.id, t.campaign_id, t.gm_override_id);
+                    if (!role.gm) throw new QuestError(403, `Only the quest's owner or the ${t.gm_title} can undo it.`);
+                }
+                if (t.status === "cancelled") throw new QuestError(409, "This quest was cancelled.");
+                if (t.status === "done") {
+                    await db.query(`UPDATE session_tasks SET status = 'open', completed_at = NULL WHERE id = $1`, [t.id]);
+                    effects.push(() => bus.publish("quest.reopened", {
+                        questId: t.id, sessionId: t.session_id, campaignId: t.campaign_id,
+                        assigneeId: t.assignee_id, reopenedBy: actor.id,
                     }).catch(() => { /* bus down is non-fatal */ }));
                 }
                 return (await getQuest(db, t.id))!;

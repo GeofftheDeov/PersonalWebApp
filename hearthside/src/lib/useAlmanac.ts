@@ -7,8 +7,8 @@ import {
   type AlmanacReply, type AlmanacSession, type OlderPage, type Range, type Reach,
 } from './almanac';
 import type { CampaignSummary } from './campaigns';
-import type { Quest } from './quests';
-import { completeQuest, questStore, refreshQuests } from './useQuests';
+import { railChanges, type Quest } from './quests';
+import { questStore, refreshQuests, setQuestDone } from './useQuests';
 
 const enc = encodeURIComponent;
 
@@ -49,10 +49,10 @@ export interface AlmanacData {
  * (`OLDER_PAGE` sessions) so Played's count is usually whole, then more as
  * its pages need them, until the API says there are no more.
  *
- * Ticking goes through the rail's store (`completeQuest`) when Your Quests
- * holds the quest, so it shows done there at once; one it doesn't hold (a
- * played session's) is ticked directly. A quest ticked in the rail shows
- * done here too.
+ * Ticking (and unticking) goes through the rail's store (`setQuestDone`)
+ * when Your Quests holds the quest, so it follows there at once; one it
+ * doesn't hold (a played session's) is ticked directly. A quest ticked in
+ * the rail shows ticked here too.
  */
 export function useAlmanac(enabled: boolean, now: Date): AlmanacData {
   const [sessions, setSessions] = useState<AlmanacSession[] | null>(null);
@@ -111,29 +111,33 @@ export function useAlmanac(enabled: boolean, now: Date): AlmanacData {
   }, [enabled, fetchRange]);
 
   const tick = useCallback(async (q: Quest) => {
-    if (ticking.has(q.id) || q.status !== 'open') return;
+    if (ticking.has(q.id) || q.status === 'cancelled') return;
+    const done = q.status === 'open';
+    const status = done ? 'done' as const : 'open' as const;
+    const failed = done ? 'Couldn’t mark it done' : 'Couldn’t undo it';
     setTickError(null);
     setTicking((t) => new Set([...t, q.id]));
-    setSessions((list) => list && setQuest(list, q.id, (x) => ({ ...x, status: 'done' })));
+    setSessions((list) => list && setQuest(list, q.id, (x) => ({ ...x, status })));
     try {
       if (questStore.getState().quests.some((x) => x.id === q.id)) {
-        await completeQuest(q.id);
+        await setQuestDone(q.id, done);
         const after = questStore.getState();
-        if (after.quests.find((x) => x.id === q.id)?.status !== 'done') throw new Error(after.error ?? 'Couldn’t mark it done');
+        if (after.quests.find((x) => x.id === q.id)?.status !== status) throw new Error(after.error ?? failed);
       } else {
-        const done = await api.post<Quest>(`/api/quests/${enc(q.id)}/done`);
-        if (done?.id) setSessions((list) => list && setQuest(list, q.id, (x) => ({ ...x, status: done.status, completedAt: done.completedAt })));
+        const path = `/api/quests/${enc(q.id)}/done`;
+        const saved = done ? await api.post<Quest>(path) : await api.delete<Quest>(path);
+        if (saved?.id) setSessions((list) => list && setQuest(list, q.id, (x) => ({ ...x, status: saved.status, completedAt: saved.completedAt })));
         refreshQuests();
       }
     } catch (err) {
       setSessions((list) => list && setQuest(list, q.id, (x) => ({ ...x, status: q.status })));
-      setTickError(errorOf(err, 'Couldn’t mark it done'));
+      setTickError(errorOf(err, failed));
     } finally {
       setTicking((t) => new Set([...t].filter((id) => id !== q.id)));
     }
   }, [ticking]);
 
-  const shown = useMemo(() => sessions && withRail(sessions, rail.quests), [sessions, rail.quests]);
+  const shown = useMemo(() => sessions && withRail(sessions, railChanges(rail)), [sessions, rail]);
 
   return { sessions: shown, campaigns, error, tickError, ticking, ensure, tick, older, loadOlder };
 }

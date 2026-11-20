@@ -41,8 +41,8 @@ export default function Almanac() {
   const counts = useMemo(() => filterCounts(all, filter, now), [all, filter, now]);
   const filterKey = `${filter.where}|${[...filter.campaigns].sort().join()}`;
 
-  // The Almanac lists only your own quests: tick an open one off.
-  const canTick = useCallback((q: Quest) => q.status === 'open' && !!viewerId && q.assignee?.id === viewerId, [viewerId]);
+  // The Almanac lists only your own quests: tick one off, or back on.
+  const canTick = useCallback((q: Quest) => q.status !== 'cancelled' && !!viewerId && q.assignee?.id === viewerId, [viewerId]);
   const slips: SlipActions = { now, canTick, ticking: data.ticking, onTick: data.tick };
 
   return (

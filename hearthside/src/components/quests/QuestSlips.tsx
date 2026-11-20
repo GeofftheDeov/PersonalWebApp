@@ -6,9 +6,9 @@ import { KIND_TAG, questWhen, type Quest } from '@/lib/quests';
 /**
  * Quests as paper slips (#227, from the session prototype): a session's
  * table puts them by each player's seat, and the Almanac (#228) on each
- * session's sheet. A slip's box ticks the quest off when `canTick` allows;
- * there's no undoing it (the API has none). Tick through `completeQuest`
- * (or `useSessionTable().tick`) so Your Quests in the rail follows.
+ * session's sheet. A slip's box ticks the quest off, or a done one back on,
+ * when `canTick` allows. Tick through `setQuestDone` (or
+ * `useSessionTable().tick`) so Your Quests in the rail follows.
  *
  * Sized in `em`, so a place can scale the slips with its font size (the
  * table does, with the table's width).
@@ -57,7 +57,7 @@ export function QuestSlip({ quest: q, now, tickable, busy, onTick }: {
         role="checkbox"
         aria-checked={done}
         aria-label={`${q.title}: ${done ? 'done' : tickable ? 'mark done' : 'not done yet'}`}
-        disabled={done || !tickable || busy}
+        disabled={!tickable || busy}
         onClick={onTick}
       />
       <span className="hs-slip-text">

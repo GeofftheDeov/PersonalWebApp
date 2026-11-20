@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ApiError } from "@gtd/shared/api";
-import { createQuestStore, questWhen, railQuests, type Quest } from "../src/lib/quests";
+import { createQuestStore, questWhen, railChanges, railQuests, type Quest } from "../src/lib/quests";
 
 const NOW = new Date("2026-11-10T18:00:00Z");
 const HOUR = 3_600_000;
@@ -85,6 +85,7 @@ function fakeApi(handlers: Record<string, (body?: unknown) => unknown>) {
     api: {
       get: (path: string) => call("GET", path),
       post: (path: string, body?: unknown) => call("POST", path, body),
+      delete: (path: string) => call("DELETE", path),
     } as any,
   };
 }
@@ -107,7 +108,7 @@ test("the store loads every quest of yours, keeps the rail's, and ticks one off 
   assert.equal(store.getState().status, "ready");
   assert.deepEqual(seen, ["loading", "ready"]);
 
-  const ticking = store.complete("q1");
+  const ticking = store.setDone("q1", true);
   // Ticked at once, before the server answers.
   assert.equal(store.getState().quests[0].status, "done");
   assert.ok(store.getState().ticking.has("q1"));
@@ -129,7 +130,7 @@ test("a tick the server refuses is undone, with the server's reason", async () =
   });
   const store = createQuestStore({ api, now: () => NOW });
   await store.load();
-  await store.complete("q1");
+  await store.setDone("q1", true);
   assert.equal(store.getState().quests[0].status, "open");
   assert.equal(store.getState().error, "This quest was cancelled.");
   assert.ok(!store.getState().ticking.has("q1"));
@@ -150,10 +151,50 @@ test("a load that started before a tick can't bring the old state back", async (
   const store = createQuestStore({ api, now: () => NOW });
   await store.load();
   const stale = store.load();
-  await store.complete("q1");
+  await store.setDone("q1", true);
   release();
   await stale;
   assert.equal(store.getState().quests[0].status, "done");
+});
+
+test("a done quest ticks back on; pages follow only the quests ticked here", async () => {
+  let stored = [quest("q1", { status: "done", completedAt: at(-HOUR) }), quest("q2", { status: "done", completedAt: at(-HOUR) })];
+  const { api, calls } = fakeApi({
+    "GET /api/quests/mine?scope=all": () => ({ quests: stored }),
+    "DELETE /api/quests/q1/done": () => {
+      stored = stored.map((q) => (q.id === "q1" ? { ...q, status: "open", completedAt: null } : q));
+      return stored[0];
+    },
+  });
+  const store = createQuestStore({ api, now: () => NOW });
+  await store.load();
+  assert.deepEqual(railChanges(store.getState()), [], "nothing ticked here yet");
+
+  const unticking = store.setDone("q1", false);
+  // Open at once, before the server answers.
+  assert.equal(store.getState().quests[0].status, "open");
+  assert.equal(store.getState().quests[0].completedAt, null);
+  await unticking;
+  assert.ok(!store.getState().ticking.has("q1"));
+  assert.deepEqual(railChanges(store.getState()).map((q) => [q.id, q.status]), [["q1", "open"]]);
+
+  // Already open: nothing to send.
+  await store.setDone("q1", false);
+  assert.deepEqual(calls, ["GET /api/quests/mine?scope=all", "DELETE /api/quests/q1/done"]);
+  store.reset();
+  assert.equal(store.getState().touched.size, 0, "signing out forgets them");
+});
+
+test("an untick the server refuses is put back, with the server's reason", async () => {
+  const { api } = fakeApi({
+    "GET /api/quests/mine?scope=all": () => ({ quests: [quest("q1", { status: "done" })] }),
+    "DELETE /api/quests/q1/done": () => { throw new ApiError("Conflict", 409, { error: "This quest was cancelled." }); },
+  });
+  const store = createQuestStore({ api, now: () => NOW });
+  await store.load();
+  await store.setDone("q1", false);
+  assert.equal(store.getState().quests[0].status, "done");
+  assert.equal(store.getState().error, "This quest was cancelled.");
 });
 
 test("a failed load says so, and signing out empties the rail", async () => {

@@ -87,11 +87,21 @@ export interface QuestRailState {
   quests: Quest[];
   /** The last thing that went wrong, fit to show. */
   error: string | null;
-  /** Quests ticked here whose done the server hasn't confirmed yet. */
+  /** Quests ticked (or unticked) here whose change the server hasn't confirmed yet. */
   ticking: ReadonlySet<string>;
+  /**
+   * Quests ticked or unticked through this store since sign-in. Pages with
+   * their own copy of a quest show these as the rail has them, so a tick in
+   * Your Quests shows on the page; the rest they keep as they read them.
+   */
+  touched: ReadonlySet<string>;
 }
 
-const EMPTY: QuestRailState = { status: 'idle', quests: [], error: null, ticking: new Set() };
+const EMPTY: QuestRailState = { status: 'idle', quests: [], error: null, ticking: new Set(), touched: new Set() };
+
+/** The quests the rail holds that were ticked or unticked here (`touched`): what a page should show as the rail has it. */
+export const railChanges = (s: Pick<QuestRailState, 'quests' | 'touched'>): Quest[] =>
+  s.touched.size ? s.quests.filter((q) => s.touched.has(q.id)) : [];
 
 /**
  * Your quests, for the rail and any page that ticks them (a session's slips,
@@ -100,7 +110,7 @@ const EMPTY: QuestRailState = { status: 'idle', quests: [], error: null, ticking
  * is its React face.
  */
 export function createQuestStore({ api, now = () => new Date() }: {
-  api: Pick<ApiClient, 'get' | 'post'>;
+  api: Pick<ApiClient, 'get' | 'post' | 'delete'>;
   now?: () => Date;
 }) {
   let state: QuestRailState = EMPTY;
@@ -136,22 +146,28 @@ export function createQuestStore({ api, now = () => new Date() }: {
       }
     },
 
-    /** Ticks a quest off: done at once, undone again if the server refuses. */
-    async complete(questId: string) {
+    /**
+     * Ticks a quest off (`done`) or back on (POST or DELETE
+     * /api/quests/:id/done): changed at once, put back if the server refuses.
+     */
+    async setDone(questId: string, done: boolean) {
       const before = state.quests.find((q) => q.id === questId);
-      if (!before || before.status !== 'open' || state.ticking.has(questId)) return;
+      const from = done ? 'open' : 'done';
+      if (!before || before.status !== from || state.ticking.has(questId)) return;
       version++;
       set({
-        quests: replace({ ...before, status: 'done' }),
+        quests: replace({ ...before, status: done ? 'done' : 'open', completedAt: done ? before.completedAt : null }),
         ticking: new Set([...state.ticking, questId]),
+        touched: new Set([...state.touched, questId]),
         error: null,
       });
       const settled = () => new Set([...state.ticking].filter((id) => id !== questId));
+      const path = `/api/quests/${encodeURIComponent(questId)}/done`;
       try {
-        const done = await api.post<Quest>(`/api/quests/${encodeURIComponent(questId)}/done`);
-        set({ quests: done?.id ? replace(done) : state.quests, ticking: settled() });
+        const after = done ? await api.post<Quest>(path) : await api.delete<Quest>(path);
+        set({ quests: after?.id ? replace(after) : state.quests, ticking: settled() });
       } catch (err) {
-        set({ quests: replace(before), ticking: settled(), error: errorOf(err, "Couldn't mark it done") });
+        set({ quests: replace(before), ticking: settled(), error: errorOf(err, done ? "Couldn't mark it done" : "Couldn't undo it") });
       }
     },
 

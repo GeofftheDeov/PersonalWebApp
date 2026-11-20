@@ -135,11 +135,11 @@ test("words: the night, the place, the week, the seal and the heading's count", 
   assert.equal(headLine([...withQuests, nextWeek, later, session("far", at(2026, 12, 18, 19))], NOW), "3 sessions in the next four weeks · 1 quest open");
 });
 
-test("a quest ticked in Your Quests shows done in the Almanac", () => {
-  const s = { ...tonight, quests: [quest("a", "t", null), quest("b", "t", null)] };
-  const [after] = withRail([s], [quest("a", "t", null, "done")]);
+test("a quest ticked or unticked in Your Quests shows that in the Almanac", () => {
+  const s = { ...tonight, quests: [quest("a", "t", null), quest("b", "t", null, "done")] };
+  const [after] = withRail([s], [quest("a", "t", null, "done"), quest("b", "t", null, "open")]);
   assert.deepEqual(after.quests.map((q) => q.status), ["done", "open"]);
-  assert.equal(withRail([s], [quest("a", "t", null)])[0], s, "nothing done there: unchanged");
+  assert.equal(withRail([s], [quest("a", "t", null)])[0], s, "the same there: unchanged");
 });
 
 test("reads: a range read is kept, and a newer read of it replaces what was known there", () => {

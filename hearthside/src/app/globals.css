@@ -818,3 +818,217 @@ a.hs-cp-row:hover .hs-cp-chev{color:var(--accent)}
 .hs-room-pill.is-seal{color:#fff;background:var(--seal);border-color:var(--seal)}
 @media (max-width:479px){.hs-room-ig{grid-template-columns:40px minmax(0,1fr)}.hs-room-ig-btn{grid-column:2;justify-self:start}}
 @media (prefers-reduced-motion:reduce){.hs-room-photo-hint{transition:none}}
+
+/* ---------- The Almanac (#228; prototype/hearthside-almanac, layout B "Chronicle") ----------
+   A list by week or a calendar (Month / Week), with filters for both. Sessions on the calendar carry their
+   campaign's banner (BannerArt, .hs-alm-bn) in a gilded panel's gold frame; quests are #227's paper slips. */
+.hs-alm-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+.hs-alm-head > div:first-child{min-width:0}
+.hs-alm-seg{display:inline-flex;gap:2px;padding:3px;border-radius:var(--radius);background:rgba(26,19,14,.82);border:1px solid var(--gold-line);box-shadow:var(--shadow-panel)}
+.hs-alm-seg button{background:transparent;border:0;padding:5px 14px;border-radius:3px;cursor:pointer;color:var(--muted);font-family:var(--font-label);font-size:14px;font-weight:500;letter-spacing:.04em}
+.hs-alm-seg button:hover{color:var(--text)}
+.hs-alm-seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.hs-alm-n{margin-left:2px;font-family:var(--font-body);font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.hs-alm-link{background:none;border:0;padding:0;color:var(--accent);cursor:pointer;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.04em}
+.hs-alm-link:hover{color:var(--gold-hi)}
+.hs-alm-error{color:#f0a58f}
+.hs-alm-tabs button{padding-inline:8px}
+
+/* A banner behind something: fills its box; the cloth keeps its initials only where there's room. */
+.hs-alm-bn{position:absolute;inset:0;display:block;overflow:hidden;container-type:inline-size}
+.hs-alm-bn img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+.hs-alm-bn .hs-cloth{place-items:center end;padding-right:8%}
+.hs-alm-bn .hs-cloth::after{inset:4px}
+.hs-alm-bn .hs-cloth span{font-size:clamp(12px,9cqw,28px)}
+
+/* Filters: the campaign dropdown, the place chips, Clear filters. The open list hangs from the whole panel. */
+.hs-alm-filters{z-index:5;padding:10px 14px;display:flex;flex-direction:column;gap:8px}
+.hs-alm-frow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0}
+.hs-alm-flab{width:78px;flex:none;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--muted)}
+.hs-alm-chip{display:inline-flex;align-items:center;gap:2px;padding:3px 10px;border-radius:var(--radius-full);border:1px solid var(--line);background:transparent;
+  color:var(--text);cursor:pointer;font-family:var(--font-body);font-size:13px;line-height:1.3}
+.hs-alm-chip:hover{border-color:var(--gold)}
+.hs-alm-chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.hs-alm-chip[aria-pressed="true"] .hs-alm-n{color:var(--accent-ink);opacity:.75}
+.hs-alm-clear{margin-left:auto}
+.hs-alm-dd{flex:1 1 240px;display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0}
+.hs-alm-dd-btn{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 10px 0 5px;border-radius:var(--radius);border:1px solid var(--gold-line);
+  background:var(--surface);color:var(--text);cursor:pointer;font-family:var(--font-body);font-size:14px;max-width:100%;min-width:0}
+.hs-alm-dd-btn:hover,.hs-alm-dd-btn[aria-expanded="true"]{border-color:var(--gold)}
+.hs-alm-dd-btn:disabled{opacity:.6;cursor:default}
+.hs-alm-dd-txt{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hs-alm-dd-caret{color:var(--muted);font-size:11px}
+.hs-alm-dd-stack{display:inline-flex;flex:none}
+.hs-alm-dd-stack > span + span{margin-left:-24px}
+.hs-alm-thumb{position:relative;flex:none;width:40px;height:22px;border-radius:2px;box-shadow:0 0 0 1px rgba(0,0,0,.7),0 1px 3px rgba(0,0,0,.6)}
+.hs-alm-thumb .hs-cloth span,.hs-alm-thumb .hs-cloth::after{display:none}
+.hs-alm-tok{display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 9px 0 3px;border-radius:var(--radius);border:1px solid var(--gold);
+  background:rgba(229,161,58,.14);color:var(--text);cursor:pointer;font-family:var(--font-body);font-size:13px;max-width:100%;min-width:0}
+.hs-alm-tok .hs-alm-thumb{width:34px;height:20px}
+.hs-alm-tok-n{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hs-alm-tok-x{flex:none;color:var(--muted);font-size:15px;line-height:1}
+.hs-alm-tok:hover .hs-alm-tok-x{color:var(--gold-hi)}
+.hs-alm-dd-pop{position:absolute;z-index:30;top:calc(100% + 10px);left:0;width:min(420px,100%);padding:10px 12px 12px;display:flex;flex-direction:column;gap:10px}
+.hs-alm-dd-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:2px 4px 0;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--muted)}
+.hs-alm-dd-list{display:flex;flex-direction:column;gap:8px;max-height:min(60vh,520px);overflow-y:auto;padding:3px}
+/* At least 4:1 so the whole banner shows, and taller when the name wraps (overflow:clip keeps the content minimum). */
+.hs-alm-opt{position:relative;flex:none;display:flex;align-items:center;width:100%;aspect-ratio:4/1;border:0;padding:10px 48px 10px 12px;border-radius:3px;overflow:clip;
+  cursor:pointer;text-align:left;font:inherit;color:var(--text);background:var(--leather);box-shadow:0 0 0 1px var(--gold-line),0 3px 8px rgba(0,0,0,.55)}
+.hs-alm-opt::before{content:"";position:absolute;inset:0;z-index:1;background:linear-gradient(90deg,rgba(20,13,8,.9) 0%,rgba(20,13,8,.55) 50%,rgba(20,13,8,0) 80%)}
+.hs-alm-opt .hs-cloth{padding-right:58px}
+.hs-alm-opt-name{position:relative;z-index:2;min-width:0;display:flex;flex-direction:column;gap:2px}
+.hs-alm-opt-name b{font-family:var(--font-story);font-weight:400;font-size:19px;line-height:1.1;color:var(--on-wood-text);text-shadow:var(--on-wood-shadow);overflow-wrap:anywhere}
+.hs-alm-opt-name small{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.05em;color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow)}
+.hs-alm-opt-check{position:absolute;z-index:2;right:10px;top:50%;margin-top:-13px;width:26px;height:26px;border-radius:50%;border:2px solid var(--gold);background:rgba(20,13,8,.65);box-shadow:0 1px 4px #000}
+.hs-alm-opt.is-on{box-shadow:0 0 0 2px var(--gold-hi),0 3px 10px rgba(0,0,0,.6)}
+.hs-alm-opt.is-on .hs-alm-opt-check{background:var(--accent);border-color:var(--gold-hi)}
+.hs-alm-opt.is-on .hs-alm-opt-check::after{content:"";position:absolute;left:7px;top:3px;width:6px;height:11px;border:solid var(--accent-ink);border-width:0 2.5px 2.5px 0;transform:rotate(45deg)}
+.hs-alm-dd.has-sel .hs-alm-opt:not(.is-on) .hs-alm-bn{filter:grayscale(.85) brightness(.5)}
+.hs-alm-dd.has-sel .hs-alm-opt:not(.is-on) .hs-alm-opt-name{opacity:.7}
+.hs-alm-opt:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.hs-alm-dd-f{display:flex;justify-content:flex-end}
+.hs-alm-dd-f .hs-btn-amber{height:32px}
+@media (max-width:620px){
+  .hs-alm-flab{width:100%}
+  .hs-alm-dd-pop{width:100%;padding:10px}
+  .hs-alm-opt{padding:8px 44px 8px 10px}
+  .hs-alm-opt-check{right:9px}
+  .hs-alm-opt-name b{font-size:17px}
+  .hs-alm-opt .hs-cloth span{display:none}
+}
+
+/* The list: Coming up by week, each day's date large on the floor beside its sheets; Played as rows. */
+.hs-alm-strip{padding:6px}
+.hs-alm-strip .hs-tabs{border-bottom:0;padding:0 8px}
+.hs-alm-list{display:flex;flex-direction:column;gap:26px;min-width:0}
+.hs-alm-week{display:flex;flex-direction:column;gap:22px;min-width:0}
+.hs-alm-week-h{display:flex;align-items:center;gap:12px;margin:6px 0 0;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;
+  color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow)}
+.hs-alm-week-h::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--gold-line),rgba(226,184,98,0))}
+.hs-alm-entry{display:grid;grid-template-columns:62px minmax(0,1fr);gap:16px;align-items:start}
+.hs-alm-leaf{text-align:center;color:var(--on-wood-text);text-shadow:var(--on-wood-shadow);padding-top:12px}
+.hs-alm-leaf b{display:block;font-family:var(--font-display);font-size:36px;line-height:1;font-weight:400}
+.hs-alm-leaf span{display:block;font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.08em;color:var(--on-wood-muted)}
+.hs-alm-leaf.is-today b{color:var(--accent)}
+.hs-alm-day{display:flex;flex-direction:column;gap:22px;min-width:0}
+.hs-alm-off{padding:12px 16px;display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;color:var(--muted);font-size:14px}
+.hs-alm-off b{font-weight:500;text-decoration:line-through}
+.hs-alm-played{list-style:none;margin:0;padding:0}
+.hs-alm-played li + li{border-top:1px solid var(--gold-rule)}
+.hs-alm-prow{display:grid;grid-template-columns:84px minmax(0,1fr);gap:12px;align-items:baseline;padding:11px 14px;color:var(--text);text-decoration:none}
+.hs-alm-prow:hover b{color:var(--gold-hi)}
+.hs-alm-prow time{font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.04em;color:var(--accent)}
+.hs-alm-prow-t{min-width:0}
+.hs-alm-prow b{display:block;font-weight:500;font-size:14.5px;overflow-wrap:anywhere}
+.hs-alm-prow small{display:block;font-size:13px;color:var(--muted)}
+@media (max-width:620px){
+  .hs-alm-entry{grid-template-columns:44px minmax(0,1fr);gap:10px}
+  .hs-alm-leaf b{font-size:28px}
+  .hs-alm-prow{grid-template-columns:1fr;gap:2px}
+}
+
+/* A session's parchment (AlmanacSheet), in the list and under the calendar. */
+.hs-alm-sheet{min-width:0}
+.hs-alm-sheet-text{flex:1 1 220px;min-width:0}
+.hs-alm-sheet .hs-sheet-title{font-size:24px;overflow-wrap:anywhere}
+.hs-alm-qh{margin:16px 0 0;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--paper-muted)}
+.hs-alm-qnone{margin:14px 0 0;font-size:14px;color:var(--paper-muted)}
+.hs-alm-sheet-slips{font-size:14px;max-width:440px}
+.hs-alm-sheet a.hs-btn{display:inline-block;text-decoration:none}
+.hs-alm-sheets{display:flex;flex-direction:column;gap:30px;padding-top:6px}
+
+/* The calendar: tabs, the head (‹ title Today ›), then the month's grid or the week's columns. */
+.hs-alm-cal{padding:6px;min-width:0}
+.hs-alm-cal .hs-alm-tabs{padding:0 8px}
+.hs-alm-cal-in{container-type:inline-size;min-width:0}
+.hs-alm-cal-head{display:flex;align-items:center;gap:8px;padding:8px 10px 10px}
+.hs-alm-cal-head h2{margin:0;flex:1;min-width:0;font-family:var(--font-display);font-weight:400;font-size:22px;letter-spacing:.02em;color:var(--text)}
+.hs-alm-nav{flex:none;background:transparent;border:1px solid var(--line);color:var(--text);border-radius:var(--radius);height:32px;min-width:32px;padding:0 10px;cursor:pointer;
+  font-family:var(--font-label);font-weight:500;letter-spacing:.04em}
+.hs-alm-nav:hover{border-color:var(--gold);color:var(--gold-hi)}
+.hs-alm-wd,.hs-alm-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr))}
+.hs-alm-wd{border-top:1px solid var(--gold-rule)}
+.hs-alm-wd span{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.06em;color:var(--muted);text-align:center;padding:6px 0}
+.hs-alm-cell{min-height:100px;padding:4px 4px 6px;border-top:1px solid var(--gold-rule);border-left:1px solid var(--gold-rule);cursor:pointer;
+  display:flex;flex-direction:column;gap:3px;min-width:0}
+.hs-alm-cell:nth-child(7n+1){border-left:0}
+.hs-alm-cell:hover{background:rgba(229,161,58,.06)}
+.hs-alm-cell.is-sel{background:rgba(229,161,58,.13);box-shadow:inset 0 0 0 1px var(--gold)}
+.hs-alm-cell.is-out > *{opacity:.45}
+.hs-alm-num{flex:none;border:0;background:none;padding:0;cursor:pointer;font-family:var(--font-label);font-size:13px;font-weight:500;color:var(--muted);
+  width:24px;height:24px;display:grid;place-items:center;border-radius:50%;font-variant-numeric:tabular-nums}
+.hs-alm-cell.is-today .hs-alm-num{background:var(--accent);color:var(--accent-ink);font-weight:700}
+.hs-alm-num:focus-visible,.hs-alm-wdh:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.hs-alm-items{display:flex;flex-direction:column;gap:3px;min-width:0}
+.hs-alm-ms,.hs-alm-ws{border:1px solid transparent;border-radius:var(--radius);overflow:hidden;min-width:0;
+  background:linear-gradient(var(--leather),var(--leather)) padding-box,linear-gradient(135deg,var(--gold-hi) 0%,#b07c2c 22%,#f0cf7a 45%,#7c5318 68%,#e7c06a 88%,#a87228 100%) border-box}
+.hs-alm-ms{position:relative;display:block;min-height:50px;box-shadow:0 2px 5px rgba(0,0,0,.65)}
+.hs-alm-ms::before{content:"";position:absolute;inset:0;z-index:1;background:linear-gradient(180deg,rgba(20,13,8,.05) 0%,rgba(20,13,8,.6) 45%,rgba(20,13,8,.92) 100%)}
+.hs-alm-ms .hs-cloth span,.hs-alm-ms .hs-cloth::after{display:none}
+.hs-alm-ms-in{position:relative;z-index:2;display:flex;flex-direction:column;gap:1px;padding:16px 5px 5px}
+.hs-alm-ms b{font-family:var(--font-label);font-weight:700;font-size:11.5px;letter-spacing:.04em;color:var(--accent);text-shadow:0 1px 2px #000}
+.hs-alm-ms-t{font-family:var(--font-story);font-size:13.5px;line-height:1.12;color:var(--on-wood-text);text-shadow:0 1px 2px #000;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.hs-alm-ms.is-after .hs-alm-bn,.hs-alm-ws.is-after .hs-alm-bn{filter:grayscale(.75) brightness(.75)}
+.hs-alm-ms.is-cancelled,.hs-alm-ws.is-cancelled{background:transparent;border:1px dashed var(--line);box-shadow:none}
+.hs-alm-ms.is-cancelled{min-height:0}
+.hs-alm-ms.is-cancelled::before{display:none}
+.hs-alm-ms.is-cancelled .hs-alm-ms-in{padding:3px 5px}
+.hs-alm-ms.is-cancelled b{color:var(--muted);text-shadow:none}
+.hs-alm-ms.is-cancelled .hs-alm-ms-t{color:var(--muted);text-decoration:line-through;text-shadow:none;font-size:12.5px}
+/* Quests on their due day: #227's slips, smaller; a month cell clips the title to two lines. */
+.hs-alm-cslips{margin:2px 0 0;font-size:11.5px;gap:.4em}
+.hs-alm-cslips .hs-slip{padding:.35em .45em;gap:.4em}
+.hs-alm-month .hs-alm-cslips small,.hs-alm-month .hs-alm-cslips .hs-tag{display:none}
+.hs-alm-month .hs-alm-cslips .hs-slip-title{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.hs-alm-more{font-size:11.5px;color:var(--muted);padding-left:3px}
+.hs-alm-dots{display:none;gap:3px;flex-wrap:wrap;justify-content:center}
+.hs-alm-dots i{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+.hs-alm-dots i.is-off{background:transparent;border:1px dashed var(--muted)}
+.hs-alm-dots i.q{border-radius:1px;transform:rotate(-8deg);background:var(--paper);width:7px;height:8px}
+.hs-alm-dots i.q.is-done{background:var(--moss)}
+/* Phones: the month's cells shrink to marks (a dot per session, a paper chip per quest, moss once done). */
+@container (max-width:520px){
+  .hs-alm-cell{min-height:54px;align-items:center}
+  .hs-alm-items{display:none}
+  .hs-alm-dots{display:flex}
+}
+/* The week: a tall column per day, everything written out; a list of days when narrow. */
+.hs-alm-wgrid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border-top:1px solid var(--gold-rule)}
+.hs-alm-wday{border-left:1px solid var(--gold-rule);cursor:pointer;min-height:280px;padding:8px 5px 12px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.hs-alm-wday:first-child{border-left:0}
+.hs-alm-wday:hover{background:rgba(229,161,58,.06)}
+.hs-alm-wday.is-sel{background:rgba(229,161,58,.13);box-shadow:inset 0 0 0 1px var(--gold)}
+.hs-alm-wdh{border:0;background:none;cursor:pointer;text-align:left;display:flex;align-items:baseline;gap:6px;padding:0 0 0 2px;
+  font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.06em;color:var(--muted)}
+.hs-alm-wdh b{font-family:var(--font-display);font-weight:400;font-size:24px;line-height:1;letter-spacing:0;color:var(--text)}
+.hs-alm-wday.is-today .hs-alm-wdh b{color:var(--accent)}
+.hs-alm-witems{display:flex;flex-direction:column;gap:6px;min-width:0}
+.hs-alm-ws{display:flex;flex-direction:column;box-shadow:0 3px 8px rgba(0,0,0,.6);font-size:12.5px;line-height:1.3}
+.hs-alm-ws-bn{position:relative;display:block;aspect-ratio:2.6/1}
+.hs-alm-ws-bn .hs-cloth::after{inset:3px}
+.hs-alm-ws-body{display:flex;flex-direction:column;gap:2px;padding:5px 7px 7px;background:radial-gradient(130% 90% at 50% 0%,var(--leather-hi),var(--leather))}
+.hs-alm-ws-t{font-family:var(--font-label);font-weight:500;color:var(--accent);font-size:12px;letter-spacing:.02em}
+.hs-alm-ws b{font-family:var(--font-story);font-weight:400;font-size:14.5px;line-height:1.12;color:var(--text);overflow-wrap:break-word;hyphens:auto}
+.hs-alm-ws small{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.hs-alm-ws.is-cancelled .hs-alm-ws-body{background:none}
+.hs-alm-ws.is-cancelled b{text-decoration:line-through;color:var(--muted);font-size:13.5px}
+.hs-alm-ws.is-cancelled .hs-alm-ws-t{color:var(--muted)}
+.hs-alm-none{font-size:12px;color:var(--muted);opacity:.55;padding-left:2px}
+@container (max-width:560px){
+  .hs-alm-wgrid{grid-template-columns:minmax(0,1fr)}
+  .hs-alm-wday{min-height:0;border-left:0;border-top:1px solid var(--gold-rule);display:grid;grid-template-columns:44px minmax(0,1fr);gap:10px;padding:10px 8px}
+  .hs-alm-wday:first-child{border-top:0}
+  .hs-alm-wdh{flex-direction:column-reverse;align-items:center;align-self:start;gap:2px;padding:0}
+  .hs-alm-ws b{font-size:15.5px}
+  .hs-alm-ws-bn{aspect-ratio:4/1}
+  .hs-alm-cslips{font-size:13px}
+}
+.hs-alm-legend{margin:0;padding:8px 12px 6px;border-top:1px solid var(--gold-rule);font-size:12px;line-height:1.4;color:var(--muted)}
+/* The chosen day, under the calendar. */
+.hs-alm-dayd{min-width:0}
+.hs-alm-dayd .hs-sec{flex-wrap:wrap}
+.hs-alm-due{padding:10px 14px 14px}
+.hs-alm-sheets + .hs-alm-due{margin-top:26px}
+.hs-alm-panel-h{margin:0;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--muted)}
+.hs-alm-due .hs-slips{font-size:14px;max-width:440px}

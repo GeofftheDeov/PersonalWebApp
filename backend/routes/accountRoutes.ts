@@ -29,7 +29,9 @@ const authenticateJWT = (req: express.Request, res: express.Response, next: expr
     const token = authHeader.substring(7); // Remove 'Bearer ' prefix
 
     try {
-        verifyJwt(token);
+        // The Salesforce batch token, or a login (#240): never a Google
+        // Calendar OAuth state, which used to pass here too.
+        verifyJwt(token, { purpose: ["account-sync", "session"] });
         next();
     } catch (error) {
         return res.status(403).json({ error: "Forbidden: Invalid token" });

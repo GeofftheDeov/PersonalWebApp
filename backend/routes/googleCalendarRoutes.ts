@@ -78,8 +78,7 @@ router.get('/callback', async (req: any, res: Response) => {
         const { code, state, error } = req.query as { code?: string; state?: string; error?: string };
         if (!state) return back('error');
 
-        const decoded = verifyJwt(state);
-        if (decoded.purpose !== 'gcal-connect') throw new Error('Bad state');
+        const decoded = verifyJwt(state, { purpose: 'gcal-connect' });
         // A state from before #215 carries no host and meant the portfolio. One
         // naming a host off the allowlist was not issued by this environment.
         if (decoded.host !== undefined) {

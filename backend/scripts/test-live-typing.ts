@@ -124,9 +124,11 @@ async function account(name: string, appRole: "user" | "admin" = "user"): Promis
   return { id: rows[0].id, email: rows[0].email, handle };
 }
 
-async function campaign(title: string): Promise<string> {
+/** Owned by `owner`: a campaign with no owner is admin-managed, which admins follow (#130). */
+async function campaign(title: string, owner: Person): Promise<string> {
   const { rows } = await pool.query(
-    `INSERT INTO campaigns (title, status) VALUES ($1, 'In Progress') RETURNING id`, [`t103 ${title} ${RUN}`]);
+    `INSERT INTO campaigns (title, status, owner_id) VALUES ($1, 'In Progress', $2) RETURNING id`,
+    [`t103 ${title} ${RUN}`, owner.id]);
   created.campaigns.push(rows[0].id);
   return rows[0].id;
 }
@@ -230,7 +232,7 @@ async function main() {
     const outsider = await account("outsider");
     const admin = await account("admin", "admin");
     const leaver = await account("leaver");
-    const table = await campaign("Curse of Strahd");
+    const table = await campaign("Curse of Strahd", alice);
     for (const p of [alice, bob, mara, leaver]) await member(table, p);
     const tableThread = campaignThreadKey(table);
     const rowsBefore = await rowCounts();

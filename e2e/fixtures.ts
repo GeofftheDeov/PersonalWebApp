@@ -21,6 +21,8 @@
  *
  * Helpers, also exported here:
  *   verifyLinkToken(stack, email)   the token a verify email would carry (the stack sends no mail)
+ *   seedNotification(stack, personId, row)   a row in someone's bell, as the database holds it: for
+ *                ones the backend no longer makes (an old /game-night/... link) or only a scheduler makes
  *   logInAndPlant(context, backend, person, cookieName, host)   signIn against any backend, e.g. the
  *                dev environment that stack/dev-environment.ts starts for a test of the two environments' cookies
  */
@@ -130,4 +132,21 @@ export async function logInAndPlant(
  */
 export async function verifyLinkToken(stack: Stack, email: string): Promise<string> {
   return (await runBackendScript(["scripts/e2e-database.ts", "verify-token", stack.databaseUrl, email])).trim();
+}
+
+/** A bell notification as the database holds it. */
+export interface NotificationRow {
+  type: "friend_request" | "campaign_invite" | "message" | "system";
+  title: string;
+  body?: string;
+  link?: string;
+}
+
+/**
+ * Puts `row` in `personId`'s bell straight into the run's database (backend/scripts/e2e-database.ts):
+ * for rows the running backend no longer makes, such as an old relative `/game-night/...` link from before
+ * HEARTHSIDE_URL, or ones only a scheduler makes, such as a quest reminder. Resolves with the row's id.
+ */
+export async function seedNotification(stack: Stack, personId: string, row: NotificationRow): Promise<string> {
+  return (await runBackendScript(["scripts/e2e-database.ts", "notify", stack.databaseUrl, personId, JSON.stringify(row)])).trim();
 }

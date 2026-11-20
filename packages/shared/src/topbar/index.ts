@@ -11,7 +11,7 @@
  */
 export { default as TopBar, type TopBarProps } from "./TopBar";
 export { topBarLinks, type TopBarLinks, type TopBarSite } from "./links";
-export { default as NotificationsBell } from "./NotificationsBell";
-export { default as SocialDock } from "./SocialDock";
+export { default as NotificationsBell, type NotificationsBellProps } from "./NotificationsBell";
+export { default as SocialDock, type SocialDockProps } from "./SocialDock";
 export { default as ChatThread, type ChatChannel } from "./ChatThread";
 export { AttachButton, DraftAttachments, MessageAttachments } from "./MessageAttachments";

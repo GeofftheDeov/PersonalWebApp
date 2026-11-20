@@ -5,6 +5,7 @@
  *   npx tsx scripts/e2e-database.ts create   build pwae2e_<time>_<random> from db/schema.sql, print its URL
  *   npx tsx scripts/e2e-database.ts drop <url-or-name>
  *   npx tsx scripts/e2e-database.ts verify-token <url-or-name> <email>   a verify link's token, as the email would carry it
+ *   npx tsx scripts/e2e-database.ts notify <url-or-name> <person-id> <json>   put a row in someone's bell
  *
  * It loads schema.sql straight into the new database rather than cloning
  * run-tests.ts's template, which every `npm test` drops and rebuilds: a
@@ -74,13 +75,35 @@ async function verifyToken(target: string, email: string) {
   }
 }
 
-const [command, arg, arg2] = process.argv.slice(2);
+/**
+ * A bell notification for `personId`, as the database would hold one (#220):
+ * `{type, title, body?, link?}`. For rows the running backend no longer makes,
+ * such as a relative `/game-night/...` link from before HEARTHSIDE_URL, or
+ * ones only a scheduler makes (a quest reminder). Prints the row's id.
+ */
+async function notifyRow(target: string, personId: string, json: string) {
+  const name = target.split("/").pop() ?? "";
+  if (!/^pwae2e_\d+_[0-9a-f]+$/.test(name)) throw new Error(`Not an end-to-end database: ${target}`);
+  const row = JSON.parse(json) as { type: string; title: string; body?: string; link?: string };
+  const db = await connect(name);
+  try {
+    const { rows: [made] } = await db.query(
+      `INSERT INTO notifications (user_id, type, title, body, link) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+      [personId, row.type, row.title, row.body ?? null, row.link ?? null]);
+    console.log(made.id);
+  } finally {
+    await db.end();
+  }
+}
+
+const [command, arg, arg2, arg3] = process.argv.slice(2);
 const run = command === "create" ? create()
   : command === "drop" && arg ? drop(arg)
   : command === "verify-token" && arg && arg2 ? verifyToken(arg, arg2)
+  : command === "notify" && arg && arg2 && arg3 ? notifyRow(arg, arg2, arg3)
   : null;
 if (!run) {
-  console.error("Usage: npx tsx scripts/e2e-database.ts create | drop <url-or-name> | verify-token <url-or-name> <email>");
+  console.error("Usage: npx tsx scripts/e2e-database.ts create | drop <url-or-name> | verify-token <url-or-name> <email> | notify <url-or-name> <person-id> <json>");
   process.exit(2);
 }
 run.catch((e) => {

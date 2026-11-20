@@ -10,3 +10,4 @@ export * from "./api";
 export * from "./session";
 export * from "./realtime";
 export * from "./letters";
+export * from "./hearthside/paths";

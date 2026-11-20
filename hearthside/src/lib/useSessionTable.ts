@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { api, errorOf, getOrNull } from './api';
+import { campaignThreadKey, getLiveClient } from './letters';
 import type { Quest } from './quests';
 import type { Attendance, CampaignCharacter, QuestViewer, ReadyCheck } from './sessionTable';
 import { completeQuest, questStore, refreshQuests } from './useQuests';
@@ -22,6 +23,9 @@ export interface SessionTableData {
 
 const enc = encodeURIComponent;
 
+/** How long to wait for more `noticeboard.changed` frames before reading again: one action can send several. */
+const LIVE_REFETCH_MS = 250;
+
 /**
  * What a session's round table needs beyond the page's own read (#227): its
  * quests, its attendance and the party's adventurers, plus what the table
@@ -32,6 +36,8 @@ const enc = encodeURIComponent;
  * one of yours there, so Your Quests shows it done at once; a quest the rail
  * doesn't hold (someone else's, for the GM, or one from a session that's
  * over) is ticked directly. A quest ticked in the rail shows done here too.
+ * Live: what anyone else does to the session's quests shows here without a
+ * reload (the campaign thread's `noticeboard.changed`).
  */
 export function useSessionTable(sessionId: string, campaignId: string | null) {
   const [data, setData] = useState<SessionTableData>({ quests: null, viewer: null, attendance: null, characters: null });
@@ -49,6 +55,23 @@ export function useSessionTable(sessionId: string, campaignId: string | null) {
   }, [sessionId, campaignId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Live: a quest added, claimed, edited or done in the campaign (or the
+  // night moved, the session cancelled) sends `noticeboard.changed` on its
+  // thread; read the table again, and after a reconnect too.
+  useEffect(() => {
+    if (!campaignId) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const soon = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => load(), LIVE_REFETCH_MS);
+    };
+    const off = getLiveClient().subscribe(campaignThreadKey(campaignId), { onNoticeBoard: soon, onReconnect: soon });
+    return () => {
+      off();
+      clearTimeout(timer);
+    };
+  }, [campaignId, load]);
 
   const setQuest = (id: string, change: (q: Quest) => Quest) =>
     setData((d) => ({ ...d, quests: d.quests?.map((q) => (q.id === id ? change(q) : q)) ?? null }));

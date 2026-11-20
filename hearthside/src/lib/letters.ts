@@ -6,7 +6,11 @@ import {
     useThreads as useSharedThreads,
     type UseThreadOptions,
 } from '@gtd/shared/letters/react';
-import { usePresence as useSharedPresence, useTyping as useSharedTyping } from '@gtd/shared/realtime/react';
+import {
+    useHoldPresence as useSharedHoldPresence,
+    usePresence as useSharedPresence,
+    useTyping as useSharedTyping,
+} from '@gtd/shared/realtime/react';
 import type { ThreadFilter } from '@gtd/shared/letters';
 import { api } from './api';
 import { session } from './session';
@@ -38,5 +42,8 @@ export const useThread = (threadKey: string | null, options?: UseThreadOptions) 
 /** "Theo is writing…" for one thread. */
 export const useTyping = (threadKey: string | null) => useSharedTyping(letters, threadKey);
 
-/** Who has a campaign's Table Talk open. */
+/** Who has a campaign's thread open, in its Table Talk or in Letters. */
 export const usePresence = (threadKey: string | null) => useSharedPresence(letters, threadKey);
+
+/** Counts you among those here now in a campaign's thread while mounted (Letters, with the thread open). */
+export const useHoldPresence = (threadKey: string | null) => useSharedHoldPresence(letters, threadKey);

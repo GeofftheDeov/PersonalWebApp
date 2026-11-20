@@ -12,7 +12,8 @@
  *   or protocol-version refusal: retrying with the same token can't help.
  * - Dispatches `message.created` to the handlers subscribed to its thread.
  * - Sends `typing` (`sendTyping`) and dispatches others' `typing` to `onTyping` (#103).
- * - Dispatches `noticeboard.changed` to its campaign thread's `onNoticeBoard` (#57).
+ * - Dispatches `noticeboard.changed` to its campaign thread's `onNoticeBoard` (#57),
+ *   and to person-level subscribers' (`subscribePerson`), for views across campaigns.
  * - Sends `presence` for the campaign threads held open (`holdPresence`), again
  *   after every reconnect, and dispatches the server's list to `onPresence` (#37).
  * - Dispatches frames about the person rather than one thread
@@ -111,6 +112,12 @@ export interface PersonHandlers {
     onThreadRead?: (read: ThreadRead) => void;
     /** The socket came back after a drop: refetch, since nothing is replayed. */
     onReconnect?: () => void;
+    /**
+     * A Notice Board changed in any of your campaigns, `thread` naming which
+     * (#57): a quest assigned, claimed, edited or done among others. For views
+     * across campaigns, such as your quests.
+     */
+    onNoticeBoard?: (thread: string) => void;
 }
 
 /** The slice of the browser WebSocket this client uses; `ws` fits it too. */
@@ -433,9 +440,9 @@ export class LiveClient {
                 return;
             }
             case "noticeboard.changed": { // #57
-                const handlers = this.threads.get(frame.thread);
-                if (!handlers) return;
-                for (const h of [...handlers]) safely(() => h.onNoticeBoard?.(frame.thread));
+                for (const h of [...(this.threads.get(frame.thread) ?? [])]) safely(() => h.onNoticeBoard?.(frame.thread));
+                // Person-level too, for views across campaigns (your quests).
+                for (const h of [...this.people]) safely(() => h.onNoticeBoard?.(frame.thread));
                 return;
             }
             // The thread list's frames (#102): about the person, so they go to person-level subscribers.

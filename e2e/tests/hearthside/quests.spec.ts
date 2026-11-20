@@ -60,6 +60,31 @@ test("a quest ticked in the rail stays done after a reload", async ({ page, sign
   await expect(rail.getByText("0 open", { exact: true })).toBeVisible();
 });
 
+test("a quest the GM adds or edits shows in the rail without a reload", async ({ page, signIn, apiAs, newPerson }) => {
+  const [gm, player] = await Promise.all([newPerson("Odile Marsh"), newPerson("Piet Lark")]);
+  const gmApi = await apiAs(gm);
+  const { sessionId } = await questFor(gmApi, await apiAs(player), player.id, "Bring the lamp oil");
+
+  await signIn(player);
+  // Wait for the live channel to be ready, so the GM's changes below can't land before it.
+  const ready = page.waitForEvent("websocket", (ws) => ws.url().includes("/api/live")).then((ws) =>
+    ws.waitForEvent("framereceived", { predicate: (f) => String(f.payload).includes('"ready"') }));
+  await page.goto("/");
+  const rail = yourQuests(page);
+  await expect(rail.getByText("1 open", { exact: true })).toBeVisible();
+  await ready;
+
+  const added = await gmApi.post(`/api/quests/sessions/${sessionId}`, { data: { title: "Fetch the map case", assigneeId: player.id } });
+  expect(added.ok(), await added.text()).toBe(true);
+  await expect(rail.getByText("2 open", { exact: true })).toBeVisible();
+  await expect(rail.getByText("Fetch the map case")).toBeVisible();
+
+  const questId = String((await added.json()).id);
+  const edited = await gmApi.patch(`/api/quests/${questId}`, { data: { title: "Fetch the brass map case" } });
+  expect(edited.ok(), await edited.text()).toBe(true);
+  await expect(rail.getByText("Fetch the brass map case")).toBeVisible();
+});
+
 test.describe("at 375px", () => {
   test.use({ viewport: { width: 375, height: 812 } });
 

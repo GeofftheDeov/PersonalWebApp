@@ -18,7 +18,9 @@ export interface CampaignCardProps {
  * One campaign on the Campaigns page (layout B, "Roster"; spec #69). The
  * banner is the card's background and the card is at least 4:1, growing if
  * the text needs room. The title, status, dates and description sit on a
- * gilded leather panel over the banner's left side, at most 60% of the card.
+ * gilded leather panel over the banner's left side, at most 60% of the card;
+ * the title's link covers the whole panel, so a click anywhere on it opens
+ * the campaign.
  * The owner's Change banner (or Add banner) and Remove sit bottom right.
  * Under 620px the banner is a strip across the top, with the panel below it.
  *

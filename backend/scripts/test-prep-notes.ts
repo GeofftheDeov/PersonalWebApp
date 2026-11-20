@@ -213,12 +213,12 @@ async function main() {
             check(`...and so does the Notice Board`, board.status === 200 && onBoard && !hasNotes(onBoard.session), onBoard?.session);
         }
 
-        // The encounter list is open to anyone, so its sessions never carry the notes.
+        // The encounter list answers the whole party (#238), so its sessions never carry the notes.
         const { rows: [enc] } = await pool.query(
             `INSERT INTO encounters (name, session_id) VALUES ('t213 ambush', $1) RETURNING id`, [sid]);
-        const encs = await fetch(`${base}/api/tabletop/encounters`).then((r) => r.json());
+        const encs = (await call("GET", "/api/tabletop/encounters", "p1")).json;
         const mine = Array.isArray(encs) ? encs.find((e: any) => String(e._id) === enc.id) : null;
-        check("the (unauthenticated) encounter list leaves the Prep notes out of its sessions",
+        check("a player's encounter list leaves the Prep notes out of its sessions",
             mine?.session?.title === "Old night" && !hasNotes(mine.session) && !String(mine.session.googleCalendarLink).includes("details="), mine);
         await pool.query(`DELETE FROM encounters WHERE id = $1`, [enc.id]);
 

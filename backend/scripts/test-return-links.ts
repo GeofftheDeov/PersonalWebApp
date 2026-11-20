@@ -438,7 +438,8 @@ async function main() {
 
     const hearthsideState = (await startConnect("hearthside.geoffthedeov.net")).state;
     check("the state carries the originating host",
-      (verifyJwt(hearthsideState) as any).host === "hearthside.geoffthedeov.net", JSON.stringify(verifyJwt(hearthsideState)));
+      (verifyJwt(hearthsideState, { purpose: "gcal-connect" }) as any).host === "hearthside.geoffthedeov.net",
+      JSON.stringify(verifyJwt(hearthsideState, { purpose: "gcal-connect" })));
   } finally {
     await pool.query(`DELETE FROM accounts WHERE email = ANY($1)`, [emails]);
     server.close();

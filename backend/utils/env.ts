@@ -6,7 +6,7 @@
  * backend at http://localhost:5000, so every prod request arrives with
  * `Host: localhost:5000`.
  *
- * A function, not a constant, because route modules are imported (ESM
- * hoisting) before server.ts calls dotenv.config().
+ * A function, not a constant, so it sees the environment as it is when
+ * called, whichever module loaded .env (loadEnv.ts, or a script's own).
  */
 export const isDevEnv = () => process.env.NODE_ENV === "development";

@@ -29,6 +29,10 @@ const handle = app.getRequestHandler();
 // listeners ourselves, below. Left alone, Next attaches it lazily to whichever
 // server served the first page request, and only to that one.
 app.didWebSocketSetup = true;
+// Pages wait for this: until Next is prepared its handler isn't there, and a
+// request that came in early would fail with a 500 (#245). /health doesn't wait.
+console.log("-> Preparing Next.js app (compilation)...");
+const prepared = app.prepare();
 
 const requestHandler = async (req, res) => {
     // Immediate health check response (even if Next.js isn't ready)
@@ -43,6 +47,7 @@ const requestHandler = async (req, res) => {
         // /admin and /db pages carry the JWT as ?token= — same leak the backend
         // logger had (#39): keep it out of CloudWatch.
         console.log(`[FRONTEND] ${req.method} ${req.url.replace(/([?&]token=)[^&]+/, "$1***")}`);
+        await prepared;
         await handle(req, res, parsedUrl);
     } catch (err) {
         console.error('Error occurred handling', req.url.replace(/([?&]token=)[^&]+/, "$1***"), err);
@@ -73,8 +78,7 @@ secondaryServer.listen(secondaryPort, hostname, () => {
     console.log(`> Appending Listener on http://${hostname}:${secondaryPort}`);
 });
 
-console.log("-> Preparing Next.js app (compilation)...");
-app.prepare().then(() => {
+prepared.then(() => {
     console.log("-> App prepared successfully.");
     if (typeof app.upgradeHandler === 'function') {
         for (const server of [httpServer, secondaryServer]) {

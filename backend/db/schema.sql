@@ -814,8 +814,12 @@ CREATE TABLE events (
                 CHECK (status IN ('Not Started','In Progress','Completed')),
   start_date  timestamptz,
   end_date    timestamptz,
-  created_at  timestamptz NOT NULL DEFAULT now()
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  -- Who made it (#238, migrations/0009__event-owners.sql). Non-admins see only
+  -- their own; NULL (made before #238) is admin-only.
+  owner_id    uuid REFERENCES accounts(id) ON DELETE CASCADE
 );
+CREATE INDEX events_owner_id_idx ON events (owner_id);
 
 CREATE TABLE tasks (
   id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1047,3 +1051,13 @@ CREATE INDEX idx_os_asks_recent ON os_asks (asked_at DESC);
 CREATE INDEX idx_os_asks_tier2 ON os_asks (asked_at) WHERE tier = 2;
 -- At most one queued-or-running run per skill; enqueueRun relies on it (#172).
 CREATE UNIQUE INDEX idx_agent_runs_one_active ON agent_runs (skill) WHERE status IN ('queued','running');
+
+-- ---------- background loop leases (migrations/0008__loop-leases.sql) ----------
+-- One row per setInterval loop that must run once per tick across backend
+-- tasks (#133): a task runs a tick only if it moves next_due forward first.
+
+CREATE TABLE loop_leases (
+  name        text PRIMARY KEY,
+  next_due    timestamptz NOT NULL,
+  claimed_at  timestamptz NOT NULL DEFAULT now()
+);

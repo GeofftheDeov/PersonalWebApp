@@ -1,24 +1,43 @@
 /**
  * Phase 3 (#35) regression suite.
  *
- * Run against a throwaway local Postgres built from db/schema.sql — Neon is
- * unreachable from a session environment on every port, so a pass here proves
- * LOGIC, never dev data:
+ * Run against a throwaway local Postgres — Neon is unreachable from a session
+ * environment on every port, so a pass here proves LOGIC, never dev data:
  *
  *   DATABASE_URL="postgresql://postgres@127.0.0.1:5433/pwatest" npx tsx scripts/test-phase3.ts
  *
  * Sections map to the agreed slices. Each is expected to fail until its slice
  * lands; a section that passes before its slice is written is a bug in the
  * test, not good news (see the Phase 2 fixture lesson in phase3-fixture.ts).
+ *
+ * The suite replaces whatever schema it is given with the frozen pre-cutover
+ * one (db/fixtures/pre-phase3-schema.sql). db/schema.sql has had the Phase 3
+ * foreign keys since the cutover, so the fixture's deliberately dangling ids
+ * could no longer be seeded into it (#181). The migrations after Phase 3 run
+ * before S3, so the app code under test sees the columns it reads today.
  */
 import "./use-test-jwt-secret.js";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pool from "../db/index.js";
 import { buildFixture, IDS, LOSING_IDS, PASSWORD } from "./phase3-fixture.js";
 
-const MIGRATIONS = join(dirname(fileURLToPath(import.meta.url)), "..", "db", "migrations");
+const DB = join(dirname(fileURLToPath(import.meta.url)), "..", "db");
+const MIGRATIONS = join(DB, "migrations");
+
+if (!/(\/\/|@)(127\.0\.0\.1|localhost)[:/]/.test(process.env.DATABASE_URL ?? "")) {
+    console.error("\n  Refusing to run: DATABASE_URL must be a local throwaway database (this suite drops its schema).\n");
+    process.exit(1);
+}
+
+/** Every migration written after Phase 3, in the order apply-migration.ts runs them. */
+function laterMigrations(): string[] {
+    const files = readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql"));
+    const dated = files.filter((f) => /^\d{4}-\d{2}-\d{2}-/.test(f)
+        && f > "2026-09-24-phase3-person-outbox-trigger.sql").sort();
+    return [...dated, ...files.filter((f) => /^\d{4}__/.test(f)).sort()];
+}
 
 /** Apply a Phase 3 migration exactly as it would be applied to dev. */
 async function applyMigration(client: any, file: string): Promise<string | null> {
@@ -59,6 +78,8 @@ function section(title: string) {
 async function main() {
     const client = await pool.connect();
     try {
+        await client.query("DROP SCHEMA public CASCADE; CREATE SCHEMA public;");
+        await client.query(readFileSync(join(DB, "fixtures", "pre-phase3-schema.sql"), "utf8"));
         await buildFixture(client);
         console.log("Fixture built: 9 landing rows, 4 accounts, 7 links, 3 losing ids.");
 
@@ -305,6 +326,11 @@ async function main() {
 
         // ── S3/S4/S5: application cutover ────────────────────────────────────
         section("S3/S4/S5 — application cutover");
+
+        for (const file of laterMigrations()) {
+            const err = await applyMigration(client, file);
+            if (err) assert(`${file} applies after Phase 3`, false, err);
+        }
 
         const { findPersonById, findPersonByHandle, findPeopleByEmail, toPublicPerson } =
             await import("../utils/personUtils.js");

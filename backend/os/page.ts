@@ -155,9 +155,14 @@ function askScript(token: string): string {
             var yesBtn = document.getElementById('ask-confirm-yes'), noBtn = document.getElementById('ask-confirm-no');
             // The run proposal waiting for Confirm or Cancel, and its expiry timer.
             var proposal = null, proposalTimer = null;
+            // The proposal whose confirm is in flight, and its expiry if the timer ran out meanwhile (#173).
+            var confirming = null, expireAfterConfirm = null;
             // A proposal lapsed (its timer ran out, or the server said 410) and nothing has been asked since.
             var lapsed = false;
             var EXPIRED = 'That proposal expired. Ask again to run it.';
+            var NOT_RUNNABLE = 'That skill can no longer be run.';
+            // A reply that couldn't be handled (#173): shown, so the box doesn't sit on "…".
+            var BROKEN = 'Something went wrong showing the reply.';
             // 'confirm', 'cancel' or null for a short reply to a proposal (#151, os/proposalReply.ts).
             var proposalReply = ${PROPOSAL_REPLY_JS};
             // The navigation waiting for its "Opening …" to finish; a new ask or a stop drops it.
@@ -207,6 +212,7 @@ function askScript(token: string): string {
             // Shows (c) or clears (null) the pending proposal's Confirm and Cancel.
             function setProposal(c) {
                 if (proposalTimer) { clearTimeout(proposalTimer); proposalTimer = null; }
+                expireAfterConfirm = null;
                 proposal = c || null;
                 if (proposal) lapsed = false;
                 confirmBox.hidden = !proposal;
@@ -218,11 +224,16 @@ function askScript(token: string): string {
                 var ms = Date.parse(proposal.expiresAt) - Date.now();
                 // A skewed client clock: fall back to the full two minutes; the server still says 410.
                 if (!(ms > 0 && ms <= 120000)) ms = 120000;
-                proposalTimer = setTimeout(function () {
+                function expire() {
                     if (proposal !== c) return;
                     setProposal(null);
                     lapsed = true;
                     show(question, 'Expired. Ask again to run it.', 'expired');
+                }
+                proposalTimer = setTimeout(function () {
+                    proposalTimer = null;
+                    // A confirm in flight has the last word: the server may have queued it in time (#173).
+                    if (confirming === c) expireAfterConfirm = expire; else expire();
                 }, ms);
             }
 
@@ -244,6 +255,13 @@ function askScript(token: string): string {
             }
 
             function fail(message) { show(message, '', 'error'); say(message); }
+
+            // A reply handler threw: log it and say so, so the ask box isn't left locked (#173).
+            function broken(e) {
+                console.error(e);
+                try { fail(BROKEN); } catch (e2) { console.error(e2); }
+                return null;
+            }
 
             // POSTs JSON behind the admin gate. Resolves to { status, ok, body }, or to
             // null once a failure (expired session, not an admin, no JSON, no server) is shown.
@@ -301,7 +319,7 @@ function askScript(token: string): string {
                     if (!r.ok) { fail(r.body && r.body.error ? 'Sorry: ' + r.body.error + '.' : 'The ask failed.'); return null; }
                     handle(r.body);
                     return r.body;
-                }).then(function (reply) {
+                }).catch(broken).then(function (reply) {
                     setPending(false);
                     return reply;
                 });
@@ -314,15 +332,18 @@ function askScript(token: string): string {
                 cancelSpeech();
                 hushed = false;
                 setPending(true); yesBtn.disabled = noBtn.disabled = true;
+                confirming = p;
                 show('…', '', 'pending');
                 return postJson('/admin/os/ask/confirm', { id: p.id }).then(function (r) {
                     if (!r) return null;
-                    // 404, 409 and 410 are final; anything else (a 500) leaves the proposal to try again.
+                    // 404, 409 and 410 are final; anything else (a 500, a 503) leaves the proposal to try again.
                     var final = r.ok || r.status === 404 || r.status === 409 || r.status === 410;
+                    // 410 is expired, or the skill has since gone (#173): only an expiry makes a later "yes" say expired.
+                    var gone = r.status === 410 && r.body && r.body.reason === 'not_runnable';
                     if (final && proposal === p) setProposal(null);
-                    if (r.status === 410 && !proposal) lapsed = true;
+                    if (r.status === 410 && !gone && !proposal) lapsed = true;
                     if (!r.ok) {
-                        fail(r.status === 410 ? EXPIRED
+                        fail(gone ? NOT_RUNNABLE : r.status === 410 ? EXPIRED
                             : r.status === 409 ? 'That run was already confirmed.'
                             : r.status === 404 ? 'Nothing to confirm.'
                             : "Sorry, the run couldn't be queued. Try again.");
@@ -332,9 +353,14 @@ function askScript(token: string): string {
                     confirmHooks.forEach(function (fn) { try { fn(r.body.run, r.body); } catch (e) { console.error(e); } });
                     say(r.body.say);
                     return r.body;
-                }).then(function (body) {
+                }).catch(broken).then(function (body) {
+                    confirming = null;
                     setPending(false);
                     if (proposal === p) yesBtn.disabled = noBtn.disabled = false;
+                    // It expired while the confirm was in flight and the confirm didn't settle it: expire it now.
+                    var expire = expireAfterConfirm;
+                    expireAfterConfirm = null;
+                    if (expire) expire();
                     return body;
                 });
             }

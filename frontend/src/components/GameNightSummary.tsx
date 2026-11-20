@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { sessionWhen } from '@/lib/sessions';
 import { getOrNull } from '@/lib/api';
 import CampaignBanner from '@/components/CampaignBanner';
+import { gameNightHref } from '@/lib/hearthside';
 
 interface Campaign {
     _id: string;
@@ -94,7 +95,7 @@ export default function GameNightSummary() {
             </div>
             <div className="space-y-3 flex-grow">{content}</div>
             <Link
-                href={`/game-night?tab=${tab}`}
+                href={gameNightHref(`/game-night?tab=${tab}`)}
                 className="mt-5 w-full flex items-center justify-center gap-1 p-2 border-2 border-black bg-teal-500 text-white font-permanent uppercase hover:bg-teal-600 transition-colors shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] text-sm"
             >
                 View All <ChevronRight className="w-4 h-4" />
@@ -109,7 +110,7 @@ export default function GameNightSummary() {
                     <span className="drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">Game Night</span>
                 </h2>
                 <Link
-                    href="/game-night"
+                    href={gameNightHref('/game-night')}
                     id="game-night-full-planner-link"
                     className="p-3 border-4 border-black bg-yellow-400 text-black font-permanent text-sm uppercase hover:bg-white transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]"
                 >
@@ -124,7 +125,7 @@ export default function GameNightSummary() {
                     'Campaigns',
                     <Map className="w-5 h-5 text-black" />,
                     displayCampaigns.length > 0 ? displayCampaigns.map(c => (
-                        <Link key={c._id} href={`/game-night/campaigns/${c._id}`} className="block border-b-2 border-black/10 dark:border-white/10 pb-2 group">
+                        <Link key={c._id} href={gameNightHref(`/game-night/campaigns/${c._id}`)} className="block border-b-2 border-black/10 dark:border-white/10 pb-2 group">
                             <CampaignBanner url={c.bannerUrl} seed={c._id} title={c.title} compact className="mb-2 border-2 border-black" />
                             <div className="flex justify-between items-center gap-2">
                                 <p className="font-permanent text-sm text-black dark:text-white uppercase leading-tight group-hover:text-teal-600 transition-colors">{c.title}</p>

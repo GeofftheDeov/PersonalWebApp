@@ -6,7 +6,7 @@ import { useThreads, type ThreadFilter, type ThreadSummary } from '@/lib/letters
 import { threadWhen } from '@/lib/lettersFormat';
 import { useSession } from '@/lib/session';
 import LetterThread from './LetterThread';
-import { useLetters, type OpenLetter } from './LettersProvider';
+import { useLetters, useLettersPanel, type OpenLetter } from './LettersProvider';
 
 const FILTERS: { value: ThreadFilter; label: string }[] = [
   { value: 'all', label: 'All' },
@@ -24,11 +24,14 @@ const letterOf = (t: ThreadSummary): OpenLetter => ({
  * Talk and friend DMs, with All, Campaigns and Friends tabs and unread
  * marks), and in its place the open thread (LetterThread). Live throughout,
  * entirely on the shared hooks the portfolio uses. Which thread is open lives
- * in LettersProvider, so a page can open one (`useLetters().openDm`).
+ * in LettersProvider, so a page or the top bar's friend MESSAGE can open one
+ * (`useLetters().openDm`). Mounted, it tells the provider this page shows
+ * Letters (`useLettersPanel`). Signed out, it reads nothing and draws nothing.
  */
 export default function Letters() {
   const signedIn = useSession().status === 'signedIn';
   const control = useLetters();
+  useLettersPanel();
   const { open, summoned } = control;
   const [filter, setFilter] = useState<ThreadFilter>('all');
   const { threads, totalUnread, loading, error, markRead } = useThreads({ filter, enabled: signedIn });

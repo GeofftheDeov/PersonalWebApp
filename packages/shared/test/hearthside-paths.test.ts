@@ -8,7 +8,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { campaignPageUrl, hearthsideCampaignPath, hearthsideOrigin, hearthsidePath } from "../src/hearthside/paths";
+import { campaignPageUrl, hearthsideCampaignPath, hearthsideJoinPath, hearthsideOrigin, hearthsidePath, hearthsidePlayerPath } from "../src/hearthside/paths";
 
 test("each Game Night page maps to its Hearthside page, prefix stripped", () => {
   assert.equal(hearthsidePath("/game-night/campaigns/c1"), "/campaigns/c1");
@@ -43,6 +43,11 @@ test("the portfolio's own pages, look-alikes and non-paths aren't Hearthside's",
 
 test("accepting an invite lands on the campaign's Hearthside page", () => {
   assert.equal(hearthsideCampaignPath("c1"), "/campaigns/c1");
+});
+
+test("an invite's page and a player's page on Hearthside (#251)", () => {
+  assert.equal(hearthsideJoinPath("c1"), "/join/c1");
+  assert.equal(hearthsidePlayerPath("p/1"), "/players/p%2F1");
 });
 
 test("Hearthside's configured origin: blank or unset is no Hearthside (#217, #233)", () => {

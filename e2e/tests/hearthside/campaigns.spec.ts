@@ -63,6 +63,27 @@ test("the filters show the right counts and cards", async ({ page, newPerson, ap
   await expect(shown).toHaveCount(4);
 });
 
+test("a click anywhere on a card's panel opens the campaign, not only on its name", async ({ page, newPerson, apiAs, signIn }) => {
+  const owner = await newPerson("Wren Talbot");
+  const id = await createCampaign(await apiAs(owner), "The Salt Marsh Wake", "In Progress");
+  await signIn(owner);
+  await page.goto("/campaigns");
+
+  // A click where the eye sees the description, or the status: the name's link lies over the
+  // whole panel, so Playwright's own click (which wants the text itself under the pointer) won't do.
+  const clickOn = async (text: string) => {
+    const box = (await card(page, "The Salt Marsh Wake").getByText(text, { exact: true }).boundingBox())!;
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  };
+  await expect(card(page, "The Salt Marsh Wake")).toBeVisible();
+  await clickOn("The Salt Marsh Wake: a test campaign.");
+  await expect(page).toHaveURL(new RegExp(`/campaigns/${id}$`));
+  await page.goBack();
+  await expect(card(page, "The Salt Marsh Wake")).toBeVisible();
+  await clickOn("In progress");
+  await expect(page).toHaveURL(new RegExp(`/campaigns/${id}$`));
+});
+
 test("creating a campaign from the dialog adds its card", async ({ page, newPerson, signIn }) => {
   const owner = await newPerson("Ada Quill");
   await signIn(owner);

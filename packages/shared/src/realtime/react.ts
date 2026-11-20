@@ -62,9 +62,10 @@ export function useLiveThread(live: LiveSource, thread: string | null, handlers:
 }
 
 /**
- * Who has a campaign's Table Talk open right now (#37, plan §4.2), you
- * included. Mounting it says you're here; unmounting says you've gone. Pass
- * null to stay out (and see nobody).
+ * Who has a campaign's thread open right now (#37, plan §4.2), you
+ * included: its Table Talk, or the thread in Letters (`useHoldPresence`).
+ * Mounting it says you're here; unmounting says you've gone. Pass null to
+ * stay out (and see nobody).
  *
  *   const people = usePresence(letters, threadKey);
  */
@@ -89,6 +90,26 @@ export function usePresence(live: LiveSource, thread: string | null): LivePresen
   }, [live, thread]);
 
   return people;
+}
+
+/**
+ * Puts you among those here now in a campaign's thread while mounted, without
+ * reading the list: for a view of the thread that doesn't show who's here
+ * (Letters, the portfolio's dock). Several views may hold one thread at once.
+ * Pass null to stay out (a DM, say).
+ */
+export function useHoldPresence(live: LiveSource, thread: string | null): void {
+  useEffect(() => {
+    if (!thread) return;
+    const client = live.liveClient();
+    // The subscription keeps the socket open; holding presence is what counts.
+    const off = client.subscribe(thread, {});
+    const release = client.holdPresence(thread);
+    return () => {
+      release();
+      off();
+    };
+  }, [live, thread]);
 }
 
 /**

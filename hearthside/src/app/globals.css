@@ -163,7 +163,11 @@ body.hs-app{margin:0;min-height:100vh;-webkit-font-smoothing:antialiased}
 .hs-roster-info{position:relative;z-index:1;width:min(60%,440px);min-width:0;padding:14px 18px 15px;display:flex;flex-direction:column;gap:4px}
 .hs-roster-info h3{margin:0;font-family:var(--font-story);font-weight:400;font-size:22px;line-height:1.15;overflow-wrap:anywhere;text-wrap:balance}
 .hs-roster-title{color:var(--text);text-decoration:none}
-.hs-roster-title:hover{color:var(--gold-hi)}
+/* The title's link covers the whole panel, so a click anywhere on the name, status, dates or description opens the campaign. */
+.hs-roster-title::after{content:"";position:absolute;inset:0;z-index:1;border-radius:inherit}
+.hs-roster-info:hover .hs-roster-title,.hs-roster-title:focus-visible{color:var(--gold-hi)}
+.hs-roster-info:has(.hs-roster-title:focus-visible){outline:2px solid var(--gold);outline-offset:2px}
+.hs-roster-title:focus-visible{outline:none}
 .hs-roster-meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;margin-bottom:2px}
 .hs-roster-desc{margin:0;color:var(--muted);font-size:14px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
 .hs-banner-tools{position:absolute;right:14px;bottom:14px;z-index:2;display:flex;gap:6px}
@@ -563,7 +567,8 @@ a.hs-cp-whois:hover .hs-cp-name{color:var(--gold-hi)}
 .hs-board-form .hs-btn-row{margin-top:2px}
 .hs-board-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center;min-width:0}
 .hs-board-form .hs-board-row{margin-top:0}
-.hs-board-row .hs-paper-input{flex:1 1 12rem}
+/* Only an input sitting in the row grows along it: one inside a .hs-pick-field label (a column) would grow 12rem tall. */
+.hs-board-row > .hs-paper-input{flex:1 1 12rem}
 .hs-board-choice{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:14px}
 .hs-board-choice label{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
 .hs-paper-input{width:100%;min-width:0;padding:6px 9px;border:1px solid var(--paper-line);border-radius:var(--radius);

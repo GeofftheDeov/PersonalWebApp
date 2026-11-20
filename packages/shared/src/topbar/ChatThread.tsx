@@ -6,7 +6,7 @@ import type { Letters } from '../letters/letters';
 import { useThread } from '../letters/useThread';
 import { useThreadScroll } from '../letters/useThreadScroll';
 import { useAttachmentDraft } from '../letters/useAttachmentDraft';
-import { useTyping } from '../realtime/react';
+import { useHoldPresence, useTyping } from '../realtime/react';
 import { useSession } from '../session/react';
 import { AttachButton, DraftAttachments, MessageAttachments } from './MessageAttachments';
 
@@ -43,6 +43,8 @@ export default function ChatThread({ letters, channel, placeholder, onLatestMess
     const threadKey = channel.id ? letters.threadKeyFor(channel.kind, channel.id) : null;
     // "Theo is writing…" (#103): announce while the draft has text; others' indicators beside the badge.
     const { label: typingText, typing, sent: typingSent } = useTyping(letters, threadKey);
+    // A campaign's chat open in the dock counts you among its Table Talk's here now (#37).
+    useHoldPresence(letters, channel.kind === 'campaign' ? threadKey : null);
     const thread = useThread(letters, threadKey, {
         markRead: onLatestMessage ? (_key, messageId) => onLatestMessage(messageId) : undefined,
         // A confirmed send (or resend) ends the typing burst, so the next keystroke announces at once.

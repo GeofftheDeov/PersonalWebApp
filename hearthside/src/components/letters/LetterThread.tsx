@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ATTACHMENT_ACCEPT, formatBytes, isImageType } from '@gtd/shared/letters';
-import { letters, useAttachmentDraft, useThread, useThreadScroll, useTyping } from '@/lib/letters';
+import { letters, useAttachmentDraft, useHoldPresence, useThread, useThreadScroll, useTyping } from '@/lib/letters';
 import { messageWhen, senderLabel } from '@/lib/lettersFormat';
 import { useSession } from '@/lib/session';
 import type { ThreadEntry } from '@gtd/shared/letters';
@@ -17,6 +17,7 @@ const LIVE_LABEL: Record<string, string> = { open: 'Live', connecting: 'Connecti
  * useThreadScroll, useTyping, useAttachmentDraft); this only draws them in
  * the design system's Letters markup. A campaign's page draws its Table Talk
  * with it too (#225): no way back, and who's here above the compose bar.
+ * Either way, a campaign's thread open here puts you among its here now.
  */
 export default function LetterThread({ letter, markRead, onBack, beforeCompose }: {
   /** The thread; one a page asked for (`summon` set) puts the compose box in focus. */
@@ -30,6 +31,8 @@ export default function LetterThread({ letter, markRead, onBack, beforeCompose }
 }) {
   const myId = useSession().user?.id ?? null;
   const threadKey = letters.threadKeyFor(letter.kind, letter.id);
+  // A campaign's thread open here counts you among its Table Talk's here now (#37), as on its page.
+  useHoldPresence(letter.kind === 'campaign' ? threadKey : null);
   const { label: writing, typing, sent } = useTyping(threadKey);
   const thread = useThread(threadKey, { markRead, onSent: sent });
   const logRef = useRef<HTMLDivElement>(null);

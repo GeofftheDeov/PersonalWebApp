@@ -45,7 +45,7 @@ async function main() {
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
     const events: { name: string; payload: any }[] = [];
-    for (const name of ["quest.assigned", "quest.completed", "quest.reopened"] as const) {
+    for (const name of ["quest.assigned", "quest.updated", "quest.completed", "quest.reopened"] as const) {
         bus.subscribe(name, (payload: any) => { events.push({ name, payload }); });
     }
     const flush = () => new Promise((r) => setImmediate(r));
@@ -220,6 +220,10 @@ async function main() {
         check("editing without changing the owner doesn't publish quest.assigned",
             retitled.status === 200 && retitled.json.title === "Print two handouts" &&
                 eventsFor(qHandout).filter((e) => e.name === "quest.assigned").length === 2);
+        const updated = eventsFor(qHandout).filter((e) => e.name === "quest.updated");
+        // One, not two: the reassignment above published quest.assigned only.
+        check("...it publishes quest.updated (and reassigning didn't), so the party's views refetch",
+            updated.length === 1 && updated[0].payload.updatedBy === who.gm.id && updated[0].payload.assigneeId === who.p2.id, updated);
 
         // ── marking done ────────────────────────────────────────────────────
         check("another party member can't mark it done (403)", (await done("p1", qHandout)).status === 403);

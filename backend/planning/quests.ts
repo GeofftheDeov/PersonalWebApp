@@ -422,6 +422,12 @@ export function createQuests(deps: QuestDeps = { now: () => new Date() }) {
                 if (sets.length) await db.query(`UPDATE session_tasks SET ${sets.join(", ")} WHERE id = $1`, params);
                 const quest = (await getQuest(db, t.id))!;
                 if (previous !== undefined) effects.push(() => announceAssigned(quest, actor.id, previous!));
+                else if (sets.length) {
+                    effects.push(() => bus.publish("quest.updated", {
+                        questId: quest.id, sessionId: quest.sessionId, campaignId: quest.session.campaign.id,
+                        assigneeId: quest.assignee?.id ?? null, updatedBy: actor.id,
+                    }).catch(() => { /* bus down is non-fatal */ }));
+                }
                 return quest;
             });
         },

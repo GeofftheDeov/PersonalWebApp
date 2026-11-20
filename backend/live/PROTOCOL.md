@@ -104,7 +104,7 @@ These keep a thread list (unread markers, newest-first order) current without po
 { "type": "noticeboard.changed", "thread": "campaign:<id>" }
 ```
 
-Sent to every socket subscribed to a campaign's thread, the actor's own included, when something on that campaign's Notice Board changes: a session kicked off, shortlisted, voted on, moved to its next step, scheduled or cancelled; a venue suggested; a quest assigned, claimed, done or undone; the torch passed; the campaign's details or party changed. It carries nothing else: refetch the board (`GET /api/planning/campaigns/:campaignId`), which applies its own access rules. One action can send several (a last vote closes the poll and moves the step on), so clients wait a moment and refetch once. Live-only like everything here: refetch after a reconnect. The web client's `useNoticeBoard` hook (`frontend/src/components/NoticeBoard.tsx`) does both.
+Sent to every socket subscribed to a campaign's thread, the actor's own included, when something on that campaign's Notice Board changes: a session kicked off, shortlisted, voted on, moved to its next step, scheduled or cancelled; a venue suggested; a quest assigned, claimed, edited, done or undone; the torch passed; the campaign's details or party changed. It carries nothing else: refetch the board (`GET /api/planning/campaigns/:campaignId`), which applies its own access rules. One action can send several (a last vote closes the poll and moves the step on), so clients wait a moment and refetch once. Live-only like everything here: refetch after a reconnect. The web client's `useNoticeBoard` hook (`frontend/src/components/NoticeBoard.tsx`) does both. Since a socket gets the frame for every campaign it's subscribed to, a view across campaigns (Hearthside's Your Quests) can refetch on any of them; the web client hands the frame to person-level subscribers (`subscribePerson`'s `onNoticeBoard`) as well as to the thread's.
 
 Clients must ignore frame types they don't know. Later versions of the server will add frames (spec #58) without changing `v`.
 
@@ -145,7 +145,7 @@ Clients show "Theo is writing…" and take it down `expiresInMs` (5 seconds) aft
 
 ## Presence
 
-Added with #37. While a campaign's Table Talk is open, the client sends
+Added with #37. While a campaign's Table Talk is open, or the campaign's thread is open in Letters (Hearthside's rail, the portfolio's dock), the client sends
 
 ```json
 { "type": "presence", "thread": "campaign:<id>", "here": true }

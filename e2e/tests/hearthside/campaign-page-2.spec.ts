@@ -114,6 +114,25 @@ test("the GM plans a session on the board, shortlisting nights from the availabi
   expect(boardRead.planning[0].night.options).toHaveLength(2);
 });
 
+test("the kickoff's Food and Provided by dropdowns are one line tall", async ({ page, signIn, apiAs, newPerson }) => {
+  const gm = await newPerson("Odile Marsh");
+  const id = await campaignOf(await apiAs(gm), [], "t225 The Hearth Kitchen");
+
+  await signIn(gm);
+  await page.goto(`/campaigns/${id}`);
+  const board = noticeBoard(page);
+  await board.getByRole("button", { name: "Plan a session" }).click(FIRST_LOAD);
+  const fresh = board.getByRole("article", { name: "A new notice" });
+  await fresh.getByRole("radio", { name: "In person" }).check();
+  const food = fresh.getByLabel("Food");
+  await expect(food).toBeVisible();
+  const title = await fresh.getByLabel("Session title").boundingBox();
+  // As tall as the title's box, give or take: not 12rem.
+  expect((await food.boundingBox())!.height).toBeLessThan(title!.height + 12);
+  await food.selectOption("provided");
+  expect((await fresh.getByLabel("Provided by").boundingBox())!.height).toBeLessThan(title!.height + 12);
+});
+
 test("adding a session through the dialog shows it under Coming up", async ({ page, signIn, apiAs, newPerson }) => {
   const gm = await newPerson("Wren Talbot");
   const gmApi = await apiAs(gm);
@@ -170,6 +189,38 @@ test("a Table Talk message appears in Letters too", async ({ page, signIn, apiAs
   const sent = await ok(gmApi.get(`/api/threads/${encodeURIComponent(`campaign:${id}`)}/messages`));
   const bodies = sent.messages.map((m: { body: string }) => m.body);
   expect(bodies).toContain("The lanterns are lit in the court.");
+});
+
+test("someone with the campaign open in Letters counts among those here now", async ({ page, browser, baseURL, signIn, apiAs, newPerson }) => {
+  const [gm, player] = await Promise.all([newPerson("Hollis Brand"), newPerson("Tamsin Oak")]);
+  const [gmApi, playerApi] = await Promise.all([apiAs(gm), apiAs(player)]);
+  const title = "t225 The Ember Hall";
+  const id = await campaignOf(gmApi, [playerApi], title);
+
+  await signIn(gm);
+  await page.goto(`/campaigns/${id}`);
+  const talk = page.getByRole("region", { name: /^Table Talk/ });
+  await expect(talk.getByText("Live", { exact: true })).toBeVisible(FIRST_LOAD);
+  const here = talk.getByRole("list", { name: "Here now" }).getByRole("listitem");
+  await expect(here).toHaveCount(1);
+
+  // Tamsin, on the Hearth, not the campaign's page, opens its thread in Letters.
+  const other = await browser.newContext({ baseURL, ignoreHTTPSErrors: true });
+  try {
+    await signIn(player, other);
+    const theirs = await other.newPage();
+    await theirs.goto("/");
+    await letters(theirs).getByRole("button", { name: new RegExp(escape(title)) }).click(FIRST_LOAD);
+    await expect(letters(theirs).getByText("Live", { exact: true })).toBeVisible();
+    await expect(here).toHaveCount(2);
+    await expect(talk.getByText("2 here now")).toBeVisible();
+
+    // Back to the list: she's gone.
+    await letters(theirs).getByRole("button", { name: "Back to your letters" }).click();
+    await expect(here).toHaveCount(1);
+  } finally {
+    await other.close();
+  }
 });
 
 test.describe("at 375px", () => {

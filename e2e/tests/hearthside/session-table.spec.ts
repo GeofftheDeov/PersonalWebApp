@@ -120,6 +120,23 @@ test("the GM confirms attendance, and the absent player's seat goes grey", async
   expect(record.people.filter((p: any) => p.attended).map((p: any) => p.playerId).sort()).toEqual([came.id, gm.id].sort());
 });
 
+test("a quest the GM adds shows at the player's seat without a reload", async ({ page, signIn, apiAs, newPerson }) => {
+  const [gm, player] = await Promise.all([newPerson("Odile Marsh"), newPerson("Piet Lark")]);
+  const gmApi = await apiAs(gm);
+  const campaignId = await campaignOf(gmApi, [await apiAs(player)]);
+  const { id } = await sessionOf(gmApi, campaignId, "t227 Supper at the Wharf", 3 * DAY);
+
+  await signIn(player);
+  const ready = page.waitForEvent("websocket", (ws) => ws.url().includes("/api/live")).then((ws) =>
+    ws.waitForEvent("framereceived", { predicate: (f) => String(f.payload).includes('"ready"') }));
+  await page.goto(`/sessions/${id}`);
+  await expect(heading(page)).toHaveText("t227 Supper at the Wharf", FIRST_LOAD);
+  await ready;
+
+  await questFor(gmApi, id, player.id, "Bring the harbour chart");
+  await expect(seatOf(page, "Piet Lark").getByRole("list", { name: "Your quests" }).getByText("Bring the harbour chart")).toBeVisible();
+});
+
 test("before the session the GM adds a quest at a seat, and the ready check colours the seats", async ({ page, signIn, apiAs, newPerson }) => {
   const [gm, ready, notReady] = await Promise.all([newPerson("Odile Marsh"), newPerson("Piet Lark"), newPerson("Wren Hollis")]);
   const gmApi = await apiAs(gm);

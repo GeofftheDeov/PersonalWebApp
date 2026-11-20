@@ -10,8 +10,8 @@ import LetterThread from './LetterThread';
  * A campaign's Table Talk on its own page (#225): the party's thread, the
  * same one Letters lists, drawn by LetterThread on the shared hooks, so a
  * letter sent here shows in Letters too (and the other way round), live.
- * Being on the page puts you among those here now (#37), shown above the
- * compose bar, as on the portfolio.
+ * Being on the page, or having the thread open in Letters, puts you among
+ * those here now (#37), shown above the compose bar, as on the portfolio.
  */
 export default function TableTalk({ campaignId, title, partySize }: {
   campaignId: string;

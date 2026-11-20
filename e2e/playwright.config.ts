@@ -15,6 +15,7 @@
  * and https://hearthside.geoffthedeov.test:<port>, resolved to 127.0.0.1 by
  * its host-resolver rules (stack/hosts.ts).
  */
+import os from "node:os";
 import { defineConfig, devices } from "@playwright/test";
 import type { Options } from "./fixtures";
 import { HOST_RESOLVER_RULES } from "./stack/hosts";
@@ -28,7 +29,7 @@ export default defineConfig<Options>({
   // each other until tests ran past their 60s. 4 workers ran all 70 green, and
   // faster (5.3 min against ~7). Runners with fewer cores keep Playwright's
   // default of half of them. `--workers=N` still overrides it.
-  workers: 4,
+  workers: Math.max(1, Math.min(4, Math.floor(os.cpus().length / 2))),
   forbidOnly: !!process.env.CI,
   // No retries: a test that needs one is flaky, and gets fixed rather than retried.
   retries: 0,

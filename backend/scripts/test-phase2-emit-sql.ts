@@ -196,6 +196,28 @@ async function main() {
         await client.query(`INSERT INTO person_outbox (account_id, op, payload) VALUES ($1, 'update', '{}')`, [adminId]);
       }, () => backfillSql(sheet, adminId), /person_outbox holds 1 queued/);
 
+    // #236: since Phase 3 many tables reference accounts. Truncating accounts
+    // would take their rows too, so a database past Phase 2 is refused.
+    const friendRow = async () => {
+      const other = "00000000-0000-4000-a000-000000000002";
+      await client.query(`INSERT INTO accounts (id) VALUES ($1), ($2)`, [adminId, other]);
+      await client.query(`INSERT INTO friend_requests (from_user, to_user) VALUES ($1, $2)`, [adminId, other]);
+    };
+    await refuses("refuses when another table that references accounts holds a row",
+      friendRow, () => backfillSql(sheet, adminId), /friend_requests holds 1 row\(s\) that reference accounts/);
+    {
+      await client.query("BEGIN");
+      try {
+        await seed(client, rows);
+        await friendRow();
+        let msg = "";
+        try { await runBackfill(client, sheet, { adminId }); } catch (e: any) { msg = e.message; }
+        check("...and runBackfill refuses it too", /friend_requests holds 1 row\(s\)/.test(msg), msg ? `raised: ${msg}` : "did not raise");
+      } finally {
+        await client.query("ROLLBACK");
+      }
+    }
+
     await refuses("refuses a sheet row that is not in the database",
       async () => { await client.query(`DELETE FROM sf_contacts WHERE id = $1`, [sheet.find((m) => m.source_table === "sf_contacts")!.source_id]); },
       () => backfillSql(sheet, adminId), /sf_contacts row .* not found/);

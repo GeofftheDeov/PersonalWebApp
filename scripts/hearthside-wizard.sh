@@ -830,8 +830,8 @@ say "HEARTHSIDE_LIVE on the GitHub '$GH_ENV' environment is the switch. At the n
 step "the backend's HEARTHSIDE_URL=https://$HOST: Game Night links (bell, emails, calendar and"
 say "    Discord events) point at Hearthside (#214), and $HOST joins the allowed sites for reset,"
 say "    verify and Google Calendar return links (#215);"
-step "the portfolio's NEXT_PUBLIC_HEARTHSIDE_URL build arg. Nothing reads it yet: the portfolio's"
-say "    /game-night redirects and Hearthside links read it once #234 lands, and go live with this switch."
+step "the portfolio's NEXT_PUBLIC_HEARTHSIDE_URL build arg: its /game-night/... and /players/:id"
+say "    answer with a 308 to the same page on $HOST, and its Game Night links point there (#234)."
 say "SESSION_COOKIE_ORIGINS already lists https://$HOST, so the live channel accepts its cookie:"
 ORIGINS=$(aws ecs describe-task-definition --task-definition "$TASK_DEF_ARN" \
   --query "taskDefinition.containerDefinitions[?name=='backend'] | [0].environment[?name=='SESSION_COOKIE_ORIGINS'].value | [0]" --output text)
@@ -883,6 +883,13 @@ if [[ "$NOW_LIVE" == true && "$RUNNING_URL" != "https://$HOST" ]]; then
 fi
 if [[ "$RUNNING_URL" == "https://$HOST" ]]; then
   pass "the $ENV_NAME backend runs with HEARTHSIDE_URL=https://$HOST"
+  # The portfolio image from the same deploy carries the redirects (#234).
+  REDIRECT=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "https://$PORTFOLIO_HOST/game-night/join/wizard-check?x=1" || true)
+  if [[ "$REDIRECT" == "308 https://$HOST/join/wizard-check?x=1" ]]; then
+    pass "the portfolio sends /game-night/... to $HOST with a 308 ($REDIRECT)"
+  else
+    SKIPPED+=("https://$PORTFOLIO_HOST/game-night/join/wizard-check?x=1 answered '$REDIRECT', not a 308 to https://$HOST/join/wizard-check?x=1: was the portfolio image built with NEXT_PUBLIC_HEARTHSIDE_URL?")
+  fi
 elif [[ "$NOW_LIVE" == true ]]; then
   SKIPPED+=("after the deploy, re-run '$0 $ENV_NAME' to confirm the backend has HEARTHSIDE_URL=https://$HOST")
 fi

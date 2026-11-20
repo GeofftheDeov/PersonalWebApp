@@ -52,6 +52,12 @@ export function hearthsidePath(path: string): string | null {
 /** A campaign's page on Hearthside, where accepting its invite lands. */
 export const hearthsideCampaignPath = (campaignId: string): string => `/campaigns/${encodeURIComponent(campaignId)}`;
 
+/** A campaign's invite page on Hearthside (#232), where its invite row in the bell goes (#251). */
+export const hearthsideJoinPath = (campaignId: string): string => `/join/${encodeURIComponent(campaignId)}`;
+
+/** A player's page on Hearthside (#231), where a friend's answer in the bell goes (#251). */
+export const hearthsidePlayerPath = (personId: string): string => `/players/${encodeURIComponent(personId)}`;
+
 /**
  * Hearthside's origin from an app's build-time setting (the portfolio's
  * `NEXT_PUBLIC_HEARTHSIDE_URL`, #217), or null when Hearthside isn't

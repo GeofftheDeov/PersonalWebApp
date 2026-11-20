@@ -9,7 +9,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { notificationTarget } from "../src/topbar/notificationLink";
+import { hearthsideNoticePath, notificationTarget } from "../src/topbar/notificationLink";
 
 const HERE = "https://geoffthedeov.net/dashboard";
 
@@ -78,4 +78,26 @@ test("on Hearthside, links it can't trust still open nothing", () => {
 test("the portfolio's bell is unchanged by the options", () => {
   assert.deepEqual(notificationTarget("/game-night/campaigns/c1", HERE, { site: "portfolio", portfolioUrl: "https://geoffthedeov.net" }),
     { kind: "route", href: "/game-night/campaigns/c1" });
+});
+
+// ── Rows with no link, on Hearthside (#251) ────────────────────────────────
+
+test("on Hearthside, a campaign invite's row opens its invite page", () => {
+  assert.equal(hearthsideNoticePath({ type: "campaign_invite", meta: { inviteId: "i1", campaignId: "c 1" } }), "/join/c%201");
+  assert.equal(hearthsideNoticePath({ type: "campaign_invite", meta: { inviteId: "i1" } }), null, "no campaign, nowhere to go");
+});
+
+test("on Hearthside, a friend's answer to your request opens their page", () => {
+  for (const friendAnswer of ["accepted", "declined"]) {
+    assert.equal(hearthsideNoticePath({ type: "system", meta: { friendAnswer, fromUserId: "p1" } }), "/players/p1", friendAnswer);
+  }
+});
+
+test("other rows with no link open nothing of their own", () => {
+  assert.equal(hearthsideNoticePath({ type: "system" }), null, "a row from before #251 doesn't say who answered");
+  assert.equal(hearthsideNoticePath({ type: "system", meta: null }), null);
+  assert.equal(hearthsideNoticePath({ type: "system", meta: { friendAnswer: "accepted" } }), null);
+  assert.equal(hearthsideNoticePath({ type: "system", meta: { friendAnswer: "maybe", fromUserId: "p1" } }), null);
+  assert.equal(hearthsideNoticePath({ type: "message", meta: { fromUserId: "p1" } }), null);
+  assert.equal(hearthsideNoticePath({ type: "friend_request", meta: { campaignId: "c1" } }), null);
 });

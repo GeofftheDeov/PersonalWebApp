@@ -6,7 +6,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Bell, Check, MessageSquare, UserPlus, Map, Info, X, CheckCheck } from 'lucide-react';
 import type { Letters } from '../letters/letters';
 import { useSession } from '../session/react';
-import { notificationTarget } from './notificationLink';
+import { hearthsideNoticePath, notificationTarget } from './notificationLink';
 import { hearthsideCampaignPath } from '../hearthside/paths';
 import type { TopBarSite } from './links';
 
@@ -16,7 +16,7 @@ interface Notification {
   title: string;
   body?: string;
   link?: string;
-  meta?: { requestId?: string; inviteId?: string; campaignId?: string; fromUserId?: string };
+  meta?: { requestId?: string; inviteId?: string; campaignId?: string; fromUserId?: string; friendAnswer?: 'accepted' | 'declined' };
   count: number;
   read: boolean;
   createdAt: string;
@@ -41,10 +41,13 @@ export interface NotificationsBellProps {
   /**
    * Which site it's on (#220). On Hearthside the bell asks the backend for
    * Hearthside's notifications only (`?site=hearthside`: campaign invites,
-   * friend requests and Game Night links), and "mark all read" marks only
-   * those; an old `/game-night/...` link opens its Hearthside page; accepting
-   * a campaign invite goes to the campaign's Hearthside page. The portfolio
-   * when left out, where it shows everything, as before.
+   * friend requests, answers to your friend requests and Game Night links),
+   * and "mark all read" marks only those; an old `/game-night/...` link opens
+   * its Hearthside page; accepting a campaign invite goes to the campaign's
+   * Hearthside page. Opening an invite's row goes to its invite page,
+   * `/join/:id`, and a friend's answer to that friend's `/players/:id`
+   * (#251, `hearthsideNoticePath`). The portfolio when left out, where it
+   * shows everything, as before.
    */
   site?: TopBarSite;
   /** The portfolio's origin: on Hearthside, links to the portfolio's own pages open there. */
@@ -127,7 +130,19 @@ export default function NotificationsBell({ letters, site = 'portfolio', portfol
     }
   };
 
+  // On Hearthside an invite's row opens its invite page, and a friend's answer
+  // their page (#251). An invite stays unread: answering it, here or there,
+  // clears it.
+  const ownPath = (n: Notification) => (onHearthside ? hearthsideNoticePath(n) : null);
+
   const handleClick = (n: Notification) => {
+    const own = ownPath(n);
+    if (own) {
+      if (!n.read && n.type !== 'campaign_invite') markRead(n._id);
+      setIsOpen(false);
+      router.push(own);
+      return;
+    }
     if (!n.read) markRead(n._id);
     // A relative `/game-night/...` path, or an absolute Hearthside URL once
     // the backend has HEARTHSIDE_URL (#214): the router for this site, a full
@@ -207,7 +222,7 @@ export default function NotificationsBell({ letters, site = 'portfolio', portfol
                   <div
                     key={n._id}
                     onClick={() => handleClick(n)}
-                    className={`p-4 border-b-2 border-black flex gap-3 transition-colors ${n.read ? 'bg-zinc-900 opacity-60' : 'bg-zinc-800'} ${n.link ? 'cursor-pointer hover:bg-zinc-700' : ''}`}
+                    className={`p-4 border-b-2 border-black flex gap-3 transition-colors ${n.read ? 'bg-zinc-900 opacity-60' : 'bg-zinc-800'} ${n.link || ownPath(n) ? 'cursor-pointer hover:bg-zinc-700' : ''}`}
                   >
                     <div className={`p-1.5 border-2 border-black h-fit shrink-0 ${TYPE_BG[n.type]}`}>
                       {TYPE_ICON[n.type]}

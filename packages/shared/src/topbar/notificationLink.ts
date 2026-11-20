@@ -1,4 +1,4 @@
-import { hearthsidePath } from "../hearthside/paths";
+import { hearthsideJoinPath, hearthsidePath, hearthsidePlayerPath } from "../hearthside/paths";
 import type { TopBarSite } from "./links";
 
 /** How to open a notification: a page of this site through the app's router, or a full page load elsewhere. */
@@ -54,6 +54,31 @@ export function notificationTarget(
 
   if (sameOrigin) return { kind: "route", href: path };
   return { kind: "page", href: url.href };
+}
+
+/** What `hearthsideNoticePath` reads of a bell row. */
+export interface NoticeRow {
+  type: string;
+  meta?: { campaignId?: string; inviteId?: string; fromUserId?: string; friendAnswer?: string } | null;
+}
+
+/**
+ * Where a row with no link of its own opens on Hearthside (#251), or null:
+ *
+ * - a campaign invite opens its invite page, `/join/:campaignId` (JOIN and
+ *   DECLINE still answer it in the bell);
+ * - "@x accepted (or declined) your friend request" opens that person's
+ *   `/players/:id`. Rows made before #251 don't say who, so they open nothing.
+ *
+ * The portfolio's bell doesn't use it: there these rows open nothing, as before.
+ */
+export function hearthsideNoticePath(n: NoticeRow): string | null {
+  const meta = n.meta ?? {};
+  if (n.type === "campaign_invite" && meta.campaignId) return hearthsideJoinPath(meta.campaignId);
+  if (n.type === "system" && (meta.friendAnswer === "accepted" || meta.friendAnswer === "declined") && meta.fromUserId) {
+    return hearthsidePlayerPath(meta.fromUserId);
+  }
+  return null;
 }
 
 function originOf(raw: string | undefined): string | null {

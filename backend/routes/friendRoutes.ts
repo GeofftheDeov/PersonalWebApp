@@ -4,6 +4,7 @@ import FriendRequest from "../models/FriendRequest.js";
 import { auth } from "../middleware/auth.js";
 import { startSession } from "../db/model.js";
 import { notify, resolveNotifications } from "../utils/notify.js";
+import { friendAnswerNotice } from "../utils/friendAnswerNotice.js";
 import { publishFriendshipChanged } from "../services/accessEvents.js";
 import Account from "../models/Account.js";
 import { query } from "../db/index.js";
@@ -191,17 +192,10 @@ router.put("/request/:id", auth, async (req: any, res) => {
         const actor = await findPersonById(userId, "name firstName lastName handle");
         const actorName = actor ? personDisplayName(actor.doc) : "Someone";
 
-        if (action === "accept") {
-            notify(request.from, {
-                type: "system",
-                title: `@${actorName} accepted your friend request`,
-            }).catch(() => { /* logged inside */ });
-        } else if (action === "reject") {
-            notify(request.from, {
-                type: "system",
-                title: `@${actorName} declined your friend request`,
-            }).catch(() => { /* logged inside */ });
-        }
+        // Hearthside's bell shows this too, opening the answerer's page (#251).
+        const answer = action === "accept" ? "accepted" : "declined";
+        notify(request.from, friendAnswerNotice(answer, { id: String(userId), name: actorName }, String(request._id)))
+            .catch(() => { /* logged inside */ });
 
         const actionDisplay = action === "accept" ? "accepted" : "declined";
         res.json({ message: `Request ${actionDisplay} successfully` });

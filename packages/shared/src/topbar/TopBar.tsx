@@ -27,6 +27,12 @@ export interface TopBarProps {
   letters: Letters;
   /** The portfolio's origin, e.g. `https://geoffthedeov.net`. Required on Hearthside. */
   portfolioUrl?: string;
+  /**
+   * On Hearthside, a friend's MESSAGE in the social menu: opens your letter
+   * with them in Letters (#251). Left out (a page without Letters, such as
+   * `/join/:id`), there's no MESSAGE button. See `SocialDock`'s `onMessage`.
+   */
+  onMessageFriend?: (personId: string, name: string) => void;
 }
 
 /**
@@ -41,7 +47,7 @@ export interface TopBarProps {
  *   <TopBar site="portfolio" letters={letters} />
  *   <TopBar site="hearthside" letters={letters} portfolioUrl="https://geoffthedeov.net" />
  */
-export default function TopBar({ site, letters, portfolioUrl }: TopBarProps) {
+export default function TopBar({ site, letters, portfolioUrl, onMessageFriend }: TopBarProps) {
   const { api, session } = letters;
   const router = useRouter();
   const pathname = usePathname();
@@ -130,6 +136,12 @@ export default function TopBar({ site, letters, portfolioUrl }: TopBarProps) {
     setMobileMoreOpen(false);
   };
 
+  // The phone menu covers the page, so it closes as the letter opens beside it.
+  const messageFriend = onMessageFriend && ((personId: string, name: string) => {
+    closeMenu();
+    onMessageFriend(personId, name);
+  });
+
   const linkCls = "group relative text-lg font-bold text-black dark:text-white";
   const mobileLinkCls = "text-3xl font-black tracking-tight text-black dark:text-white uppercase font-permanent";
   const decorationCls = "absolute -bottom-1 left-0 h-2 w-0 bg-orange-500 group-hover:w-full transition-all duration-300";
@@ -213,7 +225,7 @@ export default function TopBar({ site, letters, portfolioUrl }: TopBarProps) {
               )}
 
               <NotificationsBell letters={letters} site={site} portfolioUrl={portfolioUrl} />
-              <SocialDock letters={letters} site={site} />
+              <SocialDock letters={letters} site={site} onMessage={messageFriend} />
 
               <button onClick={handleLogout} className={linkCls}>
                 <span className="relative z-10 group-hover:text-teal-600 transition-colors uppercase">LOGOUT</span>
@@ -302,7 +314,7 @@ export default function TopBar({ site, letters, portfolioUrl }: TopBarProps) {
 
           <div className="mt-8 flex items-center gap-4">
             <NotificationsBell letters={letters} site={site} portfolioUrl={portfolioUrl} />
-            <SocialDock letters={letters} site={site} />
+            <SocialDock letters={letters} site={site} onMessage={messageFriend} />
           </div>
         </div>
       )}

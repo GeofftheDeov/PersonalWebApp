@@ -82,18 +82,24 @@ const chatFor = (t: ThreadSummary): ActiveChat => ({
 export interface SocialDockProps {
   letters: Letters;
   /**
-   * Which site it's on (#220). On Hearthside a Campaigns tab (the player's
-   * campaigns with their status, each opening its Hearthside page) takes the
-   * place of Chats, since Letters is on screen in Hearthside's shell. So a
-   * friend's card has no Message button there (their Profile, Hearthside's
-   * `/players/:id`, has "Write a letter"), and the badge counts friend
-   * requests only. The portfolio when left out, where it's unchanged.
+   * Which site it's on (#220). On Hearthside a Campaigns tab (the campaigns
+   * the player was added to, admins too (#251), with their status, each
+   * opening its Hearthside page) takes the place of Chats, since Letters is on
+   * screen in Hearthside's shell, and the badge counts friend requests only.
+   * The portfolio when left out, where it's unchanged.
    */
   site?: TopBarSite;
+  /**
+   * On Hearthside, what a friend's MESSAGE button does: open your letter
+   * with them in Letters (#251). Left out, as on a page without Letters
+   * (`/join/:id`), a friend's card has no MESSAGE button. The portfolio's
+   * MESSAGE opens the dock's own chat and ignores this.
+   */
+  onMessage?: (personId: string, name: string) => void;
 }
 
 /** The top bar's social dock (#211): chats (Letters), friends, requests and adding a friend by handle. */
-export default function SocialDock({ letters, site = 'portfolio' }: SocialDockProps) {
+export default function SocialDock({ letters, site = 'portfolio', onMessage }: SocialDockProps) {
   const { api, session } = letters;
   const onHearthside = site === 'hearthside';
   const tabs: readonly DockTab[] = onHearthside ? ['campaigns', 'friends', 'requests', 'add'] : ['chats', 'friends', 'requests', 'add'];
@@ -134,9 +140,11 @@ export default function SocialDock({ letters, site = 'portfolio' }: SocialDockPr
   }, [isOpen, signedIn, refreshThreads, onHearthside]);
 
   // Hearthside's Campaigns tab: read each time the dock opens, like friends.
+  // Only the campaigns you were added to, even for an admin, who'd otherwise
+  // get every campaign (#251).
   const fetchCampaigns = async () => {
     try {
-      const list = await api.get<CampaignRow[]>('/api/campaigns');
+      const list = await api.get<CampaignRow[]>('/api/campaigns?mine=1');
       // A stable sort: the API's order stays within each status.
       setCampaigns([...(list ?? [])].sort((a, b) => statusRank(a) - statusRank(b)));
       setCampaignsError('');
@@ -161,6 +169,14 @@ export default function SocialDock({ letters, site = 'portfolio' }: SocialDockPr
     setActiveChat(chat);
     setActiveTab('chats');
   };
+
+  // A friend's MESSAGE: the dock's own chat on the portfolio; on Hearthside,
+  // their letter in Letters, closing the dock so it's in view (#251).
+  const message = !onHearthside
+    ? (friend: Friend) => openChat({ channel: { kind: 'dm', id: friend._id }, title: `@${friendLabel(friend)}` })
+    : onMessage
+      ? (friend: Friend) => { setIsOpen(false); onMessage(friend._id, friendLabel(friend)); }
+      : null;
 
   // Typeahead (#36): 250 ms after the last keystroke, and each new search
   // aborts the one before, so a slow answer for "ge" can never land on top of
@@ -487,9 +503,9 @@ export default function SocialDock({ letters, site = 'portfolio' }: SocialDockPr
                           </div>
                           
                           <div className="flex gap-2">
-                            {!onHearthside && (
+                            {message && (
                             <button
-                              onClick={() => openChat({ channel: { kind: 'dm', id: friend._id }, title: `@${friendLabel(friend)}` })}
+                              onClick={() => message(friend)}
                               className="flex-grow flex items-center justify-center gap-2 py-2 bg-teal-500 border-2 border-black text-black font-black text-xs uppercase hover:bg-teal-400 transition-colors"
                             >
                               <MessageSquare size={14} />
@@ -499,7 +515,7 @@ export default function SocialDock({ letters, site = 'portfolio' }: SocialDockPr
                             <Link
                               href={`/players/${friend._id}`}
                               onClick={() => setIsOpen(false)}
-                              className={`${onHearthside ? 'flex-grow ' : ''}flex items-center justify-center gap-2 px-3 py-2 bg-yellow-400 border-2 border-black text-black font-black text-xs uppercase hover:bg-white transition-colors`}
+                              className={`${message ? '' : 'flex-grow '}flex items-center justify-center gap-2 px-3 py-2 bg-yellow-400 border-2 border-black text-black font-black text-xs uppercase hover:bg-white transition-colors`}
                             >
                               <UserIcon size={14} />
                               PROFILE

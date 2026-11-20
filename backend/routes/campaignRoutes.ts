@@ -6,7 +6,7 @@ import CampaignInvite from "../models/CampaignInvite.js";
 import Session from "../models/Session.js";
 import Account from "../models/Account.js";
 import { auth } from "../middleware/auth.js";
-import { getAuthorizedCampaignIds, isCampaignGameMaster } from "../utils/gameNightPlannerUtils.js";
+import { getAuthorizedCampaignIds, getMemberCampaignIds, isCampaignGameMaster } from "../utils/gameNightPlannerUtils.js";
 import { personDisplayName } from "../utils/personUtils.js";
 import { publishMembershipChanged } from "../services/accessEvents.js";
 import { SettingsError, cleanGmTitle, updateCampaignSettings } from "../planning/campaignSettings.js";
@@ -91,10 +91,13 @@ router.post("/", auth, async (req: any, res) => {
     }
 });
 
-// Get all campaigns
+// Get all campaigns: the ones you're in, or every campaign for an admin.
+// `?mine=1` lists only the ones you're in, admins included (#251): Hearthside's
+// Campaigns tab in the social menu.
 router.get("/", auth, async (req: any, res) => {
     try {
-        const campaignIds = await getAuthorizedCampaignIds(req.user);
+        const mine = req.query.mine === "1" || req.query.mine === "true";
+        const campaignIds = mine ? await getMemberCampaignIds(req.user) : await getAuthorizedCampaignIds(req.user);
         const query = campaignIds ? { _id: { $in: campaignIds } } : {};
 
         const campaigns = await Campaign.find(query).sort({ startDate: -1 });

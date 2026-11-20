@@ -2,6 +2,7 @@ import express from "express";
 import Notification from "../models/Notification.js";
 import { auth } from "../middleware/auth.js";
 import { hearthsideSite } from "../utils/frontendSites.js";
+import { FRIEND_ANSWER_FILTER } from "../utils/friendAnswerNotice.js";
 
 const router = express.Router();
 
@@ -11,10 +12,11 @@ const router = express.Router();
 /**
  * Which of a person's notifications a site's bell shows. The portfolio's (no
  * `site`, or `site=portfolio`) shows everything, as always. Hearthside's shows
- * only Hearthside's: campaign invites, friend requests, and anything whose
- * link is a Game Night page, either a relative `/game-night/...` path (rows
- * made without HEARTHSIDE_URL, #214) or an absolute link on this environment's
- * Hearthside host.
+ * only Hearthside's: campaign invites, friend requests, the answers to your
+ * friend requests (#251, `friendAnswerNotice`), and anything whose link is a
+ * Game Night page, either a relative `/game-night/...` path (rows made without
+ * HEARTHSIDE_URL, #214) or an absolute link on this environment's Hearthside
+ * host.
  *
  * The list, the unread count and "mark all read" all take the same filter, so
  * the badge and the button never count what the bell doesn't show. Returns
@@ -29,7 +31,7 @@ export function notificationSiteFilter(site: unknown): Record<string, unknown> |
     const gameNight: Record<string, unknown>[] = [{ link: { $regex: GAME_NIGHT_PATH } }];
     const hearthside = hearthsideSite();
     if (hearthside) gameNight.push({ link: { $regex: `^${escapeRegex(hearthside.origin)}([/?#]|$)`, $options: "i" } });
-    return { $or: [{ type: { $in: ["campaign_invite", "friend_request"] } }, ...gameNight] };
+    return { $or: [{ type: { $in: ["campaign_invite", "friend_request"] } }, FRIEND_ANSWER_FILTER, ...gameNight] };
 }
 
 const UNKNOWN_SITE = { error: "Unknown site: use site=hearthside, or leave it out for every notification" };

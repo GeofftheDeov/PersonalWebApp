@@ -50,15 +50,28 @@ env:
   PORTFOLIO_ORIGIN: https://geoffthedeov.net
   HEARTHSIDE_ORIGIN: https://hearthside.geoffthedeov.net
 
+# The deploy is five jobs (#250). Prepare runs the checks that fail in seconds
+# and dry-runs the migrations. The three image builds then run side by side,
+# each building, tagging and pushing its own image. Deploy needs all of them,
+# so if any build fails, no migration is applied and the task definition
+# doesn't change.
+#
+# What passes between jobs: Prepare's `hearthside-live` output (the switch it
+# read, true or false) reaches the portfolio build and Deploy. The image names
+# aren't passed: Deploy rebuilds them from the registry, the repository and
+# github.sha, exactly as the build jobs tagged them.
 jobs:
-  deploy:
-    name: Deploy
-    # workflow_dispatch can name any branch; prod only ever deploys main.
+  prepare:
+    name: Prepare
+    # workflow_dispatch can name any branch; prod only ever deploys main. Every
+    # other job needs this one, so they're skipped with it.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production
     permissions:
       contents: read
+    outputs:
+      hearthside-live: ${{ steps.hearthside.outputs.live }}
 
     steps:
     - name: Checkout
@@ -71,7 +84,8 @@ jobs:
     # backend's HEARTHSIDE_URL (#214's links, #215's site allowlist) and the
     # portfolio's NEXT_PUBLIC_HEARTHSIDE_URL (#234's redirects). Off or unset,
     # both are empty, so no link or redirect leads to a host that isn't
-    # serving yet.
+    # serving yet. It's read once, here, so the portfolio build and Deploy
+    # agree even if the switch changes mid-run.
     - name: Read the Hearthside switch
       id: hearthside
       env:
@@ -79,10 +93,10 @@ jobs:
       run: |
         case "$HEARTHSIDE_LIVE" in
           true)
-            echo "url=$HEARTHSIDE_ORIGIN" >> "$GITHUB_OUTPUT"
+            echo "live=true" >> "$GITHUB_OUTPUT"
             echo "Hearthside is live: HEARTHSIDE_URL=$HEARTHSIDE_ORIGIN" ;;
           ""|false)
-            echo "url=" >> "$GITHUB_OUTPUT"
+            echo "live=false" >> "$GITHUB_OUTPUT"
             echo "Hearthside isn't live yet: HEARTHSIDE_URL stays empty" ;;
           *)
             echo "::error::The production environment's HEARTHSIDE_LIVE must be true or false (got '$HEARTHSIDE_LIVE')"
@@ -101,12 +115,6 @@ jobs:
           exit 1
         fi
 
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@v3
-
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
@@ -117,7 +125,9 @@ jobs:
     # Hearthside's images have their own ECR repository, shared by dev and
     # prod like the others. The first deploy with Hearthside creates it; if
     # the deploy user may not, stop here, before any build or migration, and
-    # let the wizard's first stage create it.
+    # let the wizard's first stage create it. It's checked once, here, before
+    # any build job starts, so no two jobs of this run race to create it; a
+    # dev deploy creating it at the same moment counts as created.
     - name: Make sure Hearthside's image repository exists
       run: |
         if out=$(aws ecr describe-repositories --repository-names "$ECR_HEARTHSIDE_REPOSITORY" 2>&1); then
@@ -126,18 +136,21 @@ jobs:
           echo "$out"
           echo "::error::Couldn't check for ECR repository $ECR_HEARTHSIDE_REPOSITORY (above)."
           exit 1
-        elif aws ecr create-repository --repository-name "$ECR_HEARTHSIDE_REPOSITORY" >/dev/null; then
+        elif out=$(aws ecr create-repository --repository-name "$ECR_HEARTHSIDE_REPOSITORY" 2>&1 >/dev/null); then
           echo "Created ECR repository $ECR_HEARTHSIDE_REPOSITORY."
+        elif grep -q RepositoryAlreadyExistsException <<<"$out"; then
+          echo "ECR repository $ECR_HEARTHSIDE_REPOSITORY exists (another deploy just created it)."
         else
+          echo "$out"
           echo "::error::No ECR repository $ECR_HEARTHSIDE_REPOSITORY, and the deploy user can't create it. Run 'scripts/hearthside-wizard.sh prod' (its stage 2 creates it), then re-run this deploy."
           exit 1
         fi
 
     # Schema migrations (backend/db/migrations, scripts/apply-migration.ts).
     # Dry-run now, so a migration that fails on prod's data stops the deploy
-    # before the 45-minute image build; apply just before the deploy step, so
-    # the new code never starts against the old schema. The URL comes from the
-    # same Secrets Manager secret the task definition injects.
+    # before the 45-minute image builds; Deploy applies them just before the
+    # ECS update, so the new code never starts against the old schema. The URL
+    # comes from the same Secrets Manager secret the task definition injects.
     - name: Set up Node
       uses: actions/setup-node@v4
       with:
@@ -156,10 +169,8 @@ jobs:
         echo "::add-mask::$DATABASE_URL"
         DATABASE_URL="$DATABASE_URL" npx tsx scripts/apply-migration.ts --dry-run
 
-    - name: Login to Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v2
-
+    # Redis rolls over here, ahead of the image builds as it did before #250,
+    # so it is stable long before the backend's new tasks start.
     - name: Register Redis task definition
       id: register-redis
       run: |
@@ -215,6 +226,39 @@ jobs:
             --no-cli-pager
         fi
 
+  # The three builds run at the same time, each on its own runner under QEMU,
+  # with its own buildx cache scope. Each uses the "production" environment,
+  # so GOOGLE_CLIENT_ID and NEXT_PUBLIC_API_URL are the same environment
+  # secrets as before the split (the repo has its own GOOGLE_CLIENT_ID too).
+  build-backend:
+    name: Build backend image
+    needs: prepare
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
     - name: Build, tag, and push backend image to Amazon ECR
       id: build-backend-image
       timeout-minutes: 45
@@ -231,6 +275,51 @@ jobs:
           -t $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:prod \
           --push .
         echo "image=$ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+  build-frontend:
+    name: Build portfolio image
+    needs: prepare
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    # Prepare read the switch; this turns it back into the URL (empty when
+    # off). Anything but true or false means Prepare's output didn't arrive,
+    # so stop rather than build the portfolio without its redirects.
+    - name: Hearthside's URL, from the switch Prepare read
+      id: hearthside
+      env:
+        HEARTHSIDE_LIVE: ${{ needs.prepare.outputs.hearthside-live }}
+      run: |
+        case "$HEARTHSIDE_LIVE" in
+          true) echo "url=$HEARTHSIDE_ORIGIN" >> "$GITHUB_OUTPUT" ;;
+          false) echo "url=" >> "$GITHUB_OUTPUT" ;;
+          *)
+            echo "::error::Prepare's hearthside-live output is '$HEARTHSIDE_LIVE', not true or false."
+            exit 1 ;;
+        esac
+
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
 
     - name: Build, tag, and push frontend image to Amazon ECR
       id: build-frontend-image
@@ -254,6 +343,37 @@ jobs:
           --push .
         echo "image=$ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
+  # Builds whether or not HEARTHSIDE_LIVE is on: the container runs in the
+  # task either way.
+  build-hearthside:
+    name: Build Hearthside image
+    needs: prepare
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
     - name: Build, tag, and push Hearthside image to Amazon ECR
       id: build-hearthside-image
       timeout-minutes: 45
@@ -276,13 +396,74 @@ jobs:
           --push .
         echo "image=$ECR_REGISTRY/$ECR_HEARTHSIDE_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
+  deploy:
+    name: Deploy
+    # Only once every image is in ECR: a failed build skips this job, so no
+    # migration is applied and the service keeps its task definition.
+    needs: [prepare, build-backend, build-frontend, build-hearthside]
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Hearthside's URL, from the switch Prepare read
+      id: hearthside
+      env:
+        HEARTHSIDE_LIVE: ${{ needs.prepare.outputs.hearthside-live }}
+      run: |
+        case "$HEARTHSIDE_LIVE" in
+          true) echo "url=$HEARTHSIDE_ORIGIN" >> "$GITHUB_OUTPUT" ;;
+          false) echo "url=" >> "$GITHUB_OUTPUT" ;;
+          *)
+            echo "::error::Prepare's hearthside-live output is '$HEARTHSIDE_LIVE', not true or false."
+            exit 1 ;;
+        esac
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    # The images the build jobs pushed, named as they tagged them.
+    - name: Name the new images
+      id: images
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        echo "backend=$ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+        echo "frontend=$ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+        echo "hearthside=$ECR_REGISTRY/$ECR_HEARTHSIDE_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+    # For the migrations, applied below just before the ECS update.
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+        cache: npm
+        cache-dependency-path: backend/package-lock.json
+
+    - name: Install backend dependencies
+      working-directory: backend
+      run: npm ci --no-audit --no-fund
+
     - name: Fill in the new backend image ID in the Amazon ECS task definition
       id: backend-task-def
       uses: aws-actions/amazon-ecs-render-task-definition@v1
       with:
         task-definition: ${{ env.ECS_TASK_DEFINITION }}
         container-name: ${{ env.CONTAINER_BACKEND }}
-        image: ${{ steps.build-backend-image.outputs.image }}
+        image: ${{ steps.images.outputs.backend }}
         # NOTE: ANTHROPIC_API_KEY, ALPACA_API_KEY, ALPACA_SECRET_KEY and VAULT_TOKEN are
         # now injected via the task-def `secrets` block (AWS Secrets Manager), not as
         # plaintext env. Do not re-add them here — doing so re-exposes them as plaintext
@@ -308,7 +489,7 @@ jobs:
       with:
         task-definition: ${{ steps.backend-task-def.outputs.task-definition }}
         container-name: ${{ env.CONTAINER_FRONTEND }}
-        image: ${{ steps.build-frontend-image.outputs.image }}
+        image: ${{ steps.images.outputs.frontend }}
 
     - name: Fill in the new Hearthside image ID in the Amazon ECS task definition
       id: hearthside-task-def
@@ -316,7 +497,7 @@ jobs:
       with:
         task-definition: ${{ steps.frontend-task-def.outputs.task-definition }}
         container-name: ${{ env.CONTAINER_HEARTHSIDE }}
-        image: ${{ steps.build-hearthside-image.outputs.image }}
+        image: ${{ steps.images.outputs.hearthside }}
 
     - name: Apply pending migrations to the prod database
       working-directory: backend

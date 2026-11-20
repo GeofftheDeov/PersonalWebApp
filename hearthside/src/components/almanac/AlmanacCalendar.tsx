@@ -36,9 +36,7 @@ function QuestMarkOn({ s }: { s: AlmanacSession }) {
   const mark = questMark(s);
   if (!mark) return null;
   return (
-    <span className={mark.done ? 'hs-alm-qm is-done' : 'hs-alm-qm'}>
-      {mark.done && <span aria-hidden="true">✓ </span>}{mark.label}
-    </span>
+    <span className={mark.done ? 'hs-alm-qm is-done' : 'hs-alm-qm'}>{mark.label}</span>
   );
 }
 

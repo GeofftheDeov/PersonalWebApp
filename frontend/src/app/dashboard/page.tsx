@@ -89,7 +89,7 @@ export default function DashboardPage() {
                                     <p className="text-2xl font-permanent text-teal-600 dark:text-yellow-400 uppercase tracking-tight truncate">
                                         {user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'USER'}
                                     </p>
-                                    <p className="text-base font-medium tracking-wider text-zinc-500 dark:text-zinc-400 uppercase">
+                                    <p className="text-base font-medium tracking-wider text-zinc-500 dark:text-zinc-400 uppercase break-words">
                                         {user.handle ? `@${user.handle}` : user.email}
                                     </p>
                                 </div>

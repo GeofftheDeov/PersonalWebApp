@@ -8,7 +8,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { hearthsideCampaignPath, hearthsidePath } from "../src/hearthside/paths";
+import { campaignPageUrl, hearthsideCampaignPath, hearthsideOrigin, hearthsidePath } from "../src/hearthside/paths";
 
 test("each Game Night page maps to its Hearthside page, prefix stripped", () => {
   assert.equal(hearthsidePath("/game-night/campaigns/c1"), "/campaigns/c1");
@@ -43,4 +43,19 @@ test("the portfolio's own pages, look-alikes and non-paths aren't Hearthside's",
 
 test("accepting an invite lands on the campaign's Hearthside page", () => {
   assert.equal(hearthsideCampaignPath("c1"), "/campaigns/c1");
+});
+
+test("Hearthside's configured origin: blank or unset is no Hearthside (#217, #233)", () => {
+  assert.equal(hearthsideOrigin("https://hearthside.geoffthedeov.net"), "https://hearthside.geoffthedeov.net");
+  assert.equal(hearthsideOrigin(" https://deov.hearthside.geoffthedeov.net/ "), "https://deov.hearthside.geoffthedeov.net");
+  assert.equal(hearthsideOrigin("https://hearthside.geoffthedeov.test:4321"), "https://hearthside.geoffthedeov.test:4321");
+  for (const unset of [undefined, null, "", "   ", "hearthside.geoffthedeov.net", "javascript:alert(1)", "ftp://x.example"]) {
+    assert.equal(hearthsideOrigin(unset), null, String(unset));
+  }
+});
+
+test("Open in Hearthside goes to the campaign's Hearthside page, or the portfolio's while Hearthside is unset", () => {
+  assert.equal(campaignPageUrl("c1", "https://hearthside.example"), "https://hearthside.example/campaigns/c1");
+  assert.equal(campaignPageUrl("c1", null), "/game-night/campaigns/c1");
+  assert.equal(campaignPageUrl("a/b", null), "/game-night/campaigns/a%2Fb");
 });

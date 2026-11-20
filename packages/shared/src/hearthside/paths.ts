@@ -51,3 +51,38 @@ export function hearthsidePath(path: string): string | null {
 
 /** A campaign's page on Hearthside, where accepting its invite lands. */
 export const hearthsideCampaignPath = (campaignId: string): string => `/campaigns/${encodeURIComponent(campaignId)}`;
+
+/**
+ * Hearthside's origin from an app's build-time setting (the portfolio's
+ * `NEXT_PUBLIC_HEARTHSIDE_URL`, #217), or null when Hearthside isn't
+ * configured: unset, blank (the deploy passes `""` while Hearthside isn't
+ * live) or not an http(s) URL. Trailing slashes are dropped.
+ *
+ *   hearthsideOrigin("https://hearthside.geoffthedeov.net/")  // "https://hearthside.geoffthedeov.net"
+ *   hearthsideOrigin("")                                      // null
+ */
+export function hearthsideOrigin(setting: string | null | undefined): string | null {
+  const raw = (setting ?? "").trim();
+  if (!raw) return null;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+  return `${url.origin}${url.pathname}`.replace(/\/+$/, "");
+}
+
+/**
+ * Where a campaign's "Open in Hearthside" link goes (#233): its page on
+ * Hearthside when Hearthside is configured (`hearthsideOrigin`), otherwise the
+ * portfolio's own campaign page.
+ *
+ *   campaignPageUrl("c1", "https://hearthside.example")  // "https://hearthside.example/campaigns/c1"
+ *   campaignPageUrl("c1", null)                          // "/game-night/campaigns/c1"
+ */
+export function campaignPageUrl(campaignId: string, hearthside: string | null): string {
+  const path = hearthsideCampaignPath(campaignId);
+  return hearthside ? `${hearthside}${path}` : `${GAME_NIGHT_PREFIX}${path}`;
+}

@@ -245,6 +245,8 @@ export async function startStack(): Promise<{ stack: Stack; stop: () => Promise<
       // The portfolio's container has a second listener (3001); here it's another free port.
       SECONDARY_PORT: String(portfolioSecondPort),
       HOSTNAME: "127.0.0.1",
+      // As deployed once Hearthside is live (#217): the dashboard's "Open in Hearthside" goes there (#233).
+      NEXT_PUBLIC_HEARTHSIDE_URL: hearthside,
     }, logs);
     servers.push(portfolioServer);
     const hearthsideServer = startServer("hearthside", ["https-server.js"], path.join(REPO, "hearthside"), {

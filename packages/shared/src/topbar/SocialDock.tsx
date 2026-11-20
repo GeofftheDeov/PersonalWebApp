@@ -499,7 +499,7 @@ export default function SocialDock({ letters, site = 'portfolio' }: SocialDockPr
                             <Link
                               href={`/players/${friend._id}`}
                               onClick={() => setIsOpen(false)}
-                              className="flex items-center justify-center gap-2 px-3 py-2 bg-yellow-400 border-2 border-black text-black font-black text-xs uppercase hover:bg-white transition-colors"
+                              className={`${onHearthside ? 'flex-grow ' : ''}flex items-center justify-center gap-2 px-3 py-2 bg-yellow-400 border-2 border-black text-black font-black text-xs uppercase hover:bg-white transition-colors`}
                             >
                               <UserIcon size={14} />
                               PROFILE

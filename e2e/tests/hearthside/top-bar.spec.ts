@@ -2,7 +2,8 @@
  * The top bar on Hearthside (#220, spec #69, "The top bar on Hearthside").
  *
  * - Its bell shows only Hearthside's notifications (campaign invites, friend
- *   requests, Game Night links), while the portfolio's still shows everything.
+ *   requests and their answers (#251), Game Night links), while the
+ *   portfolio's still shows everything.
  * - An old `/game-night/...` link opens its Hearthside page, and accepting a
  *   campaign invite lands on the campaign's Hearthside page.
  * - The social menu has a Campaigns tab in place of Chats, each campaign
@@ -39,7 +40,7 @@ async function expectDockTabs(page: Page, shown: string[], hidden: string[]) {
   for (const name of hidden) await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
 }
 
-test("Hearthside's bell shows a campaign invite and a quest reminder but not a system notice; the portfolio's shows all three", async ({ page, newPerson, apiAs, signIn, stack, hearthside, portfolio }) => {
+test("Hearthside's bell shows a campaign invite, a quest reminder and a friend's answer but not a portfolio notice; the portfolio's shows all four", async ({ page, newPerson, apiAs, signIn, stack, hearthside, portfolio }) => {
   // Three pages on two sites, each compiled on its first visit in dev mode.
   test.setTimeout(120_000);
   const [owner, player] = await Promise.all([newPerson("Mira Holt"), newPerson("Bram Tull")]);
@@ -47,8 +48,8 @@ test("Hearthside's bell shows a campaign invite and a quest reminder but not a s
   const title = "t220 The Drowned Bell";
   const id = await campaignOf(ownerApi, title);
 
-  // The player asks the owner to be friends and the owner accepts: the player's bell gets the
-  // portfolio-only "accepted your friend request" (a system notice with no link).
+  // The player asks the owner to be friends and the owner accepts: the player's bell gets
+  // "accepted your friend request", which Hearthside's bell shows too since #251.
   expect((await playerApi.post("/api/friends/request", { data: { toUserId: owner.id } })).ok()).toBe(true);
   const [request] = (await (await ownerApi.get("/api/friends/requests")).json()).incoming;
   expect((await ownerApi.put(`/api/friends/request/${request._id}`, { data: { action: "accept" } })).ok()).toBe(true);
@@ -59,8 +60,11 @@ test("Hearthside's bell shows a campaign invite and a quest reminder but not a s
   await seedNotification(stack, player.id, {
     type: "system", title: reminder, body: "Due in 2 hours.", link: hearthside.url(`/sessions/${crypto.randomUUID()}#quests`),
   });
+  // A notice about a portfolio page, which only the portfolio's bell shows.
+  const notice = "t220 Your profile is half filled in";
+  await seedNotification(stack, player.id, { type: "system", title: notice, link: "/profile" });
   const invite = `invited you to "${title}"`;
-  const notice = "accepted your friend request";
+  const answer = "accepted your friend request";
 
   await signIn(player);
   await page.goto("/");
@@ -68,6 +72,7 @@ test("Hearthside's bell shows a campaign invite and a quest reminder but not a s
   let bell = await openBell(page);
   await expect(bell.getByText(invite)).toBeVisible();
   await expect(bell.getByText(reminder)).toBeVisible();
+  await expect(bell.getByText(answer)).toBeVisible();
   await expect(bell.getByText(notice)).toHaveCount(0);
 
   await page.goto(portfolio.url("/"));
@@ -75,6 +80,7 @@ test("Hearthside's bell shows a campaign invite and a quest reminder but not a s
   bell = await openBell(page);
   await expect(bell.getByText(invite)).toBeVisible();
   await expect(bell.getByText(reminder)).toBeVisible();
+  await expect(bell.getByText(answer)).toBeVisible();
   await expect(bell.getByText(notice)).toBeVisible();
 
   // Joining from Hearthside's bell lands on the campaign's Hearthside page.

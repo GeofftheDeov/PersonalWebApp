@@ -23,6 +23,7 @@
  *   verifyLinkToken(stack, email)   the token a verify email would carry (the stack sends no mail)
  *   seedNotification(stack, personId, row)   a row in someone's bell, as the database holds it: for
  *                ones the backend no longer makes (an old /game-night/... link) or only a scheduler makes
+ *   makeAdmin(stack, personId)   makes someone (a `newPerson`, never the seeded party) an admin
  *   logInAndPlant(context, backend, person, cookieName, host)   signIn against any backend, e.g. the
  *                dev environment that stack/dev-environment.ts starts for a test of the two environments' cookies
  */
@@ -149,4 +150,13 @@ export interface NotificationRow {
  */
 export async function seedNotification(stack: Stack, personId: string, row: NotificationRow): Promise<string> {
   return (await runBackendScript(["scripts/e2e-database.ts", "notify", stack.databaseUrl, personId, JSON.stringify(row)])).trim();
+}
+
+/**
+ * Makes `personId` an admin, straight in the run's database (backend/scripts/e2e-database.ts): no signup
+ * makes one. The backend reads the role on every request, so it applies from the next call, signed in or not.
+ * Use it on a `newPerson`, never the seeded party.
+ */
+export async function makeAdmin(stack: Stack, personId: string): Promise<void> {
+  await runBackendScript(["scripts/e2e-database.ts", "admin", stack.databaseUrl, personId]);
 }

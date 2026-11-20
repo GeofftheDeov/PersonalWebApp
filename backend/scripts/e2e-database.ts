@@ -6,6 +6,7 @@
  *   npx tsx scripts/e2e-database.ts drop <url-or-name>
  *   npx tsx scripts/e2e-database.ts verify-token <url-or-name> <email>   a verify link's token, as the email would carry it
  *   npx tsx scripts/e2e-database.ts notify <url-or-name> <person-id> <json>   put a row in someone's bell
+ *   npx tsx scripts/e2e-database.ts admin <url-or-name> <person-id>   make someone an admin
  *
  * It loads schema.sql straight into the new database rather than cloning
  * run-tests.ts's template, which every `npm test` drops and rebuilds: a
@@ -96,14 +97,33 @@ async function notifyRow(target: string, personId: string, json: string) {
   }
 }
 
+/**
+ * Makes `personId` an admin (#251): `app_role = 'admin'`, set by hand, as Geoff
+ * is. Signup only ever makes players, and the backend reads the role on each
+ * request, so a signed-in browser is an admin from its next call.
+ */
+async function makeAdmin(target: string, personId: string) {
+  const name = target.split("/").pop() ?? "";
+  if (!/^pwae2e_\d+_[0-9a-f]+$/.test(name)) throw new Error(`Not an end-to-end database: ${target}`);
+  const db = await connect(name);
+  try {
+    const { rowCount } = await db.query(
+      `UPDATE accounts SET app_role = 'admin', app_role_source = 'manual' WHERE id = $1`, [personId]);
+    if (rowCount !== 1) throw new Error(`No account ${personId}`);
+  } finally {
+    await db.end();
+  }
+}
+
 const [command, arg, arg2, arg3] = process.argv.slice(2);
 const run = command === "create" ? create()
   : command === "drop" && arg ? drop(arg)
   : command === "verify-token" && arg && arg2 ? verifyToken(arg, arg2)
   : command === "notify" && arg && arg2 && arg3 ? notifyRow(arg, arg2, arg3)
+  : command === "admin" && arg && arg2 ? makeAdmin(arg, arg2)
   : null;
 if (!run) {
-  console.error("Usage: npx tsx scripts/e2e-database.ts create | drop <url-or-name> | verify-token <url-or-name> <email> | notify <url-or-name> <person-id> <json>");
+  console.error("Usage: npx tsx scripts/e2e-database.ts create | drop <url-or-name> | verify-token <url-or-name> <email> | notify <url-or-name> <person-id> <json> | admin <url-or-name> <person-id>");
   process.exit(2);
 }
 run.catch((e) => {

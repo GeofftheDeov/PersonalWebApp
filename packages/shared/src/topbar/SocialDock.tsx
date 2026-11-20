@@ -280,6 +280,7 @@ export default function SocialDock({ letters, site = 'portfolio', onMessage }: S
       {/* Persistent Nav Trigger */}
       <button
         onClick={() => setIsOpen(true)}
+        aria-label="Social"
         className="group relative flex items-center gap-2 px-4 py-2 bg-black border-2 border-white text-white font-bold hover:bg-white hover:text-black transition-all shadow-[4px_4px_0px_0px_rgba(255,255,255,1)] active:shadow-none active:translate-x-1 active:translate-y-1"
       >
         <Users size={20} className="group-hover:rotate-12 transition-transform" />

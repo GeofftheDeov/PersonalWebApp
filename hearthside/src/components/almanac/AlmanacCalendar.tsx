@@ -103,8 +103,8 @@ function DayDetail({ day, sessions, slips }: { day: Date; sessions: readonly Alm
  * ticked off there, unless that's a day of their own session (or they have no
  * due time), when they're on its sheet and the session carries a mark with
  * how many are still open (#252). A day's button counts the quests still open
- * on it, slips and marks alike. Under 520px the month's cells show marks instead; under
- * 560px Week is a list of days.
+ * on it, slips and marks alike. Under 520px the month's cells show marks
+ * instead; under 560px Week is a list of days.
  */
 export default function AlmanacCalendar({ sessions, banners, slips, ensure }: {
   /** Already filtered. */

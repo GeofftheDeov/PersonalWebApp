@@ -352,6 +352,7 @@ export async function attachLiveChannel(
         await bus.subscribeBroadcast("planning.poll_closed", (p) => boardChanged(p.campaignId)),
         await bus.subscribeBroadcast("quest.assigned", (p) => boardChanged(p.campaignId)),
         await bus.subscribeBroadcast("quest.completed", (p) => boardChanged(p.campaignId)),
+        await bus.subscribeBroadcast("quest.reopened", (p) => boardChanged(p.campaignId)),
         await bus.subscribeBroadcast("campaign.torch_passed", (p) => boardChanged(p.campaignId)),
     );
     /* ---------------- end the Notice Board ---------------- */

@@ -217,6 +217,11 @@ async function main() {
     });
     check("a quest done", await grew(), counts());
     mark = lastCounts();
+    await bus.publish("quest.reopened", {
+      questId: "00000000-0000-4000-8000-000000000001", sessionId: sid, campaignId: table, assigneeId: player.id, reopenedBy: player.id,
+    });
+    check("a quest undone", await grew(), counts());
+    mark = lastCounts();
     await bus.publish("campaign.torch_passed", {
       campaignId: table, scope: "session", sessionId: sid, byId: gm.id, fromId: null, toId: player.id,
     });

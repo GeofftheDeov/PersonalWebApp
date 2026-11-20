@@ -385,7 +385,8 @@ body.hs-app{margin:0;min-height:100vh;-webkit-font-smoothing:antialiased}
 .hs-slip-plus{width:100%;background:rgba(20,13,8,.6);border:1px dashed var(--gold-line);border-radius:2px;color:var(--on-wood-muted);cursor:pointer;padding:.35em;
   font:500 .95em/1.2 var(--font-label);letter-spacing:.04em}
 .hs-slip-plus:hover,.hs-slip-plus:focus-visible{color:var(--gold-hi);border-color:var(--gold)}
-.hs-slip-input{width:100%;min-width:0;font:inherit;padding:.4em .6em;border-radius:2px;border:1px solid var(--gold);background:var(--paper-hi);color:var(--paper-ink)}
+/* Ink on the slip (`.hs-app input` would otherwise give it the body's cream, unreadable on paper). */
+.hs-app .hs-slip-input{width:100%;min-width:0;font:inherit;padding:.4em .6em;border-radius:2px;border:1px solid var(--gold);background:var(--paper-hi);color:var(--paper-ink)}
 .hs-slip-error{display:block;margin-top:.3em;color:#f0a48c;font-size:.9em;text-shadow:var(--on-wood-shadow)}
 /* At the table: slips as wide as the seat, their type sized from the table. */
 .hs-seat-slips{width:100%;margin-top:1.2cqw;gap:.9cqw;font-size:clamp(10px,1.85cqw,13px)}

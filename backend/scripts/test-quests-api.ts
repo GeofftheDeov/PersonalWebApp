@@ -45,7 +45,7 @@ async function main() {
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
     const events: { name: string; payload: any }[] = [];
-    for (const name of ["quest.assigned", "quest.completed"] as const) {
+    for (const name of ["quest.assigned", "quest.completed", "quest.reopened"] as const) {
         bus.subscribe(name, (payload: any) => { events.push({ name, payload }); });
     }
     const flush = () => new Promise((r) => setImmediate(r));
@@ -67,6 +67,7 @@ async function main() {
     const ofSession = (as: string, sessionId: string) => call("GET", `/sessions/${sessionId}`, as);
     const mine = (as: string, qs = "") => call("GET", `/mine${qs}`, as);
     const done = (as: string, questId: string) => call("POST", `/${questId}/done`, as);
+    const undo = (as: string, questId: string) => call("DELETE", `/${questId}/done`, as);
     const edit = (as: string, questId: string, body: unknown) => call("PATCH", `/${questId}`, as, body);
     const row = async (id: string) => (await pool.query(`SELECT * FROM session_tasks WHERE id = $1`, [id])).rows[0];
     const bells = async (person: string, questId: string) => (await pool.query(
@@ -245,6 +246,32 @@ async function main() {
 
         await pool.query(`UPDATE session_tasks SET status = 'cancelled' WHERE id = $1`, [own.json.id]);
         check("a cancelled quest can't be marked done (409)", (await done("gm", own.json.id)).status === 409);
+
+        // ── undoing done ────────────────────────────────────────────────────
+        check("another party member can't undo it (403)", (await undo("p1", qHandout)).status === 403);
+        check("someone outside the party can't either (403)", (await undo("outsider", qHandout)).status === 403);
+        check("undoing an unknown quest is a 404", (await undo("p2", crypto.randomUUID())).status === 404);
+        const reopened = await undo("p2", qHandout);
+        await flush();
+        check("its owner undoes it: open again, no completion time",
+            reopened.status === 200 && reopened.json.status === "open" && reopened.json.completedAt === null, reopened.json);
+        check("undoing publishes quest.reopened",
+            eventsFor(qHandout).filter((e) => e.name === "quest.reopened").length === 1 &&
+                eventsFor(qHandout).find((e) => e.name === "quest.reopened")!.payload.reopenedBy === who.p2.id);
+        check("an undone quest is back in the Quest Log", (await mine("p2")).json.quests.some((q: any) => q.id === qHandout));
+        const undoneAgain = await undo("p2", qHandout);
+        await flush();
+        check("undoing an open quest is harmless, and publishes nothing new",
+            undoneAgain.status === 200 && undoneAgain.json.status === "open" &&
+                eventsFor(qHandout).filter((e) => e.name === "quest.reopened").length === 1);
+        const redone = await done("p2", qHandout);
+        await flush();
+        check("it can be marked done again",
+            redone.status === 200 && redone.json.status === "done" &&
+                eventsFor(qHandout).filter((e) => e.name === "quest.completed").length === 2);
+        const gmUndo = await undo("gm", map.json.id);
+        check("the GM can undo someone else's quest", gmUndo.status === 200 && gmUndo.json.status === "open");
+        check("a cancelled quest can't be undone (409)", (await undo("gm", own.json.id)).status === 409);
 
         // ── the Almanac ─────────────────────────────────────────────────────
         const range = `?start=${encodeURIComponent(at(-7 * DAY).toISOString())}&end=${encodeURIComponent(at(30 * DAY).toISOString())}`;

@@ -281,6 +281,14 @@ export interface EventMap {
         assigneeId: string | null;
         completedBy: string;
     };
+    /** A done quest was ticked back to open, by its owner or the Game Master. */
+    "quest.reopened": {
+        questId: string;
+        sessionId: string;
+        campaignId: string;
+        assigneeId: string | null;
+        reopenedBy: string;
+    };
 
     /** A notification was created (or refreshed) for a user's bell. */
     "user.notification": {

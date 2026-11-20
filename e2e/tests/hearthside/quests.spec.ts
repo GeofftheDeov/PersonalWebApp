@@ -37,7 +37,7 @@ async function questFor(gm: APIRequestContext, player: APIRequestContext, player
 
 const yourQuests = (page: Page) => page.getByRole("region", { name: "Your Quests" });
 
-test("a quest ticked in the rail stays done after a reload", async ({ page, signIn, apiAs, newPerson }) => {
+test("a quest ticked in the rail stays done after a reload, and unticks", async ({ page, signIn, apiAs, newPerson }) => {
   const [gm, player] = await Promise.all([newPerson("Odile Marsh"), newPerson("Piet Lark")]);
   const title = "Bring the lamp oil";
   const { questId, sessionId } = await questFor(await apiAs(gm), await apiAs(player), player.id, title);
@@ -56,8 +56,16 @@ test("a quest ticked in the rail stays done after a reload", async ({ page, sign
 
   await page.reload();
   await expect(rail.getByRole("checkbox", { name: `${title}: done` })).toBeChecked();
-  await expect(rail.getByRole("checkbox", { name: `${title}: done` })).toBeDisabled();
   await expect(rail.getByText("0 open", { exact: true })).toBeVisible();
+
+  // Ticked by mistake: tick it back on, and it stays open.
+  const undone = page.waitForResponse((r) => r.url().includes(`/api/quests/${questId}/done`) && r.request().method() === "DELETE");
+  await rail.getByRole("checkbox", { name: `${title}: done` }).click();
+  expect((await undone).ok()).toBe(true);
+  await expect(rail.getByRole("checkbox", { name: `${title}: mark done` })).not.toBeChecked();
+  await expect(rail.getByText("1 open", { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(rail.getByRole("checkbox", { name: `${title}: mark done` })).not.toBeChecked();
 });
 
 test.describe("at 375px", () => {

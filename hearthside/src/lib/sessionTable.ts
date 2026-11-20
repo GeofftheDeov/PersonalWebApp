@@ -158,9 +158,9 @@ export function slipsBySeat(quests: readonly Quest[]): Map<string, Quest[]> {
   return by;
 }
 
-/** Players tick their own open quests; the GM (or stand-in, or an admin) ticks anyone's. There's no undoing it. */
+/** Players tick (and untick) their own quests; the GM (or stand-in, or an admin) anyone's. */
 export const canTick = (q: Pick<Quest, 'status' | 'assignee'>, viewer: QuestViewer | null): boolean =>
-  !!viewer && q.status === 'open' && (viewer.isGameMaster || q.assignee?.id === viewer.id);
+  !!viewer && q.status !== 'cancelled' && (viewer.isGameMaster || q.assignee?.id === viewer.id);
 
 /** The GM's "+ quest" on each seat: before the session, while it still takes quests. */
 export const canAddQuests = (s: { status?: string | null }, phase: SessionPhase, isGameMaster: boolean): boolean =>

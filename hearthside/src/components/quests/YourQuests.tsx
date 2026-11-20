@@ -3,14 +3,14 @@
 import Link from 'next/link';
 import GildedPanel from '@/components/design-system/GildedPanel';
 import { KIND_TAG, questWhen } from '@/lib/quests';
-import { completeQuest, useYourQuests } from '@/lib/useQuests';
+import { setQuestDone, useYourQuests } from '@/lib/useQuests';
 
 /**
  * Your Quests (#221), in the shell's rail: the design system's QuestList on
  * gilded leather. Your open and done quests for sessions being planned or
- * still to come, soonest first, each ticked off in place through the
- * existing quests API. A tick can't be taken back (the API has no undo), so a
- * done quest stays struck through until its session is over.
+ * still to come, soonest first, each ticked off (or back on) in place
+ * through the quests API. A done quest stays struck through until its
+ * session is over.
  *
  * Each quest links to its session's table (`/sessions/:id#quests`), where the
  * quest bells and reminders also land (#214).
@@ -45,8 +45,8 @@ export default function YourQuests() {
                     role="checkbox"
                     aria-checked={done}
                     aria-label={`${q.title}: ${done ? 'done' : 'mark done'}`}
-                    disabled={done || ticking.has(q.id)}
-                    onClick={() => completeQuest(q.id)}
+                    disabled={ticking.has(q.id)}
+                    onClick={() => setQuestDone(q.id, !done)}
                   />
                   <div>
                     <div className="hs-quest-name">

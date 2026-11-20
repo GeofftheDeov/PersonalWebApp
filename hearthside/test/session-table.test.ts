@@ -140,12 +140,14 @@ test("each seat's slips are its player's quests; unowned ones sit at no seat", (
   assert.equal(slips.get("p3"), undefined);
 });
 
-test("players tick their own open quests, and the GM ticks anyone's", () => {
+test("players tick (and untick) their own quests, and the GM anyone's", () => {
   const me = { id: "p2", isGameMaster: false };
   assert.equal(canTick(quest("q1", "p2"), me), true);
   assert.equal(canTick(quest("q1", "p3"), me), false);
   assert.equal(canTick(quest("q1", "p3"), { id: "p1", isGameMaster: true }), true);
-  assert.equal(canTick(quest("q1", "p2", "done"), me), false, "a done quest can't be ticked again");
+  assert.equal(canTick(quest("q1", "p2", "done"), me), true, "a done quest ticks back on");
+  assert.equal(canTick(quest("q1", "p3", "done"), me), false);
+  assert.equal(canTick(quest("q1", "p2", "cancelled"), me), false);
   assert.equal(canTick(quest("q1", "p2"), null), false);
 });
 

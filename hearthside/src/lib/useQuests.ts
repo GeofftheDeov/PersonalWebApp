@@ -8,13 +8,13 @@ import { session, useSession } from './session';
 /**
  * Your quests, one store per tab (#221): the rail's Your Quests reads it, and
  * any page that ticks a quest (a session's slips, the Almanac) should tick it
- * through `completeQuest`, so the rail shows it done at once. A page that
- * changes quests some other way calls `refreshQuests()` afterwards.
+ * through `setQuestDone`, so the rail shows it at once. A page that changes
+ * quests some other way calls `refreshQuests()` afterwards.
  */
 export const questStore = createQuestStore({ api });
 
-/** Ticks one of your quests off (POST /api/quests/:id/done). */
-export const completeQuest = (questId: string) => questStore.complete(questId);
+/** Ticks one of your quests off, or back on (POST or DELETE /api/quests/:id/done). */
+export const setQuestDone = (questId: string, done: boolean) => questStore.setDone(questId, done);
 
 /** Fetches your quests again, e.g. after a page added or changed one. */
 export const refreshQuests = () => questStore.load();

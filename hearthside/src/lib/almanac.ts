@@ -352,12 +352,13 @@ export function openQuestsOn(sessions: readonly AlmanacSession[], day: Date): nu
 
 // ── quests ──────────────────────────────────────────────────────────────────
 
-/** A quest ticked in Your Quests shows done here too. */
-export function withRail(sessions: readonly AlmanacSession[], rail: readonly Quest[]): AlmanacSession[] {
-  const done = new Set(rail.filter((q) => q.status === 'done').map((q) => q.id));
-  if (!done.size) return [...sessions];
-  return sessions.map((s) => s.quests.some((q) => q.status === 'open' && done.has(q.id))
-    ? { ...s, quests: s.quests.map((q) => (q.status === 'open' && done.has(q.id) ? { ...q, status: 'done' as const } : q)) }
+/** A quest ticked or unticked in Your Quests (`railChanges`) shows that here too. */
+export function withRail(sessions: readonly AlmanacSession[], changed: readonly Quest[]): AlmanacSession[] {
+  const there = new Map(changed.map((q) => [q.id, q]));
+  if (!there.size) return [...sessions];
+  const differs = (q: Quest) => { const r = there.get(q.id); return !!r && r.status !== q.status; };
+  return sessions.map((s) => s.quests.some(differs)
+    ? { ...s, quests: s.quests.map((q) => (differs(q) ? { ...q, status: there.get(q.id)!.status, completedAt: there.get(q.id)!.completedAt } : q)) }
     : s);
 }
 

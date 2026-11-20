@@ -46,7 +46,7 @@ const theTable = (page: Page) => page.getByRole("region", { name: "Around the ta
 const seatOf = (page: Page, name: string) => theTable(page).getByRole("group", { name: `${name}’s seat` });
 const heading = (page: Page) => page.getByRole("heading", { level: 1 });
 
-test("a #quests link lands at the table, and a quest ticked there shows done in Your Quests", async ({ page, signIn, apiAs, newPerson }) => {
+test("a #quests link lands at the table, and a quest ticked or unticked there follows in Your Quests (and back)", async ({ page, signIn, apiAs, newPerson }) => {
   const [gm, player] = await Promise.all([newPerson("Odile Marsh"), newPerson("Piet Lark")]);
   const gmApi = await apiAs(gm);
   const campaignId = await campaignOf(gmApi, [await apiAs(player)]);
@@ -72,6 +72,20 @@ test("a #quests link lands at the table, and a quest ticked there shows done in 
   const rail = page.getByRole("region", { name: "Your Quests" });
   await expect(rail.getByRole("checkbox", { name: `${title}: done` })).toBeChecked();
   await expect(rail.getByText("0 open", { exact: true })).toBeVisible();
+
+  // Unticked at the table, it's open again in both places.
+  const undone = page.waitForResponse((r) => r.url().includes(`/api/quests/${questId}/done`) && r.request().method() === "DELETE");
+  await slips.getByRole("checkbox", { name: `${title}: done` }).click();
+  expect((await undone).ok()).toBe(true);
+  await expect(slips.getByRole("checkbox", { name: `${title}: mark done` })).not.toBeChecked();
+  await expect(rail.getByRole("checkbox", { name: `${title}: mark done` })).not.toBeChecked();
+  await expect(rail.getByText("1 open", { exact: true })).toBeVisible();
+
+  // And unticked in the rail, the table follows.
+  await rail.getByRole("checkbox", { name: `${title}: mark done` }).click();
+  await expect(slips.getByRole("checkbox", { name: `${title}: done` })).toBeChecked();
+  await rail.getByRole("checkbox", { name: `${title}: done` }).click();
+  await expect(slips.getByRole("checkbox", { name: `${title}: mark done` })).not.toBeChecked();
 });
 
 test("the GM confirms attendance, and the absent player's seat goes grey", async ({ page, signIn, apiAs, newPerson }) => {
@@ -133,6 +147,8 @@ test("before the session the GM adds a quest at a seat, and the ready check colo
   await seat.getByRole("button", { name: "Add a quest for Piet Lark" }).click();
   const made = page.waitForResponse((r) => r.url().endsWith(`/api/quests/sessions/${id}`) && r.request().method() === "POST");
   await seat.getByRole("textbox", { name: /^New quest for Piet Lark/ }).fill("Bring the storm lantern");
+  // What's typed shows in ink (--paper-ink), not the body's cream on the cream slip.
+  await expect(seat.getByRole("textbox", { name: /^New quest for Piet Lark/ })).toHaveCSS("color", "rgb(43, 29, 18)");
   await seat.getByRole("textbox", { name: /^New quest for Piet Lark/ }).press("Enter");
   expect((await made).ok()).toBe(true);
   await expect(seat.getByRole("list", { name: "Piet Lark’s quests" }).getByText("Bring the storm lantern")).toBeVisible();

@@ -7,6 +7,7 @@
  */
 export { createLetters, type Letters, type LettersOptions } from "./letters";
 export type { ThreadEntry, ThreadFilter, ThreadSummary } from "./types";
+export { messageWhen, threadWhen, timeOfDay } from "./format";
 export {
   ATTACHMENT_ACCEPT,
   ATTACHMENT_MAX_BYTES,

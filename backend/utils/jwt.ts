@@ -13,9 +13,9 @@ import jwt, { type JwtPayload, type SignOptions } from "jsonwebtoken";
  * verifyJwt throw: callers already treat a throw as "invalid token", so that
  * fails closed.
  *
- * The secret is read per call, not at import. Route modules are imported (ESM
- * hoisting) before server.ts calls dotenv.config(), so a module-level read sees
- * the environment before .env is loaded.
+ * The secret is read per call, not at import. server.ts loads .env first
+ * (loadEnv.ts, #245), but scripts and tests import this module on their own
+ * and may set the variable after it loads.
  */
 
 /** Values that mean "nobody set this": the old fallback and the old example-file placeholder. */

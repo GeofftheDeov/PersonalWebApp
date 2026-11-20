@@ -502,10 +502,11 @@ router.put("/characters/:id", auth, async (req: any, res) => {
             if (!isUuid(String(fields.campaign))) return res.status(400).json({ error: "campaign must be a campaign id" });
             if (campaignIds && !campaignIds.includes(String(fields.campaign))) return res.status(403).json({ error: "Unauthorized" });
         }
-        const updated = await Character.findByIdAndUpdate(req.params.id, fields, { new: true });
-        if (!updated) return res.status(404).json({ error: "Character not found" });
+        await Character.findByIdAndUpdate(req.params.id, fields, { new: true });
         // The reply is the character as its page reads it (GET /characters/:id).
-        res.json(characterOut(await characterById(req.params.id), campaignIds));
+        const character = await characterById(req.params.id);
+        if (!character) return res.status(404).json({ error: "Character not found" });
+        res.json(characterOut(character, campaignIds));
     } catch (error: any) {
         res.status(500).json({ error: "Failed to update character", details: error.message });
     }

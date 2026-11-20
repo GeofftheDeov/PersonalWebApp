@@ -89,7 +89,7 @@ body.hs-app{margin:0;min-height:100vh;-webkit-font-smoothing:antialiased}
 .hs-signin{width:min(100%,440px);margin:clamp(8px,6vh,64px) auto 0;display:flex;flex-direction:column;gap:18px}
 .hs-signin-brand{align-self:center;text-align:center;text-decoration:none}
 .hs-signin-pad{padding:18px 18px 20px;display:flex;flex-direction:column;gap:14px}
-.hs-signin-pad h1{margin:0;font-family:var(--font-display);font-weight:400;font-size:26px;line-height:1.15;color:var(--text);text-wrap:balance}
+.hs-signin-pad h1{margin:0;font-family:var(--font-display);font-weight:400;font-size:26px;line-height:1.15;color:var(--text);text-wrap:balance;overflow-wrap:anywhere}
 .hs-signin-intro{margin:-8px 0 0;color:var(--muted);font-size:15px}
 .hs-signin-pad .hs-input{padding:10px 12px;font-size:16px}
 /* SignInForm's fieldset only disables the controls until the page hydrates; the form lays them out. */
@@ -107,6 +107,17 @@ body.hs-app{margin:0;min-height:100vh;-webkit-font-smoothing:antialiased}
 .hs-signin-google{min-height:44px;display:flex;justify-content:center}
 .hs-signin-pad .hs-alert{font-size:14px}
 @media (max-width:479px){.hs-signin-actions .hs-btn-amber{flex:1 1 100%;justify-content:center}}
+/* A panel can carry a banner across its top and a kicker over its heading (the invite page). */
+.hs-signin-banner{border-radius:var(--radius-sheet);overflow:hidden;border-bottom:1px solid var(--gold-line)}
+.hs-signin-kicker{margin:0 0 -8px;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--accent)}
+
+/* ---------- The campaign invite page (/join/:id; #232) ----------
+   The sign-in panel with the campaign's banner on top, its name, status and story, then Accept and Decline. */
+.hs-join-meta{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin-top:-4px;font-size:14px;color:var(--muted)}
+.hs-join-desc{margin:0;font-size:15px;line-height:1.5;color:var(--text);white-space:pre-line;overflow-wrap:anywhere}
+.hs-join-acts .hs-ghost{height:40px;font-size:16px;padding:0 18px}
+.hs-join-acts .hs-ghost:disabled{opacity:.6;cursor:default}
+@media (max-width:479px){.hs-join-acts .hs-ghost{flex:1 1 100%;justify-content:center}}
 
 /* ---------- Campaign banners (CampaignBanner) ----------
    4:1: the uploaded picture, or a dyed cloth with the campaign's initials stitched in gold. */

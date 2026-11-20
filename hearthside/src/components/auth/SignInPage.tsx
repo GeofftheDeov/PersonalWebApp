@@ -9,6 +9,10 @@ export interface SignInPageProps {
   title: string;
   /** A line under the heading. */
   intro?: ReactNode;
+  /** A small line above the heading (the invite page's "A summons for the party"). */
+  kicker?: ReactNode;
+  /** Across the top of the panel, above the heading (the invite page's banner). */
+  banner?: ReactNode;
   children: ReactNode;
 }
 
@@ -31,16 +35,18 @@ export function SignInForm({ onSubmit, children }: { onSubmit: (e: FormEvent) =>
  * A signing-in page (#219, spec #69): under the top bar, on the floor, with no
  * rail or Letters; the Hearthside name, then one gilded panel holding the
  * form. Login, signup, forgot and reset password, check email and verify
- * email all use it; so can the invite page (#232).
+ * email all use it, and so does the invite page (#232), with its banner.
  */
-export default function SignInPage({ title, intro, children }: SignInPageProps) {
+export default function SignInPage({ title, intro, kicker, banner, children }: SignInPageProps) {
   const titleId = useId();
   return (
     <div className="hs-shell-wrap">
       <main className="hs-signin">
         <Link href="/" className="hs-brand hs-signin-brand">Hearthside<small>The Party Gathers</small></Link>
         <GildedPanel as="section" className="hs-signin-panel" aria-labelledby={titleId}>
+          {banner && <div className="hs-signin-banner">{banner}</div>}
           <div className="hs-signin-pad">
+            {kicker && <p className="hs-signin-kicker">{kicker}</p>}
             <h1 id={titleId}>{title}</h1>
             {intro && <p className="hs-signin-intro">{intro}</p>}
             {children}

@@ -81,7 +81,12 @@ export const test = base.extend<Options & Fixtures, WorkerFixtures>({
     await use(async (person) => {
       const ctx = await request.newContext({
         baseURL: stack.backend,
-        extraHTTPHeaders: { authorization: `Bearer ${await bearerFor(stack.backend, person)}` },
+        extraHTTPHeaders: {
+          authorization: `Bearer ${await bearerFor(stack.backend, person)}`,
+          // A fresh connection per request: reusing an idle one raced the
+          // backend's 5s keep-alive timeout and failed tests with ECONNRESET.
+          connection: "close",
+        },
       });
       contexts.push(ctx);
       return ctx;

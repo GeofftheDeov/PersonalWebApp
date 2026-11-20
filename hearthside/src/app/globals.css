@@ -1043,3 +1043,119 @@ a.hs-cp-row:hover .hs-cp-chev{color:var(--accent)}
 .hs-alm-sheets + .hs-alm-due{margin-top:26px}
 .hs-alm-panel-h{margin:0;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--muted)}
 .hs-alm-due .hs-slips{font-size:14px;max-width:440px}
+
+/* ---------- Adventurers (#229; prototype/hearthside-characters, layout D "Gallery + road") ----------
+   The roster: portraits in gilded frames hung on the floor, a brass name plate screwed to each frame's foot and the
+   next session under it; the fallen hang in the Hall of Heroes below with a black ribbon. An adventurer's page: a
+   hero (the medallion, their name, the level seal), then their sheet on leather. Every portrait is the fallback (dyed
+   cloth with the initials stitched on) until art exists (#198), as a campaign with no banner shows its cloth. */
+.hs-adv-wait{padding:12px 0}
+.hs-adv-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+.hs-adv-head > div{min-width:0}
+.hs-app .hs-adv-new,.hs-app .hs-adv-edit{height:36px;font-size:15px;font-family:var(--font-label)}
+.hs-adv-frame,.hs-adv-medal{--hs-adv-gild:linear-gradient(135deg,var(--gold-hi) 0%,#b07c2c 22%,#f0cf7a 45%,#7c5318 68%,#e7c06a 88%,#a87228 100%)}
+/* A portrait, 3:4; a face (for medallions) is round. */
+.hs-adv-pt{position:relative;display:block;aspect-ratio:3/4;overflow:hidden;background:var(--leather);container-type:inline-size}
+.hs-adv-pt.is-face{aspect-ratio:1;border-radius:50%}
+.hs-adv-pt-none{position:absolute;inset:0;display:grid;place-items:center;
+  background:repeating-linear-gradient(45deg,rgba(0,0,0,.12) 0 1px,transparent 1px 5px),repeating-linear-gradient(-45deg,rgba(255,255,255,.035) 0 1px,transparent 1px 5px),
+    radial-gradient(120% 90% at 15% 100%,rgba(255,179,107,.2),transparent 55%),linear-gradient(160deg,#4a3324,#1c120b)}
+.hs-adv-pt-none::after{content:"";position:absolute;inset:5%;border:1px dashed rgba(246,221,150,.4);border-radius:2px}
+.hs-adv-pt.is-face .hs-adv-pt-none::after{inset:9%;border-radius:50%}
+.hs-adv-pt-none span{font-family:var(--font-display);font-size:30cqw;letter-spacing:.06em;color:var(--gold-hi);opacity:.85;text-shadow:0 1px 0 rgba(0,0,0,.6)}
+.hs-adv-pt.is-face .hs-adv-pt-none span{font-size:36cqw}
+/* The fallen lose their colour. */
+.is-fallen .hs-adv-pt-none,.hs-adv-frame.is-fallen .hs-adv-pt-none{filter:grayscale(1) brightness(.7)}
+/* A frame: the gilded panel's gold, a hairline inside. A medallion: the same gold, round. */
+.hs-adv-frame{position:relative;display:block;width:100%;border:3px solid transparent;border-radius:var(--radius-panel);overflow:hidden;
+  background:linear-gradient(var(--leather),var(--leather)) padding-box,var(--hs-adv-gild) border-box;box-shadow:var(--shadow-panel)}
+.hs-adv-frame::after{content:"";position:absolute;inset:4px;border:1px solid rgba(246,221,150,.45);border-radius:2px;pointer-events:none;z-index:3}
+.hs-adv-medal{position:relative;display:block;flex:none;border-radius:50%;overflow:hidden;border:3px solid transparent;
+  background:linear-gradient(var(--leather),var(--leather)) padding-box,var(--hs-adv-gild) border-box;box-shadow:0 3px 8px rgba(0,0,0,.6)}
+.hs-adv-medal.is-small{width:38px;border-width:2px}
+
+/* The roster: the wall of portraits, two across on a phone. */
+.hs-adv-wall{list-style:none;margin:0;padding:4px 0 0;display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:30px 22px}
+.hs-adv-wall > li{min-width:0;display:flex}
+.hs-adv-card{flex:1;display:flex;flex-direction:column;align-items:center;min-width:0;color:inherit;text-align:center;text-decoration:none}
+.hs-adv-card:hover .hs-adv-frame,.hs-adv-card:focus-visible .hs-adv-frame{box-shadow:var(--shadow-panel),0 0 0 2px rgba(246,221,150,.8),0 0 28px 6px rgba(255,179,107,.5)}
+.hs-adv-card:focus-visible{outline:0}
+/* The brass name plate, screwed to the frame's foot. */
+.hs-adv-plate{position:relative;z-index:4;margin-top:-14px;max-width:92%;min-width:66%;padding:6px 12px 7px;border-radius:2px;
+  background:linear-gradient(180deg,#f4d98e,#d7ab55 55%,#b88834);box-shadow:0 3px 6px rgba(0,0,0,.65),inset 0 1px 0 rgba(255,255,255,.4);color:var(--accent-ink)}
+.hs-adv-plate::before,.hs-adv-plate::after{content:"";position:absolute;top:50%;margin-top:-2.5px;width:5px;height:5px;border-radius:50%;background:#7c5318;box-shadow:inset 0 1px 0 rgba(255,255,255,.35)}
+.hs-adv-plate::before{left:4px}
+.hs-adv-plate::after{right:4px}
+.hs-adv-plate b{display:block;font-family:var(--font-story);font-weight:400;font-size:17px;line-height:1.15;text-shadow:0 1px 0 rgba(255,240,200,.5);overflow-wrap:anywhere}
+.hs-adv-plate small{display:block;font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.05em;color:#4a3112;overflow-wrap:anywhere}
+.hs-adv-under{margin-top:8px;font-size:13px;color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow);max-width:100%;overflow-wrap:anywhere}
+.hs-adv-under b{display:block;font-family:var(--font-label);font-weight:500;font-size:12.5px;letter-spacing:.05em;color:var(--accent)}
+/* The fallen: a black ribbon across the frame's corner. */
+.hs-adv-ribbon{position:absolute;z-index:4;top:16px;right:-34px;width:130px;transform:rotate(45deg);text-align:center;padding:3px 0;
+  background:#120c08;color:var(--muted);font:500 11.5px/1.2 var(--font-label);letter-spacing:.14em;box-shadow:0 2px 4px rgba(0,0,0,.6)}
+.hs-adv-hall > .hs-sec{margin-top:10px}
+/* No adventurers yet: an empty frame, and the first one's invitation. */
+.hs-adv-empty{display:grid;grid-template-columns:150px minmax(0,1fr);gap:22px;align-items:center;max-width:560px}
+.hs-adv-empty .hs-adv-frame{opacity:.9}
+.hs-adv-empty h2{margin:0 0 4px;font-family:var(--font-story);font-weight:400;font-size:24px;color:var(--on-wood-text);text-shadow:var(--on-wood-shadow)}
+.hs-adv-empty p{margin:0 0 12px;color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow);font-size:15px}
+@media (max-width:520px){
+  .hs-adv-wall{grid-template-columns:repeat(2,minmax(0,1fr));gap:26px 14px}
+  .hs-adv-plate{min-width:0;padding:5px 9px 6px}
+  .hs-adv-plate b{font-size:15.5px}
+  .hs-adv-empty{grid-template-columns:96px minmax(0,1fr);gap:14px}
+}
+
+/* An adventurer's page: the hero, then their sheet. */
+.hs-adv-hero{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:20px;align-items:center;padding:20px 22px}
+.hs-adv-hero .hs-adv-medal{width:150px}
+.hs-adv-hero-who{min-width:0}
+.hs-adv-hero h1{overflow-wrap:anywhere}
+.hs-page-head p.hs-adv-hero-k{font-family:var(--font-label);font-weight:500;letter-spacing:.05em;color:var(--accent);font-size:14.5px;overflow-wrap:anywhere}
+.hs-page-head p.hs-adv-hero-fell{font-family:var(--font-label);letter-spacing:.12em;font-size:13px;color:var(--muted)}
+.hs-adv-hero.is-fallen .hs-adv-medal{filter:grayscale(.6)}
+/* The level, as an amber seal. */
+.hs-adv-lvl{flex:none;width:58px;height:58px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+  background:radial-gradient(circle at 35% 30%,#f3c070,var(--accent) 45%,#a8661c);color:var(--accent-ink);
+  box-shadow:0 2px 6px rgba(0,0,0,.6),inset 0 0 0 2px rgba(255,230,170,.35)}
+.hs-adv-lvl small{font:500 10px/1 var(--font-label);letter-spacing:.12em}
+.hs-adv-lvl b{font:400 26px/1 var(--font-display)}
+.hs-adv-hero.is-fallen .hs-adv-lvl{filter:grayscale(.7) brightness(.8)}
+@media (max-width:620px){
+  .hs-adv-hero{grid-template-columns:auto minmax(0,1fr);gap:8px 14px;padding:16px}
+  .hs-adv-hero .hs-adv-medal{width:92px}
+  .hs-adv-hero .hs-adv-lvl{grid-column:1;grid-row:2;justify-self:center}
+  .hs-adv-hero-who{grid-column:2;grid-row:1 / span 2}
+}
+.hs-adv-sheet-sec{max-width:720px}
+.hs-adv-sheet{padding:6px 0}
+.hs-adv-dl{margin:0;display:flex;flex-direction:column}
+.hs-adv-dl > div{display:grid;grid-template-columns:minmax(90px,32%) minmax(0,1fr);gap:10px;padding:8px 14px;border-top:1px solid var(--gold-rule);align-items:baseline}
+.hs-adv-dl > div:first-child{border-top:0}
+.hs-adv-dl dt{font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.06em;color:var(--muted)}
+.hs-adv-dl dd{margin:0;font-size:14.5px;overflow-wrap:anywhere}
+.hs-adv-none{color:var(--muted);font-style:italic}
+.hs-adv-link{color:var(--accent);text-decoration:none}
+.hs-adv-link:hover{color:var(--gold-hi);text-decoration:underline}
+.hs-adv-panel-h{margin:0;padding:10px 14px 6px;border-top:1px solid var(--gold-rule);font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--muted)}
+/* Travels with: the party's other adventurers, each a medallion and a name. */
+.hs-adv-mates{list-style:none;margin:0;padding:4px 14px 12px;display:flex;flex-wrap:wrap;gap:10px 18px}
+.hs-adv-mates > li{min-width:0;max-width:100%}
+.hs-adv-mate{display:flex;align-items:center;gap:8px;min-width:0;color:inherit;text-decoration:none}
+.hs-adv-mate:hover b{color:var(--gold-hi)}
+.hs-adv-mate-text{min-width:0}
+.hs-adv-mate b{display:block;font-weight:500;font-size:14px;line-height:1.2;overflow-wrap:anywhere}
+.hs-adv-mate small{display:block;font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
+.hs-adv-empty-line{margin:0;padding:2px 14px 12px;font-size:14px;color:var(--muted)}
+.hs-adv-foot{display:flex;justify-content:flex-end;gap:10px;padding:10px 14px 8px;border-top:1px solid var(--gold-rule)}
+
+/* The dialog (New adventurer, Edit): the frame beside the name, then the rest of today's fields. */
+.hs-adv-form-top{display:grid;grid-template-columns:96px minmax(0,1fr);gap:14px;align-items:start}
+.hs-adv-form-top .hs-adv-frame{border-width:2px}
+.hs-adv-form-who{display:flex;flex-direction:column;gap:8px;min-width:0}
+.hs-adv-form-cls{display:grid;grid-template-columns:minmax(0,1fr) 88px;gap:12px}
+.hs-adv-seg{display:inline-flex;align-self:flex-start;gap:2px;padding:3px;border-radius:var(--radius);background:var(--surface);border:1px solid var(--line)}
+.hs-app .hs-adv-seg button{background:transparent;border:0;padding:5px 14px;border-radius:3px;cursor:pointer;color:var(--muted);font-family:var(--font-label);font-size:14px;font-weight:500;letter-spacing:.04em}
+.hs-adv-seg button:hover{color:var(--text)}
+.hs-adv-seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+@media (max-width:420px){.hs-adv-form-top{grid-template-columns:72px minmax(0,1fr);gap:12px}.hs-adv-form-cls{grid-template-columns:minmax(0,1fr) 72px}}

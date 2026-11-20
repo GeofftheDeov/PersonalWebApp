@@ -1043,6 +1043,23 @@ a.hs-cp-row:hover .hs-cp-chev{color:var(--accent)}
 .hs-alm-sheets + .hs-alm-due{margin-top:26px}
 .hs-alm-panel-h{margin:0;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--muted)}
 .hs-alm-due .hs-slips{font-size:14px;max-width:440px}
+/* A session's quests in the calendar (#252): a paper tag with how many are still open, moss once all are done. */
+.hs-alm-qm{position:relative;align-self:flex-start;max-width:100%;margin-top:3px;padding:1px 5px;border-radius:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  background:linear-gradient(170deg,var(--paper-hi),var(--paper-lo));color:var(--paper-ink);box-shadow:0 1px 3px rgba(0,0,0,.6);
+  font-family:var(--font-label);font-size:11px;font-weight:600;letter-spacing:.03em;line-height:1.35;text-shadow:none;transform:rotate(-1deg)}
+.hs-alm-qm.is-done{background:var(--moss);color:var(--paper-ink)}
+.hs-alm-ws .hs-alm-qm{margin-top:4px;font-size:11.5px}
+/* Played, a page at a time (#252): the range and the page size at the head, Previous and Next at the foot. */
+.hs-alm-pl-head{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;padding:10px 14px;border-bottom:1px solid var(--gold-rule)}
+.hs-alm-pl-range{margin:0 auto 0 0;min-width:0;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.06em;color:var(--muted);font-variant-numeric:tabular-nums}
+.hs-alm-pl-size{font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.06em;color:var(--muted)}
+.hs-alm-pl-select{height:30px;padding:0 6px;border:1px solid var(--gold-line);border-radius:var(--radius);background:var(--surface);color:var(--text);
+  font-family:var(--font-body);font-size:14px;color-scheme:dark;cursor:pointer}
+.hs-alm-pl-select:hover,.hs-alm-pl-select:focus-visible{border-color:var(--gold)}
+.hs-alm-pl-err{margin:10px 14px}
+.hs-alm-pager{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 14px;border-top:1px solid var(--gold-rule)}
+.hs-alm-pager-n{font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.06em;color:var(--muted)}
+.hs-alm-pager .hs-alm-nav:disabled{opacity:.45;cursor:default;border-color:var(--line);color:var(--muted)}
 
 /* ---------- Adventurers (#229; prototype/hearthside-characters, layout D "Gallery + road") ----------
    The roster: portraits in gilded frames hung on the floor, a brass name plate screwed to each frame's foot and the

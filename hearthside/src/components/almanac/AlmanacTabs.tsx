@@ -5,7 +5,7 @@ import { useRef, type KeyboardEvent } from 'react';
 export interface AlmanacTab<T extends string> {
   id: T;
   label: string;
-  count?: number;
+  count?: number | string;
 }
 
 /**

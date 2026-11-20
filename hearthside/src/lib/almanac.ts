@@ -4,6 +4,8 @@
  * React so they can be tested (test/almanac.test.ts). Today's data only:
  *
  *   GET /api/quests/almanac?start&end   my dated sessions in [start, end) (not cancelled), each with my quests on it
+ *   GET /api/quests/almanac?before&beforeId&limit
+ *                                       the same, a page at a time going back from a cursor, with `more` (#252, Played)
  *   GET /api/campaigns                  my campaigns, for their banners
  *
  * Days are the viewer's own (local time): a session belongs to every day
@@ -310,9 +312,42 @@ export function questsLine(quests: readonly Quest[]): string {
   return open ? `${open} open` : 'all done';
 }
 
-/** A day's label for its button: "Thursday, November 26, 1 session, 2 quests". */
+/** A day's label for its button: "Thursday, November 26, 1 session, 2 quests" (the quests still open that day, `openQuestsOn`). */
 export function dayButtonLabel(day: Date, sessions: number, quests: number): string {
   return [longDayName(day), sessions && plural(sessions, 'session'), quests && plural(quests, 'quest')].filter(Boolean).join(', ');
+}
+
+/**
+ * The quests on a session's sheet in the calendar: the ones with no due time
+ * or due on one of its own days. Every other quest is a slip on the day it's
+ * due (`questsDueOn`), so each quest has one place.
+ */
+export const sheetQuests = (s: AlmanacSession): Quest[] =>
+  s.quests.filter((q) => q.status !== 'cancelled' && (!q.dueAt || isOnDay(s, new Date(q.dueAt))));
+
+/** The mark on a session in the calendar's cells (#252): "2 quests" still open on its sheet, or done once they're all ticked. */
+export interface QuestMark {
+  open: number;
+  label: string;
+  done: boolean;
+}
+
+/** None on a cancelled session: it's outlined, its quests are moot. */
+export function questMark(s: AlmanacSession): QuestMark | null {
+  const qs = s.status === 'cancelled' ? [] : sheetQuests(s);
+  if (!qs.length) return null;
+  const open = qs.filter((q) => q.status === 'open').length;
+  return open ? { open, label: plural(open, 'quest'), done: false } : { open: 0, label: 'Quests done', done: true };
+}
+
+/**
+ * The quests still open on a day, for its button's name: the slips due that
+ * day and the ones on its sessions' sheets (the sessions' marks), so the name
+ * says what the cell shows.
+ */
+export function openQuestsOn(sessions: readonly AlmanacSession[], day: Date): number {
+  const slips = questsDueOn(sessions, day).filter((q) => q.status === 'open').length;
+  return sessionsOn(sessions, day).reduce((n, s) => n + (questMark(s)?.open ?? 0), slips);
 }
 
 // ── quests ──────────────────────────────────────────────────────────────────
@@ -363,4 +398,114 @@ export function mergeRange(known: readonly AlmanacSession[], r: Range, fresh: re
   const ids = new Set(fresh.map((s) => s.id));
   const inside = (s: AlmanacSession) => { const t = Date.parse(s.date); return t >= r.start.getTime() && t < r.end.getTime(); };
   return [...known.filter((s) => !ids.has(s.id) && !inside(s)), ...fresh];
+}
+
+/** Adds sessions read going back (`OlderPage`); a session read again replaces what was known of it. */
+export function mergeOlder(known: readonly AlmanacSession[], fresh: readonly AlmanacSession[]): AlmanacSession[] {
+  const ids = new Set(fresh.map((s) => s.id));
+  return [...known.filter((s) => !ids.has(s.id)), ...fresh];
+}
+
+// ── Played, a page at a time (#252) ─────────────────────────────────────────
+
+/**
+ * How far back Played has read, as the cursor of the next page back: every
+ * session at or after it has been read. The first read reaches its own start;
+ * each page back moves it to that page's last (oldest) session. Null once the
+ * API says there are no older sessions (`more: false`): that is the stopping
+ * rule, so paging reaches every played session and no further.
+ */
+export interface Reach {
+  before: string;
+  /** With a page's last session: sessions at the same instant are ordered by id. */
+  beforeId?: string;
+}
+
+/** Sessions per read going back. */
+export const OLDER_PAGE = 50;
+
+export const firstReach = (r: Range): Reach => ({ before: r.start.toISOString() });
+
+/** Has Played read back as far as this session? Ones further back (the calendar may have read them) wait their turn, so pages have no gaps. */
+export function reached(s: Pick<AlmanacSession, 'id' | 'date'>, reach: Reach | null): boolean {
+  if (!reach) return true;
+  const t = Date.parse(s.date), b = Date.parse(reach.before);
+  return t > b || (t === b && (reach.beforeId === undefined || s.id >= reach.beforeId));
+}
+
+export const olderPath = (reach: Reach, limit = OLDER_PAGE): string =>
+  `/api/quests/almanac?before=${encodeURIComponent(reach.before)}${reach.beforeId ? `&beforeId=${encodeURIComponent(reach.beforeId)}` : ''}&limit=${limit}`;
+
+/** A page back as the API sends it: latest first. */
+export interface OlderPage {
+  sessions: AlmanacSession[];
+  more: boolean;
+}
+
+/** Where Played has read back to after a page. */
+export function nextReach(reach: Reach, page: OlderPage): Reach | null {
+  if (!page.more) return null;
+  const last = page.sessions[page.sessions.length - 1];
+  return last ? { before: last.date, beforeId: last.id } : reach;
+}
+
+export const PAGE_SIZES = [10, 25, 50] as const;
+export const DEFAULT_PAGE_SIZE = 10;
+
+export interface PlayedPage {
+  rows: AlmanacSession[];
+  /** The page shown, from 0: the one asked for, or the last there is. */
+  page: number;
+  /** "11–20 of 34", "1–10 of 50+" while older ones may be left; '' with none. */
+  range: string;
+  hasPrev: boolean;
+  hasNext: boolean;
+  /** Not enough read yet to fill this page and know whether there's a next: read further back. */
+  short: boolean;
+}
+
+/**
+ * One page of Played (already reached, latest first). `more`: older sessions
+ * may still be unread. Asking past the end (fewer sessions than the page
+ * needs, all read) shows the last page.
+ */
+export function playedPage(played: readonly AlmanacSession[], page: number, size: number, more: boolean): PlayedPage {
+  const total = played.length;
+  const at = more ? page : Math.min(page, Math.max(0, Math.ceil(total / size) - 1));
+  const from = at * size;
+  const rows = played.slice(from, from + size);
+  const range = rows.length ? `${from + 1}–${from + rows.length} of ${total}${more ? '+' : ''}` : '';
+  return { rows, page: at, range, hasPrev: at > 0, hasNext: total > from + size, short: more && total <= from + size };
+}
+
+/** After a change of page size, the page that holds the first row shown. */
+export const pageAfterResize = (page: number, from: number, to: number): number => Math.floor((page * from) / to);
+
+export const isPageSize = (n: number): boolean => (PAGE_SIZES as readonly number[]).includes(n);
+
+// ── the view, remembered (#252) ─────────────────────────────────────────────
+
+export type AlmanacView = 'list' | 'calendar';
+
+export const VIEW_KEY = 'hearthside.almanac.view';
+
+/** localStorage, or a stand-in for the tests. */
+export interface ViewStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
+/** The view used last; the list if none was kept or storage is refused. */
+export function storedView(storage: ViewStorage | null): AlmanacView {
+  try {
+    return storage?.getItem(VIEW_KEY) === 'calendar' ? 'calendar' : 'list';
+  } catch {
+    return 'list';
+  }
+}
+
+export function keepView(storage: ViewStorage | null, view: AlmanacView): void {
+  try {
+    storage?.setItem(VIEW_KEY, view);
+  } catch { /* no storage: the Almanac opens on the list next time */ }
 }

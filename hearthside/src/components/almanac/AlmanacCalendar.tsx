@@ -5,8 +5,8 @@ import GildedPanel from '@/components/design-system/GildedPanel';
 import QuestSlips from '@/components/quests/QuestSlips';
 import {
   addDays, addMonths, dayButtonLabel, dayKey, firstDay, firstOfMonth, fromDayKey, longDayName, mondayOf, monthDays,
-  monthTitle, phaseOf, placeLine, questsDueOn, rangeOf, sameDay, sessionsOn, startOfDay, timeOnDay, weekDays,
-  weekTitle, weekdayShort,
+  monthTitle, openQuestsOn, phaseOf, placeLine, questMark, questsDueOn, rangeOf, sameDay, sessionsOn, sheetQuests,
+  startOfDay, timeOnDay, weekDays, weekTitle, weekdayShort,
   type AlmanacSession, type Range,
 } from '@/lib/almanac';
 import type { CampaignSummary } from '@/lib/campaigns';
@@ -28,6 +28,18 @@ const phaseClass = (s: AlmanacSession, now: Date) => `is-${phaseOf(s, now)}`;
 
 type Banners = ReadonlyMap<string, CampaignSummary>;
 
+/**
+ * The quests on a session's sheet, as a mark on it in the calendar (#252):
+ * "2 quests" still open, a tick once they're all done, nothing with none.
+ */
+function QuestMarkOn({ s }: { s: AlmanacSession }) {
+  const mark = questMark(s);
+  if (!mark) return null;
+  return (
+    <span className={mark.done ? 'hs-alm-qm is-done' : 'hs-alm-qm'}>{mark.label}</span>
+  );
+}
+
 /** A session in a month cell: its banner behind, in a gilded panel's gold frame; the time and title over a dark fade. */
 function MonthSession({ s, day, now, banners }: { s: AlmanacSession; day: Date; now: Date; banners: Banners }) {
   const off = phaseOf(s, now) === 'cancelled';
@@ -37,6 +49,7 @@ function MonthSession({ s, day, now, banners }: { s: AlmanacSession; day: Date; 
       <span className="hs-alm-ms-in">
         <b>{off ? 'Cancelled' : timeOnDay(s, day, false)}</b>
         <span className="hs-alm-ms-t">{titleOf(s)}</span>
+        <QuestMarkOn s={s} />
       </span>
     </div>
   );
@@ -52,6 +65,7 @@ function WeekSession({ s, day, now, banners }: { s: AlmanacSession; day: Date; n
         <span className="hs-alm-ws-t">{timeOnDay(s, day, true)}</span>
         <b>{titleOf(s)}</b>
         <small>{off ? 'Cancelled' : placeLine(s)}</small>
+        <QuestMarkOn s={s} />
       </span>
     </div>
   );
@@ -86,9 +100,11 @@ function DayDetail({ day, sessions, slips }: { day: Date; sessions: readonly Alm
  * Month and Week keeps the chosen day. Sessions outrank quests: each carries
  * its campaign's banner in a gold frame (greyed once played, outlined if
  * cancelled). Quests sit on the day they're due as paper slips (#227's),
- * ticked off there, unless that's a day of their own session, when they're
- * on its sheet. Under 520px the month's cells show marks instead; under
- * 560px Week is a list of days.
+ * ticked off there, unless that's a day of their own session (or they have no
+ * due time), when they're on its sheet and the session carries a mark with
+ * how many are still open (#252). A day's button counts the quests still open
+ * on it, slips and marks alike. Under 520px the month's cells show marks
+ * instead; under 560px Week is a list of days.
  */
 export default function AlmanacCalendar({ sessions, banners, slips, ensure }: {
   /** Already filtered. */
@@ -176,7 +192,7 @@ export default function AlmanacCalendar({ sessions, banners, slips, ensure }: {
                   return (
                     // The cell picks its day on a click; the day's number is the way in from the keyboard.
                     <div key={dayKey(d)} className={cls} onClick={() => pick(d)}>
-                      <button type="button" className="hs-alm-num" aria-label={dayButtonLabel(d, ss.length, qs.length)} aria-pressed={sel}>
+                      <button type="button" className="hs-alm-num" aria-label={dayButtonLabel(d, ss.length, openQuestsOn(sessions, d))} aria-pressed={sel}>
                         {d.getDate()}
                       </button>
                       <div className="hs-alm-items">
@@ -188,7 +204,9 @@ export default function AlmanacCalendar({ sessions, banners, slips, ensure }: {
                       </div>
                       <div className="hs-alm-dots" aria-hidden="true">
                         {ss.map((s) => <i key={s.id} className={phaseOf(s, now) === 'cancelled' ? 'is-off' : undefined} />)}
-                        {qs.map((q) => <i key={q.id} className={q.status === 'done' ? 'q is-done' : 'q'} />)}
+                        {[...ss.flatMap((s) => (questMark(s) ? sheetQuests(s) : [])), ...qs].map((q) => (
+                          <i key={q.id} className={q.status === 'done' ? 'q is-done' : 'q'} />
+                        ))}
                       </div>
                     </div>
                   );
@@ -204,7 +222,7 @@ export default function AlmanacCalendar({ sessions, banners, slips, ensure }: {
                 const cls = ['hs-alm-wday', sameDay(d, today) && 'is-today', sel && 'is-sel'].filter(Boolean).join(' ');
                 return (
                   <li key={dayKey(d)} className={cls} onClick={() => pick(d)}>
-                    <button type="button" className="hs-alm-wdh" aria-label={dayButtonLabel(d, ss.length, qs.length)} aria-pressed={sel}>
+                    <button type="button" className="hs-alm-wdh" aria-label={dayButtonLabel(d, ss.length, openQuestsOn(sessions, d))} aria-pressed={sel}>
                       <span>{weekdayShort(d)}</span><b>{d.getDate()}</b>
                     </button>
                     <div className="hs-alm-witems">

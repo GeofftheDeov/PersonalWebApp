@@ -10,7 +10,9 @@ import {
   NO_FILTER, addDays, almanacLists, applyFilter, campaignChoices, chronicleWeeks, covered, dayKey, filterCounts,
   firstDay, headLine, isFiltered, mergeRange, monthDays, placeLine, questsDueOn, sealOf, sessionDays, sessionsOn,
   timeOnDay, toggleCampaign, weekLabel, weekTitle, whenLine, withRail,
-  type AlmanacSession,
+  DEFAULT_PAGE_SIZE, PAGE_SIZES, VIEW_KEY, dayButtonLabel, firstRange, firstReach, keepView, mergeOlder, nextReach,
+  olderPath, openQuestsOn, pageAfterResize, playedPage, questMark, reached, sheetQuests, storedView,
+  type AlmanacSession, type ViewStorage,
 } from "../src/lib/almanac";
 import type { Quest } from "../src/lib/quests";
 
@@ -149,4 +151,97 @@ test("reads: a range read is kept, and a newer read of it replaces what was know
   // `played` (in the range) is gone; `nextWeek` moved out and is replaced; `later` (outside) stays.
   assert.deepEqual(merged.map((s) => s.id).sort(), ["l", "n", "t"]);
   assert.equal(merged.find((s) => s.id === "n")?.date, moved.date);
+});
+
+// ── #252 ────────────────────────────────────────────────────────────────────
+
+test("a session's mark counts its open quests on its sheet, shows done once they're ticked, and the day's name agrees", () => {
+  const day = new Date(2026, 10, 24);
+  const onItsDay = quest("a", "n", at(2026, 11, 24, 17));
+  const undated = quest("b", "n", null);
+  const early = quest("c", "n", at(2026, 11, 22, 20)); // a slip on the 22nd, not on the sheet
+  const s = { ...nextWeek, quests: [onItsDay, undated, early] };
+  assert.deepEqual(sheetQuests(s).map((q) => q.id), ["a", "b"]);
+  assert.deepEqual(questMark(s), { open: 2, label: "2 quests", done: false });
+  assert.equal(openQuestsOn([s], day), 2);
+  assert.equal(dayButtonLabel(day, 1, openQuestsOn([s], day)), "Tuesday, November 24, 1 session, 2 quests");
+  // The slip counts on its own day instead.
+  assert.equal(openQuestsOn([s], new Date(2026, 10, 22)), 1);
+
+  const oneDone = { ...s, quests: [{ ...onItsDay, status: "done" as const }, undated, early] };
+  assert.deepEqual(questMark(oneDone), { open: 1, label: "1 quest", done: false });
+  assert.equal(openQuestsOn([oneDone], day), 1);
+  const allDone = { ...s, quests: [{ ...onItsDay, status: "done" as const }, { ...undated, status: "done" as const }, early] };
+  assert.deepEqual(questMark(allDone), { open: 0, label: "Quests done", done: true });
+  assert.equal(dayButtonLabel(day, 1, openQuestsOn([allDone], day)), "Tuesday, November 24, 1 session");
+
+  assert.equal(questMark(nextWeek), null, "no quests: no mark");
+  assert.equal(questMark({ ...s, status: "cancelled" }), null, "a cancelled session carries none");
+  // A ticked slip leaves the day's count too.
+  const slipDone = { ...s, quests: [{ ...early, status: "done" as const }] };
+  assert.equal(openQuestsOn([slipDone], new Date(2026, 10, 22)), 0);
+});
+
+test("Played reads back from the first read's start, a page at a time, until the API says there are no more", () => {
+  const reach = firstReach(firstRange(NOW));
+  assert.equal(reach.before, new Date(2026, 4, 21).toISOString());
+  assert.equal(olderPath(reach), `/api/quests/almanac?before=${encodeURIComponent(reach.before)}&limit=50`);
+  const a = session("a", at(2025, 3, 1, 19));
+  const b = session("b", at(2025, 2, 1, 19));
+  const next = nextReach(reach, { sessions: [a, b], more: true });
+  assert.deepEqual(next, { before: b.date, beforeId: "b" });
+  assert.equal(olderPath(next!, 10), `/api/quests/almanac?before=${encodeURIComponent(b.date)}&beforeId=b&limit=10`);
+  assert.equal(nextReach(next!, { sessions: [], more: false }), null);
+  assert.deepEqual(nextReach(reach, { sessions: [], more: true }), reach, "an odd empty page that says more: try again from the same place");
+
+  // Reached: everything from the cursor on; at its instant, ids from its own on (the API's order).
+  assert.equal(reached(played, reach), true);
+  assert.equal(reached(a, reach), false);
+  assert.equal(reached(b, next), true);
+  assert.equal(reached({ id: "c", date: b.date }, next), true);
+  assert.equal(reached({ id: "a", date: b.date }, next), false);
+  assert.equal(reached(session("z", at(2020, 1, 1)), null), true, "all read");
+
+  const merged = mergeOlder([played, { ...a, title: "old" }], [a, b]);
+  assert.deepEqual(merged.map((s) => [s.id, s.title]), [["p", "Session p"], ["a", "Session a"], ["b", "Session b"]]);
+});
+
+test("Played pages: one page at the size chosen, the range shown, and whether to read further back", () => {
+  assert.deepEqual([...PAGE_SIZES], [10, 25, 50]);
+  assert.equal(DEFAULT_PAGE_SIZE, 10);
+  const list = Array.from({ length: 23 }, (_, i) => session(`s${i}`, at(2026, 10, 30 - i, 19)));
+
+  const first = playedPage(list, 0, 10, false);
+  assert.deepEqual([first.rows.length, first.range, first.hasPrev, first.hasNext, first.short], [10, "1–10 of 23", false, true, false]);
+  const last = playedPage(list, 2, 10, false);
+  assert.deepEqual([last.rows.map((s) => s.id), last.range, last.hasNext], [["s20", "s21", "s22"], "21–23 of 23", false]);
+  assert.equal(playedPage(list, 9, 10, false).page, 2, "past the end: the last page");
+  assert.equal(playedPage(list, 0, 25, false).range, "1–23 of 23");
+  assert.equal(playedPage([], 0, 10, false).range, "");
+
+  // More may be left: "+", and a page that can't be filled (or can't tell if there's a next) asks for more.
+  const more = playedPage(list, 1, 10, true);
+  assert.deepEqual([more.range, more.hasNext, more.short], ["11–20 of 23+", true, false]);
+  assert.deepEqual([playedPage(list, 2, 10, true).short, playedPage(list.slice(0, 20), 1, 10, true).short], [true, true]);
+  assert.equal(playedPage(list, 4, 10, true).page, 4, "while more may come, the page asked for stays");
+
+  // A new size keeps the first row shown on the page.
+  assert.equal(pageAfterResize(2, 10, 25), 0);
+  assert.equal(pageAfterResize(3, 10, 25), 1);
+  assert.equal(pageAfterResize(1, 25, 10), 2);
+});
+
+test("the view is remembered, and the list opens when storage has nothing or refuses", () => {
+  const kept = new Map<string, string>();
+  const storage: ViewStorage = { getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => { kept.set(k, v); } };
+  assert.equal(storedView(storage), "list");
+  keepView(storage, "calendar");
+  assert.equal(kept.get(VIEW_KEY), "calendar");
+  assert.equal(storedView(storage), "calendar");
+  kept.set(VIEW_KEY, "nonsense");
+  assert.equal(storedView(storage), "list");
+  const refusing: ViewStorage = { getItem: () => { throw new Error("denied"); }, setItem: () => { throw new Error("denied"); } };
+  assert.equal(storedView(refusing), "list");
+  assert.doesNotThrow(() => keepView(refusing, "calendar"));
+  assert.equal(storedView(null), "list");
 });

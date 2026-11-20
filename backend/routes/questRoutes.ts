@@ -7,7 +7,7 @@ import { subscribeQuestSchedule } from "../planning/questReminders.js";
  * Quests (#90, part of #57). Thin wrappers over planning/quests.ts:
  *
  *   GET   /api/quests/mine                 my quests across sessions   ?scope=upcoming (default; the Quest Log) | all
- *   GET   /api/quests/almanac              my dated sessions in range, each with my quests on it   ?start&end
+ *   GET   /api/quests/almanac              my dated sessions in range, each with my quests on it   ?start&end, or a page back in time ?before[&beforeId][&limit] (#252)
  *   GET   /api/quests/sessions/:sessionId  a session's quests, the party, and whether I'm its GM
  *   POST  /api/quests/sessions/:sessionId  GM: add a custom quest   { title, assigneeId, notes?, dueAt? }
  *   PATCH /api/quests/:questId             GM: edit or reassign     { title?, notes?, dueAt?, assigneeId? }

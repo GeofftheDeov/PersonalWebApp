@@ -260,6 +260,39 @@ async function main() {
         check("someone outside the party sees none of it",
             !((await call("GET", `/almanac${range}`, "outsider")).json?.sessions ?? []).some((s: any) => s.id === s1));
         check("a range that isn't dates is a 400", (await call("GET", `/almanac?start=nope&end=nope`, "p1")).status === 400);
+
+        // ── the Almanac, a page at a time going back (#252, Played) ─────────
+        const old1 = await session(ashen, "Session 3", { date: at(-400 * DAY) });
+        // Two at the same instant, so a page can end between them.
+        const old2 = await session(ashen, "Session 2a", { date: at(-500 * DAY) });
+        const old3 = await session(tides, "Tides 1", { date: at(-500 * DAY) });
+        await session(ashen, "Session 2b", { date: at(-450 * DAY), status: "cancelled" });
+        const old4 = await session(ashen, "Session 1", { date: at(-600 * DAY) });
+        const oldQuest = await pool.query(
+            `INSERT INTO session_tasks (session_id, kind, title, assignee_id, status) VALUES ($1, 'custom', 'Bring the map', $2, 'done') RETURNING id`,
+            [old4, who.p1.id]);
+        const back = (qs: string, as = "p1") => call("GET", `/almanac?${qs}`, as);
+        const before = `before=${encodeURIComponent(at(-7 * DAY).toISOString())}`;
+        const [hiTie, loTie] = [old2, old3].sort().reverse();
+        const page1 = await back(`${before}&limit=2`);
+        check("a page back lists the latest sessions before the cursor, latest first, and says there are more",
+            page1.status === 200 && page1.json.sessions.map((s: any) => s.id).join() === [old1, hiTie].join() && page1.json.more === true, page1.json);
+        const last = page1.json.sessions.at(-1);
+        const page2 = await back(`before=${encodeURIComponent(last.date)}&beforeId=${last.id}&limit=2`);
+        check("the next page starts after the last one's session, even at the same instant, and is the end",
+            page2.status === 200 && page2.json.sessions.map((s: any) => s.id).join() === [loTie, old4].join() && page2.json.more === false, page2.json);
+        check("its sessions carry my quests, like a range's",
+            page2.json.sessions[1]?.quests?.map((q: any) => `${q.id}:${q.status}`).join() === `${oldQuest.rows[0].id}:done`, page2.json);
+        const whole = await back(before);
+        check("by default a page holds up to 50; cancelled ones are left out",
+            whole.status === 200 && whole.json.sessions.length === 4 && whole.json.more === false, whole.json);
+        check("someone outside the party gets an empty page", (await back(before, "outsider")).json?.sessions?.length === 0);
+        check("before with start and end is a 400",
+            (await back(`${before}&start=${encodeURIComponent(at(0).toISOString())}&end=${encodeURIComponent(at(DAY).toISOString())}`)).status === 400);
+        check("a limit out of 1-200 is a 400",
+            (await back(`${before}&limit=0`)).status === 400 && (await back(`${before}&limit=201`)).status === 400 && (await back(`${before}&limit=x`)).status === 400);
+        check("a beforeId that isn't a session id is a 400", (await back(`${before}&beforeId=nope`)).status === 400);
+        check("a before that isn't a date is a 400", (await back(`before=nope`)).status === 400);
     } finally {
         const ids = Object.values(who).map((p) => p.id);
         if (campaigns.length) await pool.query(`DELETE FROM campaigns WHERE id = ANY($1)`, [campaigns]);

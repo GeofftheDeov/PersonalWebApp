@@ -3,9 +3,8 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { ArrowLeft, ExternalLink, MessageSquare, Send, WifiOff } from 'lucide-react';
 import { messageWhen } from '@gtd/shared/letters';
-import { MessageBody, MESSAGE_BODY_TW } from '@gtd/shared/letters/react';
 import { AttachButton, DraftAttachments, MessageAttachments } from '@gtd/shared/topbar';
-import { letters, useAttachmentDraft, useThread, useThreadScroll, useTyping, type ThreadEntry, type ThreadSummary } from '@/lib/letters';
+import { letters, MESSAGE_BODY_TW, MessageBody, useAttachmentDraft, useThread, useThreadScroll, useTyping, type ThreadEntry, type ThreadSummary } from '@/lib/letters';
 import { campaignHref } from '@/lib/hearthside';
 import { useSession } from '@/lib/session';
 

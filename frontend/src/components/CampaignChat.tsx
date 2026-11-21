@@ -4,9 +4,8 @@ import { useRef, useState } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { MessageSquare, Send, WifiOff, Bold, Italic, Code, List, ListOrdered } from 'lucide-react';
-import { MessageBody, MESSAGE_BODY_TW } from '@gtd/shared/letters/react';
 import { AttachButton, DraftAttachments, MessageAttachments } from '@gtd/shared/topbar';
-import { campaignThreadKey, useAttachmentDraft, usePresence, useThread, useThreadScroll, useTyping } from '@/lib/letters';
+import { campaignThreadKey, MESSAGE_BODY_TW, MessageBody, useAttachmentDraft, usePresence, useThread, useThreadScroll, useTyping } from '@/lib/letters';
 import { useSession } from '@/lib/session';
 
 /** Older messages stored the sender's email as the name — show the handle-ish local part instead. */

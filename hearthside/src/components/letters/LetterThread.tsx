@@ -2,8 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ATTACHMENT_ACCEPT, formatBytes, isImageType } from '@gtd/shared/letters';
-import { MessageBody } from '@gtd/shared/letters/react';
-import { letters, useAttachmentDraft, useHoldPresence, useThread, useThreadScroll, useTyping } from '@/lib/letters';
+import { letters, MessageBody, useAttachmentDraft, useHoldPresence, useThread, useThreadScroll, useTyping } from '@/lib/letters';
 import { messageWhen, senderLabel } from '@/lib/lettersFormat';
 import { useSession } from '@/lib/session';
 import type { ThreadEntry } from '@gtd/shared/letters';

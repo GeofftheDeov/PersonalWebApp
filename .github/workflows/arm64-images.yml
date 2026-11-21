@@ -1,0 +1,70 @@
+name: arm64 images
+# Builds the three prod images (backend, portfolio, Hearthside) for arm64 on
+# GitHub's arm64 runners, as the prod deploy does, without pushing them.
+# The dev deploy builds amd64, so a green dev deploy says nothing about the
+# arm64 build prod needs; this check does, before the PR merges.
+#
+# Each build reads the prod deploy's buildx cache scope but writes no cache,
+# so it neither slows nor changes the deploy's builds. The build args are
+# placeholders: the check proves the images build, not what they point at.
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'hearthside/**'
+      - 'packages/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.dockerignore'
+      - '.github/workflows/arm64-images.yml'
+      - '.github/workflows/backend-aws-workflow.yml'
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  build:
+    name: Build ${{ matrix.name }} image (arm64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: backend
+            context: backend
+            dockerfile: backend/Dockerfile
+            scope: backend
+            args: ''
+          - name: portfolio
+            context: .
+            dockerfile: frontend/Dockerfile
+            scope: frontend
+            args: >-
+              --build-arg NEXT_PUBLIC_API_URL=https://api.example.test
+              --build-arg NEXT_PUBLIC_HEARTHSIDE_URL=
+          - name: Hearthside
+            context: .
+            dockerfile: hearthside/Dockerfile
+            scope: hearthside
+            args: >-
+              --build-arg NEXT_PUBLIC_PORTFOLIO_URL=https://portfolio.example.test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build
+        run: |
+          docker buildx build --platform linux/arm64 \
+            -f ${{ matrix.dockerfile }} \
+            --cache-from type=gha,scope=${{ matrix.scope }} \
+            --provenance=false \
+            ${{ matrix.args }} \
+            ${{ matrix.context }}

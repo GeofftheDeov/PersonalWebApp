@@ -3,9 +3,8 @@
 import { useRef, useState } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { MessageSquare, Send, WifiOff, Bold, Italic, Code, List, ListOrdered } from 'lucide-react';
+import { MessageBody, MESSAGE_BODY_TW } from '@gtd/shared/letters/react';
 import { AttachButton, DraftAttachments, MessageAttachments } from '@gtd/shared/topbar';
 import { campaignThreadKey, useAttachmentDraft, usePresence, useThread, useThreadScroll, useTyping } from '@/lib/letters';
 import { useSession } from '@/lib/session';
@@ -171,24 +170,7 @@ export default function CampaignChat({ campaignId }: { campaignId: string }) {
                                             {m.state === 'sending' ? 'SENDING…' : fmtTime(m.createdAt)}
                                         </span>
                                     </div>
-                                    <div className="text-sm break-words">
-                                        <ReactMarkdown
-                                            remarkPlugins={[remarkGfm]}
-                                            components={{
-                                                p: ({ children }) => <p className="mb-1 last:mb-0 leading-snug">{children}</p>,
-                                                strong: ({ children }) => <strong className="font-bold">{children}</strong>,
-                                                em: ({ children }) => <em className="italic">{children}</em>,
-                                                code: ({ inline, children }: any) => inline
-                                                    ? <code className={`px-1 py-0.5 rounded text-xs font-mono border ${mine ? 'bg-teal-600 border-teal-400' : 'bg-zinc-200 dark:bg-zinc-700 border-zinc-300 dark:border-zinc-600'}`}>{children}</code>
-                                                    : <code className={`block p-2 my-1 rounded text-xs font-mono whitespace-pre-wrap border ${mine ? 'bg-teal-600 border-teal-400' : 'bg-zinc-200 dark:bg-zinc-700 border-zinc-300 dark:border-zinc-600'}`}>{children}</code>,
-                                                pre: ({ children }) => <>{children}</>,
-                                                ul: ({ children }) => <ul className="list-disc list-inside my-1 space-y-0.5">{children}</ul>,
-                                                ol: ({ children }) => <ol className="list-decimal list-inside my-1 space-y-0.5">{children}</ol>,
-                                                li: ({ children }) => <li className="leading-snug">{children}</li>,
-                                                blockquote: ({ children }) => <blockquote className={`border-l-2 pl-2 my-1 italic opacity-80 ${mine ? 'border-teal-300' : 'border-zinc-400 dark:border-zinc-500'}`}>{children}</blockquote>,
-                                            }}
-                                        >{m.body}</ReactMarkdown>
-                                    </div>
+                                    {m.body && <MessageBody body={m.body} className={MESSAGE_BODY_TW} />}
                                     <MessageAttachments attachments={m.attachments} files={m.state === 'sent' ? undefined : m.files} />
                                     {failed && (
                                         <div className="mt-1 flex items-center gap-2 font-permanent text-[10px] uppercase">

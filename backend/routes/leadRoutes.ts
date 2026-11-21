@@ -1,7 +1,6 @@
 import express from "express";
 const router = express.Router();
 import Account from "../models/Account.js";
-import SfLead from "../models/SfLead.js";
 import CampaignInvite from "../models/CampaignInvite.js";
 
 import bcrypt from "bcryptjs";
@@ -23,8 +22,10 @@ import { setSignupCookie } from "../utils/signupCookie.js";
  * the CRM" (§2.8) — and the nightly outbox drain creates the Salesforce Lead and
  * writes the id back. Nobody's signup waits on Salesforce being reachable.
  *
- * The listing handlers below still read the sf_leads landing table, which is
- * what they were always for.
+ * Signup is the only route here. GET / and GET /:id used to list the sf_leads
+ * landing table with no login, whole rows and all, secret columns included
+ * (#262). Nothing called them, and admins browse sf_leads through /db, so they
+ * are gone rather than gated.
  */
 // Create a new lead
 router.post("/", async (req, res) => {
@@ -108,31 +109,6 @@ router.post("/", async (req, res) => {
             message: error.message,
             stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
-    }
-});
-
-// Get all leads
-router.get("/", async (req, res) => {
-    try {
-        const leads = await SfLead.find().sort({ createdAt: -1 });
-        res.json(leads);
-    } catch (error: any) {
-        console.error("Error fetching leads:", error);
-        res.status(500).json({ error: "Failed to fetch leads", details: error.message });
-    }
-});
-
-// Get a specific lead
-router.get("/:id", async (req, res) => {
-    try {
-        const lead = await SfLead.findById(req.params.id);
-        if (!lead) {
-            return res.status(404).json({ error: "Lead not found" });
-        }
-        res.json(lead);
-    } catch (error: any) {
-        console.error("Error fetching lead:", error);
-        res.status(500).json({ error: "Failed to fetch lead", details: error.message });
     }
 });
 

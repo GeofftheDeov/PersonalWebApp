@@ -30,9 +30,13 @@ This is the backend service for the Personal Web App, built with Node.js and Exp
 
 - `GET /stats`: Retrieve database status and statistics.
 
-### Salesforce Routes (`/api/accounts`, `/api/leads`)
+### Salesforce Routes (`/api/accounts`)
 
 - `POST /sync`: Synchronize data with Salesforce.
+
+### Signup (`/api/leads`)
+
+- `POST /`: Create an account from the create-account form. Public; it is the only route here.
 
 ## Scripts
 

@@ -5,6 +5,8 @@
    keep separate CSS imports in order (in development it put tokens.css last). */
 @import "../design-system/tokens.css";
 @import "../design-system/components.css";
+/* The fonts, committed with the app: their @font-face rules and the --hs-font-* variables. */
+@import "../fonts/faces.css";
 
 /* Tailwind for the top bar. With preflight off, `base` is only Tailwind's own --tw-* defaults, which its
    utilities read; the utilities are all scoped under .hs-topbar. */
@@ -16,7 +18,7 @@
 body.hs-app{margin:0;min-height:100vh;-webkit-font-smoothing:antialiased}
 .hs-app{
   color-scheme:dark;
-  /* The design system's faces, self-hosted (src/app/fonts.ts), ahead of the names tokens.css gives. */
+  /* The design system's faces, self-hosted (src/fonts/faces.css), ahead of the names tokens.css gives. */
   --font-display:var(--hs-font-fell-sc),var(--hs-font-fell),"IM Fell English SC","IM Fell English",Georgia,serif;
   --font-story:var(--hs-font-fell),"IM Fell English",Georgia,serif;
   --font-body:var(--hs-font-alegreya),"Alegreya Sans",system-ui,sans-serif;

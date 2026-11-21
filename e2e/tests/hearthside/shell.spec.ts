@@ -19,6 +19,27 @@ test("Hearthside renders its shell under the top bar", async ({ page }) => {
   await expect(page.getByRole("main").getByRole("heading", { level: 1 })).toHaveText(/^Good (morning|afternoon|evening), Tobin$/);
 });
 
+// The fonts are committed with the app (src/fonts), not fetched from Google
+// Fonts when it builds: every face loads, from Hearthside's own host.
+test("every font loads, from Hearthside itself", async ({ page }) => {
+  const fontHosts = new Set<string>();
+  page.on("request", (r) => { if (r.resourceType() === "font") fontHosts.add(new URL(r.url()).host); });
+  await page.goto("/");
+  await expect(page.getByRole("main").getByRole("heading", { level: 1 })).toBeVisible();
+
+  const families = [
+    "Hearthside IM Fell English SC", "Hearthside IM Fell English", "Hearthside Alegreya Sans SC",
+    "Hearthside Alegreya Sans", "Hearthside Inter", "Hearthside Permanent Marker",
+  ];
+  // Loads each family's Latin face (bold for the small caps, which has no 400) and reports how many loaded.
+  const loaded = await page.evaluate(async (names) => Promise.all(names.map(async (name) => {
+    const faces = await document.fonts.load(`${name.endsWith("Sans SC") ? 700 : 400} 16px "${name}"`, "Aa");
+    return [name, faces.filter((f) => f.status === "loaded").length] as const;
+  })), families);
+  for (const [name, count] of loaded) expect(count, `${name} loads`).toBeGreaterThan(0);
+  expect([...fontHosts]).toEqual([new URL(page.url()).host]);
+});
+
 test.describe("at 375px", () => {
   test.use({ viewport: { width: 375, height: 812 } });
 

@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 // The design system's stylesheets come in through this one, in order.
 import './globals.css';
-import { fontVariables } from './fonts';
 import Floor from '@/components/design-system/Floor';
 import TopBarMount from '@/components/TopBarMount';
 import { LettersProvider } from '@/components/letters/LettersProvider';
@@ -27,7 +26,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className={`hs-app ${fontVariables}`}>
+      <body className="hs-app">
         <Floor />
         <LettersProvider>
           <TopBarMount />

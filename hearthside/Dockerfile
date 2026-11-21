@@ -45,7 +45,7 @@ ARG NEXT_PUBLIC_GOOGLE_CLIENT_ID
 ENV NEXT_PUBLIC_GOOGLE_CLIENT_ID=$NEXT_PUBLIC_GOOGLE_CLIENT_ID
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY . .
-# next/font downloads the fonts here, so the build needs the network; the
+# The fonts are in the repo (src/fonts), so the build fetches nothing; the
 # running app serves them itself.
 RUN npm run build --workspace hearthside
 

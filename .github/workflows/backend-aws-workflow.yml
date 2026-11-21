@@ -226,14 +226,20 @@ jobs:
             --no-cli-pager
         fi
 
-  # The three builds run at the same time, each on its own runner under QEMU,
-  # with its own buildx cache scope. Each uses the "production" environment,
+  # The three builds run at the same time, each on its own arm64 runner with
+  # its own buildx cache scope. Each uses the "production" environment,
   # so GOOGLE_CLIENT_ID and NEXT_PUBLIC_API_URL are the same environment
   # secrets as before the split (the repo has its own GOOGLE_CLIENT_ID too).
+  #
+  # The task runs on arm64, so the images are built on GitHub's arm64 runners
+  # rather than under QEMU on x64 ones. Under QEMU, Node died with "Illegal
+  # instruction" on runners with the 7.0.0-1020-azure kernel and npm then hung
+  # until the step timed out (2026-11-21). A native build has no emulator to
+  # break, and takes minutes, so the step timeout is short.
   build-backend:
     name: Build backend image
     needs: prepare
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     environment: production
     permissions:
       contents: read
@@ -241,9 +247,6 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v4
-
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@v3
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -261,7 +264,7 @@ jobs:
 
     - name: Build, tag, and push backend image to Amazon ECR
       id: build-backend-image
-      timeout-minutes: 45
+      timeout-minutes: 20
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         IMAGE_TAG: ${{ github.sha }}
@@ -279,7 +282,7 @@ jobs:
   build-frontend:
     name: Build portfolio image
     needs: prepare
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     environment: production
     permissions:
       contents: read
@@ -304,9 +307,6 @@ jobs:
             exit 1 ;;
         esac
 
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@v3
-
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
@@ -323,7 +323,7 @@ jobs:
 
     - name: Build, tag, and push frontend image to Amazon ECR
       id: build-frontend-image
-      timeout-minutes: 45
+      timeout-minutes: 20
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         IMAGE_TAG: ${{ github.sha }}
@@ -348,7 +348,7 @@ jobs:
   build-hearthside:
     name: Build Hearthside image
     needs: prepare
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     environment: production
     permissions:
       contents: read
@@ -356,9 +356,6 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v4
-
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@v3
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -376,7 +373,7 @@ jobs:
 
     - name: Build, tag, and push Hearthside image to Amazon ECR
       id: build-hearthside-image
-      timeout-minutes: 45
+      timeout-minutes: 20
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         IMAGE_TAG: ${{ github.sha }}

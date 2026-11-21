@@ -265,7 +265,19 @@ body.hs-app{margin:0;min-height:100vh;-webkit-font-smoothing:antialiased}
 .hs-convo{min-height:200px}
 .hs-convo-note{margin:auto 0;text-align:center;font-size:13px;color:var(--muted)}
 .hs-msg{min-width:0;overflow-wrap:anywhere}
-.hs-msg-body{margin:0;white-space:pre-wrap}
+/* A letter's Markdown (#265): MessageBody draws plain elements, styled here. Tints use currentColor, so they read on yours and theirs. */
+.hs-msg-body>*{margin:0}
+.hs-msg-body>*+*{margin-top:6px}
+.hs-msg-body a{color:inherit;text-decoration:underline;text-underline-offset:2px}
+.hs-msg-body ul,.hs-msg-body ol{padding-left:20px}
+.hs-msg-body li+li{margin-top:2px}
+.hs-msg-body blockquote{padding-left:8px;border-left:2px solid currentColor;opacity:.8;font-style:italic}
+.hs-msg-body code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.88em;padding:1px 4px;border-radius:4px;background:color-mix(in srgb,currentColor 12%,transparent)}
+.hs-msg-body pre{padding:6px 8px;border-radius:var(--radius);background:color-mix(in srgb,currentColor 12%,transparent);white-space:pre-wrap}
+.hs-msg-body pre code{padding:0;background:none}
+.hs-msg-body table{display:block;max-width:100%;overflow-x:auto;border-collapse:collapse}
+.hs-msg-body th,.hs-msg-body td{border:1px solid currentColor;padding:1px 6px}
+.hs-msg-body hr{border:0;border-top:1px solid currentColor;opacity:.4}
 .hs-msg-time{font-size:11px;opacity:.7;margin-left:6px}
 .hs-msg.is-sending{opacity:.65}
 .hs-msg.is-failed{border:1px solid var(--seal)}

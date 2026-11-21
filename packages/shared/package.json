@@ -21,6 +21,11 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts"
   },
+  "dependencies": {
+    "react-markdown": "^10.1.0",
+    "remark-breaks": "^4.0.0",
+    "remark-gfm": "^4.0.1"
+  },
   "devDependencies": {
     "@types/node": "^20",
     "@types/react": "^18.3.27",

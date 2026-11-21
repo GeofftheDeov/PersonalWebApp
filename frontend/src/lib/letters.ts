@@ -9,7 +9,7 @@ import { session } from './session';
 
 export { campaignThreadKey } from '@gtd/shared/realtime';
 export type { ThreadEntry, ThreadFilter, ThreadSummary } from '@gtd/shared/letters';
-export { useAttachmentDraft, useThreadScroll } from '@gtd/shared/letters/react';
+export { MESSAGE_BODY_TW, MessageBody, useAttachmentDraft, useThreadScroll } from '@gtd/shared/letters/react';
 
 /**
  * The portfolio's Letters (#211): the shared Letters hooks, the live channel

@@ -6,6 +6,7 @@ import type { Letters } from '../letters/letters';
 import { useThread } from '../letters/useThread';
 import { useThreadScroll } from '../letters/useThreadScroll';
 import { useAttachmentDraft } from '../letters/useAttachmentDraft';
+import MessageBody, { MESSAGE_BODY_TW } from '../letters/MessageBody';
 import { useHoldPresence, useTyping } from '../realtime/react';
 import { useSession } from '../session/react';
 import { AttachButton, DraftAttachments, MessageAttachments } from './MessageAttachments';
@@ -98,7 +99,7 @@ export default function ChatThread({ letters, channel, placeholder, onLatestMess
                                         {m.state === 'sending' ? 'SENDING…' : fmtTime(m.createdAt)}
                                     </span>
                                 </div>
-                                {m.body && <p className="text-sm whitespace-pre-wrap break-words">{m.body}</p>}
+                                {m.body && <MessageBody body={m.body} className={MESSAGE_BODY_TW} />}
                                 <MessageAttachments attachments={m.attachments} files={m.state === 'sent' ? undefined : m.files} tone="dark" />
                                 {failed && (
                                     <div className="mt-1 flex items-center gap-2 text-[10px] font-black uppercase">

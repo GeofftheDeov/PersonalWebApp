@@ -17,7 +17,7 @@ import { session } from './session';
 
 export { campaignThreadKey } from '@gtd/shared/realtime';
 export type { ThreadFilter, ThreadSummary } from '@gtd/shared/letters';
-export { useAttachmentDraft, useThreadScroll } from '@gtd/shared/letters/react';
+export { MessageBody, useAttachmentDraft, useThreadScroll } from '@gtd/shared/letters/react';
 
 /**
  * Hearthside's Letters (#211, #216): the shared Letters hooks, the live

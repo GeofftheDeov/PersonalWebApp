@@ -70,6 +70,42 @@ test("a letter sent in Letters reaches another player live, and marks the thread
   await other.close();
 });
 
+test("a letter's Markdown shows as rich text, and its raw HTML as text (#265)", async ({ page, signIn, apiAs, newPerson }) => {
+  const [ida, rook] = await Promise.all([newPerson("Ida Marrow"), newPerson("Rook Vane")]);
+  const title = "t265 The Inked Letters";
+  const idaApi = await apiAs(ida);
+  const id = await campaignFor(idaApi, await apiAs(rook), title);
+  const sent = await idaApi.post(`/api/threads/${encodeURIComponent(`campaign:${id}`)}/messages`, {
+    data: {
+      body: [
+        "**Bring** _rope_ and `chalk`",
+        "No later than dusk.",
+        "",
+        "- lantern",
+        "- map",
+        "",
+        "[The road](https://example.com/road) <b>not bold</b>",
+      ].join("\n"),
+      clientId: `t265-${Date.now()}`,
+    },
+  });
+  expect(sent.ok(), await sent.text()).toBe(true);
+
+  await signIn(rook);
+  await page.goto("/");
+  await letters(page).getByRole("button", { name: new RegExp(title) }).click();
+  const log = letters(page).getByRole("log", { name: `Letters with ${title}` });
+  await expect(log.locator("strong", { hasText: "Bring" })).toBeVisible();
+  await expect(log.locator("em", { hasText: "rope" })).toBeVisible();
+  await expect(log.locator("code", { hasText: "chalk" })).toBeVisible();
+  await expect(log.getByRole("listitem")).toHaveText(["lantern", "map"]);
+  const link = log.getByRole("link", { name: "The road" });
+  await expect(link).toHaveAttribute("href", "https://example.com/road");
+  await expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  await expect(log.getByText("<b>not bold</b>")).toBeVisible();
+  await expect(log.getByText(/\*\*Bring/)).toHaveCount(0);
+});
+
 test.describe("at 375px", () => {
   test.use({ viewport: { width: 375, height: 812 } });
 

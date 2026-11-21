@@ -150,6 +150,24 @@ test("a chat picked under Profile opens on the right, live for another player in
   await other.close();
 });
 
+test("a message's Markdown shows as rich text in the log (#265)", async ({ page, signIn, apiAs, newPerson }) => {
+  const [ida, rook] = await Promise.all([newPerson("Ida Marrow"), newPerson("Rook Vane")]);
+  const title = "t265 The Inked Chat";
+  await campaignFor(await apiAs(ida), await apiAs(rook), title);
+
+  await signIn(ida);
+  await page.goto("/dashboard");
+  await row(page, title).click(FIRST_LOAD);
+  const log = messages(page).getByRole("log", { name: `Messages with ${title}` });
+  await expect(messages(page).getByText("Live", { exact: true })).toBeVisible();
+  await messages(page).getByRole("textbox", { name: "Write a message" }).fill("**hello** _there_ `code`");
+  await messages(page).getByRole("button", { name: "Send" }).click();
+  await expect(log.locator("strong", { hasText: "hello" })).toBeVisible();
+  await expect(log.locator("em", { hasText: "there" })).toBeVisible();
+  await expect(log.locator("code", { hasText: "code" })).toBeVisible();
+  await expect(log.getByText(/\*\*hello/)).toHaveCount(0);
+});
+
 test("the filters split campaigns from friends", async ({ page, signIn, apiAs, newPerson }) => {
   const [mira, oswin] = await Promise.all([newPerson("Mira Hollow"), newPerson("Oswin Reed")]);
   const [miraApi, oswinApi] = await Promise.all([apiAs(mira), apiAs(oswin)]);

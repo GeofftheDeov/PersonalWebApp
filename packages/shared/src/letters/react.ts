@@ -13,3 +13,6 @@ export { useThreads } from "./useThreads";
 export { useThread, type UseThreadOptions } from "./useThread";
 export { useThreadScroll } from "./useThreadScroll";
 export { useAttachmentDraft, type AttachmentDraft } from "./useAttachmentDraft";
+
+/** Not a hook: a message body's Markdown drawn as rich text (#265), for every site's thread view. */
+export { default as MessageBody, MESSAGE_BODY_TW } from "./MessageBody";

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ATTACHMENT_ACCEPT, formatBytes, isImageType } from '@gtd/shared/letters';
-import { letters, useAttachmentDraft, useHoldPresence, useThread, useThreadScroll, useTyping } from '@/lib/letters';
+import { letters, MessageBody, useAttachmentDraft, useHoldPresence, useThread, useThreadScroll, useTyping } from '@/lib/letters';
 import { messageWhen, senderLabel } from '@/lib/lettersFormat';
 import { useSession } from '@/lib/session';
 import type { ThreadEntry } from '@gtd/shared/letters';
@@ -134,7 +134,7 @@ function Letter({ entry: m, myId, onResend, onDiscard }: {
         {mine ? 'You' : senderLabel(m.sender, myId)}
         <span className="hs-msg-time">{m.state === 'sending' ? 'sending…' : messageWhen(m.createdAt)}</span>
       </span>
-      {m.body && <p className="hs-msg-body">{m.body}</p>}
+      {m.body && <MessageBody body={m.body} className="hs-msg-body" />}
       {m.attachments?.map((a) => {
         if (!a.url) return <span key={a.key} className="hs-att">{a.name} (unavailable)</span>;
         if (isImageType(a.contentType)) {

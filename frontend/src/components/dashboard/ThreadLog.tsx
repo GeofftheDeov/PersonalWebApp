@@ -4,7 +4,7 @@ import { useRef, useState, type FormEvent } from 'react';
 import { ArrowLeft, ExternalLink, MessageSquare, Send, WifiOff } from 'lucide-react';
 import { messageWhen } from '@gtd/shared/letters';
 import { AttachButton, DraftAttachments, MessageAttachments } from '@gtd/shared/topbar';
-import { letters, useAttachmentDraft, useThread, useThreadScroll, useTyping, type ThreadEntry, type ThreadSummary } from '@/lib/letters';
+import { letters, MESSAGE_BODY_TW, MessageBody, useAttachmentDraft, useThread, useThreadScroll, useTyping, type ThreadEntry, type ThreadSummary } from '@/lib/letters';
 import { campaignHref } from '@/lib/hearthside';
 import { useSession } from '@/lib/session';
 
@@ -176,7 +176,7 @@ function Message({ entry: m, myId, onResend, onDiscard }: {
                         {m.state === 'sending' ? 'Sending…' : messageWhen(m.createdAt)}
                     </span>
                 </div>
-                {m.body && <p className="text-sm whitespace-pre-wrap break-words">{m.body}</p>}
+                {m.body && <MessageBody body={m.body} className={MESSAGE_BODY_TW} />}
                 <MessageAttachments attachments={m.attachments} files={m.state === 'sent' ? undefined : m.files} />
                 {failed && (
                     <div className="mt-1 flex items-center gap-2 font-permanent text-[10px] uppercase">

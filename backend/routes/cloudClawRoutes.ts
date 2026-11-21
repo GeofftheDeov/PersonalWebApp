@@ -1,11 +1,15 @@
 import express, { Response } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
-import { auth } from '../middleware/auth.js';
+import { auth, requireAdmin } from '../middleware/auth.js';
 import CloudClawSession from '../models/CloudClawSession.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import { readVaultNote as readVaultNoteIn, searchVaultNotes as searchVaultNotesIn } from '../utils/vaultNotes.js';
 
 const router = express.Router();
+
+// Admin only (#263). The agent spends the server's Anthropic key, trades on the
+// shared Alpaca paper account and reads the vault, so a login alone isn't enough.
+router.use(auth, requireAdmin(false));
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || '' });
 
@@ -171,7 +175,7 @@ function describeToolCall(name: string, input: Record<string, unknown>): string 
 // ── Routes ───────────────────────────────────────────────────────────────────
 
 // POST /api/cloud-claw/chat  — send a message, get a reply
-router.post('/chat', auth, async (req: any, res: Response) => {
+router.post('/chat', async (req: any, res: Response) => {
   const { message } = req.body as { message: string };
   if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
 
@@ -204,7 +208,7 @@ router.post('/chat', auth, async (req: any, res: Response) => {
 });
 
 // POST /api/cloud-claw/chat/stream  — same as /chat, but streams progress + text over SSE
-router.post('/chat/stream', auth, async (req: any, res: Response) => {
+router.post('/chat/stream', async (req: any, res: Response) => {
   const { message } = req.body as { message: string };
   if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
 
@@ -333,7 +337,7 @@ router.post('/chat/stream', auth, async (req: any, res: Response) => {
 });
 
 // DELETE /api/cloud-claw/chat  — clear conversation history
-router.delete('/chat', auth, async (req: any, res: Response) => {
+router.delete('/chat', async (req: any, res: Response) => {
   try {
     const userId = String(req.user.id);
     await CloudClawSession.findOneAndUpdate({ userId }, { messages: [] }, { upsert: true });
@@ -344,7 +348,7 @@ router.delete('/chat', auth, async (req: any, res: Response) => {
 });
 
 // GET /api/cloud-claw/history  — fetch existing conversation
-router.get('/history', auth, async (req: any, res: Response) => {
+router.get('/history', async (req: any, res: Response) => {
   try {
     const userId = String(req.user.id);
     const session = await CloudClawSession.findOne({ userId });

@@ -16,7 +16,7 @@
  *   - SESSION_COOKIE_NAME unset: the cookie is off on upgrades too;
  *   - first-frame and query-string tokens still work with no cookie;
  *   - a cookie and an auth frame on one socket: one `ready`, as the cookie's person;
- *   - the shared client (frontend/src/lib/realtime/liveClient.ts): with
+ *   - the shared client (packages/shared/src/realtime/liveClient.ts): with
  *     `cookieAuth` and no token it connects and gets `ready`; without
  *     `cookieAuth` and no token it stays idle.
  *
@@ -45,7 +45,7 @@ type LiveClientCtor = new (opts: {
   url: string; getToken: () => string | null; cookieAuth?: boolean; WebSocket: unknown;
 }) => LiveClientLike;
 /** Loaded by path at run time: the backend's Docker build sees only backend/. */
-const LIVE_CLIENT = new URL("../../frontend/src/lib/realtime/liveClient.ts", import.meta.url).href;
+const LIVE_CLIENT = new URL("../../packages/shared/src/realtime/liveClient.ts", import.meta.url).href;
 
 if (!/(\/\/|@)(127\.0\.0\.1|localhost)[:/]/.test(process.env.DATABASE_URL ?? "")) {
   console.error("\n  Refusing to run: DATABASE_URL must be a local throwaway database.\n");

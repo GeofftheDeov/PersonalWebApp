@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Send, Terminal, MessageSquare, RefreshCw, WifiOff, Wifi, Eye } from 'lucide-react';
+import { ApiError } from '@gtd/shared/api';
+import { api, errorOf, getOrNull } from '@/lib/api';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -47,12 +49,6 @@ type TranscriptEntry =
   | { kind: 'error'; text: string; ts: number };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-const token = () => (typeof window !== 'undefined' ? localStorage.getItem('token') : null);
-const ah = (): Record<string, string> => {
-  const t = token();
-  return t ? { Authorization: `Bearer ${t}` } : {};
-};
 
 const issueId = (i: Issue) => i.id ?? i._id ?? '';
 
@@ -192,24 +188,16 @@ export default function IssueDeskPage() {
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3500); };
 
   // ── Auth guard
-  useEffect(() => {
-    const t = token();
-    if (!t) { router.push('/login'); return; }
-    // The type-based pre-check that used to live here read `user.type` from
-    // localStorage, which after the account merge is "Account" for everybody --
-    // it would have bounced every visitor, including the one who has access.
-    // The server's requirePaperclipAccess gate decides, and the 403 below acts on it.
-  }, [router]);
+  // Signed out, the reads below 401 and the session sends the person to log
+  // in and back (#210). The server's requirePaperclipAccess gate decides who
+  // may see this, and the 403 below acts on it.
 
   // ── Load agents
   const loadAgents = useCallback(async () => {
-    const t = token();
-    if (!t) return;
     try {
-      const res = await fetch('/api/paperclip/agents', { headers: ah() });
-      if (res.status === 401) { router.push('/login'); return; }
-      if (res.status === 403) { router.push('/dashboard'); return; }
-      const data = await res.json();
+      const data = await api.get<any>('/api/paperclip/agents').catch((err) => err as Error);
+      if (data instanceof ApiError && data.status === 403) { router.push('/dashboard'); return; }
+      if (data instanceof Error) return;
       const list: Agent[] = Array.isArray(data) ? data : (data?.agents ?? data?.items ?? []);
       setAgents(list);
       const requested = list.find(a => a.id === requestedAgentId);
@@ -219,12 +207,9 @@ export default function IssueDeskPage() {
 
   // ── Load issues
   const loadIssues = useCallback(async () => {
-    const t = token();
-    if (!t) return;
     setIssuesLoading(true);
     try {
-      const res = await fetch('/api/paperclip/issues', { headers: ah() });
-      const data = await res.json();
+      const data = await api.get<any>('/api/paperclip/issues');
       const list: Issue[] = Array.isArray(data) ? data : (data?.issues ?? data?.items ?? []);
       setIssues(list);
     } catch { /* non-fatal */ }
@@ -290,9 +275,9 @@ export default function IssueDeskPage() {
 
         try {
           const qs = cursor > 0 ? `?afterSeq=${cursor}` : '';
-          const res = await fetch(`/api/paperclip/runs/${encodeURIComponent(rid)}/events${qs}`, { headers: ah() });
-          const data = await res.json();
-          if (!res.ok) { finish((data as any)?.error ?? `Upstream ${res.status}`, true); return; }
+          const data = await api.get(`/api/paperclip/runs/${encodeURIComponent(rid)}/events${qs}`).catch((err) => err as Error);
+          if (data instanceof ApiError) { finish(errorOf(data, `Upstream ${data.status}`), true); return; }
+          if (data instanceof Error) throw data;
           if (ctl.stopped) return;
 
           setStreamConnected(true);
@@ -308,9 +293,8 @@ export default function IssueDeskPage() {
           }
 
           // Terminal-status check
-          const statusRes = await fetch(`/api/paperclip/runs/${encodeURIComponent(rid)}`, { headers: ah() });
-          if (statusRes.ok) {
-            const run = await statusRes.json();
+          const run = await getOrNull(`/api/paperclip/runs/${encodeURIComponent(rid)}`);
+          if (run) {
             const status = String((run as any)?.status ?? '').toLowerCase();
             if (TERMINAL.has(status)) { finish(`Run ${status}`); return; }
           }
@@ -336,10 +320,10 @@ export default function IssueDeskPage() {
       const startedAt = Date.now();
       while (!ctl.stopped && Date.now() - startedAt < PICKUP_TIMEOUT_MS) {
         try {
-          const res = await fetch(`/api/paperclip/issues/${encodeURIComponent(iid)}/runs`, { headers: ah() });
-          const runs = await res.json();
+          const runs = await api.get<any>(`/api/paperclip/issues/${encodeURIComponent(iid)}/runs`).catch((err) => err as Error);
           if (ctl.stopped) return;
-          if (!res.ok) { finish((runs as any)?.error ?? `Upstream ${res.status}`, true); return; }
+          if (runs instanceof ApiError) { finish(errorOf(runs, `Upstream ${runs.status}`), true); return; }
+          if (runs instanceof Error) throw runs;
           // Newest first
           const latest = Array.isArray(runs) ? runs[0] : null;
           if (latest?.runId) { startStream(latest.runId); return; }
@@ -365,13 +349,7 @@ export default function IssueDeskPage() {
       if (issueDesc.trim()) body.description = issueDesc.trim();
       if (assigneeId) body.assigneeAgentId = assigneeId;
 
-      const res = await fetch('/api/paperclip/issues', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...ah() },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error((data as any)?.error ?? 'Failed to send issue');
+      const data = await api.post('/api/paperclip/issues', body);
 
       const created = data as Issue;
       const recipient = agents.find(a => a.id === assigneeId);
@@ -391,12 +369,7 @@ export default function IssueDeskPage() {
   // ── Heartbeat (invokes run)
   const handleHeartbeat = async (agentId: string) => {
     try {
-      const res = await fetch(`/api/paperclip/agents/${agentId}/heartbeat`, {
-        method: 'POST',
-        headers: ah(),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error((data as any)?.error ?? 'Heartbeat failed');
+      const data = await api.post(`/api/paperclip/agents/${agentId}/heartbeat`);
       // Verified: 202 with the heartbeat-run row ({ id, status, ... }), or
       // { status: 'skipped' } when the agent can't be woken.
       const rid = (data as any)?.id;

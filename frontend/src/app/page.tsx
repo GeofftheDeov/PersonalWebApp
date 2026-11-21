@@ -2,25 +2,22 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Footer from "@/components/Footer";
+import { useSession } from "@/lib/session";
+import { HEARTHSIDE_URL } from "@/lib/hearthside";
 
 export default function Home() {
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
+  // Signed in (the session cookie, asked of the backend: #210) goes to the dashboard.
+  const { status } = useSession();
 
   useEffect(() => {
-    // Check if user is already logged in
-    const token = localStorage.getItem("token");
-    if (token) {
-      router.push("/dashboard");
-    } else {
-      setLoading(false);
-    }
-  }, [router]);
+    if (status === "signedIn") router.push("/dashboard");
+  }, [status, router]);
 
-  if (loading) {
+  if (status !== "signedOut") {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-zinc-900">
         <div className="h-16 w-16 animate-spin border-8 border-black border-t-teal-600 dark:border-white dark:border-t-teal-400"></div>
@@ -92,6 +89,15 @@ export default function Home() {
             <p className="border-t-4 border-black pt-4 text-lg font-permanent text-zinc-600 dark:border-white dark:text-zinc-400">
               A tabletop hub for running long-form RPGs. Spin up Campaigns, log Sessions with summaries and dates, and track Characters across their classes, levels, and party assignments.
             </p>
+            {/* The planner moved to its own site, Hearthside (spec #69, #234). Shown once it's configured. */}
+            {HEARTHSIDE_URL && (
+              <a
+                href={`${HEARTHSIDE_URL}/`}
+                className="mt-6 inline-flex items-center gap-2 border-4 border-black bg-teal-600 px-5 py-2 font-permanent text-lg uppercase text-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-transform hover:-translate-y-0.5 dark:border-white"
+              >
+                Visit Hearthside <span aria-hidden="true">&rarr;</span>
+              </a>
+            )}
           </div>
 
           {/* Feature 2: Dashboard & Tasks */}

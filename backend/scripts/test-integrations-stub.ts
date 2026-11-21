@@ -111,7 +111,8 @@ async function main() {
         location: "Hearthside Games", agenda: "The Sunken Bell", ...extra,
     });
     const linkFor = (day: number, location = "Hearthside Games") => buildGoogleCalendarLink({
-        title: "Ashen Crown: One-shot", description: "The Sunken Bell", location,
+        // The agenda is the GM's Prep notes (#213): never the description.
+        title: "Ashen Crown: One-shot", location,
         start: new Date(slot(day).start), end: new Date(slot(day).end),
     });
 
@@ -165,7 +166,7 @@ async function main() {
             d.status === 201 && d.json.warnings.length === 0 && fake.calls().length === 1 && dCall !== undefined, { res: d.json, calls: fake.calls() });
         check("...the call carries the GM's bot token, the linked server and the session's details",
             dCall?.args[0].botToken === bot && dCall.args[0].guildId === "987654321" && dCall.args[0].channelId === undefined &&
-                dCall.args[0].name === "Ashen Crown: One-shot" && dCall.args[0].description === "The Sunken Bell" &&
+                dCall.args[0].name === "Ashen Crown: One-shot" && dCall.args[0].description === undefined &&
                 dCall.args[0].location === "Hearthside Games" && dCall.args[0].start.toISOString() === slot(1).start &&
                 dCall.args[0].end?.toISOString() === slot(1).end, dCall?.args);
         const dRow = await row(d.json.id);

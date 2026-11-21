@@ -10,7 +10,8 @@
  * This checks, over HTTP against the real userRoutes and auth middleware:
  *   - with SESSION_COOKIE_NAME unset the cookie is off: login sets nothing and
  *     a cookie in the request authenticates nobody;
- *   - login issues the cookie with the right name, value and attributes;
+ *   - login issues the cookie with the right name and attributes, holding its
+ *     own token, not the body's (#212; test-cookie-token covers the marker);
  *   - the cookie alone authenticates a read;
  *   - the other environment's cookie name alone is unauthenticated;
  *   - a cookie-authenticated write without the CSRF header gets 403, and with
@@ -95,20 +96,23 @@ async function main() {
     const login = await call("POST", "/api/users/login", {}, { email, password });
     const issued = login.setCookie.find((c) => c.startsWith(`${NAME}=`)) ?? "";
     const attrs = issued.split(";").map((s) => s.trim().toLowerCase());
-    check("login sets the session cookie holding the same token as the body",
-      login.status === 200 && issued.startsWith(`${NAME}=${login.json.token};`), issued || "(none)");
+    // Not the body's token (#212): the cookie's is marked and works only as the cookie.
+    const cookieToken = decodeURIComponent(issued.slice(NAME.length + 1).split(";")[0] ?? "");
+    check("login sets the session cookie, holding its own token rather than the body's",
+      login.status === 200 && !!login.json.token && cookieToken.split(".").length === 3 && cookieToken !== login.json.token,
+      issued || "(none)");
     check("the cookie is HttpOnly, Secure, SameSite=Lax, Path=/, on the parent domain, for 1h",
       ["httponly", "secure", "samesite=lax", "path=/", `domain=${DOMAIN}`, "max-age=3600"].every((a) => attrs.includes(a)),
       issued);
 
     const token = login.json.token as string;
-    const cookie = `other=1; ${NAME}=${token}`;
+    const cookie = `other=1; ${NAME}=${cookieToken}`;
 
     const read = await call("GET", "/api/users/profile", { cookie });
     check("the cookie alone authenticates a read", read.status === 200 && read.json.email === email,
       `${read.status} ${JSON.stringify(read.json).slice(0, 120)}`);
 
-    const crossEnv = await call("GET", "/api/users/profile", { cookie: `${OTHER_ENV_NAME}=${token}` });
+    const crossEnv = await call("GET", "/api/users/profile", { cookie: `${OTHER_ENV_NAME}=${cookieToken}` });
     check("only the other environment's cookie name is unauthenticated", crossEnv.status === 401, `${crossEnv.status}`);
 
     const noCsrf = await call("POST", "/api/probe", { cookie });

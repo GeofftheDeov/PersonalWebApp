@@ -30,6 +30,10 @@ export const auth = async (req: AuthRequest, res: Response, next: NextFunction) 
     // Electron and React Native clients and the scripts. A bearer request is
     // exempt from the CSRF check, since another page can't make the browser
     // attach it. Only without one does the environment's session cookie count.
+    // The cookie's own token is marked and refused as a bearer (#212), so
+    // something that sees the cookie can't replay it as a bearer to skip the
+    // CSRF check. (A non-browser client can still send it as a Cookie header
+    // with the CSRF header; the marker doesn't stop that.)
     const authHeader = req.headers.authorization;
     let token: string | null = null;
     let viaCookie = false;
@@ -46,7 +50,8 @@ export const auth = async (req: AuthRequest, res: Response, next: NextFunction) 
     }
 
     try {
-        const decoded = verifyJwt(token);
+        // A session-cookie token (#212) is refused unless it came in the cookie.
+        const decoded = verifyJwt(token, { fromCookie: viaCookie });
         const id = await resolveAccountId(String(decoded.id));
         if (!id) {
             console.log(`[AUTH] 401: token subject ${decoded.id} resolves to no account`);

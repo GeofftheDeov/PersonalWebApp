@@ -1,0 +1,48 @@
+{
+  "name": "@gtd/shared",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Code the portfolio and Hearthside share (spec #69). Shipped as TypeScript source: each Next app compiles it through transpilePackages.",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./api": "./src/api/index.ts",
+    "./session": "./src/session/index.ts",
+    "./session/react": "./src/session/react.ts",
+    "./realtime": "./src/realtime/index.ts",
+    "./realtime/react": "./src/realtime/react.ts",
+    "./letters": "./src/letters/index.ts",
+    "./letters/react": "./src/letters/react.ts",
+    "./hearthside": "./src/hearthside/paths.ts",
+    "./hearthside-redirects": "./src/hearthside/redirects.js",
+    "./topbar": "./src/topbar/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^18.3.27",
+    "fast-glob": "^3.3.3",
+    "tsx": "^4.21.0",
+    "typescript": "^5"
+  },
+  "peerDependencies": {
+    "framer-motion": "^12.34.0",
+    "lucide-react": "^0.577.0",
+    "next": "^13.5.6",
+    "react": "^18"
+  },
+  "peerDependenciesMeta": {
+    "framer-motion": {
+      "optional": true
+    },
+    "lucide-react": {
+      "optional": true
+    },
+    "next": {
+      "optional": true
+    }
+  }
+}

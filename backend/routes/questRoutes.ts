@@ -7,11 +7,12 @@ import { subscribeQuestSchedule } from "../planning/questReminders.js";
  * Quests (#90, part of #57). Thin wrappers over planning/quests.ts:
  *
  *   GET   /api/quests/mine                 my quests across sessions   ?scope=upcoming (default; the Quest Log) | all
- *   GET   /api/quests/almanac              my dated sessions in range, each with my quests on it   ?start&end
+ *   GET   /api/quests/almanac              my dated sessions in range, each with my quests on it   ?start&end, or a page back in time ?before[&beforeId][&limit] (#252)
  *   GET   /api/quests/sessions/:sessionId  a session's quests, the party, and whether I'm its GM
  *   POST  /api/quests/sessions/:sessionId  GM: add a custom quest   { title, assigneeId, notes?, dueAt? }
  *   PATCH /api/quests/:questId             GM: edit or reassign     { title?, notes?, dueAt?, assigneeId? }
  *   POST  /api/quests/:questId/done        its owner or the GM: mark it done
+ *   DELETE /api/quests/:questId/done       its owner or the GM: undo that (open again)
  *   PUT   /api/quests/:questId/reminders   its owner: when to be reminded (#91)   { offsets: minutes before due[] }
  *
  * Built from a quests instance so tests can hand it one with an injected clock.
@@ -42,6 +43,8 @@ export function buildQuestRouter(quests: Quests) {
         (req) => quests.update(req.user, req.params.questId, req.body)));
     router.post("/:questId/done", auth, handle("mark the quest done",
         (req) => quests.complete(req.user, req.params.questId)));
+    router.delete("/:questId/done", auth, handle("undo the quest",
+        (req) => quests.reopen(req.user, req.params.questId)));
     router.put("/:questId/reminders", auth, handle("save the reminders",
         (req) => quests.setReminders(req.user, req.params.questId, req.body)));
 

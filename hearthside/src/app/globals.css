@@ -1,0 +1,1185 @@
+/* Hearthside's global CSS, the one stylesheet the layout imports. Hearthside's pages are styled by the design
+   system, under the `hs-app` body class; Tailwind is only for the shared top bar (tailwind.config.js).
+   The design system's generated stylesheet and component stylesheet come first, in that order, then
+   Hearthside's own additions below. They're imported here rather than from the layout because Next doesn't
+   keep separate CSS imports in order (in development it put tokens.css last). */
+@import "../design-system/tokens.css";
+@import "../design-system/components.css";
+
+/* Tailwind for the top bar. With preflight off, `base` is only Tailwind's own --tw-* defaults, which its
+   utilities read; the utilities are all scoped under .hs-topbar. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------- The page ---------- */
+body.hs-app{margin:0;min-height:100vh;-webkit-font-smoothing:antialiased}
+.hs-app{
+  color-scheme:dark;
+  /* The design system's faces, self-hosted (src/app/fonts.ts), ahead of the names tokens.css gives. */
+  --font-display:var(--hs-font-fell-sc),var(--hs-font-fell),"IM Fell English SC","IM Fell English",Georgia,serif;
+  --font-story:var(--hs-font-fell),"IM Fell English",Georgia,serif;
+  --font-body:var(--hs-font-alegreya),"Alegreya Sans",system-ui,sans-serif;
+  --font-label:var(--hs-font-alegreya-sc),var(--hs-font-alegreya),"Alegreya Sans SC","Alegreya Sans",system-ui,sans-serif;
+}
+.hs-floor-host{display:contents}
+.hs-page-head a{color:var(--accent)}
+.hs-app .hs-sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* The shell's gutter: 16px, or the notch's safe area if that's wider. */
+.hs-shell-wrap{padding-block:16px 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+
+/* A page's back link (BackLink), in the amber button. */
+.hs-back{align-self:flex-start;display:inline-flex;align-items:center;gap:6px;height:34px;font-size:15px;white-space:nowrap;text-decoration:none}
+.hs-back-m{display:none}
+
+/* ---------- The shell on phones ----------
+   Under 760px the nav folds behind a menu button on the left of the row under the top bar, with the page's
+   back link on the right (from the campaign-page prototype). This replaces the design system's 2 x 2 nav grid,
+   which also makes room for five places. */
+.hs-burger{display:none}
+@media (max-width:759px){
+  .hs-bar{position:relative;flex-wrap:nowrap;justify-content:flex-start;gap:12px;align-self:stretch}
+  .hs-bar .hs-burger{display:grid;width:40px;height:40px;flex:none;place-items:center;padding:0;cursor:pointer;color:var(--gold-hi);
+    border-radius:var(--radius);border:1px solid var(--gold-line);background:radial-gradient(130% 90% at 50% 0%,var(--leather-hi),var(--leather));
+    box-shadow:var(--shadow-panel)}
+  .hs-bar .hs-burger svg{width:22px;height:22px}
+  .hs-bar .hs-burger[aria-expanded="true"]{border-color:var(--gold)}
+  .hs-brand{font-size:24px}
+  .hs-bar .hs-back-m{display:inline-flex;margin-left:auto;flex:none}
+  .hs-page .hs-back{display:none}
+  /* The one column aligns items to its start, so anything whose content doesn't push it wide would shrink. */
+  .hs-page > *,.hs-quests-sec,.hs-letters-col{align-self:stretch}
+  .hs-bar .hs-nav{display:none;position:absolute;z-index:30;top:calc(100% + 8px);left:0;width:min(260px,100%);flex-direction:column}
+  .hs-bar.is-open .hs-nav{display:flex}
+}
+
+/* ---------- Dialogs and forms (GildedDialog; #223) ----------
+   Not in the design system yet: these follow the campaign-page prototype. A dialog is gilded leather over a
+   dimmed room; only its content scrolls (the frame's corner flourishes reach past the panel). Fields on leather
+   follow the message composer (surface, line, radius). */
+.hs-dialog{width:min(100% - 32px,480px);max-width:none;max-height:none;padding:0;margin:auto;border:0;background:transparent;color:var(--text);overflow:visible}
+.hs-dialog.is-wide{width:min(100% - 32px,720px)}
+.hs-dialog::backdrop{background:rgba(10,6,3,.72);backdrop-filter:blur(2px)}
+.hs-dialog-pad{padding:14px 16px;max-height:calc(100dvh - 48px);overflow:hidden auto;overscroll-behavior:contain}
+.hs-dialog-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px}
+.hs-dialog-head h2{margin:0;font-family:var(--font-display);font-weight:400;font-size:21px;color:var(--text);text-wrap:balance}
+.hs-dialog-x{flex:none;width:30px;height:30px;padding:0;background:transparent;border:1px solid var(--line);border-radius:var(--radius);color:var(--muted);cursor:pointer;font-size:15px}
+.hs-dialog-x:hover{color:var(--text);border-color:var(--gold-line)}
+.hs-dialog-text{margin:0;font-size:16px;line-height:1.45}
+.hs-form{display:flex;flex-direction:column;gap:12px}
+.hs-field{display:flex;flex-direction:column;gap:4px;min-width:0}
+.hs-field > span{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.06em;color:var(--muted)}
+.hs-input{width:100%;min-width:0;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:8px 10px;color:var(--text);font:inherit;color-scheme:dark}
+.hs-input:focus{outline:none;border-color:var(--accent)}
+.hs-input:is(textarea){resize:vertical;min-height:70px;line-height:1.45}
+.hs-grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr));gap:12px}
+.hs-fine{margin:0;font-size:13px;color:var(--muted);line-height:1.45}
+.hs-alert{margin:0;font-size:13px;color:#f0a58f}
+.hs-actions{display:flex;gap:8px;flex-wrap:wrap}
+.hs-actions .hs-btn-amber,.hs-actions .hs-ghost{height:34px}
+.hs-btn-amber:disabled{opacity:.6;cursor:default}
+.hs-ghost{display:inline-flex;align-items:center;background:transparent;border:1px solid var(--line);color:var(--text);border-radius:var(--radius);padding:0 12px;height:30px;
+  cursor:pointer;font-family:var(--font-label);font-weight:500;letter-spacing:.04em}
+.hs-ghost:hover{border-color:var(--gold-line);color:var(--gold-hi)}
+.hs-ghost:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ---------- The signing-in pages (SignInPage; #219) ----------
+   On the floor, no rail or Letters: the Hearthside name, then one gilded panel holding the form. */
+.hs-signin{width:min(100%,440px);margin:clamp(8px,6vh,64px) auto 0;display:flex;flex-direction:column;gap:18px}
+.hs-signin-brand{align-self:center;text-align:center;text-decoration:none}
+.hs-signin-pad{padding:18px 18px 20px;display:flex;flex-direction:column;gap:14px}
+.hs-signin-pad h1{margin:0;font-family:var(--font-display);font-weight:400;font-size:26px;line-height:1.15;color:var(--text);text-wrap:balance;overflow-wrap:anywhere}
+.hs-signin-intro{margin:-8px 0 0;color:var(--muted);font-size:15px}
+.hs-signin-pad .hs-input{padding:10px 12px;font-size:16px}
+/* SignInForm's fieldset only disables the controls until the page hydrates; the form lays them out. */
+.hs-signin-fields{display:contents}
+.hs-signin-fields:disabled .hs-input{opacity:.7}
+.hs-signin-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;margin-top:2px}
+/* The label face on buttons and links alike (`.hs-app button` would otherwise give buttons the body's). */
+.hs-signin-actions .hs-btn-amber{height:40px;font-size:16px;font-family:var(--font-label)}
+.hs-signin-btn{display:inline-flex;align-items:center;text-decoration:none}
+.hs-signin-link,.hs-signin-foot a,.hs-signin-pad .hs-alert a{color:var(--accent)}
+.hs-signin-link{font-size:14.5px}
+.hs-signin-foot{margin:0;padding-top:12px;border-top:1px solid var(--gold-rule);font-size:14.5px;color:var(--muted)}
+.hs-signin-or{display:flex;align-items:center;gap:10px;margin:0;font-family:var(--font-label);font-size:13px;letter-spacing:.06em;color:var(--muted)}
+.hs-signin-or::before,.hs-signin-or::after{content:"";flex:1;border-top:1px solid var(--gold-rule)}
+.hs-signin-google{min-height:44px;display:flex;justify-content:center}
+.hs-signin-pad .hs-alert{font-size:14px}
+@media (max-width:479px){.hs-signin-actions .hs-btn-amber{flex:1 1 100%;justify-content:center}}
+/* A panel can carry a banner across its top and a kicker over its heading (the invite page). */
+.hs-signin-banner{border-radius:var(--radius-sheet);overflow:hidden;border-bottom:1px solid var(--gold-line)}
+.hs-signin-kicker{margin:0 0 -8px;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--accent)}
+
+/* ---------- The campaign invite page (/join/:id; #232) ----------
+   The sign-in panel with the campaign's banner on top, its name, status and story, then Accept and Decline. */
+.hs-join-meta{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin-top:-4px;font-size:14px;color:var(--muted)}
+.hs-join-desc{margin:0;font-size:15px;line-height:1.5;color:var(--text);white-space:pre-line;overflow-wrap:anywhere}
+.hs-join-acts .hs-ghost{height:40px;font-size:16px;padding:0 18px}
+.hs-join-acts .hs-ghost:disabled{opacity:.6;cursor:default}
+@media (max-width:479px){.hs-join-acts .hs-ghost{flex:1 1 100%;justify-content:center}}
+
+/* ---------- Campaign banners (CampaignBanner) ----------
+   4:1: the uploaded picture, or a dyed cloth with the campaign's initials stitched in gold. */
+.hs-banner{position:relative;aspect-ratio:4/1;width:100%;overflow:hidden;border-radius:2px;background:var(--leather);container-type:inline-size}
+.hs-banner img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+.hs-cloth{position:absolute;inset:0;display:grid;place-items:center;
+  background:
+    repeating-linear-gradient(45deg,rgba(0,0,0,.12) 0 1px,transparent 1px 5px),
+    repeating-linear-gradient(-45deg,rgba(255,255,255,.035) 0 1px,transparent 1px 5px),
+    radial-gradient(120% 140% at 15% 100%,rgba(255,179,107,.18),transparent 55%),
+    linear-gradient(160deg,var(--c1),var(--c2))}
+.hs-cloth::after{content:"";position:absolute;inset:8px;border:1px dashed rgba(246,221,150,.45);border-radius:2px}
+.hs-cloth span{font-family:var(--font-display);font-size:clamp(22px,6cqw,54px);letter-spacing:.12em;color:var(--gold-hi);opacity:.85;text-shadow:0 1px 0 rgba(0,0,0,.6)}
+
+/* ---------- Campaign status (StatusPill) ---------- */
+.hs-status{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.06em;
+  padding:3px 10px;border-radius:var(--radius-full);white-space:nowrap;border:1px solid var(--line);color:var(--muted)}
+.hs-status.is-live{border-color:rgba(229,161,58,.55);color:var(--accent)}
+.hs-status.is-live::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--firelight);box-shadow:0 0 6px var(--firelight)}
+.hs-status.is-done{background:var(--moss);border-color:var(--moss);color:var(--accent-ink)}
+.hs-when{font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.04em;color:var(--muted);font-variant-numeric:tabular-nums}
+
+/* ---------- The Campaigns page (layout B, "Roster"; #223) ---------- */
+.hs-campaigns-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+.hs-campaigns-head > div{min-width:0}
+.hs-campaigns-head .hs-new{height:36px;font-size:15px}
+.hs-roster-sec{display:flex;flex-direction:column;gap:16px;min-width:0}
+.hs-roster-sec > .hs-sec{margin:0}
+.hs-status-strip{padding:6px}
+.hs-status-strip .hs-tabs{padding:0 8px;border-bottom:0}
+.hs-status-strip .hs-tabs button{white-space:nowrap;padding-inline:8px}
+.hs-status-strip .hs-count{color:var(--muted);font-family:var(--font-body);font-size:12px;margin-left:2px}
+/* Phones: the four tabs don't fit in a row, so they make two. */
+@media (max-width:479px){.hs-status-strip .hs-tabs{display:grid;grid-template-columns:1fr 1fr}}
+.hs-roster{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:16px;container:hs-roster/inline-size}
+.hs-roster-empty{margin:0;padding:28px 16px;text-align:center;color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow)}
+/* At least 4:1, so a whole banner shows; it grows if the panel needs room, and the banner covers it. */
+.hs-roster-card{position:relative;aspect-ratio:4/1;min-width:0;padding:16px;display:flex;align-items:center;
+  border-radius:var(--radius-panel);outline:1px solid var(--gold-line);outline-offset:-1px;box-shadow:var(--shadow-panel);overflow:hidden}
+.hs-roster-card > .hs-banner{position:absolute;inset:0;aspect-ratio:auto;border-radius:0}
+.hs-roster-card > .hs-banner .hs-cloth{place-items:center end;padding-right:6%}
+.hs-roster-card > .hs-banner .hs-cloth::after{inset:6px}
+.hs-roster-info{position:relative;z-index:1;width:min(60%,440px);min-width:0;padding:14px 18px 15px;display:flex;flex-direction:column;gap:4px}
+.hs-roster-info h3{margin:0;font-family:var(--font-story);font-weight:400;font-size:22px;line-height:1.15;overflow-wrap:anywhere;text-wrap:balance}
+.hs-roster-title{color:var(--text);text-decoration:none}
+/* The title's link covers the whole panel, so a click anywhere on the name, status, dates or description opens the campaign. */
+.hs-roster-title::after{content:"";position:absolute;inset:0;z-index:1;border-radius:inherit}
+.hs-roster-info:hover .hs-roster-title,.hs-roster-title:focus-visible{color:var(--gold-hi)}
+.hs-roster-info:has(.hs-roster-title:focus-visible){outline:2px solid var(--gold);outline-offset:2px}
+.hs-roster-title:focus-visible{outline:none}
+.hs-roster-meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;margin-bottom:2px}
+.hs-roster-desc{margin:0;color:var(--muted);font-size:14px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.hs-banner-tools{position:absolute;right:14px;bottom:14px;z-index:2;display:flex;gap:6px}
+.hs-banner-tool{background:rgba(26,19,14,.78);color:var(--text);border:1px solid var(--gold-line);border-radius:var(--radius);padding:4px 10px;
+  font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.04em;cursor:pointer;backdrop-filter:blur(2px);white-space:nowrap}
+.hs-banner-tool:hover{border-color:var(--gold);color:var(--gold-hi)}
+/* A narrow card (the shell's middle column on a laptop): the tools stack, so they stay clear of the panel. */
+@container hs-roster (max-width:560px){.hs-banner-tools{flex-direction:column;align-items:flex-end}}
+/* Phones: the banner is a strip across the top (the whole 4:1), the panel spans the card below it. */
+@media (max-width:619px){
+  .hs-roster-card{aspect-ratio:auto;flex-direction:column;align-items:stretch;padding:calc(25% + 4px) 10px 10px}
+  .hs-roster-card > .hs-banner{inset:0 0 auto;aspect-ratio:4/1}
+  .hs-roster-card > .hs-banner .hs-cloth{place-items:center;padding:0}
+  .hs-roster-info{width:auto}
+  .hs-banner-tools{top:10px;right:10px;bottom:auto;flex-direction:row}
+}
+
+/* The banner cropper (BannerEditor). */
+.hs-crop{position:relative;aspect-ratio:4/1;width:100%;overflow:hidden;background:var(--ground-2);border-radius:2px;outline:1px dashed var(--gold-line);outline-offset:2px;touch-action:none;user-select:none}
+.hs-crop:not(.is-empty){cursor:grab}
+.hs-crop img{position:absolute;left:0;top:0;max-width:none;pointer-events:none}
+.hs-crop-pick{position:absolute;inset:0;display:grid;place-items:center;cursor:pointer;font-family:var(--font-label);letter-spacing:.06em;color:var(--muted)}
+.hs-crop-pick:hover,.hs-crop-pick:focus-within{color:var(--gold-hi)}
+.hs-crop-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px}
+.hs-zoom{flex:1;min-width:12rem;display:flex;gap:10px;align-items:center;font-family:var(--font-label);font-size:13px;color:var(--muted)}
+.hs-zoom input{flex:1;min-width:0;accent-color:var(--accent)}
+
+/* ---------- The top bar ----------
+   The shared GeofftheDeov bar keeps the portfolio's look (light and dark) on Hearthside. Its wrapper takes no
+   box of its own (so the bar stays sticky against the page) but sets the portfolio's type, and a reset
+   scoped to the bar stands in for the Tailwind preflight the portfolio has and Hearthside turns off. */
+.hs-topbar{display:contents;font-family:var(--hs-font-inter),"Inter",system-ui,sans-serif;font-size:16px;line-height:1.5;
+  color:#171717;-webkit-font-smoothing:antialiased;text-align:left;letter-spacing:normal}
+@media (prefers-color-scheme:dark){.hs-topbar{color:#ededed}}
+.hs-topbar *,.hs-topbar ::before,.hs-topbar ::after{box-sizing:border-box;border-width:0;border-style:solid;border-color:#e5e7eb}
+.hs-topbar h1,.hs-topbar h2,.hs-topbar h3,.hs-topbar h4,.hs-topbar h5,.hs-topbar h6{font-size:inherit;font-weight:inherit}
+.hs-topbar a{color:inherit;text-decoration:inherit}
+.hs-topbar b,.hs-topbar strong{font-weight:bolder}
+.hs-topbar button,.hs-topbar input,.hs-topbar select,.hs-topbar textarea{font-family:inherit;font-feature-settings:inherit;
+  font-variation-settings:inherit;font-size:100%;font-weight:inherit;line-height:inherit;letter-spacing:inherit;color:inherit;margin:0;padding:0}
+.hs-topbar button,.hs-topbar select{text-transform:none}
+.hs-topbar button,.hs-topbar [type=button],.hs-topbar [type=submit]{-webkit-appearance:button;background-color:transparent;background-image:none}
+.hs-topbar h1,.hs-topbar h2,.hs-topbar h3,.hs-topbar h4,.hs-topbar h5,.hs-topbar h6,.hs-topbar p,.hs-topbar blockquote,
+.hs-topbar pre,.hs-topbar figure,.hs-topbar dl,.hs-topbar dd,.hs-topbar hr{margin:0}
+.hs-topbar ol,.hs-topbar ul,.hs-topbar menu{list-style:none;margin:0;padding:0}
+.hs-topbar textarea{resize:vertical}
+.hs-topbar input::placeholder,.hs-topbar textarea::placeholder{opacity:1;color:#9ca3af}
+.hs-topbar button,.hs-topbar [role=button]{cursor:pointer}
+.hs-topbar :disabled{cursor:default}
+.hs-topbar img,.hs-topbar svg,.hs-topbar video,.hs-topbar canvas,.hs-topbar audio,.hs-topbar iframe{display:block;vertical-align:middle}
+.hs-topbar img,.hs-topbar video{max-width:100%;height:auto}
+.hs-topbar [hidden]{display:none}
+/* The design system's amber focus ring is for its own controls; the bar keeps the browser's. */
+.hs-topbar :focus-visible{outline:revert;outline-offset:revert}
+/* The portfolio's classes the bar uses, from its global CSS. */
+.hs-topbar .font-permanent{font-family:var(--hs-font-marker),"Permanent Marker",cursive}
+.hs-topbar .custom-scrollbar{scrollbar-width:thin}
+
+/* ---------- Letters and Your Quests in the shell (#221) ----------
+   Additions to the design system's Letters and QuestList for what the live panels draw that its static markup
+   doesn't: buttons for thread rows, notes, failed sends, attachments and the draft. Every colour is a token. */
+
+/* Letters stays in view below the sticky top bar (about 72px tall) as the page scrolls. */
+.hs-letters-col{top:calc(env(safe-area-inset-top,0px) + 88px)}
+
+/* A line of quiet text inside a gilded panel: loading, empty, or what went wrong. */
+.hs-panel-note{margin:0;padding:11px 14px;font-size:13px;color:var(--muted)}
+.hs-panel-error,.hs-letters-error{color:var(--firelight)}
+
+/* ---------- Your Quests ---------- */
+.hs-quest-name{overflow-wrap:anywhere}
+.hs-quest-where{display:block;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}
+.hs-quest-where:hover{color:var(--accent)}
+.hs-box:disabled{cursor:default}
+
+/* ---------- Letters: the thread list ---------- */
+.hs-threads{max-height:min(55vh,480px);overflow-y:auto}
+/* Each row is a button (so it's reachable and named), laid out as the design system's row. */
+.hs-threads li{display:block;padding:0}
+.hs-thread-row{display:grid;grid-template-columns:38px minmax(0,1fr) auto;gap:10px;align-items:start;width:100%;
+  padding:11px 14px;border:0;border-radius:0;background:transparent;color:inherit;text-align:left;cursor:pointer}
+.hs-thread-row:hover{background:rgba(229,161,58,.08)}
+.hs-thread-text{display:flex;flex-direction:column;min-width:0}
+.hs-thread-name,.hs-thread-sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ---------- Letters: the open thread ---------- */
+.hs-convo-head{grid-template-columns:auto 38px minmax(0,1fr) auto}
+.hs-convo-head .hs-back{align-self:center;justify-content:center;height:32px;padding:0;font-size:16px}
+.hs-convo-head .hs-thread-name{margin:0;font-family:inherit;font-size:14px;font-weight:500;line-height:1.3}
+.hs-live{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.06em;color:var(--moss);display:inline-flex;align-items:center;gap:6px}
+.hs-live::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.hs-live.is-off{color:var(--muted)}
+.hs-convo{min-height:200px}
+.hs-convo-note{margin:auto 0;text-align:center;font-size:13px;color:var(--muted)}
+.hs-msg{min-width:0;overflow-wrap:anywhere}
+.hs-msg-body{margin:0;white-space:pre-wrap}
+.hs-msg-time{font-size:11px;opacity:.7;margin-left:6px}
+.hs-msg.is-sending{opacity:.65}
+.hs-msg.is-failed{border:1px solid var(--seal)}
+.hs-msg-failed{display:block;margin-top:4px;font-size:12px}
+.hs-msg-failed button{background:none;border:0;padding:0;margin-left:8px;color:inherit;text-decoration:underline;cursor:pointer;font-size:12px}
+.hs-att{color:inherit;text-decoration:none;min-width:0}
+.hs-att-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hs-att small{flex:none;opacity:.7}
+.hs-att-img{display:block;margin-top:6px}
+.hs-att-img img{display:block;max-width:100%;max-height:240px;width:auto;height:auto;border-radius:var(--radius)}
+.hs-draft{display:flex;flex-wrap:wrap;gap:6px;padding:8px 14px 0;background:var(--surface);border-top:1px solid var(--gold-rule)}
+.hs-draft-file{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:2px 8px;border:1px dashed var(--line);border-radius:var(--radius);font-size:12px}
+.hs-draft-file button{background:none;border:0;padding:0;color:var(--muted);cursor:pointer;font-size:14px;line-height:1}
+.hs-compose .hs-btn-amber{height:36px}
+.hs-compose .hs-btn-amber:disabled{opacity:.6;cursor:default}
+
+/* ---------- A session's page (layout C, "Around the table", revised; #226) ----------
+   Previous and next above the parchment card, the table under it (#227), then the tabs on gilded leather. */
+/* The back link (BackLink), the first page to use it: the amber button, as wide as its words (the design system's
+   .hs-back is Letters' 32px square), in its own ink (.hs-page-head a would paint it amber on amber). In the phone
+   bar a long label ends in an ellipsis rather than running off the screen. */
+.hs-btn-amber.hs-back{width:auto}
+.hs-page-head a.hs-btn-amber{color:var(--accent-ink)}
+@media (max-width:759px){
+  .hs-bar .hs-brand{flex:none}
+  .hs-bar .hs-btn-amber.hs-back-m{display:block;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;line-height:34px}
+}
+.hs-sess-wait{padding:12px 0}
+.hs-sess-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}
+.hs-sess-steps{display:flex;gap:8px;min-width:0;margin-left:auto}
+.hs-sess-steps .hs-ghost{gap:6px;min-width:0;max-width:min(240px,45vw);height:34px;text-decoration:none;background:rgba(26,19,14,.72)}
+.hs-sess-step-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:759px){.hs-sess-steps{flex:1;justify-content:space-between}.hs-sess-steps .hs-ghost{max-width:48%}}
+
+/* The card: parchment, with the torch's orange as it is on parchment. */
+.hs-sess-card{padding:var(--space-5) var(--space-6) var(--space-6);min-width:0}
+.hs-sess-card .hs-sheet-title{font-size:clamp(26px,4vw,34px);overflow-wrap:anywhere}
+.hs-sess-card-text{min-width:0;flex:1 1 16rem}
+.hs-sess-card .hs-byline{margin:4px 0 0;overflow-wrap:anywhere}
+.hs-sess-card-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.hs-seal.is-planning{background:var(--verdigris)}
+.hs-seal.is-cancelled{background:#5a4a3a}
+.hs-sess-card .hs-btn{text-decoration:none;display:inline-flex;align-items:center}
+.hs-sess-banner{margin-top:12px;padding:10px 12px;border:1.5px solid var(--seal);border-radius:var(--radius);font-size:14.5px;
+  display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;justify-content:space-between}
+.hs-sess-card .hs-sess-link{color:var(--seal)}
+.hs-sess-link{font-family:var(--font-label);font-weight:500;letter-spacing:.04em;color:var(--accent);text-decoration:none}
+.hs-sess-link:hover{text-decoration:underline}
+.hs-sess-torch{margin-top:12px;display:flex;flex-direction:column;gap:8px;font-size:14.5px}
+.hs-sess-torch p,.hs-sess-torch form{margin:0;display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center}
+.hs-sess-torch b{color:#9a4a12;font-weight:500}
+.hs-sess-torch select{max-width:100%;min-width:0;padding:4px 8px;border:1px solid var(--paper-line);border-radius:var(--radius);
+  background:rgba(255,250,235,.55);color:var(--paper-ink);font:inherit;font-size:14px}
+.hs-flame{width:1.1em;height:1.1em;flex:none;color:#9a4a12}
+.hs-btn.is-torch{border-color:#9a4a12;color:#9a4a12}
+.hs-sess-alert{color:var(--seal);font-size:13px}
+
+/* The round table (RoundTable; #227), at #quests: seen from above, the GM at its head, the party in seats on brass
+   plates, a card in the middle, each player's quests as paper slips by their seat. Everything on it is sized from the
+   table's width (cqw), so it reads the same on a phone and a desktop. The top is a picture painted once from the
+   session prototype's painter; the shadows under it give it an edge and lift it off the floor. */
+.hs-sess-table{min-width:0;scroll-margin-top:96px;
+  --hs-gild:linear-gradient(135deg,var(--gold-hi) 0%,#b07c2c 22%,#f0cf7a 45%,#7c5318 68%,#e7c06a 88%,#a87228 100%)}
+.hs-table{position:relative;width:100%;max-width:640px;aspect-ratio:1;margin:4px auto 0;container-type:inline-size}
+.hs-table-top{position:absolute;inset:13%;border-radius:50%;background:#3a2414 url("../components/session/round-table.jpg") center/cover;
+  box-shadow:0 4px 0 #3b2210,0 7px 0 #24140a,0 9px 4px rgba(0,0,0,.6),0 36px 60px 6px rgba(0,0,0,.75)}
+.hs-table-top::after{content:"";position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle,rgba(255,179,107,.2),rgba(255,179,107,0) 55%)}
+/* The middle: a gilded card, its front only (the recording and the cinematic are #199's). */
+.hs-table-mid{position:absolute;left:50%;top:50%;width:48%;aspect-ratio:5/4;transform:translate(-50%,-50%);z-index:3}
+.hs-table-card{position:absolute;inset:0;display:flex;flex-direction:column;gap:1cqw;padding:1.4cqw;border:2px solid transparent;border-radius:var(--radius-panel);
+  background:linear-gradient(#17100b,#0e0906) padding-box,var(--hs-gild) border-box;box-shadow:0 14px 30px rgba(0,0,0,.65)}
+.hs-table-card-h{padding:0 .4cqw;font:500 clamp(10px,2.1cqw,13.5px)/1.1 var(--font-label);letter-spacing:.1em;color:var(--gold-hi);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hs-table-say{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1cqw;padding:1cqw 2cqw;text-align:center;
+  border-radius:2px;background:radial-gradient(120% 90% at 50% 100%,rgba(255,179,107,.14),transparent 60%),#0b0705}
+.hs-table-say b{font-family:var(--font-story);font-weight:400;font-size:clamp(14px,4.2cqw,26px);line-height:1.1;color:var(--on-wood-text);overflow-wrap:anywhere}
+.hs-table-say p{margin:0;font-size:clamp(10.5px,2.3cqw,14px);line-height:1.3;color:var(--on-wood-muted)}
+.hs-table-say .hs-btn-amber{display:inline-flex;align-items:center;font-size:clamp(11px,2.4cqw,15px);padding:.8cqw 2.2cqw;line-height:1.25;text-decoration:none}
+.hs-table-card.is-cancelled .hs-table-say b{color:var(--muted)}
+/* The seats, anchored on the portrait (13.6cqw across), so a seat with more slips stays put. */
+.hs-seat{position:absolute;width:22%;transform:translate(-50%,-6.8cqw);display:flex;flex-direction:column;align-items:center;text-align:center;z-index:2}
+.hs-seat-who{display:flex;flex-direction:column;align-items:center;width:100%;background:none;border:0;padding:0;color:inherit;font:inherit;position:relative}
+.hs-seat button.hs-seat-who{cursor:pointer;border-radius:8px}
+.hs-seat button.hs-seat-who:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.hs-avatar.hs-seat-medal{width:62%;height:auto;aspect-ratio:1;font-size:6.5cqw;border:2px solid transparent;color:var(--gold-hi);
+  background:radial-gradient(120% 90% at 15% 100%,rgba(255,179,107,.25),transparent 55%) padding-box,linear-gradient(160deg,#4a3324,#1c120b) padding-box,var(--hs-gild) border-box;
+  box-shadow:0 3px 8px rgba(0,0,0,.55);transition:box-shadow .2s,filter .2s,opacity .2s}
+.hs-seat-plate{margin-top:-1.4cqw;position:relative;z-index:2;max-width:118%;padding:.6cqw 1.6cqw .8cqw;border-radius:2px;
+  background:linear-gradient(180deg,#f4d98e,#d7ab55 55%,#b88834);box-shadow:0 2px 5px rgba(0,0,0,.6);color:var(--accent-ink)}
+.hs-seat-plate b{display:block;font-family:var(--font-story);font-weight:400;font-size:clamp(11px,2.9cqw,16px);line-height:1.1;overflow-wrap:anywhere}
+.hs-seat-plate small{display:block;font:500 clamp(9.5px,2.2cqw,12.5px)/1.2 var(--font-label);letter-spacing:.04em;color:#4a3112;overflow-wrap:anywhere}
+.hs-seat-st{margin-top:.8cqw;font:500 clamp(9.5px,2.3cqw,13px)/1.2 var(--font-label);letter-spacing:.04em;color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow)}
+.hs-seat-flame{margin-top:.6cqw;width:clamp(12px,2.8cqw,18px);height:clamp(12px,2.8cqw,18px);color:var(--torch)}
+.hs-seat.is-head .hs-seat-medal{box-shadow:0 0 0 3px var(--torch),0 0 22px 5px rgba(240,123,44,.5)}
+.hs-seat.is-ready .hs-seat-medal{box-shadow:0 0 0 3px var(--moss),0 0 18px 4px rgba(124,154,85,.6)}
+.hs-seat.is-ready .hs-seat-st{color:#b5d68a}
+.hs-seat.is-not-ready .hs-seat-medal{box-shadow:0 0 0 3px var(--seal),0 0 14px 2px rgba(180,70,44,.5);filter:grayscale(.6)}
+.hs-seat.is-not-ready .hs-seat-st{color:#f0a48c}
+/* Away (once attendance is confirmed, or while the GM taps): an empty grey seat. */
+.hs-seat.is-away .hs-seat-medal{filter:grayscale(1) brightness(.55);opacity:.55;box-shadow:none;color:transparent}
+.hs-seat.is-away .hs-seat-plate{filter:grayscale(.8) brightness(.8)}
+.hs-seat.is-me .hs-seat-plate small{color:#7a3f0c}
+.hs-seat button.hs-seat-who:hover .hs-seat-medal{box-shadow:0 0 0 2px rgba(246,221,150,.9),0 0 22px 6px rgba(255,179,107,.5)}
+/* The GM's own slips sit beside the head of the table. */
+.hs-seat.is-head .hs-seat-slips{position:absolute;left:104%;top:2%;width:120%;margin:0}
+.hs-sess-table .hs-alert{margin:8px 0 0}
+.hs-table-strip{padding:12px 16px;display:flex;flex-direction:column;gap:10px}
+.hs-table-row{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;justify-content:space-between;font-size:14.5px}
+.hs-table-btns{display:flex;flex-wrap:wrap;gap:8px}
+.hs-table-row .hs-btn-amber,.hs-table-row .hs-ghost{height:32px;font-size:14px}
+.hs-table-row .hs-btn-amber:disabled,.hs-table-row .hs-ghost:disabled{opacity:.6;cursor:default}
+
+/* Quest slips (QuestSlips; #227, reused by the Almanac): paper, a little askew, sized in em so a place can scale them. */
+.hs-slips{list-style:none;margin:.6em 0 0;padding:0;display:flex;flex-direction:column;gap:.5em;font-size:13px}
+.hs-slip{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.5em;align-items:start;text-align:left;padding:.45em .6em;border-radius:2px;color:var(--paper-ink);
+  background:linear-gradient(170deg,var(--paper-hi),var(--paper-lo));box-shadow:0 2px 5px rgba(0,0,0,.55);line-height:1.2;transform:rotate(-.8deg)}
+.hs-slip:nth-child(even){transform:rotate(.7deg)}
+.hs-slip .hs-box{width:1.05em;height:1.05em;margin-top:.05em;border-color:var(--paper-muted)}
+.hs-slip-text{min-width:0;overflow-wrap:anywhere}
+.hs-slip .hs-tag{margin-left:.4em;font-size:.85em;border-color:var(--paper-line);color:var(--paper-muted)}
+.hs-slip small{display:block;color:var(--paper-muted);font-size:.88em;margin-top:1px}
+.hs-slip.is-done .hs-slip-title{text-decoration:line-through;color:var(--paper-muted)}
+.hs-slip-tool{display:block}
+.hs-slip-plus{width:100%;background:rgba(20,13,8,.6);border:1px dashed var(--gold-line);border-radius:2px;color:var(--on-wood-muted);cursor:pointer;padding:.35em;
+  font:500 .95em/1.2 var(--font-label);letter-spacing:.04em}
+.hs-slip-plus:hover,.hs-slip-plus:focus-visible{color:var(--gold-hi);border-color:var(--gold)}
+/* Ink on the slip (`.hs-app input` would otherwise give it the body's cream, unreadable on paper). */
+.hs-app .hs-slip-input{width:100%;min-width:0;font:inherit;padding:.4em .6em;border-radius:2px;border:1px solid var(--gold);background:var(--paper-hi);color:var(--paper-ink)}
+.hs-slip-error{display:block;margin-top:.3em;color:#f0a48c;font-size:.9em;text-shadow:var(--on-wood-shadow)}
+/* At the table: slips as wide as the seat, their type sized from the table. */
+.hs-seat-slips{width:100%;margin-top:1.2cqw;gap:.9cqw;font-size:clamp(10px,1.85cqw,13px)}
+
+/* The tabs, on leather. */
+.hs-sess-tabs{padding:0;min-width:0}
+.hs-sess-tabs .hs-tabs{overflow-x:auto;scrollbar-width:none}
+.hs-sess-tabs .hs-tabs button{flex:1 0 auto;padding:11px 12px;font-size:14.5px;white-space:nowrap}
+.hs-sess-panel{padding:16px;min-width:0}
+.hs-sess-empty{margin:0;font-size:14.5px;line-height:1.5;color:var(--muted)}
+.hs-sess-muted{color:var(--muted)}
+.hs-sess-slot{border:1.5px dashed var(--gold-rule);border-radius:var(--radius);padding:14px 16px}
+.hs-sess-after{margin-top:12px}
+.hs-sess-before{margin-bottom:10px}
+/* The tale: the story face, with a drop cap. */
+.hs-tale{font-family:var(--font-story);font-size:17px;line-height:1.55;color:var(--text);max-width:66ch;overflow-wrap:anywhere}
+.hs-tale p{margin:0 0 .75em;white-space:pre-line}
+.hs-tale p:last-child{margin-bottom:0}
+.hs-tale p:first-child::first-letter{float:left;font-family:var(--font-display);font-size:3.3em;line-height:.82;padding:6px 7px 0 0;color:var(--accent)}
+.hs-sess-prep{margin:0;font-size:15px;line-height:1.5;white-space:pre-line;max-width:66ch;overflow-wrap:anywhere}
+.hs-sess-write{min-height:150px}
+.hs-sess-write.is-story{font-family:var(--font-story);font-size:16.5px;line-height:1.5}
+.hs-sess-dl{margin:0;display:flex;flex-direction:column}
+.hs-sess-dl > div{display:grid;grid-template-columns:minmax(84px,30%) minmax(0,1fr);gap:10px;padding:7px 0;border-top:1px solid var(--gold-rule);align-items:baseline}
+.hs-sess-dl > div:first-child{border-top:0}
+.hs-sess-dl dt{font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.06em;color:var(--muted);overflow-wrap:anywhere}
+.hs-sess-dl dd{margin:0;font-size:14.5px;overflow-wrap:anywhere}
+.hs-sess-dl dd small{display:block;color:var(--muted);font-size:13px}
+.hs-sess-pill{display:inline-block;font-family:var(--font-label);font-size:12px;font-weight:500;letter-spacing:.06em;padding:1px 8px;
+  border-radius:var(--radius-full);border:1px solid currentColor;color:#f07b2c;white-space:nowrap}
+.hs-sess-check{display:flex;align-items:center;gap:8px;font-size:14.5px;cursor:pointer}
+.hs-sess-check input{accent-color:var(--accent);width:16px;height:16px}
+
+/* ---------- A campaign's page (part 1; #224) ----------
+   prototype/hearthside-campaign-details: the head on the floor (back link, the banner in a gilded frame, the title
+   with its status), the details, their edit form and the party on gilded leather, and the torch in its orange with
+   its flame wherever the Game Master's role changes hands. #225 fills the empty slots (Notice Board, Table Talk,
+   Sessions | Characters); each is hidden while empty. */
+.hs-cp-wait{padding:12px 0}
+.hs-cp-slot:empty{display:none}
+/* The label face on the page's and its dialogs' buttons (`.hs-app button` would otherwise give them the body's). */
+.hs-app :is(.hs-cp-head,.hs-cp-details,.hs-cp-party,.hs-dialog) :is(.hs-btn-amber,.hs-btn-torch,.hs-ghost,.hs-cp-link){font-family:var(--font-label)}
+.hs-cp-head{display:flex;flex-direction:column;gap:14px;min-width:0}
+.hs-cp-banner{padding:6px}
+.hs-cp-banner .hs-banner-tools{top:auto;right:10px;bottom:10px;flex-direction:row}
+.hs-cp-title-row{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+.hs-cp-title{min-width:0}
+.hs-cp-title h1{overflow-wrap:anywhere}
+.hs-cp-kicker{font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow)}
+.hs-cp-title p{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
+.hs-cp-title .hs-status{text-shadow:none;background:rgba(26,19,14,.6)}
+.hs-cp-title .hs-status.is-done{background:var(--moss)}
+.hs-cp-edit{height:34px;font-size:15px;white-space:nowrap}
+.hs-cp-sec-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:10px}
+.hs-cp-sec-row .hs-sec{margin:0;flex:1;min-width:0}
+.hs-cp-sec-row .hs-btn-amber{height:30px;font-size:14px;flex:none}
+.hs-cp-note{margin-bottom:8px}
+
+/* The details, on leather. */
+.hs-cp-details{min-width:0}
+.hs-cp-pad{padding:14px 16px}
+.hs-cp-desc{margin:0 0 14px;font-family:var(--font-story);font-size:18px;line-height:1.45;color:var(--text);max-width:62ch;overflow-wrap:anywhere;white-space:pre-line}
+.hs-cp-facts{margin:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px 20px}
+.hs-cp-facts + .hs-cp-facts{margin-top:14px;padding-top:14px;border-top:1px solid var(--gold-rule)}
+.hs-cp-facts > div{min-width:0}
+.hs-cp-facts dt{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.06em;color:var(--muted)}
+.hs-cp-facts dd{margin:2px 0 0;font-size:15px;color:var(--text);overflow-wrap:anywhere}
+.hs-cp-facts dd a{color:var(--accent)}
+.hs-cp-form-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.hs-cp-form-head h2{margin:0;font-family:var(--font-display);font-weight:400;font-size:21px;color:var(--text)}
+.hs-cp-group{margin:0;padding:12px 0 0;border:0;border-top:1px solid var(--gold-rule);display:flex;flex-direction:column;gap:12px;min-width:0}
+.hs-cp-group legend{float:left;width:100%;padding:0;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--accent)}
+.hs-cp-group legend + *{clear:both}
+
+/* The torch: the flame, and the orange (#f07b2c on leather, #9a4a12 on parchment). Not design-system tokens yet. */
+.hs-app{--torch:#f07b2c;--torch-ink:#9a4a12}
+.hs-cp-flame{width:15px;height:15px;flex:none}
+.hs-cp-torch{display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin-top:4px}
+.hs-cp-link{display:inline-flex;align-items:center;gap:5px;background:none;border:0;padding:0;cursor:pointer;font-size:13px;font-weight:500;letter-spacing:.04em;color:var(--accent)}
+.hs-cp-link:hover{text-decoration:underline}
+.hs-cp-link.is-torch{color:var(--torch)}
+.hs-btn-torch{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border:0;border-radius:var(--radius);cursor:pointer;white-space:nowrap;
+  background:var(--torch);color:var(--accent-ink);font-size:14px;font-weight:500;letter-spacing:.04em}
+.hs-btn-torch:disabled{opacity:.55;cursor:default}
+.hs-cp-torch-form{display:flex;flex-direction:column;gap:6px;width:100%;max-width:280px}
+.hs-cp-torch-form .hs-input{padding:5px 8px;font-size:14px}
+.hs-cp-torch-form .hs-actions .hs-btn-torch,.hs-cp-torch-form .hs-actions .hs-ghost{height:30px}
+
+/* The party beside Table Talk when the page is wide enough (#225 fills Table Talk), as on the portfolio. */
+.hs-cp-split{container-type:inline-size;min-width:0}
+.hs-cp-split-in{display:grid;gap:var(--space-5)}
+@container (min-width:620px){.hs-cp-split-in:has(> [data-slot="table-talk"]:not(:empty)){grid-template-columns:240px minmax(0,1fr);align-items:start}}
+.hs-cp-party{min-width:0}
+.hs-cp-roster{list-style:none;margin:0;padding:0}
+.hs-cp-roster > li{padding:7px 12px;border-top:1px solid var(--gold-rule)}
+.hs-cp-roster > li:first-child{border-top:0}
+.hs-cp-member{display:grid;grid-template-columns:30px minmax(0,1fr);gap:10px;align-items:start}
+.hs-cp-member .hs-avatar{width:30px;height:30px;font-size:14px;margin-top:1px}
+.hs-avatar.is-gm{box-shadow:0 0 0 2px var(--leather),0 0 0 3px var(--gold)}
+.hs-avatar.is-off{background:var(--surface);color:var(--muted)}
+.hs-cp-who{min-width:0}
+.hs-cp-whois{display:flex;flex-direction:column;min-width:0;color:var(--text);text-decoration:none}
+a.hs-cp-whois:hover .hs-cp-name{color:var(--gold-hi)}
+.hs-cp-name{font-weight:500;font-size:15px;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hs-cp-you{color:var(--muted);font-weight:400}
+.hs-cp-role{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.04em;color:var(--accent)}
+.hs-cp-role.is-plain{color:var(--muted)}
+.hs-cp-tools{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px}
+.hs-cp-mini{display:inline-flex;align-items:center;justify-content:center;width:28px;height:24px;padding:0;cursor:pointer;
+  background:transparent;border:1px solid var(--line);border-radius:var(--radius);color:var(--muted)}
+.hs-cp-mini:hover{border-color:var(--gold-line);color:var(--text)}
+.hs-cp-mini.is-warn:hover{border-color:var(--seal);color:#f3b7a5}
+.hs-cp-mini:disabled{opacity:.5;cursor:default}
+.hs-cp-roster > li.hs-cp-inactive-head{position:relative;display:flex;align-items:center;gap:6px;padding:8px 12px 2px;font-family:var(--font-label);font-size:12.5px;letter-spacing:.06em;color:var(--muted)}
+.hs-cp-roster > li.hs-cp-inactive-head + li{border-top:0}
+.hs-cp-roster .is-inactive .hs-cp-name{color:var(--muted)}
+.hs-cp-tip{display:inline-grid;place-items:center;width:16px;height:16px;padding:0;border-radius:50%;border:1px solid var(--muted);background:transparent;color:var(--muted);font-size:11px;line-height:1;cursor:help}
+.hs-cp-tip:hover,.hs-cp-tip:focus-visible{color:var(--text);border-color:var(--text)}
+/* The note about inactive players, as a tooltip under the header: on hover, and on focus for the keyboard. */
+.hs-cp-tip-text{display:none;position:absolute;z-index:5;left:8px;right:8px;top:calc(100% + 4px);padding:8px 10px;border:1px solid var(--gold-line);border-radius:var(--radius);
+  background:var(--ground-2);box-shadow:var(--shadow-panel);font-family:var(--font-body);font-size:13px;letter-spacing:0;line-height:1.45;color:var(--text)}
+.hs-cp-tip:hover + .hs-cp-tip-text,.hs-cp-tip:focus-visible + .hs-cp-tip-text{display:block}
+.hs-cp-roster-foot{padding:10px 12px 12px}
+.hs-ghost.is-warn{gap:6px;color:#e8a08b}
+.hs-ghost.is-warn:hover{border-color:var(--seal);color:#f3b7a5}
+.hs-cp-empty{color:var(--muted);font-size:14px}
+
+/* The invite dialog: the link to copy, then friends to invite. */
+.hs-cp-copy{display:flex;gap:8px}
+.hs-cp-copy .hs-input{flex:1}
+.hs-cp-copy .hs-btn-amber{flex:none;height:38px;padding:0 16px;white-space:nowrap}
+.hs-cp-friends{list-style:none;margin:0;padding:0;max-height:220px;overflow-y:auto}
+.hs-cp-friends li{display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--gold-rule)}
+.hs-cp-friends li:first-child{border-top:0}
+.hs-cp-friend{flex:1;min-width:0}
+.hs-cp-friends .hs-btn-amber,.hs-cp-friends .hs-ghost{height:28px;font-size:13px;flex:none}
+
+/* ---------- The Notice Board (NoticeBoardSheet, PlannerSteps, VoteTally; #222) ----------
+   One NoticeSheet per session being planned, on the Hearth and (#225) a campaign's page. What the design system's
+   static markup doesn't draw: the ballot's boxes in the tally, notes under its bars, the potluck's buttons,
+   fields on parchment (a translucent paper field, as the prototypes draw them) and the sheet's foot. */
+.hs-board{display:flex;flex-direction:column;gap:var(--space-4);min-width:0}
+.hs-board > .hs-sec{margin:0}
+/* Room above each sheet for its pin. */
+.hs-board-sheets{display:flex;flex-direction:column;gap:30px;padding-top:9px;min-width:0}
+.hs-board-empty{font-size:15px}
+.hs-board-empty a{color:var(--accent)}
+.hs-board-sheet{min-width:0;padding:var(--space-5) var(--space-6) var(--space-6)}
+.hs-board-head-text{min-width:0;flex:1 1 16rem}
+.hs-board-sheet .hs-sheet-title{overflow-wrap:anywhere}
+.hs-board-sheet .hs-byline{margin:4px 0 0;overflow-wrap:anywhere}
+.hs-seal.is-tie{background:var(--accent);color:var(--accent-ink)}
+.hs-step-body{min-width:0}
+.hs-step.is-later h4{color:var(--paper-muted)}
+.hs-step .hs-board-line{margin:0 0 6px;font-size:14.5px;color:var(--paper-ink);max-width:none;overflow-wrap:anywhere}
+.hs-step .hs-board-fine{margin:8px 0 0;font-size:13px;color:var(--paper-muted);overflow-wrap:anywhere}
+.hs-step .hs-board-done{margin:8px 0 0;font-size:13.5px;color:#4b6630}
+.hs-board-alert{margin:12px 0 0;color:var(--seal);font-size:14px}
+/* The label face on the sheet's buttons (`.hs-app button` would otherwise give them the body's). */
+.hs-board-sheet .hs-btn{font-family:var(--font-label);font-size:14px;text-decoration:none}
+/* The tally: the option (with the ballot's box) and its count, the bar, then who chose it. */
+.hs-votes{list-style:none;padding:0;margin-bottom:0}
+.hs-vote-what{min-width:0;overflow-wrap:anywhere}
+.hs-vote-who{white-space:nowrap}
+.hs-vote-foot{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;justify-content:space-between;min-width:0}
+.hs-vote-note{font-size:12.5px;color:var(--paper-muted);min-width:0;overflow-wrap:anywhere}
+.hs-board-pick{display:flex;gap:8px;align-items:flex-start;cursor:pointer;min-width:0}
+.hs-board-pick input,.hs-board-choice input{accent-color:var(--paper-ink);width:16px;height:16px;margin:2px 0 0;flex:none}
+.hs-board-venue{display:flex;flex-direction:column;min-width:0}
+.hs-board-venue-name{font-weight:500;overflow-wrap:anywhere}
+.hs-board-venue-sub{font-size:12.5px;color:var(--paper-muted);overflow-wrap:anywhere}
+/* Forms on parchment: suggesting a venue, the potluck's slots. */
+.hs-board-form{display:flex;flex-direction:column;gap:8px;margin-top:12px;padding:12px;border:1.5px dashed var(--paper-line);border-radius:var(--radius)}
+.hs-board-form .hs-btn-row{margin-top:2px}
+.hs-board-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center;min-width:0}
+.hs-board-form .hs-board-row{margin-top:0}
+/* Only an input sitting in the row grows along it: one inside a .hs-pick-field label (a column) would grow 12rem tall. */
+.hs-board-row > .hs-paper-input{flex:1 1 12rem}
+.hs-board-choice{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:14px}
+.hs-board-choice label{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
+.hs-paper-input{width:100%;min-width:0;padding:6px 9px;border:1px solid var(--paper-line);border-radius:var(--radius);
+  background:rgba(255,250,235,.55);color:var(--paper-ink);font:inherit;font-size:14px;color-scheme:light}
+.hs-paper-input:focus{outline:none;border-color:var(--paper-ink)}
+.hs-paper-input::placeholder{color:var(--paper-muted);opacity:.85}
+/* The potluck, on the design system's Ledger. */
+.hs-board-sheet .hs-ledger li{align-items:center}
+.hs-board-slot{min-width:0;overflow-wrap:anywhere}
+.hs-board-slot-who{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;justify-content:flex-end;text-align:right}
+/* The foot: the session's page, the campaign's Notice Board, and the GM's Cancel planning. */
+.hs-board-foot{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;margin-top:16px;padding-top:12px;border-top:1px solid var(--paper-line)}
+.hs-board-sheet .hs-sess-link{color:var(--seal);overflow-wrap:anywhere}
+.hs-board-cancel{margin-left:auto}
+@media (max-width:759px){
+  .hs-board-sheet{padding:var(--space-4) var(--space-4) var(--space-5)}
+  .hs-board-sheet .hs-sheet-title{font-size:23px}
+}
+
+/* ---------- A campaign's page (part 2; #225) ----------
+   prototype/hearthside-campaign-details: the Notice Board's sheets on parchment with everything the portfolio's planning
+   cards do (the overlap picker, re-shortlisting, earlier rounds, the torch), Table Talk on leather beside the party, and
+   Sessions | Characters on leather. */
+.hs-app :is(.hs-cp-board,.hs-cp-talk,.hs-cp-records) :is(.hs-btn-amber,.hs-ghost){font-family:var(--font-label)}
+.hs-cp-board .hs-cp-sec-row{margin-bottom:0}
+/* Links to #notice-board land below the sticky top bar. */
+.hs-cp-board{scroll-margin-top:96px}
+.hs-board-agenda{margin:10px 0 0;font-size:14.5px;color:var(--paper-ink);max-width:62ch;white-space:pre-line;overflow-wrap:anywhere}
+.hs-board-agenda b{font-family:var(--font-label);font-weight:500;letter-spacing:.06em;margin-right:6px}
+.hs-board-table{color:inherit;overflow-wrap:anywhere}
+.hs-board-sheet .hs-sess-torch{font-size:14px}
+.hs-board-more{margin-top:14px;padding-top:12px;border-top:1px dotted var(--paper-line)}
+.hs-board-checks{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:14px}
+.hs-board-kickoff{display:flex;flex-direction:column;gap:10px;margin-top:16px}
+.hs-board-where{margin:0;padding:0;border:0;min-width:0}
+.hs-board-where legend{padding:0;margin-bottom:4px;font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.06em;color:var(--paper-muted)}
+.hs-board-where .hs-board-fine{margin:4px 0 0;font-size:13px;color:var(--paper-muted)}
+.hs-board-grow{flex:1 1 10rem}
+/* The earlier rounds, folded at the foot of the night step. */
+.hs-board-rounds{margin-top:12px;padding-top:8px;border-top:1px dotted var(--paper-line);font-size:13px;color:var(--paper-muted)}
+.hs-board-rounds summary{cursor:pointer;font-family:var(--font-label);letter-spacing:.06em;color:var(--paper-ink)}
+.hs-board-rounds ol{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}
+.hs-board-rounds ul{list-style:none;margin:2px 0 0;padding:0}
+.hs-board-rounds li{overflow-wrap:anywhere}
+.hs-board-round{color:var(--paper-ink)}
+.hs-board-rounds .is-won{color:var(--paper-ink);font-weight:500}
+
+/* The overlap picker, on parchment: settings, the best times, the grid (days across, start times down), the shortlist. */
+.hs-pick{display:flex;flex-direction:column;gap:12px;margin-top:6px;min-width:0}
+.hs-pick-set{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:flex-end}
+.hs-pick-field{display:flex;flex-direction:column;gap:3px;min-width:0}
+.hs-pick-field > span{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.06em;color:var(--paper-muted)}
+.hs-pick-set .hs-paper-input{width:auto}
+.hs-pick-quorum{font-size:13px;color:var(--paper-muted);padding-bottom:6px}
+.hs-pick-note{margin:0;padding:8px 10px;border:1px dashed var(--paper-line);border-radius:var(--radius-sheet);font-size:13.5px;color:var(--paper-ink);background:rgba(255,255,255,.18)}
+.hs-pick-h{margin:0 0 6px;font-family:var(--font-label);font-size:14px;font-weight:500;letter-spacing:.06em;color:var(--paper-ink)}
+.hs-pick-best{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:5px}
+.hs-pick-best button{width:100%;text-align:left;display:flex;flex-wrap:wrap;gap:2px 10px;align-items:center;padding:6px 9px;border:1px solid var(--paper-line);border-radius:var(--radius);
+  background:rgba(255,253,245,.3);color:var(--paper-ink);cursor:pointer;font:inherit;font-size:14px}
+.hs-pick-best button:hover{border-color:var(--paper-ink)}
+.hs-pick-best button:disabled{opacity:.55;cursor:default}
+.hs-pick-best button[aria-pressed="true"]{background:var(--paper-ink);color:var(--paper);border-color:var(--paper-ink)}
+.hs-pick-best small{flex-basis:100%;font-size:12px;opacity:.8;overflow-wrap:anywhere}
+.hs-pick-tag{display:inline-block;font-family:var(--font-label);font-size:11.5px;font-weight:500;letter-spacing:.06em;padding:0 7px;border-radius:var(--radius-full);
+  border:1px solid currentColor;opacity:.85;white-space:nowrap}
+.hs-pick-tag.is-ink{opacity:1;background:var(--paper-ink);border-color:var(--paper-ink);color:var(--paper)}
+[aria-pressed="true"] .hs-pick-tag.is-ink{background:var(--paper);color:var(--paper-ink)}
+/* The grid scrolls inside its own frame on a phone; the page never does. */
+.hs-pick-heatwrap{max-width:100%;overflow-x:auto;overscroll-behavior-x:contain}
+.hs-pick-heat{border-collapse:separate;border-spacing:3px;font-size:12px;font-variant-numeric:tabular-nums}
+.hs-pick-heat th{font-family:var(--font-label);font-weight:500;color:var(--paper-ink);letter-spacing:.04em;white-space:nowrap;padding:0 4px}
+.hs-pick-heat th[scope=row]{text-align:right;position:sticky;left:0;z-index:1;background:var(--paper)}
+.hs-pick-heat th[scope=col]{text-align:center;line-height:1.15;padding:0 0 2px}
+.hs-pick-dow{display:block;font-size:11px;color:var(--paper-muted)}
+.hs-pick-heat td{padding:0}
+.hs-pick-heat button,.hs-pick-none{display:block;width:32px;height:26px}
+.hs-pick-heat button{padding:0;border:0;border-radius:var(--radius-sheet);background:var(--heat);color:var(--paper-ink);cursor:pointer;font:inherit;font-size:12px}
+.hs-pick-heat button:disabled{cursor:default}
+.hs-pick-heat button[data-v="0"]{outline:1px solid var(--paper-line);outline-offset:-1px;color:transparent}
+.hs-pick-heat button:is([data-v="3"],[data-v="4"],[data-v="5"]){color:var(--paper)}
+.hs-pick-heat button.is-q{box-shadow:inset 0 0 0 1.5px var(--paper-ink)}
+.hs-pick-heat button.is-q:is([data-v="4"],[data-v="5"]){box-shadow:inset 0 0 0 1.5px var(--paper)}
+.hs-pick-heat button[aria-pressed="true"]{outline:2px solid var(--seal);outline-offset:1px;font-weight:700}
+.hs-pick-heat [data-v="0"]{--heat:var(--heat-0)}.hs-pick-heat [data-v="1"]{--heat:var(--heat-1)}.hs-pick-heat [data-v="2"]{--heat:var(--heat-2)}
+.hs-pick-heat [data-v="3"]{--heat:var(--heat-3)}.hs-pick-heat :is([data-v="4"],[data-v="5"]){--heat:var(--heat-4)}
+.hs-pick-list{padding-top:10px;border-top:1px solid var(--paper-line)}
+.hs-pick-chips{list-style:none;margin:0 0 8px;padding:0;display:flex;flex-wrap:wrap;gap:6px}
+.hs-pick-chips li{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:2px 4px 2px 10px;border-radius:var(--radius-full);background:var(--paper-ink);color:var(--paper);font-size:13px}
+.hs-pick-chips button{flex:none;background:none;border:0;color:inherit;cursor:pointer;width:20px;height:20px;border-radius:50%;padding:0}
+.hs-pick-chips button:hover{background:rgba(255,255,255,.15)}
+
+/* Table Talk: the Letters thread, on leather beside the party, and who's here now above the compose bar. */
+.hs-cp-talk{min-width:0}
+.hs-convo-head.is-flat{grid-template-columns:38px minmax(0,1fr) auto}
+.hs-cp-talk .hs-convo{max-height:420px}
+.hs-cp-here{display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:1px solid var(--gold-rule);background:var(--surface);min-width:0}
+.hs-cp-here > span{font-family:var(--font-label);font-size:12.5px;letter-spacing:.06em;color:var(--muted);flex:none}
+.hs-cp-here ul{display:flex;flex-wrap:wrap;gap:4px;list-style:none;margin:0;padding:0;min-width:0}
+.hs-cp-here .hs-avatar{width:24px;height:24px;font-size:11px}
+
+/* Sessions | Characters: the tabs in a gilded strip, the lists in panels below. */
+.hs-cp-records{display:flex;flex-direction:column;gap:var(--space-5);min-width:0}
+.hs-cp-tabstrip{padding:2px 8px}
+.hs-cp-tabstrip .hs-tabs{border-bottom:0}
+.hs-cp-tabstrip .hs-tabs button small{font-family:var(--font-body);font-size:12px;letter-spacing:0;color:var(--muted);margin-left:6px}
+/* Coming up beside Previous sessions on desktop (the shell's three-column width); stacked on tablets and phones. */
+.hs-cp-records-in{display:grid;gap:var(--space-5);min-width:0}
+.hs-cp-records-in > *{min-width:0}
+.hs-cp-records-in[hidden],.hs-cp-chars-panel[hidden]{display:none}
+@media (min-width:1100px){.hs-cp-records-in{grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:start}}
+.hs-cp-records .hs-sec{font-size:20px}
+.hs-cp-records .hs-cp-sec-row .hs-sec{margin:0}
+.hs-cp-chars-panel{display:flex;flex-direction:column;gap:var(--space-5);min-width:0}
+.hs-cp-rows{list-style:none;margin:0;padding:0}
+.hs-cp-rows > li{border-top:1px solid var(--gold-rule)}
+.hs-cp-rows > li:first-child{border-top:0}
+.hs-cp-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:11px 14px;color:var(--text);text-decoration:none}
+a.hs-cp-row:hover .hs-cp-row-title{color:var(--gold-hi)}
+a.hs-cp-row:hover .hs-cp-chev{color:var(--accent)}
+.hs-cp-row-text{display:flex;flex-direction:column;min-width:0}
+.hs-cp-row-title{font-weight:500;font-size:15px;line-height:1.3;overflow-wrap:anywhere}
+.hs-cp-row-title.is-struck{text-decoration:line-through;text-decoration-color:var(--muted);color:var(--muted)}
+.hs-cp-meta{display:flex;flex-wrap:wrap;gap:2px 10px;align-items:center;margin-top:2px;font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+.hs-cp-meta .hs-tag{margin-left:0}
+.hs-cp-when{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.04em;color:var(--accent);font-variant-numeric:tabular-nums}
+.hs-cp-when.is-planning{color:var(--seal)}
+.hs-cp-when.is-cancelled{color:var(--muted);text-decoration:line-through}
+.hs-cp-flamed{display:inline-flex;align-items:center;gap:4px;color:var(--torch)}
+.hs-cp-sum{margin-top:3px;font-size:13px;color:var(--muted);display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+.hs-cp-chev{color:var(--muted);font-size:18px}
+.hs-cp-row-tools{padding:0 14px 12px;margin-top:-4px}
+.hs-cp-row-sheet{padding:4px 8px 16px}
+.hs-cp-row-sheet .hs-board-sheet{padding-top:20px}
+.hs-cp-change-title{margin:0;font-size:21px}
+.hs-cp-warn{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;padding:10px 14px;margin-bottom:12px}
+.hs-cp-warn p{margin:0;font-size:14px;color:var(--accent);overflow-wrap:anywhere}
+/* The party's adventurers. */
+.hs-cp-chars{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(210px,100%),1fr))}
+.hs-cp-chars a{display:grid;grid-template-columns:38px minmax(0,1fr);gap:10px;align-items:center;padding:11px 14px;border-top:1px solid var(--gold-rule);color:var(--text);text-decoration:none}
+.hs-cp-chars a:hover .hs-cp-row-title{color:var(--gold-hi)}
+.hs-cp-chars.is-former{opacity:.62}
+.hs-avatar.is-char{border-radius:var(--radius);background:var(--surface);color:var(--gold-hi);border:1px solid var(--gold-line)}
+.hs-avatar.is-fallen{color:var(--muted);border-style:dashed}
+/* A switch (the add-session dialog): a track and a knob, then its words. */
+.hs-switch{display:flex;align-items:center;gap:10px;background:none;border:0;padding:0;cursor:pointer;color:var(--text);text-align:left;font:inherit;font-size:14px}
+.hs-switch i{position:relative;width:38px;height:20px;border-radius:var(--radius-full);background:var(--surface);border:1px solid var(--line);flex:none;transition:background .15s}
+.hs-switch i::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--muted);transition:left .15s}
+.hs-switch[aria-checked="true"] i{background:var(--accent);border-color:var(--accent)}
+.hs-switch[aria-checked="true"] i::after{left:20px;background:var(--accent-ink)}
+.hs-switch:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+@media (prefers-reduced-motion:reduce){.hs-switch i,.hs-switch i::after{transition:none}}
+
+/* ---------- Your Room (layout A, "The ledger"; #230) ----------
+   prototype/hearthside-player-profile: the head on the floor (photo in a gilded medallion, name, handle and unique ID,
+   counts, Edit), then a gilded tab strip and one leather panel. The pieces take any person, so another player's page
+   (#231) draws the same head and record. */
+.hs-room-wait{padding:12px 0}
+.hs-app :is(.hs-room-head,.hs-room-panel,.hs-room-tabs) :is(.hs-btn-amber,.hs-ghost,.hs-cp-link){font-family:var(--font-label)}
+.hs-room-head{display:flex;gap:16px;align-items:center;flex-wrap:wrap;min-width:0}
+.hs-room-who{min-width:0;flex:1 1 200px}
+.hs-room-who h1{overflow-wrap:anywhere}
+.hs-room-handle{font-family:var(--font-label);font-size:16px;letter-spacing:.04em;color:var(--accent);text-shadow:var(--on-wood-shadow);overflow-wrap:anywhere}
+.hs-room-handle small{font-family:var(--font-body);letter-spacing:0;font-size:14px;color:var(--on-wood-muted)}
+.hs-page-head p.hs-room-alert{color:#f0a58f}
+.hs-room-acts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.hs-room-edit{height:34px;font-size:15px}
+/* Another player's page (#231): the Friends pill on the floor, or the line saying why there's no letter. */
+.hs-room-acts .hs-room-friend{background:rgba(26,19,14,.7)}
+.hs-page-head p.hs-room-visit-note{margin:0;font-size:14px}
+/* The photo: a face in a gilded medallion, or the initial on dyed cloth. Your own changes on a click. */
+.hs-room-photo{position:relative;display:block;flex:none;width:96px;aspect-ratio:1;border-radius:50%}
+.hs-room-medal{position:absolute;inset:0;display:block;overflow:hidden;border-radius:50%;border:2px solid transparent;container-type:inline-size;
+  background:radial-gradient(120% 90% at 15% 100%,rgba(255,179,107,.2),transparent 55%) padding-box,linear-gradient(160deg,#4a3324,#1c120b) padding-box,
+    linear-gradient(135deg,var(--gold-hi) 0%,#b07c2c 22%,#f0cf7a 45%,#7c5318 68%,#e7c06a 88%,#a87228 100%) border-box;
+  box-shadow:0 3px 8px rgba(0,0,0,.55)}
+.hs-room-medal img{width:100%;height:100%;object-fit:cover;display:block}
+.hs-room-initial{position:absolute;inset:0;display:grid;place-items:center;font-family:var(--font-display);font-size:42cqw;line-height:1;color:var(--gold-hi);opacity:.85}
+.hs-room-photo.is-mine{cursor:pointer}
+.hs-room-photo-hint{position:absolute;inset:0;border-radius:50%;display:grid;place-items:center;padding:8px;text-align:center;line-height:1.2;
+  background:rgba(10,7,4,.62);opacity:0;transition:opacity .15s;font-family:var(--font-label);font-size:13px;letter-spacing:.06em;color:var(--text)}
+.hs-room-photo.is-mine:hover .hs-room-photo-hint,.hs-room-photo.is-mine:focus-within .hs-room-photo-hint,.hs-room-photo.is-busy .hs-room-photo-hint{opacity:1}
+.hs-room-photo:focus-within{outline:2px solid var(--accent);outline-offset:3px}
+/* The tab strip, and the one panel under it. */
+.hs-room-tabs{padding:0 6px}
+.hs-room-tabs .hs-tabs{border-bottom:0;flex-wrap:wrap}
+.hs-room-tabs .hs-tabs button{flex:1 1 auto;padding:10px 8px;font-size:14.5px;white-space:nowrap}
+.hs-room-tabs .hs-tabs button small{font-family:var(--font-body);font-size:12px;letter-spacing:0;color:var(--muted)}
+/* Phones: four tabs make two rows of two. */
+@media (max-width:479px){.hs-room-tabs .hs-tabs{display:grid;grid-template-columns:1fr 1fr}}
+.hs-room-panel{padding:6px;min-width:0}
+.hs-room-sec{padding:12px}
+.hs-room-sec + .hs-room-sec{border-top:1px solid var(--gold-rule)}
+.hs-room-h{margin:0 0 8px;font-family:var(--font-label);font-size:13.5px;font-weight:500;letter-spacing:.1em;color:var(--accent)}
+.hs-room-empty{margin:0;font-size:14.5px;line-height:1.5;color:var(--muted)}
+.hs-room-empty a,.hs-room-link{color:var(--accent)}
+/* The record: a definition list. */
+.hs-room-dl{margin:0;display:flex;flex-direction:column}
+.hs-room-dl > div{display:grid;grid-template-columns:minmax(96px,32%) minmax(0,1fr);gap:10px;padding:7px 0;border-top:1px solid var(--gold-rule);align-items:baseline}
+.hs-room-dl > div:first-child{border-top:0}
+.hs-room-dl dt{font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.06em;color:var(--muted)}
+.hs-room-dl dd{margin:0;font-size:14.5px;overflow-wrap:anywhere}
+.hs-room-dl dd small{display:block;color:var(--muted);font-size:12.5px}
+.hs-room-none{color:var(--muted);font-style:italic}
+.hs-room-lock{margin-left:6px;font-family:var(--font-label);font-size:12px;letter-spacing:.05em;color:var(--muted)}
+.hs-room-mono{font-variant-numeric:tabular-nums;letter-spacing:.02em}
+/* Favourite games: chips. */
+.hs-room-chips{list-style:none;margin:0 0 8px;padding:0;display:flex;flex-wrap:wrap;gap:6px}
+.hs-room-chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:2px 4px 2px 10px;border:1px solid var(--gold-line);border-radius:var(--radius-full);
+  font-size:13.5px;background:rgba(0,0,0,.18);overflow-wrap:anywhere}
+.hs-room-chip.is-ro{padding-right:10px}
+.hs-room-chip button{flex:none;background:none;border:0;color:var(--muted);cursor:pointer;width:22px;height:22px;border-radius:50%;font-size:15px;line-height:1;padding:0}
+.hs-room-chip button:hover{color:var(--text);background:rgba(255,255,255,.06)}
+.hs-room-add{max-width:220px;padding:5px 10px;border-radius:var(--radius-full);font-size:14px}
+/* The record's dialog: the handle's @ (drawn, so it isn't part of the field's name), and labels that sit apart from their field. */
+.hs-field > .hs-room-at{position:relative;display:block;font:inherit;letter-spacing:0;color:var(--text)}
+.hs-room-at::before{content:"@";z-index:1;position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--accent);pointer-events:none}
+.hs-room-at .hs-input{padding-left:24px}
+.hs-field > label > span{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.06em;color:var(--muted)}
+.hs-input:disabled{opacity:.6}
+/* Sessions: the campaign filter over both lists, then a row each. */
+.hs-room-filt{display:flex;flex-wrap:wrap;gap:6px;padding:10px 12px;border-bottom:1px solid var(--gold-rule)}
+.hs-room-filt button{display:inline-flex;gap:6px;align-items:center;max-width:100%;background:transparent;border:1px solid var(--gold-line);color:var(--muted);border-radius:var(--radius-full);
+  padding:2px 10px;font-family:var(--font-label);font-size:13px;letter-spacing:.04em;cursor:pointer;text-align:left;overflow-wrap:anywhere}
+.hs-room-filt button[aria-pressed="true"]{color:var(--accent-ink);background:var(--accent);border-color:var(--accent)}
+.hs-room-n{font-family:var(--font-body);font-size:12px;opacity:.8}
+.hs-room-srs{list-style:none;margin:0;padding:0}
+.hs-room-srs li + li{border-top:1px solid var(--gold-rule)}
+.hs-room-sr{display:grid;grid-template-columns:74px minmax(0,1fr);gap:10px;align-items:center;padding:9px 4px;color:inherit;text-decoration:none;border-radius:var(--radius)}
+.hs-room-sr:hover{background:rgba(255,214,140,.05)}
+.hs-room-sr-when{display:flex;flex-direction:column;font-family:var(--font-label);font-size:12.5px;letter-spacing:.04em;color:var(--muted);line-height:1.2;font-variant-numeric:tabular-nums}
+.hs-room-sr-when b{color:var(--text);font-weight:500;font-size:14px}
+.hs-room-sr.is-next .hs-room-sr-when b{color:var(--accent)}
+.hs-room-sr-t{min-width:0;display:flex;flex-direction:column}
+.hs-room-sr-k{font-family:var(--font-label);font-size:12px;letter-spacing:.08em;color:var(--muted);overflow-wrap:anywhere}
+.hs-room-sr-n{font-size:14.5px;font-weight:500;line-height:1.25;overflow-wrap:anywhere}
+.hs-room-sr-as{font-size:13px;color:var(--muted)}
+/* Campaigns: banner cards. */
+.hs-room-ccs{list-style:none;margin:0;padding:8px;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(240px,100%),1fr));gap:10px}
+.hs-room-cc{min-width:0;padding:6px;border:1px solid var(--gold-rule);border-radius:var(--radius);background:rgba(0,0,0,.16)}
+.hs-room-cc:hover{border-color:var(--gold-line)}
+.hs-room-cc .hs-banner .hs-cloth::after{inset:4px}
+.hs-room-cc .hs-banner .hs-cloth span{font-size:clamp(16px,8cqw,26px)}
+.hs-room-cc.is-done .hs-banner{filter:grayscale(.55) brightness(.8)}
+.hs-room-cc-body{padding:10px 6px 4px;display:flex;flex-direction:column;gap:6px}
+.hs-room-cc h3{margin:0;font-family:var(--font-story);font-weight:400;font-size:19px;line-height:1.15;overflow-wrap:anywhere}
+.hs-room-cc h3 a{color:var(--text);text-decoration:none}
+.hs-room-cc h3 a:hover{color:var(--gold-hi)}
+.hs-room-cc-meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px}
+/* Integrations: the portfolio's card. The name and its status on the left, one button on the right, the result under. */
+.hs-room-ig{display:grid;grid-template-columns:40px minmax(0,1fr) auto;gap:6px 12px;align-items:start;padding:14px}
+.hs-room-ig-mark{width:40px;height:40px;border-radius:var(--radius);display:grid;place-items:center;border:1px solid var(--gold-line);background:rgba(0,0,0,.25);color:var(--gold-hi)}
+.hs-room-ig-mark svg{width:22px;height:22px}
+.hs-room-ig-text{min-width:0}
+.hs-room-ig-name{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
+.hs-room-ig-name h3{margin:0;font-family:var(--font-story);font-weight:400;font-size:19px;line-height:1.2}
+.hs-room-ig-sub{margin:2px 0 0;font-size:14px;color:var(--muted);line-height:1.4}
+.hs-room-ig-warn{margin:6px 0 0;padding-left:10px;border-left:2px solid var(--seal);font-size:13.5px;line-height:1.4;color:var(--text)}
+.hs-room-ig-btn{align-self:center;height:34px;min-width:104px;justify-content:center}
+.hs-room-ig-btn:disabled{opacity:.6;cursor:default}
+.hs-room-ig-note{grid-column:2 / -1;margin:4px 0 0;font-size:13.5px;color:var(--accent);overflow-wrap:anywhere}
+.hs-room-pill{display:inline-block;font-family:var(--font-label);font-size:12px;font-weight:500;letter-spacing:.06em;padding:1px 8px;border-radius:var(--radius-full);
+  border:1px solid currentColor;color:var(--muted);white-space:nowrap}
+.hs-room-pill.is-ok{color:var(--moss)}
+.hs-room-pill.is-seal{color:#fff;background:var(--seal);border-color:var(--seal)}
+@media (max-width:479px){.hs-room-ig{grid-template-columns:40px minmax(0,1fr)}.hs-room-ig-btn{grid-column:2;justify-self:start}}
+@media (prefers-reduced-motion:reduce){.hs-room-photo-hint{transition:none}}
+
+/* ---------- The Almanac (#228; prototype/hearthside-almanac, layout B "Chronicle") ----------
+   A list by week or a calendar (Month / Week), with filters for both. Sessions on the calendar carry their
+   campaign's banner (BannerArt, .hs-alm-bn) in a gilded panel's gold frame; quests are #227's paper slips. */
+.hs-alm-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+.hs-alm-head > div:first-child{min-width:0}
+.hs-alm-seg{display:inline-flex;gap:2px;padding:3px;border-radius:var(--radius);background:rgba(26,19,14,.82);border:1px solid var(--gold-line);box-shadow:var(--shadow-panel)}
+.hs-alm-seg button{background:transparent;border:0;padding:5px 14px;border-radius:3px;cursor:pointer;color:var(--muted);font-family:var(--font-label);font-size:14px;font-weight:500;letter-spacing:.04em}
+.hs-alm-seg button:hover{color:var(--text)}
+.hs-alm-seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.hs-alm-n{margin-left:2px;font-family:var(--font-body);font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.hs-alm-link{background:none;border:0;padding:0;color:var(--accent);cursor:pointer;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.04em}
+.hs-alm-link:hover{color:var(--gold-hi)}
+.hs-alm-error{color:#f0a58f}
+.hs-alm-tabs button{padding-inline:8px}
+
+/* A banner behind something: fills its box; the cloth keeps its initials only where there's room. */
+.hs-alm-bn{position:absolute;inset:0;display:block;overflow:hidden;container-type:inline-size}
+.hs-alm-bn img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+.hs-alm-bn .hs-cloth{place-items:center end;padding-right:8%}
+.hs-alm-bn .hs-cloth::after{inset:4px}
+.hs-alm-bn .hs-cloth span{font-size:clamp(12px,9cqw,28px)}
+
+/* Filters: the campaign dropdown, the place chips, Clear filters. The open list hangs from the whole panel. */
+.hs-alm-filters{z-index:5;padding:10px 14px;display:flex;flex-direction:column;gap:8px}
+.hs-alm-frow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0}
+.hs-alm-flab{width:78px;flex:none;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--muted)}
+.hs-alm-chip{display:inline-flex;align-items:center;gap:2px;padding:3px 10px;border-radius:var(--radius-full);border:1px solid var(--line);background:transparent;
+  color:var(--text);cursor:pointer;font-family:var(--font-body);font-size:13px;line-height:1.3}
+.hs-alm-chip:hover{border-color:var(--gold)}
+.hs-alm-chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.hs-alm-chip[aria-pressed="true"] .hs-alm-n{color:var(--accent-ink);opacity:.75}
+.hs-alm-clear{margin-left:auto}
+.hs-alm-dd{flex:1 1 240px;display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0}
+.hs-alm-dd-btn{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 10px 0 5px;border-radius:var(--radius);border:1px solid var(--gold-line);
+  background:var(--surface);color:var(--text);cursor:pointer;font-family:var(--font-body);font-size:14px;max-width:100%;min-width:0}
+.hs-alm-dd-btn:hover,.hs-alm-dd-btn[aria-expanded="true"]{border-color:var(--gold)}
+.hs-alm-dd-btn:disabled{opacity:.6;cursor:default}
+.hs-alm-dd-txt{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hs-alm-dd-caret{color:var(--muted);font-size:11px}
+.hs-alm-dd-stack{display:inline-flex;flex:none}
+.hs-alm-dd-stack > span + span{margin-left:-24px}
+.hs-alm-thumb{position:relative;flex:none;width:40px;height:22px;border-radius:2px;box-shadow:0 0 0 1px rgba(0,0,0,.7),0 1px 3px rgba(0,0,0,.6)}
+.hs-alm-thumb .hs-cloth span,.hs-alm-thumb .hs-cloth::after{display:none}
+.hs-alm-tok{display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 9px 0 3px;border-radius:var(--radius);border:1px solid var(--gold);
+  background:rgba(229,161,58,.14);color:var(--text);cursor:pointer;font-family:var(--font-body);font-size:13px;max-width:100%;min-width:0}
+.hs-alm-tok .hs-alm-thumb{width:34px;height:20px}
+.hs-alm-tok-n{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hs-alm-tok-x{flex:none;color:var(--muted);font-size:15px;line-height:1}
+.hs-alm-tok:hover .hs-alm-tok-x{color:var(--gold-hi)}
+.hs-alm-dd-pop{position:absolute;z-index:30;top:calc(100% + 10px);left:0;width:min(420px,100%);padding:10px 12px 12px;display:flex;flex-direction:column;gap:10px}
+.hs-alm-dd-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:2px 4px 0;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--muted)}
+.hs-alm-dd-list{display:flex;flex-direction:column;gap:8px;max-height:min(60vh,520px);overflow-y:auto;padding:3px}
+/* At least 4:1 so the whole banner shows, and taller when the name wraps (overflow:clip keeps the content minimum). */
+.hs-alm-opt{position:relative;flex:none;display:flex;align-items:center;width:100%;aspect-ratio:4/1;border:0;padding:10px 48px 10px 12px;border-radius:3px;overflow:clip;
+  cursor:pointer;text-align:left;font:inherit;color:var(--text);background:var(--leather);box-shadow:0 0 0 1px var(--gold-line),0 3px 8px rgba(0,0,0,.55)}
+.hs-alm-opt::before{content:"";position:absolute;inset:0;z-index:1;background:linear-gradient(90deg,rgba(20,13,8,.9) 0%,rgba(20,13,8,.55) 50%,rgba(20,13,8,0) 80%)}
+.hs-alm-opt .hs-cloth{padding-right:58px}
+.hs-alm-opt-name{position:relative;z-index:2;min-width:0;display:flex;flex-direction:column;gap:2px}
+.hs-alm-opt-name b{font-family:var(--font-story);font-weight:400;font-size:19px;line-height:1.1;color:var(--on-wood-text);text-shadow:var(--on-wood-shadow);overflow-wrap:anywhere}
+.hs-alm-opt-name small{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.05em;color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow)}
+.hs-alm-opt-check{position:absolute;z-index:2;right:10px;top:50%;margin-top:-13px;width:26px;height:26px;border-radius:50%;border:2px solid var(--gold);background:rgba(20,13,8,.65);box-shadow:0 1px 4px #000}
+.hs-alm-opt.is-on{box-shadow:0 0 0 2px var(--gold-hi),0 3px 10px rgba(0,0,0,.6)}
+.hs-alm-opt.is-on .hs-alm-opt-check{background:var(--accent);border-color:var(--gold-hi)}
+.hs-alm-opt.is-on .hs-alm-opt-check::after{content:"";position:absolute;left:7px;top:3px;width:6px;height:11px;border:solid var(--accent-ink);border-width:0 2.5px 2.5px 0;transform:rotate(45deg)}
+.hs-alm-dd.has-sel .hs-alm-opt:not(.is-on) .hs-alm-bn{filter:grayscale(.85) brightness(.5)}
+.hs-alm-dd.has-sel .hs-alm-opt:not(.is-on) .hs-alm-opt-name{opacity:.7}
+.hs-alm-opt:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.hs-alm-dd-f{display:flex;justify-content:flex-end}
+.hs-alm-dd-f .hs-btn-amber{height:32px}
+@media (max-width:620px){
+  .hs-alm-flab{width:100%}
+  .hs-alm-dd-pop{width:100%;padding:10px}
+  .hs-alm-opt{padding:8px 44px 8px 10px}
+  .hs-alm-opt-check{right:9px}
+  .hs-alm-opt-name b{font-size:17px}
+  .hs-alm-opt .hs-cloth span{display:none}
+}
+
+/* The list: Coming up by week, each day's date large on the floor beside its sheets; Played as rows. */
+.hs-alm-strip{padding:6px}
+.hs-alm-strip .hs-tabs{border-bottom:0;padding:0 8px}
+.hs-alm-list{display:flex;flex-direction:column;gap:26px;min-width:0}
+.hs-alm-week{display:flex;flex-direction:column;gap:22px;min-width:0}
+.hs-alm-week-h{display:flex;align-items:center;gap:12px;margin:6px 0 0;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;
+  color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow)}
+.hs-alm-week-h::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--gold-line),rgba(226,184,98,0))}
+.hs-alm-entry{display:grid;grid-template-columns:62px minmax(0,1fr);gap:16px;align-items:start}
+.hs-alm-leaf{text-align:center;color:var(--on-wood-text);text-shadow:var(--on-wood-shadow);padding-top:12px}
+.hs-alm-leaf b{display:block;font-family:var(--font-display);font-size:36px;line-height:1;font-weight:400}
+.hs-alm-leaf span{display:block;font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.08em;color:var(--on-wood-muted)}
+.hs-alm-leaf.is-today b{color:var(--accent)}
+.hs-alm-day{display:flex;flex-direction:column;gap:22px;min-width:0}
+.hs-alm-off{padding:12px 16px;display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;color:var(--muted);font-size:14px}
+.hs-alm-off b{font-weight:500;text-decoration:line-through}
+.hs-alm-played{list-style:none;margin:0;padding:0}
+.hs-alm-played li + li{border-top:1px solid var(--gold-rule)}
+.hs-alm-prow{display:grid;grid-template-columns:84px minmax(0,1fr);gap:12px;align-items:baseline;padding:11px 14px;color:var(--text);text-decoration:none}
+.hs-alm-prow:hover b{color:var(--gold-hi)}
+.hs-alm-prow time{font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.04em;color:var(--accent)}
+.hs-alm-prow-t{min-width:0}
+.hs-alm-prow b{display:block;font-weight:500;font-size:14.5px;overflow-wrap:anywhere}
+.hs-alm-prow small{display:block;font-size:13px;color:var(--muted)}
+@media (max-width:620px){
+  .hs-alm-entry{grid-template-columns:44px minmax(0,1fr);gap:10px}
+  .hs-alm-leaf b{font-size:28px}
+  .hs-alm-prow{grid-template-columns:1fr;gap:2px}
+}
+
+/* A session's parchment (AlmanacSheet), in the list and under the calendar. */
+.hs-alm-sheet{min-width:0}
+.hs-alm-sheet-text{flex:1 1 220px;min-width:0}
+.hs-alm-sheet .hs-sheet-title{font-size:24px;overflow-wrap:anywhere}
+.hs-alm-qh{margin:16px 0 0;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--paper-muted)}
+.hs-alm-qnone{margin:14px 0 0;font-size:14px;color:var(--paper-muted)}
+.hs-alm-sheet-slips{font-size:14px;max-width:440px}
+.hs-alm-sheet a.hs-btn{display:inline-block;text-decoration:none}
+.hs-alm-sheets{display:flex;flex-direction:column;gap:30px;padding-top:6px}
+
+/* The calendar: tabs, the head (‹ title Today ›), then the month's grid or the week's columns. */
+.hs-alm-cal{padding:6px;min-width:0}
+.hs-alm-cal .hs-alm-tabs{padding:0 8px}
+.hs-alm-cal-in{container-type:inline-size;min-width:0}
+.hs-alm-cal-head{display:flex;align-items:center;gap:8px;padding:8px 10px 10px}
+.hs-alm-cal-head h2{margin:0;flex:1;min-width:0;font-family:var(--font-display);font-weight:400;font-size:22px;letter-spacing:.02em;color:var(--text)}
+.hs-alm-nav{flex:none;background:transparent;border:1px solid var(--line);color:var(--text);border-radius:var(--radius);height:32px;min-width:32px;padding:0 10px;cursor:pointer;
+  font-family:var(--font-label);font-weight:500;letter-spacing:.04em}
+.hs-alm-nav:hover{border-color:var(--gold);color:var(--gold-hi)}
+.hs-alm-wd,.hs-alm-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr))}
+.hs-alm-wd{border-top:1px solid var(--gold-rule)}
+.hs-alm-wd span{font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.06em;color:var(--muted);text-align:center;padding:6px 0}
+.hs-alm-cell{min-height:100px;padding:4px 4px 6px;border-top:1px solid var(--gold-rule);border-left:1px solid var(--gold-rule);cursor:pointer;
+  display:flex;flex-direction:column;gap:3px;min-width:0}
+.hs-alm-cell:nth-child(7n+1){border-left:0}
+.hs-alm-cell:hover{background:rgba(229,161,58,.06)}
+.hs-alm-cell.is-sel{background:rgba(229,161,58,.13);box-shadow:inset 0 0 0 1px var(--gold)}
+.hs-alm-cell.is-out > *{opacity:.45}
+.hs-alm-num{flex:none;border:0;background:none;padding:0;cursor:pointer;font-family:var(--font-label);font-size:13px;font-weight:500;color:var(--muted);
+  width:24px;height:24px;display:grid;place-items:center;border-radius:50%;font-variant-numeric:tabular-nums}
+.hs-alm-cell.is-today .hs-alm-num{background:var(--accent);color:var(--accent-ink);font-weight:700}
+.hs-alm-num:focus-visible,.hs-alm-wdh:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.hs-alm-items{display:flex;flex-direction:column;gap:3px;min-width:0}
+.hs-alm-ms,.hs-alm-ws{border:1px solid transparent;border-radius:var(--radius);overflow:hidden;min-width:0;
+  background:linear-gradient(var(--leather),var(--leather)) padding-box,linear-gradient(135deg,var(--gold-hi) 0%,#b07c2c 22%,#f0cf7a 45%,#7c5318 68%,#e7c06a 88%,#a87228 100%) border-box}
+.hs-alm-ms{position:relative;display:block;min-height:50px;box-shadow:0 2px 5px rgba(0,0,0,.65)}
+.hs-alm-ms::before{content:"";position:absolute;inset:0;z-index:1;background:linear-gradient(180deg,rgba(20,13,8,.05) 0%,rgba(20,13,8,.6) 45%,rgba(20,13,8,.92) 100%)}
+.hs-alm-ms .hs-cloth span,.hs-alm-ms .hs-cloth::after{display:none}
+.hs-alm-ms-in{position:relative;z-index:2;display:flex;flex-direction:column;gap:1px;padding:16px 5px 5px}
+.hs-alm-ms b{font-family:var(--font-label);font-weight:700;font-size:11.5px;letter-spacing:.04em;color:var(--accent);text-shadow:0 1px 2px #000}
+.hs-alm-ms-t{font-family:var(--font-story);font-size:13.5px;line-height:1.12;color:var(--on-wood-text);text-shadow:0 1px 2px #000;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.hs-alm-ms.is-after .hs-alm-bn,.hs-alm-ws.is-after .hs-alm-bn{filter:grayscale(.75) brightness(.75)}
+.hs-alm-ms.is-cancelled,.hs-alm-ws.is-cancelled{background:transparent;border:1px dashed var(--line);box-shadow:none}
+.hs-alm-ms.is-cancelled{min-height:0}
+.hs-alm-ms.is-cancelled::before{display:none}
+.hs-alm-ms.is-cancelled .hs-alm-ms-in{padding:3px 5px}
+.hs-alm-ms.is-cancelled b{color:var(--muted);text-shadow:none}
+.hs-alm-ms.is-cancelled .hs-alm-ms-t{color:var(--muted);text-decoration:line-through;text-shadow:none;font-size:12.5px}
+/* Quests on their due day: #227's slips, smaller; a month cell clips the title to two lines. */
+.hs-alm-cslips{margin:2px 0 0;font-size:11.5px;gap:.4em}
+.hs-alm-cslips .hs-slip{padding:.35em .45em;gap:.4em}
+.hs-alm-month .hs-alm-cslips small,.hs-alm-month .hs-alm-cslips .hs-tag{display:none}
+.hs-alm-month .hs-alm-cslips .hs-slip-title{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.hs-alm-more{font-size:11.5px;color:var(--muted);padding-left:3px}
+.hs-alm-dots{display:none;gap:3px;flex-wrap:wrap;justify-content:center}
+.hs-alm-dots i{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+.hs-alm-dots i.is-off{background:transparent;border:1px dashed var(--muted)}
+.hs-alm-dots i.q{border-radius:1px;transform:rotate(-8deg);background:var(--paper);width:7px;height:8px}
+.hs-alm-dots i.q.is-done{background:var(--moss)}
+/* Phones: the month's cells shrink to marks (a dot per session, a paper chip per quest, moss once done). */
+@container (max-width:520px){
+  .hs-alm-cell{min-height:54px;align-items:center}
+  .hs-alm-items{display:none}
+  .hs-alm-dots{display:flex}
+}
+/* The week: a tall column per day, everything written out; a list of days when narrow. */
+.hs-alm-wgrid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border-top:1px solid var(--gold-rule)}
+.hs-alm-wday{border-left:1px solid var(--gold-rule);cursor:pointer;min-height:280px;padding:8px 5px 12px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.hs-alm-wday:first-child{border-left:0}
+.hs-alm-wday:hover{background:rgba(229,161,58,.06)}
+.hs-alm-wday.is-sel{background:rgba(229,161,58,.13);box-shadow:inset 0 0 0 1px var(--gold)}
+.hs-alm-wdh{border:0;background:none;cursor:pointer;text-align:left;display:flex;align-items:baseline;gap:6px;padding:0 0 0 2px;
+  font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.06em;color:var(--muted)}
+.hs-alm-wdh b{font-family:var(--font-display);font-weight:400;font-size:24px;line-height:1;letter-spacing:0;color:var(--text)}
+.hs-alm-wday.is-today .hs-alm-wdh b{color:var(--accent)}
+.hs-alm-witems{display:flex;flex-direction:column;gap:6px;min-width:0}
+.hs-alm-ws{display:flex;flex-direction:column;box-shadow:0 3px 8px rgba(0,0,0,.6);font-size:12.5px;line-height:1.3}
+.hs-alm-ws-bn{position:relative;display:block;aspect-ratio:2.6/1}
+.hs-alm-ws-bn .hs-cloth::after{inset:3px}
+.hs-alm-ws-body{display:flex;flex-direction:column;gap:2px;padding:5px 7px 7px;background:radial-gradient(130% 90% at 50% 0%,var(--leather-hi),var(--leather))}
+.hs-alm-ws-t{font-family:var(--font-label);font-weight:500;color:var(--accent);font-size:12px;letter-spacing:.02em}
+.hs-alm-ws b{font-family:var(--font-story);font-weight:400;font-size:14.5px;line-height:1.12;color:var(--text);overflow-wrap:break-word;hyphens:auto}
+.hs-alm-ws small{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.hs-alm-ws.is-cancelled .hs-alm-ws-body{background:none}
+.hs-alm-ws.is-cancelled b{text-decoration:line-through;color:var(--muted);font-size:13.5px}
+.hs-alm-ws.is-cancelled .hs-alm-ws-t{color:var(--muted)}
+.hs-alm-none{font-size:12px;color:var(--muted);opacity:.55;padding-left:2px}
+@container (max-width:560px){
+  .hs-alm-wgrid{grid-template-columns:minmax(0,1fr)}
+  .hs-alm-wday{min-height:0;border-left:0;border-top:1px solid var(--gold-rule);display:grid;grid-template-columns:44px minmax(0,1fr);gap:10px;padding:10px 8px}
+  .hs-alm-wday:first-child{border-top:0}
+  .hs-alm-wdh{flex-direction:column-reverse;align-items:center;align-self:start;gap:2px;padding:0}
+  .hs-alm-ws b{font-size:15.5px}
+  .hs-alm-ws-bn{aspect-ratio:4/1}
+  .hs-alm-cslips{font-size:13px}
+}
+.hs-alm-legend{margin:0;padding:8px 12px 6px;border-top:1px solid var(--gold-rule);font-size:12px;line-height:1.4;color:var(--muted)}
+/* The chosen day, under the calendar. */
+.hs-alm-dayd{min-width:0}
+.hs-alm-dayd .hs-sec{flex-wrap:wrap}
+.hs-alm-due{padding:10px 14px 14px}
+.hs-alm-sheets + .hs-alm-due{margin-top:26px}
+.hs-alm-panel-h{margin:0;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--muted)}
+.hs-alm-due .hs-slips{font-size:14px;max-width:440px}
+/* A session's quests in the calendar (#252): a paper tag with how many are still open, moss once all are done. */
+.hs-alm-qm{position:relative;align-self:flex-start;max-width:100%;margin-top:3px;padding:1px 5px;border-radius:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  background:linear-gradient(170deg,var(--paper-hi),var(--paper-lo));color:var(--paper-ink);box-shadow:0 1px 3px rgba(0,0,0,.6);
+  font-family:var(--font-label);font-size:11px;font-weight:600;letter-spacing:.03em;line-height:1.35;text-shadow:none;transform:rotate(-1deg)}
+.hs-alm-qm.is-done{background:var(--moss);color:var(--paper-ink)}
+.hs-alm-qm.is-done::before{content:"\2713\00a0"}
+.hs-alm-ws .hs-alm-qm{margin-top:4px;font-size:11.5px}
+/* Played, a page at a time (#252): the range and the page size at the head, Previous and Next at the foot. */
+.hs-alm-pl-head{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;padding:10px 14px;border-bottom:1px solid var(--gold-rule)}
+.hs-alm-pl-range{margin:0 auto 0 0;min-width:0;font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.06em;color:var(--muted);font-variant-numeric:tabular-nums}
+.hs-alm-pl-size{font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.06em;color:var(--muted)}
+.hs-alm-pl-select{height:30px;padding:0 6px;border:1px solid var(--gold-line);border-radius:var(--radius);background:var(--surface);color:var(--text);
+  font-family:var(--font-body);font-size:14px;color-scheme:dark;cursor:pointer}
+.hs-alm-pl-select:hover,.hs-alm-pl-select:focus-visible{border-color:var(--gold)}
+.hs-alm-pl-err{margin:10px 14px}
+.hs-alm-pager{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 14px;border-top:1px solid var(--gold-rule)}
+.hs-alm-pager-n{font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.06em;color:var(--muted)}
+.hs-alm-pager .hs-alm-nav:disabled{opacity:.45;cursor:default;border-color:var(--line);color:var(--muted)}
+
+/* ---------- Adventurers (#229; prototype/hearthside-characters, layout D "Gallery + road") ----------
+   The roster: portraits in gilded frames hung on the floor, a brass name plate screwed to each frame's foot and the
+   next session under it; the fallen hang in the Hall of Heroes below with a black ribbon. An adventurer's page: a
+   hero (the medallion, their name, the level seal), then their sheet on leather. Every portrait is the fallback (dyed
+   cloth with the initials stitched on) until art exists (#198), as a campaign with no banner shows its cloth. */
+.hs-adv-wait{padding:12px 0}
+.hs-adv-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+.hs-adv-head > div{min-width:0}
+.hs-app .hs-adv-new,.hs-app .hs-adv-edit{height:36px;font-size:15px;font-family:var(--font-label)}
+.hs-adv-frame,.hs-adv-medal{--hs-adv-gild:linear-gradient(135deg,var(--gold-hi) 0%,#b07c2c 22%,#f0cf7a 45%,#7c5318 68%,#e7c06a 88%,#a87228 100%)}
+/* A portrait, 3:4; a face (for medallions) is round. */
+.hs-adv-pt{position:relative;display:block;aspect-ratio:3/4;overflow:hidden;background:var(--leather);container-type:inline-size}
+.hs-adv-pt.is-face{aspect-ratio:1;border-radius:50%}
+.hs-adv-pt-none{position:absolute;inset:0;display:grid;place-items:center;
+  background:repeating-linear-gradient(45deg,rgba(0,0,0,.12) 0 1px,transparent 1px 5px),repeating-linear-gradient(-45deg,rgba(255,255,255,.035) 0 1px,transparent 1px 5px),
+    radial-gradient(120% 90% at 15% 100%,rgba(255,179,107,.2),transparent 55%),linear-gradient(160deg,#4a3324,#1c120b)}
+.hs-adv-pt-none::after{content:"";position:absolute;inset:5%;border:1px dashed rgba(246,221,150,.4);border-radius:2px}
+.hs-adv-pt.is-face .hs-adv-pt-none::after{inset:9%;border-radius:50%}
+.hs-adv-pt-none span{font-family:var(--font-display);font-size:30cqw;letter-spacing:.06em;color:var(--gold-hi);opacity:.85;text-shadow:0 1px 0 rgba(0,0,0,.6)}
+.hs-adv-pt.is-face .hs-adv-pt-none span{font-size:36cqw}
+/* The fallen lose their colour. */
+.is-fallen .hs-adv-pt-none,.hs-adv-frame.is-fallen .hs-adv-pt-none{filter:grayscale(1) brightness(.7)}
+/* A frame: the gilded panel's gold, a hairline inside. A medallion: the same gold, round. */
+.hs-adv-frame{position:relative;display:block;width:100%;border:3px solid transparent;border-radius:var(--radius-panel);overflow:hidden;
+  background:linear-gradient(var(--leather),var(--leather)) padding-box,var(--hs-adv-gild) border-box;box-shadow:var(--shadow-panel)}
+.hs-adv-frame::after{content:"";position:absolute;inset:4px;border:1px solid rgba(246,221,150,.45);border-radius:2px;pointer-events:none;z-index:3}
+.hs-adv-medal{position:relative;display:block;flex:none;border-radius:50%;overflow:hidden;border:3px solid transparent;
+  background:linear-gradient(var(--leather),var(--leather)) padding-box,var(--hs-adv-gild) border-box;box-shadow:0 3px 8px rgba(0,0,0,.6)}
+.hs-adv-medal.is-small{width:38px;border-width:2px}
+
+/* The roster: the wall of portraits, two across on a phone. */
+.hs-adv-wall{list-style:none;margin:0;padding:4px 0 0;display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:30px 22px}
+.hs-adv-wall > li{min-width:0;display:flex}
+.hs-adv-card{flex:1;display:flex;flex-direction:column;align-items:center;min-width:0;color:inherit;text-align:center;text-decoration:none}
+.hs-adv-card:hover .hs-adv-frame,.hs-adv-card:focus-visible .hs-adv-frame{box-shadow:var(--shadow-panel),0 0 0 2px rgba(246,221,150,.8),0 0 28px 6px rgba(255,179,107,.5)}
+.hs-adv-card:focus-visible{outline:0}
+/* The brass name plate, screwed to the frame's foot. */
+.hs-adv-plate{position:relative;z-index:4;margin-top:-14px;max-width:92%;min-width:66%;padding:6px 12px 7px;border-radius:2px;
+  background:linear-gradient(180deg,#f4d98e,#d7ab55 55%,#b88834);box-shadow:0 3px 6px rgba(0,0,0,.65),inset 0 1px 0 rgba(255,255,255,.4);color:var(--accent-ink)}
+.hs-adv-plate::before,.hs-adv-plate::after{content:"";position:absolute;top:50%;margin-top:-2.5px;width:5px;height:5px;border-radius:50%;background:#7c5318;box-shadow:inset 0 1px 0 rgba(255,255,255,.35)}
+.hs-adv-plate::before{left:4px}
+.hs-adv-plate::after{right:4px}
+.hs-adv-plate b{display:block;font-family:var(--font-story);font-weight:400;font-size:17px;line-height:1.15;text-shadow:0 1px 0 rgba(255,240,200,.5);overflow-wrap:anywhere}
+.hs-adv-plate small{display:block;font-family:var(--font-label);font-size:12.5px;font-weight:500;letter-spacing:.05em;color:#4a3112;overflow-wrap:anywhere}
+.hs-adv-under{margin-top:8px;font-size:13px;color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow);max-width:100%;overflow-wrap:anywhere}
+.hs-adv-under b{display:block;font-family:var(--font-label);font-weight:500;font-size:12.5px;letter-spacing:.05em;color:var(--accent)}
+/* The fallen: a black ribbon across the frame's corner. */
+.hs-adv-ribbon{position:absolute;z-index:4;top:16px;right:-34px;width:130px;transform:rotate(45deg);text-align:center;padding:3px 0;
+  background:#120c08;color:var(--muted);font:500 11.5px/1.2 var(--font-label);letter-spacing:.14em;box-shadow:0 2px 4px rgba(0,0,0,.6)}
+.hs-adv-hall > .hs-sec{margin-top:10px}
+/* No adventurers yet: an empty frame, and the first one's invitation. */
+.hs-adv-empty{display:grid;grid-template-columns:150px minmax(0,1fr);gap:22px;align-items:center;max-width:560px}
+.hs-adv-empty .hs-adv-frame{opacity:.9}
+.hs-adv-empty h2{margin:0 0 4px;font-family:var(--font-story);font-weight:400;font-size:24px;color:var(--on-wood-text);text-shadow:var(--on-wood-shadow)}
+.hs-adv-empty p{margin:0 0 12px;color:var(--on-wood-muted);text-shadow:var(--on-wood-shadow);font-size:15px}
+@media (max-width:520px){
+  .hs-adv-wall{grid-template-columns:repeat(2,minmax(0,1fr));gap:26px 14px}
+  .hs-adv-plate{min-width:0;padding:5px 9px 6px}
+  .hs-adv-plate b{font-size:15.5px}
+  .hs-adv-empty{grid-template-columns:96px minmax(0,1fr);gap:14px}
+}
+
+/* An adventurer's page: the hero, then their sheet. */
+.hs-adv-hero{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:20px;align-items:center;padding:20px 22px}
+.hs-adv-hero .hs-adv-medal{width:150px}
+.hs-adv-hero-who{min-width:0}
+.hs-adv-hero h1{overflow-wrap:anywhere}
+.hs-page-head p.hs-adv-hero-k{font-family:var(--font-label);font-weight:500;letter-spacing:.05em;color:var(--accent);font-size:14.5px;overflow-wrap:anywhere}
+.hs-page-head p.hs-adv-hero-fell{font-family:var(--font-label);letter-spacing:.12em;font-size:13px;color:var(--muted)}
+.hs-adv-hero.is-fallen .hs-adv-medal{filter:grayscale(.6)}
+/* The level, as an amber seal. */
+.hs-adv-lvl{flex:none;width:58px;height:58px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+  background:radial-gradient(circle at 35% 30%,#f3c070,var(--accent) 45%,#a8661c);color:var(--accent-ink);
+  box-shadow:0 2px 6px rgba(0,0,0,.6),inset 0 0 0 2px rgba(255,230,170,.35)}
+.hs-adv-lvl small{font:500 10px/1 var(--font-label);letter-spacing:.12em}
+.hs-adv-lvl b{font:400 26px/1 var(--font-display)}
+.hs-adv-hero.is-fallen .hs-adv-lvl{filter:grayscale(.7) brightness(.8)}
+@media (max-width:620px){
+  .hs-adv-hero{grid-template-columns:auto minmax(0,1fr);gap:8px 14px;padding:16px}
+  .hs-adv-hero .hs-adv-medal{width:92px}
+  .hs-adv-hero .hs-adv-lvl{grid-column:1;grid-row:2;justify-self:center}
+  .hs-adv-hero-who{grid-column:2;grid-row:1 / span 2}
+}
+.hs-adv-sheet-sec{max-width:720px}
+.hs-adv-sheet{padding:6px 0}
+.hs-adv-dl{margin:0;display:flex;flex-direction:column}
+.hs-adv-dl > div{display:grid;grid-template-columns:minmax(90px,32%) minmax(0,1fr);gap:10px;padding:8px 14px;border-top:1px solid var(--gold-rule);align-items:baseline}
+.hs-adv-dl > div:first-child{border-top:0}
+.hs-adv-dl dt{font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.06em;color:var(--muted)}
+.hs-adv-dl dd{margin:0;font-size:14.5px;overflow-wrap:anywhere}
+.hs-adv-none{color:var(--muted);font-style:italic}
+.hs-adv-link{color:var(--accent);text-decoration:none}
+.hs-adv-link:hover{color:var(--gold-hi);text-decoration:underline}
+.hs-adv-panel-h{margin:0;padding:10px 14px 6px;border-top:1px solid var(--gold-rule);font-family:var(--font-label);font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--muted)}
+/* Travels with: the party's other adventurers, each a medallion and a name. */
+.hs-adv-mates{list-style:none;margin:0;padding:4px 14px 12px;display:flex;flex-wrap:wrap;gap:10px 18px}
+.hs-adv-mates > li{min-width:0;max-width:100%}
+.hs-adv-mate{display:flex;align-items:center;gap:8px;min-width:0;color:inherit;text-decoration:none}
+.hs-adv-mate:hover b{color:var(--gold-hi)}
+.hs-adv-mate-text{min-width:0}
+.hs-adv-mate b{display:block;font-weight:500;font-size:14px;line-height:1.2;overflow-wrap:anywhere}
+.hs-adv-mate small{display:block;font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
+.hs-adv-empty-line{margin:0;padding:2px 14px 12px;font-size:14px;color:var(--muted)}
+.hs-adv-foot{display:flex;justify-content:flex-end;gap:10px;padding:10px 14px 8px;border-top:1px solid var(--gold-rule)}
+
+/* The dialog (New adventurer, Edit): the frame beside the name, then the rest of today's fields. */
+.hs-adv-form-top{display:grid;grid-template-columns:96px minmax(0,1fr);gap:14px;align-items:start}
+.hs-adv-form-top .hs-adv-frame{border-width:2px}
+.hs-adv-form-who{display:flex;flex-direction:column;gap:8px;min-width:0}
+.hs-adv-form-cls{display:grid;grid-template-columns:minmax(0,1fr) 88px;gap:12px}
+.hs-adv-seg{display:inline-flex;align-self:flex-start;gap:2px;padding:3px;border-radius:var(--radius);background:var(--surface);border:1px solid var(--line)}
+.hs-app .hs-adv-seg button{background:transparent;border:0;padding:5px 14px;border-radius:3px;cursor:pointer;color:var(--muted);font-family:var(--font-label);font-size:14px;font-weight:500;letter-spacing:.04em}
+.hs-adv-seg button:hover{color:var(--text)}
+.hs-adv-seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+@media (max-width:420px){.hs-adv-form-top{grid-template-columns:72px minmax(0,1fr);gap:12px}.hs-adv-form-cls{grid-template-columns:minmax(0,1fr) 72px}}

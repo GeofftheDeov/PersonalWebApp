@@ -136,6 +136,9 @@ export const realExternalEvents: ExternalEvents = {
             warnings: [],
         };
         const { start, end } = input;
+        // A move also rewrites the description, so an event published before
+        // #213 with the agenda in it loses it ("" clears it).
+        const description = input.description ?? "";
 
         if (input.existing.discordEventId || (input.createMissing && input.discord)) {
             const keys = await firstKey(input.gmIds, "discord");
@@ -148,7 +151,7 @@ export const realExternalEvents: ExternalEvents = {
             } else {
                 const ref = { botToken: keys.secret, guildId: input.discord.guildId };
                 out.discordEventId = await moveOrReplace("Discord", input.existing.discordEventId, input.createMissing, out.warnings, {
-                    update: (eventId) => integrations().discord.updateScheduledEvent({ ...ref, eventId, start, end }),
+                    update: (eventId) => integrations().discord.updateScheduledEvent({ ...ref, eventId, start, end, description }),
                     create: () => integrations().discord.createScheduledEvent({
                         ...ref, channelId: input.discord!.channelId,
                         name: input.name, description: input.description, location: input.location, start, end,
@@ -166,7 +169,7 @@ export const realExternalEvents: ExternalEvents = {
                     : "Google Calendar not connected for the Game Master: the shareable link was made, but no event was added.");
             } else {
                 out.googleEventId = await moveOrReplace("Google Calendar", input.existing.googleEventId, input.createMissing, out.warnings, {
-                    update: (eventId) => integrations().google.updateCalendarEvent(google.secret, eventId, { start, end }),
+                    update: (eventId) => integrations().google.updateCalendarEvent(google.secret, eventId, { start, end, description }),
                     create: () => integrations().google.createCalendarEvent(google.secret, {
                         title: input.name, description: input.description, location: input.location, start, end,
                     }),

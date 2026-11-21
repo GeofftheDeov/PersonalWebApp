@@ -48,7 +48,7 @@ type LiveClientCtor = new (opts: {
   url: string; getToken: () => string | null; WebSocket: unknown; backoff?: { baseMs?: number; maxMs?: number };
   idleCloseMs?: number;
 }) => LiveClientLike;
-const LIVE_CLIENT = new URL("../../frontend/src/lib/realtime/liveClient.ts", import.meta.url).href;
+const LIVE_CLIENT = new URL("../../packages/shared/src/realtime/liveClient.ts", import.meta.url).href;
 
 if (!/(\/\/|@)(127\.0\.0\.1|localhost)[:/]/.test(process.env.DATABASE_URL ?? "")) {
   console.error("\n  Refusing to run: DATABASE_URL must be a local throwaway database.\n");

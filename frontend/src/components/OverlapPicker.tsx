@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Send, X, Star } from 'lucide-react';
+import { api, errorOf } from '@/lib/api';
 
 /**
  * The Game Master's overlap grid (#57, stories 17-19): when the party is free
@@ -60,13 +61,9 @@ export default function OverlapPicker({ campaignId, submitLabel, submitting, onS
         setLoading(true);
         setError(null);
         const qs = new URLSearchParams({ start: rangeStart.toISOString(), end: end.toISOString(), slotMinutes: String(hours * 60), stepMinutes: '30' });
-        fetch(`/api/availability/campaigns/${campaignId}?${qs}`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
-            .then(async res => {
-                const body = await res.json().catch(() => ({}));
-                if (!res.ok) throw new Error(body.error || 'Could not load the party’s availability.');
-                setData(body);
-            })
-            .catch(err => { setData(null); setError(err.message); })
+        api.get<NonNullable<typeof data>>(`/api/availability/campaigns/${campaignId}?${qs}`)
+            .then(setData)
+            .catch(err => { setData(null); setError(errorOf(err, 'Could not load the party’s availability.')); })
             .finally(() => setLoading(false));
     }, [campaignId, from, rangeStart, days, hours]);
 

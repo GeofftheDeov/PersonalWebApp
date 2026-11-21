@@ -1,3 +1,5 @@
+import { api } from './api';
+
 /**
  * Quests (#90): the shapes /api/quests returns, and the few helpers the
  * Quest Log, the session page and the Almanac share.
@@ -114,15 +116,7 @@ export function reminderTime(minutes: number, dueAt: string | null): string | nu
     });
 }
 
-/** fetch() against the API with the signed-in user's token; throws the server's message on failure. */
-export async function questApi<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-    const res = await fetch(`/api/quests${path}`, {
-        method: init.method ?? 'GET',
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: init.body === undefined ? undefined : JSON.stringify(init.body),
-    });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(json.error || `Request failed (${res.status})`);
-    return json as T;
+/** A call to /api/quests through the shared API client; throws the server's message on failure. */
+export function questApi<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
+    return api.request<T>(`/api/quests${path}`, { method: init.method ?? 'GET', body: init.body });
 }

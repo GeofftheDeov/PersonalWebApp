@@ -7,8 +7,10 @@ import CampaignInvite from "../models/CampaignInvite.js";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { sendVerificationEmail } from "../services/emailService.js";
+import { originSite } from "../utils/frontendSites.js";
 import { isDevEnv } from "../utils/env.js";
 import { hashToken } from "../utils/tokenHash.js";
+import { setSignupCookie } from "../utils/signupCookie.js";
 
 /**
  * Registration lives here, not in userRoutes (#35 and plan §3.2 both file it
@@ -75,9 +77,11 @@ router.post("/", async (req, res) => {
         if (isDev) {
             console.log(">>> [BACKEND/LEADS] Dev mode: Skipping email verification.");
         } else if (email) {
+            // This browser signed the account up, so verifying here may sign it in (#219).
+            setSignupCookie(res, lead._id);
             console.log(">>> [BACKEND/LEADS] Production: Sending verification email...");
             // The lead is already saved, so a mail failure must not turn this into a 500.
-            if (token) await sendVerificationEmail(email, token).catch((err: any) =>
+            if (token) await sendVerificationEmail(email, token, originSite(req).origin).catch((err: any) =>
                 console.error("!!! [BACKEND/LEADS] Verification email failed:", err.message));
         } else {
             console.log(">>> [BACKEND/LEADS] Production: Phone-only registration, skipping verification for now.");

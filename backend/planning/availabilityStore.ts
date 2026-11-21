@@ -163,20 +163,50 @@ export async function removeException(personId: string, id: string): Promise<boo
 
 // ── feeding the math ────────────────────────────────────────────────────────
 
+/** How long a booked session with no end time is taken to last. */
+const BOOKED_DEFAULT_LENGTH = "4 hours";
+
+/**
+ * The game nights these people are already booked for, in any campaign: a
+ * session that's scheduled, or still being planned with its night picked
+ * (the venue or food step), in a campaign they're active in or that they're
+ * the session's stand-in GM for. A session whose night is being decided
+ * (again, after "move the night") doesn't count, so it can't block itself.
+ * Only the interval is read, like a busy block: the party never learns
+ * what it is.
+ */
+const BOOKED_SQL = `
+    WITH booked AS (
+        SELECT s.id, s.campaign_id, s.gm_override_id, s.date AS starts_at,
+               COALESCE(s.end_date, s.date + interval '${BOOKED_DEFAULT_LENGTH}') AS ends_at
+          FROM game_sessions s
+         WHERE s.date IS NOT NULL
+           AND (s.status = 'scheduled' OR (s.status = 'planning' AND s.planning_stage <> 'night'))
+           AND s.date < $3
+           AND COALESCE(s.end_date, s.date + interval '${BOOKED_DEFAULT_LENGTH}') > $2)
+    SELECT m.person_id, b.starts_at, b.ends_at
+      FROM booked b JOIN campaign_members m ON m.campaign_id = b.campaign_id AND m.is_active
+     WHERE m.person_id = ANY($1)
+    UNION
+    SELECT b.gm_override_id AS person_id, b.starts_at, b.ends_at
+      FROM booked b
+     WHERE b.gm_override_id = ANY($1)`;
+
 /**
  * Everything the availability math needs about these people around `range`.
  * `skip` holds "<personId>|<source>" pairs whose busy blocks are left out
  * (their calendar couldn't be read just now; see busySources.refreshBusy).
  * With `campaignId`, Discord busy time from that campaign's own session
  * events (game_sessions.discord_event_id) is left out too: being interested
- * in a session must not block planning it (#85).
+ * in a session must not block planning it (#85). Game nights they're already
+ * booked for (BOOKED_SQL) count as busy, whichever campaign they're in.
  */
 export async function loadAvailability(personIds: string[], range: { start: Date; end: Date }, skip: Set<string> = new Set(),
                                        campaignId: string | null = null) {
     // A day of slack either side: an exception or busy block can reach in from
     // just outside the range.
     const from = new Date(range.start.getTime() - DAY), to = new Date(range.end.getTime() + DAY);
-    const [w, x, b] = await Promise.all([
+    const [w, x, b, booked] = await Promise.all([
         query(`SELECT * FROM availability_windows WHERE person_id = ANY($1)`, [personIds]),
         query(`SELECT * FROM availability_exceptions
                 WHERE person_id = ANY($1) AND ends_at > $2 AND starts_at < $3`, [personIds, from, to]),
@@ -185,6 +215,7 @@ export async function loadAvailability(personIds: string[], range: { start: Date
                   AND NOT (b.source = 'discord' AND b.external_id IS NOT NULL AND EXISTS (
                       SELECT 1 FROM game_sessions s WHERE s.campaign_id = $4 AND s.discord_event_id = b.external_id))`,
               [personIds, from, to, campaignId]),
+        query(BOOKED_SQL, [personIds, from, to]),
     ]);
     const windows: WeeklyWindow[] = w.rows.map((r) => ({
         personId: r.person_id, weekday: r.weekday, start: hhmm(r.start_time), end: hhmm(r.end_time), timeZone: r.time_zone,
@@ -193,9 +224,12 @@ export async function loadAvailability(personIds: string[], range: { start: Date
         personId: r.person_id, start: r.starts_at, end: r.ends_at, kind: r.kind,
     }));
     // Only the interval goes on: the math never learns where busy time came from.
-    const busy: BusyBlock[] = b.rows
-        .filter((r) => !skip.has(busySkipKey(r.person_id, r.source)))
-        .map((r) => ({ personId: r.person_id, start: r.starts_at, end: r.ends_at }));
+    const busy: BusyBlock[] = [
+        ...b.rows
+            .filter((r) => !skip.has(busySkipKey(r.person_id, r.source)))
+            .map((r) => ({ personId: r.person_id, start: r.starts_at, end: r.ends_at })),
+        ...booked.rows.map((r) => ({ personId: r.person_id, start: r.starts_at, end: r.ends_at })),
+    ];
     return { windows, exceptions, busy };
 }
 

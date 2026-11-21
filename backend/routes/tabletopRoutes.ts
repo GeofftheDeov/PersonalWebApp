@@ -19,6 +19,8 @@ import { isUuid } from "../db/model.js";
 import CampaignMember from "../models/CampaignMember.js";
 import { followSessionStarts } from "../planning/questReminders.js";
 import { AttendanceError, confirmAttendance, getAttendance } from "../planning/attendance.js";
+import { forReader, prepNotesReader, withoutPrepNotes } from "../utils/prepNotes.js";
+import { sessionEventDescription } from "../utils/frontendSites.js";
 
 // --- Sessions ---
 router.get("/sessions", auth, async (req: any, res) => {
@@ -26,8 +28,12 @@ router.get("/sessions", auth, async (req: any, res) => {
         const campaignIds = await getAuthorizedCampaignIds(req.user);
         const query = campaignIds ? { campaign: { $in: campaignIds } } : {};
 
-        const sessions = await Session.find(query).populate("campaign").sort({ date: -1 });
-        res.json(sessions);
+        const [sessions, canRead] = await Promise.all([
+            Session.find(query).populate("campaign").sort({ date: -1 }),
+            prepNotesReader(req.user),
+        ]);
+        // Prep notes (agenda) are the GM's (#213).
+        res.json(sessions.map((s: any) => forReader(canRead, s)));
     } catch (error: any) {
         res.status(500).json({ error: "Failed to fetch sessions", details: error.message });
     }
@@ -83,6 +89,10 @@ router.post("/sessions", auth, async (req: any, res) => {
         }
 
         const session = new Session({ title, campaign, date, endDate, location, isOnline, agenda, summary, vodUrl });
+        // With events to make, saved first: they link to the session's page, which needs its id (#214).
+        if (createDiscordEvent || createGoogleEvent) await session.save();
+        // Never the agenda, the GM's Prep notes (#213): the session's Hearthside page, if any (#214).
+        const description = session._id ? sessionEventDescription(String(session._id)) : undefined;
 
         const warnings: string[] = [];
 
@@ -98,7 +108,7 @@ router.post("/sessions", auth, async (req: any, res) => {
                         guildId: campaignDoc.discordGuildId as string,
                         channelId: campaignDoc.discordChannelId || undefined,
                         name: `${campaignDoc.title}: ${title}`,
-                        description: agenda || undefined,
+                        description,
                         location: effectiveLocation || undefined,
                         start: new Date(date),
                         end: endDate ? new Date(endDate) : undefined,
@@ -115,7 +125,7 @@ router.post("/sessions", auth, async (req: any, res) => {
         if (createGoogleEvent) {
             const eventInput = {
                 title: `${campaignDoc.title}: ${title}`,
-                description: agenda || undefined,
+                description,
                 location: effectiveLocation || undefined,
                 start: new Date(date),
                 end: new Date(endDate),
@@ -137,7 +147,7 @@ router.post("/sessions", auth, async (req: any, res) => {
             }
         }
 
-        await session.save();
+        await session.save();   // the session, or with events their ids and the shareable link
         res.status(201).json({ ...session.toObject(), warnings });
     } catch (error: any) {
         res.status(500).json({ error: "Failed to create session", details: error.message });
@@ -146,14 +156,18 @@ router.post("/sessions", auth, async (req: any, res) => {
 
 router.get("/sessions/:id", auth, async (req: any, res) => {
     try {
-        const campaignIds = await getAuthorizedCampaignIds(req.user);
-        const session = await Session.findById(req.params.id).populate("campaign");
+        const [campaignIds, session, canRead] = await Promise.all([
+            getAuthorizedCampaignIds(req.user),
+            Session.findById(req.params.id).populate("campaign"),
+            prepNotesReader(req.user),
+        ]);
         if (!session) return res.status(404).json({ error: "Session not found" });
         // Check access
         if (campaignIds && !campaignIds.some((id: any) => id.toString() === session.campaign?._id?.toString())) {
             return res.status(403).json({ error: "Unauthorized" });
         }
-        res.json(session);
+        // Prep notes (agenda) are the GM's (#213): the key is left out for anyone else.
+        res.json(forReader(canRead, session));
     } catch (error: any) {
         res.status(500).json({ error: "Failed to fetch session", details: error.message });
     }
@@ -169,15 +183,17 @@ router.put("/sessions/:id", auth, async (req: any, res) => {
             return res.status(403).json({ error: `Only the ${await gmTitleOf(existing.campaign)} can edit sessions for this campaign` });
         }
 
-        const { title, date, endDate, location, isOnline, agenda, summary, vodUrl } = req.body;
-        const session = await Session.findByIdAndUpdate(
-            req.params.id,
-            { title, date, endDate, location, isOnline, agenda, summary, vodUrl },
-            { new: true }
-        ).populate("campaign");
+        // Only the fields sent change: editing the Prep notes alone (#213)
+        // mustn't blank the title and date.
+        const changes: Record<string, unknown> = {};
+        for (const key of ["title", "date", "endDate", "location", "isOnline", "agenda", "summary", "vodUrl"]) {
+            if (req.body?.[key] !== undefined) changes[key] = req.body[key];
+        }
+        if (!Object.keys(changes).length) return res.status(400).json({ error: "Nothing to change" });
+        const session = await Session.findByIdAndUpdate(req.params.id, changes, { new: true }).populate("campaign");
         if (!session) return res.status(404).json({ error: "Session not found" });
         // Its quests' due times follow a new start (#91). The reminder job catches up anyway.
-        if (date !== undefined) {
+        if (changes.date !== undefined) {
             await followSessionStarts(pool, String(session._id)).catch((err) =>
                 console.error("[tabletop] moving quest due times failed:", err.message));
         }
@@ -218,7 +234,9 @@ router.post("/sessions/:id/ready", auth, async (req: any, res) => {
         } else {
             responses.push({ playerId: String(req.user.id), name, ready, respondedAt: new Date() });
         }
-        session.markModified("readyCheck");
+        // save() writes every field that differs from what was read (db/model.ts), nested
+        // jsonb changes included. Mongo's markModified isn't needed, and since the
+        // Postgres port calling it threw, so no answer was ever recorded (#227).
         await session.save();
 
         res.json({ readyCheck: session.readyCheck });
@@ -279,10 +297,11 @@ router.post("/prepare-session", auth, async (req: any, res) => {
         });
         await task.save();
 
-        // 3. Create Event
+        // 3. Create Event. Anyone can list events, so it doesn't carry the
+        // agenda: that's the GM's Prep notes (#213). The task above is the
+        // GM's own and keeps it.
         const event = new Event({
             title: `Tabletop Session: ${title}`,
-            description: agenda,
             startDate: date,
             endDate: new Date(new Date(date).getTime() + 4 * 60 * 60 * 1000), // Default 4 hours session
             status: "Not Started",
@@ -334,9 +353,11 @@ router.get("/characters", auth, async (req: any, res) => {
             }));
         }
 
-        const query = campaignIds ? { campaign: { $in: campaignIds } } : {};
+        // Your own characters wherever they are (in no campaign, or one you've
+        // left), and everyone's in the campaigns you sit in (#235).
+        const query = campaignIds ? { $or: [{ player: req.user.id }, { campaign: { $in: campaignIds } }] } : {};
         const characters = await Character.find(query).populate("campaign dungeon");
-        res.json(characters);
+        res.json(characters.map((c: any) => characterOut(c, campaignIds)));
     } catch (error: any) {
         res.status(500).json({ error: "Failed to fetch characters", details: error.message });
     }
@@ -354,12 +375,63 @@ function characterFields(body: any) {
     for (const [key, field] of [["name", "name"], ["class", "class"], ["level", "level"], ["gameType", "gameType"], ["isDead", "isDead"]] as const) {
         if (body?.[key] !== undefined) fields[field] = body[key];
     }
+    if (typeof fields.name === "string") fields.name = fields.name.trim();
     // The forms send "" for "no campaign".
     if (body?.campaign !== undefined) fields.campaign = body.campaign || null;
     return fields;
 }
 
+const MAX_CHARACTER_LEVEL = 20;
+
+/**
+ * What's wrong with a character's fields, or null (#235): one rule for creating
+ * and editing. A name is a non-blank string, a level a whole number from 1 to
+ * 20, class and game text (or null), and fallen true or false. An edit checks
+ * only the fields it sends, and a level left as it was passes, so an older
+ * character outside 1-20 can still be edited.
+ */
+function characterProblem(fields: Record<string, unknown>, existing?: any): string | null {
+    if (existing === undefined || fields.name !== undefined) {
+        if (typeof fields.name !== "string" || !fields.name) return "A character needs a name";
+    }
+    const level = fields.level;
+    if (level !== undefined && !(existing && level === existing.level)) {
+        if (typeof level !== "number" || !Number.isInteger(level) || level < 1 || level > MAX_CHARACTER_LEVEL) {
+            return `level must be a whole number from 1 to ${MAX_CHARACTER_LEVEL}`;
+        }
+    }
+    for (const key of ["class", "gameType"]) {
+        if (fields[key] != null && typeof fields[key] !== "string") return `${key} must be text`;
+    }
+    if (fields.isDead !== undefined && typeof fields.isDead !== "boolean") return "isDead must be true or false";
+    return null;
+}
+
 const idOf = (ref: any) => (ref == null ? null : String(ref._id ?? ref));
+
+/**
+ * A character as this viewer may see it (#235). Its campaign is the whole row
+ * only for an admin or someone in that campaign; anyone else (a friend, a
+ * campaign-mate from elsewhere, the player after leaving it) gets its name and
+ * status, never its table link or Discord ids. A populated player becomes
+ * `{ _id, name, handle }`, as the party's list (`?campaign=`) sends it.
+ */
+function characterOut(character: any, campaignIds: string[] | null) {
+    const obj = character.toObject();
+    const campaignId = idOf(obj.campaign);
+    if (obj.campaign && typeof obj.campaign === "object" && campaignIds !== null && !(campaignId && campaignIds.includes(campaignId))) {
+        obj.campaign = { _id: campaignId, title: obj.campaign.title ?? null, status: obj.campaign.status ?? null };
+    }
+    if (obj.player && typeof obj.player === "object") {
+        obj.player = { _id: idOf(obj.player), name: personDisplayName(obj.player), handle: obj.player.handle ?? null };
+    }
+    return obj;
+}
+
+/** One character, with its campaign and who plays it, as its page reads it. */
+const characterById = (id: string) => Character.findById(id)
+    .populate("campaign dungeon")
+    .populate({ path: "player", select: "handle name firstName lastName" });
 
 async function canSeeCharacter(user: any, campaignIds: string[] | null, character: any): Promise<boolean> {
     if (campaignIds === null) return true;
@@ -381,14 +453,19 @@ async function canSeeCharacter(user: any, campaignIds: string[] | null, characte
 router.post("/characters", auth, async (req: any, res) => {
     try {
         const fields = characterFields(req.body);
-        if (typeof fields.name !== "string" || !fields.name.trim()) return res.status(400).json({ error: "A character needs a name" });
+        const problem = characterProblem(fields);
+        if (problem) return res.status(400).json({ error: problem });
         const campaignIds = await getAuthorizedCampaignIds(req.user);
         if (fields.campaign != null) {
             if (!isUuid(String(fields.campaign))) return res.status(400).json({ error: "campaign must be a campaign id" });
             if (campaignIds && !campaignIds.includes(String(fields.campaign))) return res.status(403).json({ error: "Unauthorized" });
         }
-        // You play what you create. An admin may make one for someone else.
-        const player = campaignIds === null && req.body?.player ? req.body.player : req.user.id;
+        // You play what you create. An admin may make one for someone else, who
+        // must exist: player_id has no foreign key (#235).
+        const player = campaignIds === null && req.body?.player ? String(req.body.player) : String(req.user.id);
+        if (player !== String(req.user.id) && !(await findPersonById(player))) {
+            return res.status(400).json({ error: "player must be someone's id" });
+        }
         const character = new Character({ ...fields, player });
         await character.save();
         res.status(201).json(character);
@@ -400,11 +477,11 @@ router.post("/characters", auth, async (req: any, res) => {
 router.get("/characters/:id", auth, async (req: any, res) => {
     try {
         if (!isUuid(req.params.id)) return res.status(404).json({ error: "Character not found" });
-        const character = await Character.findById(req.params.id).populate("campaign dungeon");
+        const character = await characterById(req.params.id);
         if (!character) return res.status(404).json({ error: "Character not found" });
         const campaignIds = await getAuthorizedCampaignIds(req.user);
         if (!(await canSeeCharacter(req.user, campaignIds, character))) return res.status(403).json({ error: "Unauthorized" });
-        res.json(character);
+        res.json(characterOut(character, campaignIds));
     } catch (error: any) {
         res.status(500).json({ error: "Failed to fetch character", details: error.message });
     }
@@ -420,14 +497,18 @@ router.put("/characters/:id", auth, async (req: any, res) => {
             return res.status(403).json({ error: "Only the character's player can change it" });
         }
         const fields = characterFields(req.body);
+        const problem = characterProblem(fields, existing);
+        if (problem) return res.status(400).json({ error: problem });
         // Moving it needs a seat in the new campaign; leaving it where it is doesn't.
         if (fields.campaign != null && String(fields.campaign) !== idOf(existing.campaign)) {
             if (!isUuid(String(fields.campaign))) return res.status(400).json({ error: "campaign must be a campaign id" });
             if (campaignIds && !campaignIds.includes(String(fields.campaign))) return res.status(403).json({ error: "Unauthorized" });
         }
-        const character = await Character.findByIdAndUpdate(req.params.id, fields, { new: true }).populate("campaign dungeon");
+        await Character.findByIdAndUpdate(req.params.id, fields, { new: true });
+        // The reply is the character as its page reads it (GET /characters/:id).
+        const character = await characterById(req.params.id);
         if (!character) return res.status(404).json({ error: "Character not found" });
-        res.json(character);
+        res.json(characterOut(character, campaignIds));
     } catch (error: any) {
         res.status(500).json({ error: "Failed to update character", details: error.message });
     }
@@ -468,7 +549,13 @@ router.get("/encounters", auth, async (req: any, res) => {
             query = { session: { $in: sessions.map((x: any) => x._id) } };
         }
         const encounters = await Encounter.find(query).populate("session dungeon");
-        res.json(encounters);
+        // No session in this list carries Prep notes (#213): they're the GM's,
+        // and this answers every member of the campaign.
+        res.json(encounters.map((e: any) => {
+            const out = e.toJSON();
+            if (out.session && typeof out.session === "object") out.session = withoutPrepNotes(out.session);
+            return out;
+        }));
     } catch (error: any) {
         res.status(500).json({ error: "Failed to fetch encounters", details: error.message });
     }

@@ -94,7 +94,7 @@ export default function BannerEditor({ campaignId, hasBanner, onClose, onSaved }
         setError(null);
         try {
             const blob = await cropToBanner(img, rect);
-            onSaved(await uploadBanner(campaignId, blob, localStorage.getItem('token') || ''));
+            onSaved(await uploadBanner(campaignId, blob));
         } catch (e: any) {
             setError(e?.message || 'The banner could not be uploaded.');
         } finally {
@@ -106,7 +106,7 @@ export default function BannerEditor({ campaignId, hasBanner, onClose, onSaved }
         setBusy('remove');
         setError(null);
         try {
-            onSaved(await removeBanner(campaignId, localStorage.getItem('token') || ''));
+            onSaved(await removeBanner(campaignId));
         } catch (e: any) {
             setError(e?.message || 'The banner could not be removed.');
         } finally {

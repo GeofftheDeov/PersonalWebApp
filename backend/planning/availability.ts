@@ -6,8 +6,9 @@
  * (scripts/test-availability-math.ts) instead of by waiting for November.
  *
  * Inputs are the party's regular availability (weekly windows, each in its
- * owner's own IANA time zone, plus one-off exceptions) and busy blocks pulled
- * from external calendars. Output is every candidate slot in a date range,
+ * owner's own IANA time zone, plus one-off exceptions) and busy blocks: pulled
+ * from external calendars, or game nights they're already booked for
+ * (availabilityStore.ts). Output is every candidate slot in a date range,
  * ranked by headcount, saying who is free, busy or unknown for each.
  *
  * For each person:

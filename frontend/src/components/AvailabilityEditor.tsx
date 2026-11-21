@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, Save, X, Globe, Eye, CalendarX, CalendarCheck, RefreshCw, Link2 } from 'lucide-react';
+import { ApiError } from '@gtd/shared/api';
+import { api, errorOf } from '../lib/api';
 
 /**
  * Regular availability (#57): the weekly windows a player can usually play,
@@ -112,35 +114,33 @@ export default function AvailabilityEditor({ googleNotice }: { googleNotice?: st
         return list.includes(timeZone) ? list : [timeZone, ...list];
     }, [timeZone]);
 
-    const headers = useCallback((): Record<string, string> => ({
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('token')}`,
-    }), []);
-
     const snapshot = (r: WindowRow[], tz: string) => JSON.stringify({ r, tz });
     const dirty = !loading && snapshot(rows, timeZone) !== savedSnapshot;
+
+    const loadSources = async () => {
+        const data = await api.get<{ sources: BusySource[] }>('/api/availability/me/busy-sources').catch(() => null);
+        if (data) setSources(data.sources);
+    };
 
     const loadPreview = useCallback(async () => {
         const to = new Date(previewFrom);
         to.setDate(to.getDate() + PREVIEW_DAYS);
-        const res = await fetch(`/api/availability/me/preview?start=${previewFrom.toISOString()}&end=${to.toISOString()}`, { headers: headers() });
-        if (res.ok) setRuns((await res.json()).runs);
-    }, [headers, previewFrom]);
+        const data = await api.get<{ runs: Run[] }>(`/api/availability/me/preview?start=${previewFrom.toISOString()}&end=${to.toISOString()}`)
+            .catch(() => null);
+        if (data) setRuns(data.runs);
+    }, [previewFrom]);
 
     useEffect(() => {
         (async () => {
             try {
-                const res = await fetch('/api/availability/me', { headers: headers() });
-                if (!res.ok) { setError('Could not load your availability.'); return; }
-                const data = await res.json();
+                const data = await api.get<any>('/api/availability/me');
                 const loaded: WindowRow[] = data.windows.map((w: any) => ({ weekday: w.weekday, start: w.start, end: w.end }));
                 const tz = data.windows[0]?.timeZone ?? browserTimeZone();
                 setRows(loaded);
                 setTimeZone(tz);
                 setSavedSnapshot(snapshot(loaded, tz));
                 setExceptions(data.exceptions);
-                const src = await fetch('/api/availability/me/busy-sources', { headers: headers() });
-                if (src.ok) setSources((await src.json()).sources);
+                await loadSources();
                 await loadPreview();
             } catch {
                 setError('Could not load your availability.');
@@ -148,7 +148,7 @@ export default function AvailabilityEditor({ googleNotice }: { googleNotice?: st
                 setLoading(false);
             }
         })();
-    }, [headers, loadPreview]);
+    }, [loadPreview]);
 
     const updateRow = (i: number, patch: Partial<WindowRow>) =>
         setRows(prev => prev.map((r, j) => (j === i ? { ...r, ...patch } : r)));
@@ -163,19 +163,14 @@ export default function AvailabilityEditor({ googleNotice }: { googleNotice?: st
         setError(null);
         setNotice(null);
         try {
-            const res = await fetch('/api/availability/me/windows', {
-                method: 'PUT', headers: headers(),
-                body: JSON.stringify({ windows: rows.map(r => ({ ...r, timeZone })) }),
-            });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) { setError(data.error || 'Could not save your week.'); return; }
+            const data = await api.put<any>('/api/availability/me/windows', { windows: rows.map(r => ({ ...r, timeZone })) });
             const saved: WindowRow[] = data.windows.map((w: any) => ({ weekday: w.weekday, start: w.start, end: w.end }));
             setRows(saved);
             setSavedSnapshot(snapshot(saved, timeZone));
             setNotice('Saved.');
             await loadPreview();
-        } catch {
-            setError('Could not save your week.');
+        } catch (err) {
+            setError(errorOf(err, 'Could not save your week.'));
         } finally {
             setSaving(false);
         }
@@ -199,25 +194,22 @@ export default function AvailabilityEditor({ googleNotice }: { googleNotice?: st
         }
         setAddingException(true);
         try {
-            const res = await fetch('/api/availability/me/exceptions', {
-                method: 'POST', headers: headers(),
-                body: JSON.stringify({ start: start.toISOString(), end: end.toISOString(), kind: xForm.kind, note: xForm.note }),
-            });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) { setXError(data.error || 'Could not add that exception.'); return; }
+            const data = await api.post<any>('/api/availability/me/exceptions',
+                { start: start.toISOString(), end: end.toISOString(), kind: xForm.kind, note: xForm.note });
             setExceptions(prev => [...prev, data.exception].sort((a, b) => a.start.localeCompare(b.start)));
             setXForm(f => ({ ...f, date: '', note: '' }));
             await loadPreview();
-        } catch {
-            setXError('Could not add that exception.');
+        } catch (err) {
+            setXError(errorOf(err, 'Could not add that exception.'));
         } finally {
             setAddingException(false);
         }
     };
 
     const removeException = async (id: string) => {
-        const res = await fetch(`/api/availability/me/exceptions/${id}`, { method: 'DELETE', headers: headers() });
-        if (res.ok || res.status === 404) {
+        const gone = await api.delete(`/api/availability/me/exceptions/${id}`)
+            .then(() => true, (err) => err instanceof ApiError && err.status === 404);
+        if (gone) {
             setExceptions(prev => prev.filter(x => x.id !== id));
             await loadPreview();
         }
@@ -226,10 +218,14 @@ export default function AvailabilityEditor({ googleNotice }: { googleNotice?: st
     /** Google's consent screen, coming back to this tab. Used to connect, and to re-consent once for free/busy. */
     const connectGoogle = async () => {
         setSourceError(null);
-        const res = await fetch('/api/google-calendar/auth-url?return=availability', { headers: headers() });
-        const data = await res.json().catch(() => ({}));
-        if (res.ok && data.url) window.location.href = data.url;
-        else setSourceError(data.error || 'Google Calendar is not set up on this server.');
+        const fallback = 'Google Calendar is not set up on this server.';
+        try {
+            const data = await api.get<{ url?: string }>('/api/google-calendar/auth-url?return=availability');
+            if (data?.url) window.location.href = data.url;
+            else setSourceError(fallback);
+        } catch (err) {
+            setSourceError(errorOf(err, fallback));
+        }
     };
 
     /** Turn a source on or off, or sync it now. */
@@ -238,14 +234,11 @@ export default function AvailabilityEditor({ googleNotice }: { googleNotice?: st
         setSourceError(null);
         try {
             const path = `/api/availability/me/busy-sources/${source}${action === 'sync' ? '/sync' : ''}`;
-            const res = await fetch(path, { method: action === 'on' ? 'PUT' : action === 'off' ? 'DELETE' : 'POST', headers: headers() });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) { setSourceError(data.error || 'That didn’t work. Try again.'); return; }
-            const list = await fetch('/api/availability/me/busy-sources', { headers: headers() });
-            if (list.ok) setSources((await list.json()).sources);
+            await api.request(path, { method: action === 'on' ? 'PUT' : action === 'off' ? 'DELETE' : 'POST' });
+            await loadSources();
             await loadPreview();
-        } catch {
-            setSourceError('That didn’t work. Try again.');
+        } catch (err) {
+            setSourceError(errorOf(err, 'That didn’t work. Try again.'));
         } finally {
             setSourceBusy(null);
         }

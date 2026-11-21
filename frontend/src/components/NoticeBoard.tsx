@@ -5,8 +5,9 @@ import Link from 'next/link';
 import { ClipboardList, Plus, X, Wifi, FastForward, RotateCcw, Ban, Check, Crown, CalendarClock, MapPin, Home, Store, Utensils } from 'lucide-react';
 import OverlapPicker, { timeRange, type PickedTime } from './OverlapPicker';
 import SessionTorch, { type StandIn } from './SessionTorch';
-import { getLiveClient } from '@/lib/realtime/useLiveThread';
-import { campaignThreadKey } from '@/lib/realtime/threadKeys';
+import { campaignThreadKey, getLiveClient } from '@/lib/letters';
+import { ApiError } from '@gtd/shared/api';
+import { api, errorOf } from '@/lib/api';
 
 /**
  * The Notice Board (#57): the campaign's planning card. The Game Master
@@ -38,7 +39,7 @@ interface Member { id: string; name: string }
 interface FoodQuest { id: string; title: string; notes: string | null; assignee: Member | null; status: 'open' | 'done' | 'cancelled'; dueAt: string | null; createdBy: string | null }
 interface PlanningState {
     session: {
-        id: string; title: string; status: string; stage: 'night' | 'venue' | 'food' | null; isOnline: boolean; agenda: string | null;
+        id: string; title: string; status: string; stage: 'night' | 'venue' | 'food' | null; isOnline: boolean; agenda?: string | null;
         date: string | null; endDate: string | null; foodMode: FoodMode | null; foodOwnerId: string | null;
         venue: Venue | null; hostId: string | null; gmOverride: StandIn | null;
     };
@@ -106,15 +107,12 @@ function EarlierRounds({ rounds, name }: { rounds: NightPoll[]; name: (id: strin
 const BTN = "flex items-center gap-1.5 px-3 py-1.5 border-2 border-black font-permanent uppercase text-xs transition-colors shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] disabled:opacity-40";
 const INPUT_CLS = "w-full p-2 border-2 border-black bg-white text-black font-permanent text-sm uppercase outline-none focus:border-teal-500";
 
-const authHeaders = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` });
-
 async function post(path: string, body?: unknown): Promise<{ ok: boolean; error?: string }> {
     try {
-        const res = await fetch(path, { method: 'POST', headers: authHeaders(), body: JSON.stringify(body ?? {}) });
-        if (res.ok) return { ok: true };
-        return { ok: false, error: (await res.json().catch(() => ({}))).error || 'Something went wrong.' };
-    } catch {
-        return { ok: false, error: 'Could not reach the server.' };
+        await api.post(path, body ?? {});
+        return { ok: true };
+    } catch (err) {
+        return { ok: false, error: err instanceof ApiError ? errorOf(err, 'Something went wrong.') : 'Could not reach the server.' };
     }
 }
 
@@ -795,10 +793,14 @@ export function useNoticeBoard(campaignId: string | null, { onSessionsChanged, r
         if (!campaignId) return;
         const seq = ++latest.current;
         try {
-            const res = await fetch(`/api/planning/campaigns/${campaignId}`, { headers: authHeaders() });
-            const body = await res.json().catch(() => ({}));
+            let body: any;
+            try {
+                body = await api.get(`/api/planning/campaigns/${campaignId}`);
+            } catch (err) {
+                if (seq === latest.current) setError(errorOf(err, 'Could not load the Notice Board.'));
+                return;
+            }
             if (seq !== latest.current) return;
-            if (!res.ok) { setError(body.error || 'Could not load the Notice Board.'); return; }
             // A session joining or leaving the board (kicked off, scheduled,
             // cancelled) changes the campaign's session list too.
             const ids = body.planning.map((p: PlanningState) => p.session.id).join();
@@ -912,7 +914,7 @@ export default function NoticeBoard({ campaignId, data: { board, error, reload }
                         <input required maxLength={120} value={kickoff.title} onChange={e => setKickoff({ ...kickoff, title: e.target.value })} className={INPUT_CLS} placeholder="SESSION 14: THE DROWNED CHAPEL" />
                     </label>
                     <label className="block">
-                        <span className="block font-permanent text-[10px] text-teal-400 uppercase mb-1">Agenda (optional)</span>
+                        <span className="block font-permanent text-[10px] text-teal-400 uppercase mb-1">Prep notes (optional, GM only)</span>
                         <textarea rows={2} maxLength={2000} value={kickoff.agenda} onChange={e => setKickoff({ ...kickoff, agenda: e.target.value })} className={INPUT_CLS} />
                     </label>
                     <fieldset>

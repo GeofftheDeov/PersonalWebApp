@@ -1,0 +1,15 @@
+{
+  "name": "e2e",
+  "private": true,
+  "description": "End-to-end browser tests (Playwright) for the portfolio and Hearthside, each run against a stack of its own: see playwright.config.ts.",
+  "scripts": {
+    "e2e": "playwright test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.0",
+    "@types/node": "^20.19.43",
+    "selfsigned": "^5.5.0",
+    "typescript": "^5.9.3"
+  }
+}

@@ -45,7 +45,7 @@ async function main() {
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
     const events: { name: string; payload: any }[] = [];
-    for (const name of ["quest.assigned", "quest.completed"] as const) {
+    for (const name of ["quest.assigned", "quest.updated", "quest.completed", "quest.reopened"] as const) {
         bus.subscribe(name, (payload: any) => { events.push({ name, payload }); });
     }
     const flush = () => new Promise((r) => setImmediate(r));
@@ -67,6 +67,7 @@ async function main() {
     const ofSession = (as: string, sessionId: string) => call("GET", `/sessions/${sessionId}`, as);
     const mine = (as: string, qs = "") => call("GET", `/mine${qs}`, as);
     const done = (as: string, questId: string) => call("POST", `/${questId}/done`, as);
+    const undo = (as: string, questId: string) => call("DELETE", `/${questId}/done`, as);
     const edit = (as: string, questId: string, body: unknown) => call("PATCH", `/${questId}`, as, body);
     const row = async (id: string) => (await pool.query(`SELECT * FROM session_tasks WHERE id = $1`, [id])).rows[0];
     const bells = async (person: string, questId: string) => (await pool.query(
@@ -219,6 +220,10 @@ async function main() {
         check("editing without changing the owner doesn't publish quest.assigned",
             retitled.status === 200 && retitled.json.title === "Print two handouts" &&
                 eventsFor(qHandout).filter((e) => e.name === "quest.assigned").length === 2);
+        const updated = eventsFor(qHandout).filter((e) => e.name === "quest.updated");
+        // One, not two: the reassignment above published quest.assigned only.
+        check("...it publishes quest.updated (and reassigning didn't), so the party's views refetch",
+            updated.length === 1 && updated[0].payload.updatedBy === who.gm.id && updated[0].payload.assigneeId === who.p2.id, updated);
 
         // ── marking done ────────────────────────────────────────────────────
         check("another party member can't mark it done (403)", (await done("p1", qHandout)).status === 403);
@@ -246,6 +251,32 @@ async function main() {
         await pool.query(`UPDATE session_tasks SET status = 'cancelled' WHERE id = $1`, [own.json.id]);
         check("a cancelled quest can't be marked done (409)", (await done("gm", own.json.id)).status === 409);
 
+        // ── undoing done ────────────────────────────────────────────────────
+        check("another party member can't undo it (403)", (await undo("p1", qHandout)).status === 403);
+        check("someone outside the party can't either (403)", (await undo("outsider", qHandout)).status === 403);
+        check("undoing an unknown quest is a 404", (await undo("p2", crypto.randomUUID())).status === 404);
+        const reopened = await undo("p2", qHandout);
+        await flush();
+        check("its owner undoes it: open again, no completion time",
+            reopened.status === 200 && reopened.json.status === "open" && reopened.json.completedAt === null, reopened.json);
+        check("undoing publishes quest.reopened",
+            eventsFor(qHandout).filter((e) => e.name === "quest.reopened").length === 1 &&
+                eventsFor(qHandout).find((e) => e.name === "quest.reopened")!.payload.reopenedBy === who.p2.id);
+        check("an undone quest is back in the Quest Log", (await mine("p2")).json.quests.some((q: any) => q.id === qHandout));
+        const undoneAgain = await undo("p2", qHandout);
+        await flush();
+        check("undoing an open quest is harmless, and publishes nothing new",
+            undoneAgain.status === 200 && undoneAgain.json.status === "open" &&
+                eventsFor(qHandout).filter((e) => e.name === "quest.reopened").length === 1);
+        const redone = await done("p2", qHandout);
+        await flush();
+        check("it can be marked done again",
+            redone.status === 200 && redone.json.status === "done" &&
+                eventsFor(qHandout).filter((e) => e.name === "quest.completed").length === 2);
+        const gmUndo = await undo("gm", map.json.id);
+        check("the GM can undo someone else's quest", gmUndo.status === 200 && gmUndo.json.status === "open");
+        check("a cancelled quest can't be undone (409)", (await undo("gm", own.json.id)).status === 409);
+
         // ── the Almanac ─────────────────────────────────────────────────────
         const range = `?start=${encodeURIComponent(at(-7 * DAY).toISOString())}&end=${encodeURIComponent(at(30 * DAY).toISOString())}`;
         const almanac = await call("GET", `/almanac${range}`, "p1");
@@ -260,6 +291,39 @@ async function main() {
         check("someone outside the party sees none of it",
             !((await call("GET", `/almanac${range}`, "outsider")).json?.sessions ?? []).some((s: any) => s.id === s1));
         check("a range that isn't dates is a 400", (await call("GET", `/almanac?start=nope&end=nope`, "p1")).status === 400);
+
+        // ── the Almanac, a page at a time going back (#252, Played) ─────────
+        const old1 = await session(ashen, "Session 3", { date: at(-400 * DAY) });
+        // Two at the same instant, so a page can end between them.
+        const old2 = await session(ashen, "Session 2a", { date: at(-500 * DAY) });
+        const old3 = await session(tides, "Tides 1", { date: at(-500 * DAY) });
+        await session(ashen, "Session 2b", { date: at(-450 * DAY), status: "cancelled" });
+        const old4 = await session(ashen, "Session 1", { date: at(-600 * DAY) });
+        const oldQuest = await pool.query(
+            `INSERT INTO session_tasks (session_id, kind, title, assignee_id, status) VALUES ($1, 'custom', 'Bring the map', $2, 'done') RETURNING id`,
+            [old4, who.p1.id]);
+        const back = (qs: string, as = "p1") => call("GET", `/almanac?${qs}`, as);
+        const before = `before=${encodeURIComponent(at(-7 * DAY).toISOString())}`;
+        const [hiTie, loTie] = [old2, old3].sort().reverse();
+        const page1 = await back(`${before}&limit=2`);
+        check("a page back lists the latest sessions before the cursor, latest first, and says there are more",
+            page1.status === 200 && page1.json.sessions.map((s: any) => s.id).join() === [old1, hiTie].join() && page1.json.more === true, page1.json);
+        const last = page1.json.sessions.at(-1);
+        const page2 = await back(`before=${encodeURIComponent(last.date)}&beforeId=${last.id}&limit=2`);
+        check("the next page starts after the last one's session, even at the same instant, and is the end",
+            page2.status === 200 && page2.json.sessions.map((s: any) => s.id).join() === [loTie, old4].join() && page2.json.more === false, page2.json);
+        check("its sessions carry my quests, like a range's",
+            page2.json.sessions[1]?.quests?.map((q: any) => `${q.id}:${q.status}`).join() === `${oldQuest.rows[0].id}:done`, page2.json);
+        const whole = await back(before);
+        check("by default a page holds up to 50; cancelled ones are left out",
+            whole.status === 200 && whole.json.sessions.length === 4 && whole.json.more === false, whole.json);
+        check("someone outside the party gets an empty page", (await back(before, "outsider")).json?.sessions?.length === 0);
+        check("before with start and end is a 400",
+            (await back(`${before}&start=${encodeURIComponent(at(0).toISOString())}&end=${encodeURIComponent(at(DAY).toISOString())}`)).status === 400);
+        check("a limit out of 1-200 is a 400",
+            (await back(`${before}&limit=0`)).status === 400 && (await back(`${before}&limit=201`)).status === 400 && (await back(`${before}&limit=x`)).status === 400);
+        check("a beforeId that isn't a session id is a 400", (await back(`${before}&beforeId=nope`)).status === 400);
+        check("a before that isn't a date is a 400", (await back(`before=nope`)).status === 400);
     } finally {
         const ids = Object.values(who).map((p) => p.id);
         if (campaigns.length) await pool.query(`DELETE FROM campaigns WHERE id = ANY($1)`, [campaigns]);

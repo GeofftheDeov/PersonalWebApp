@@ -4,6 +4,9 @@ import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Sword, ArrowLeft, Star, Skull, Map, User, Save, X, Pencil } from 'lucide-react';
+import { ApiError } from '@gtd/shared/api';
+import { api, getOrNull } from '@/lib/api';
+import { canAdmin, useSession } from '@/lib/session';
 
 const INPUT_CLS = "w-full p-3 border-4 border-black bg-white text-black font-permanent text-base uppercase focus:border-yellow-400 outline-none";
 const LABEL_CLS = "block text-teal-400 font-permanent uppercase text-xs mb-1";
@@ -20,19 +23,16 @@ export default function CharacterDetailPage() {
     const [saving, setSaving] = useState(false);
     const [form, setForm] = useState<any>({});
 
-    const token = () => localStorage.getItem('token');
+    const { user: me, capabilities: caps } = useSession();
 
     useEffect(() => {
-        const t = token();
-        if (!t) { router.push('/login'); return; }
-        const headers = { Authorization: `Bearer ${t}` };
         Promise.all([
-            fetch(`/api/tabletop/characters/${id}`, { headers }),
-            fetch('/api/campaigns', { headers }),
-        ]).then(async ([charRes, campRes]) => {
-            if (charRes.status === 401) { localStorage.clear(); router.push('/login'); return; }
-            if (charRes.ok) {
-                const c = await charRes.json();
+            api.get<any>(`/api/tabletop/characters/${id}`).catch((err) => err as Error),
+            getOrNull<any[]>('/api/campaigns'),
+        ]).then(([c, camps]) => {
+            // A 401 has already sent the person to log in and back (#210).
+            if (c instanceof ApiError && c.status === 401) return;
+            if (!(c instanceof Error)) {
                 setCharacter(c);
                 setForm({
                     name: c.name,
@@ -43,7 +43,7 @@ export default function CharacterDetailPage() {
                     isDead: c.isDead || false,
                 });
             } else router.push('/game-night');
-            if (campRes.ok) setCampaigns(await campRes.json());
+            if (camps) setCampaigns(camps);
         }).catch(() => router.push('/game-night'))
           .finally(() => setLoading(false));
     }, [id, router]);
@@ -51,12 +51,8 @@ export default function CharacterDetailPage() {
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
         setSaving(true);
-        const res = await fetch(`/api/tabletop/characters/${id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-            body: JSON.stringify(form),
-        });
-        if (res.ok) { setCharacter(await res.json()); setEditing(false); }
+        const saved = await api.put(`/api/tabletop/characters/${id}`, form).catch(() => null);
+        if (saved) { setCharacter(saved); setEditing(false); }
         setSaving(false);
     };
 
@@ -66,15 +62,8 @@ export default function CharacterDetailPage() {
     const levelStars = Math.min(character.level || 1, 20);
 
     // Only the character's player (or an admin) may change it; the API refuses anyone else.
-    const canEdit = (() => {
-        try {
-            const me = JSON.parse(localStorage.getItem('user') || 'null');
-            if (!me) return false;
-            return me.appRole === 'admin' || String(character.player?._id ?? character.player) === String(me.id ?? me._id);
-        } catch {
-            return false;
-        }
-    })();
+    // From the session client (#210), so it can't outlive the session.
+    const canEdit = !!me && (canAdmin(caps) || String(character.player?._id ?? character.player) === String(me.id));
 
     return (
         <div className="min-h-[calc(100vh-76px)] flex flex-col">

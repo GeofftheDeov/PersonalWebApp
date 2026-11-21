@@ -2,10 +2,11 @@ import express from "express";
 const router = express.Router();
 import Campaign from "../models/Campaign.js";
 import CampaignMember from "../models/CampaignMember.js";
+import CampaignInvite from "../models/CampaignInvite.js";
 import Session from "../models/Session.js";
 import Account from "../models/Account.js";
 import { auth } from "../middleware/auth.js";
-import { getAuthorizedCampaignIds, isCampaignGameMaster } from "../utils/gameNightPlannerUtils.js";
+import { getAuthorizedCampaignIds, getMemberCampaignIds, isCampaignGameMaster } from "../utils/gameNightPlannerUtils.js";
 import { personDisplayName } from "../utils/personUtils.js";
 import { publishMembershipChanged } from "../services/accessEvents.js";
 import { SettingsError, cleanGmTitle, updateCampaignSettings } from "../planning/campaignSettings.js";
@@ -13,6 +14,7 @@ import { clearBanner, requestBannerUpload, setBanner, withBannerUrl } from "../p
 import { bus } from "../events/index.js";
 import { query } from "../db/index.js";
 import { TorchError, claimTorch, passTorchPermanently } from "../planning/torch.js";
+import { forReader, prepNotesReader } from "../utils/prepNotes.js";
 
 /**
  * Phase 3 (#35, plan §3.4). Auto-enrolment used to branch on req.user.type to
@@ -89,10 +91,13 @@ router.post("/", auth, async (req: any, res) => {
     }
 });
 
-// Get all campaigns
+// Get all campaigns: the ones you're in, or every campaign for an admin.
+// `?mine=1` lists only the ones you're in, admins included (#251): Hearthside's
+// Campaigns tab in the social menu.
 router.get("/", auth, async (req: any, res) => {
     try {
-        const campaignIds = await getAuthorizedCampaignIds(req.user);
+        const mine = req.query.mine === "1" || req.query.mine === "true";
+        const campaignIds = mine ? await getMemberCampaignIds(req.user) : await getAuthorizedCampaignIds(req.user);
         const query = campaignIds ? { _id: { $in: campaignIds } } : {};
 
         const campaigns = await Campaign.find(query).sort({ startDate: -1 });
@@ -111,10 +116,13 @@ router.get("/:id", auth, async (req: any, res) => {
             return res.status(404).json({ error: "Campaign not found" });
         }
         // Anyone signed in can read a campaign (the invite page needs it before
-        // joining), but only the party (and admins) get a link to its banner.
+        // joining), but only the party (and admins) get a link to its banner,
+        // and someone invited to it while the invite is pending: Hearthside's
+        // invite page (#232) shows them the banner they're being called under.
         const campaignIds = await getAuthorizedCampaignIds(req.user);
         const inParty = !campaignIds || campaignIds.some((cid: any) => cid.toString() === String(campaign._id));
-        res.json(inParty ? await withBannerUrl(campaign.toJSON()) : { ...campaign.toJSON(), bannerUrl: null });
+        const invited = !inParty && !!(await CampaignInvite.findOne({ campaign: campaign._id, to: req.user.id, status: "pending" }));
+        res.json(inParty || invited ? await withBannerUrl(campaign.toJSON()) : { ...campaign.toJSON(), bannerUrl: null });
     } catch (error: any) {
         console.error("Error fetching campaign:", error);
         res.status(500).json({ error: "Failed to fetch campaign", details: error.message });
@@ -199,14 +207,18 @@ router.get("/:id/sessions", auth, async (req: any, res) => {
         if (campaignIds && !campaignIds.some((cid: any) => cid.toString() === req.params.id)) {
             return res.status(403).json({ error: "Unauthorized" });
         }
-        const sessions = await Session.find({ campaign: req.params.id }).sort({ date: -1 });
+        const [sessions, canRead] = await Promise.all([
+            Session.find({ campaign: req.params.id }).sort({ date: -1 }),
+            prepNotesReader(req.user),
+        ]);
         // How many came (#37), for the campaign's session list.
         const { rows } = await query<{ session_id: string; n: number }>(
             `SELECT p.session_id, count(*)::int AS n
                FROM player_sessions p JOIN game_sessions s ON s.id = p.session_id
               WHERE s.campaign_id = $1 GROUP BY p.session_id`, [req.params.id]);
         const counts = new Map(rows.map((r) => [String(r.session_id), r.n]));
-        res.json(sessions.map((s: any) => ({ ...s.toJSON(), attendeeCount: counts.get(String(s._id)) ?? 0 })));
+        // Prep notes (agenda) are the GM's (#213).
+        res.json(sessions.map((s: any) => ({ ...forReader(canRead, s.toJSON()), attendeeCount: counts.get(String(s._id)) ?? 0 })));
     } catch (error: any) {
         console.error("Error fetching campaign sessions:", error);
         res.status(500).json({ error: "Failed to fetch sessions", details: error.message });

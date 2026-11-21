@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import jwt, { type JwtPayload, type SignOptions } from "jsonwebtoken";
 
 /**
@@ -48,6 +49,16 @@ function secret(): string {
     return process.env.JWT_SECRET as string;
 }
 
+/**
+ * The claim that marks a token issued for the session cookie (#212, spec #69
+ * story 10). The cookie reaches every host on the parent domain, Paperclip
+ * included, so its token must be good for nothing but the cookie: replayed as
+ * `Authorization: Bearer`, it would also skip the CSRF check. setSessionCookie
+ * is the only place that adds it; the token in a login response body, for
+ * bearer clients, never carries it.
+ */
+export const COOKIE_TOKEN_CLAIM = "cookie";
+
 /** Sign a token with the configured secret (HS256). */
 export function signJwt(payload: object, options?: SignOptions): string {
     return jwt.sign(payload, secret(), options);
@@ -78,11 +89,16 @@ export function tokenPurpose(decoded: JwtPayload): string {
  * malformed, expired, signed with anything else, or the secret is unusable,
  * and when it is not for `purpose` (one kind, or any of a list). Without
  * `purpose` only a session token passes, so a caller that forgets to ask still
- * refuses the other kinds.
+ * refuses the other kinds (#240).
+ *
+ * Also throws on a session-cookie token (one carrying COOKIE_TOKEN_CLAIM)
+ * unless `fromCookie` says the caller read it from the session cookie. So
+ * every other way in (bearer header, `?token=`, the live channel's first
+ * frame) refuses it without having to remember to (#212).
  */
 export function verifyJwt(
     token: string,
-    { purpose = "session" }: { purpose?: TokenPurpose | readonly TokenPurpose[] } = {},
+    { purpose = "session", fromCookie = false }: { purpose?: TokenPurpose | readonly TokenPurpose[]; fromCookie?: boolean } = {},
 ): JwtPayload {
     const decoded = jwt.verify(token, secret(), { algorithms: ["HS256"] });
     if (typeof decoded === "string") throw new Error("Token payload is not an object");
@@ -91,5 +107,18 @@ export function verifyJwt(
     if (!allowed.includes(actual)) {
         throw new Error(`A ${actual} token is not accepted here (wants ${allowed.join(" or ")})`);
     }
+    if (!fromCookie && COOKIE_TOKEN_CLAIM in decoded) {
+        throw new Error("A session-cookie token is only accepted from the session cookie");
+    }
     return decoded;
+}
+
+/**
+ * An HMAC-SHA256 of `data` under the same secret (base64url), kept apart from
+ * every other use of it by `purpose`. For a signed value that must never pass
+ * as a login token: it isn't a JWT, so verifyJwt, and everything behind it,
+ * refuses it. The signup cookie (utils/signupCookie.ts, #219) is one.
+ */
+export function macFor(purpose: string, data: string): string {
+    return crypto.createHmac("sha256", secret()).update(`${purpose}\n${data}`).digest("base64url");
 }

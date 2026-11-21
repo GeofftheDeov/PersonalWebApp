@@ -2,6 +2,8 @@
 
 import React, { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { api, errorOf } from '@/lib/api';
+import { session } from '@/lib/session';
 
 function VerifyEmailContent() {
     const searchParams = useSearchParams();
@@ -10,6 +12,7 @@ function VerifyEmailContent() {
 
     const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
     const [message, setMessage] = useState('Verifying your email...');
+    const [signedIn, setSignedIn] = useState(false);
 
     useEffect(() => {
         if (!token) {
@@ -20,22 +23,19 @@ function VerifyEmailContent() {
 
         const verifyEmail = async () => {
             try {
-                const response = await fetch('/api/users/verify-email', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ token })
-                });
+                const data = await api.post<{ user?: unknown }>('/api/users/verify-email', { token })
+                    .catch((err) => { throw new Error(errorOf(err, 'Verification failed')); });
 
-                const data = await response.json();
-
-                if (!response.ok) {
-                    throw new Error(data.error || 'Verification failed');
-                }
-
+                // A reply with `user` came with the session cookie: signed in
+                // here (and on Hearthside). Without one, verified: sign in next.
+                const signedIn = data?.user
+                    ? (await session.refresh().catch(() => session.getState())).status === 'signedIn'
+                    : false;
                 setStatus('success');
-                setMessage('Email verified successfully! You can now log in.');
+                setSignedIn(signedIn);
+                setMessage(signedIn ? 'Email verified! You are signed in.' : 'Email verified successfully! You can now log in.');
                 setTimeout(() => {
-                    router.push('/login');
+                    router.push(signedIn ? '/dashboard' : '/login');
                 }, 3000);
             } catch (err: any) {
                 setStatus('error');
@@ -62,7 +62,7 @@ function VerifyEmailContent() {
             {status === 'success' && (
                 <div className="mb-6 p-4 bg-green-100 border-4 border-black text-black font-bold shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
                     <p>{message}</p>
-                    <p className="mt-2 text-sm">Redirecting to login...</p>
+                    <p className="mt-2 text-sm">{signedIn ? 'Taking you to your dashboard...' : 'Redirecting to login...'}</p>
                 </div>
             )}
 

@@ -10,14 +10,16 @@ import { findPersonById, toPublicPerson } from "../utils/personUtils.js";
 import { resolvePaperclipIdentity } from "../services/paperclipIdentity.js";
 import bcrypt from "bcryptjs";
 import { signJwt } from "../utils/jwt.js";
-import { clearSessionCookie, setSessionCookie } from "../utils/sessionCookie.js";
+import { clearSessionCookie, SESSION_TTL_S, setSessionCookie } from "../utils/sessionCookie.js";
+import { clearSignupCookie, setSignupCookie, signedUpHere, VERIFY_SIGN_IN_WINDOW_S } from "../utils/signupCookie.js";
 import crypto from "crypto";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { sendResetPasswordEmail, sendVerificationEmail } from "../services/emailService.js";
-import { auth } from "../middleware/auth.js";
+import { auth, requireAdmin } from "../middleware/auth.js";
 import { isDevEnv } from "../utils/env.js";
+import { originSite } from "../utils/frontendSites.js";
 import { hashToken } from "../utils/tokenHash.js";
 import { OAuth2Client } from "google-auth-library";
 
@@ -63,17 +65,18 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
  * it could only be meaningless or wrong, and a claim nothing reads is a claim
  * something will eventually start reading again by mistake.
  */
-const signToken = (person: any) =>
-    signJwt({ id: person._id, email: person.email }, { expiresIn: "1h" });
+const tokenClaims = (person: any) => ({ id: person._id, email: person.email });
+const signToken = (person: any) => signJwt(tokenClaims(person), { expiresIn: SESSION_TTL_S });
 
 /**
- * Sign a token, put it in this environment's session cookie (#69), and return
- * it for the response body, which bearer clients keep reading.
+ * Sign the person in (#69): put a session-cookie token in this environment's
+ * cookie, and return a separate token for the response body, which bearer
+ * clients keep reading. Only the cookie's token is marked (#212), so it's
+ * refused as a bearer; the body's works as one, as before.
  */
 const issueSession = (res: express.Response, person: any) => {
-    const token = signToken(person);
-    setSessionCookie(res, token);
-    return token;
+    setSessionCookie(res, tokenClaims(person));
+    return signToken(person);
 };
 
 /** The user object the client stores. Capability comes from explicit columns. */
@@ -119,7 +122,10 @@ async function bindPendingInvites(person: any): Promise<void> {
 
 router.post("/register", async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password } = req.body ?? {};
+    if (typeof email !== "string" || !email.trim() || typeof password !== "string" || !password) {
+      return res.status(400).json({ error: "An email and a password are required" });
+    }
     const isDev = isDevEnv();
     const token = isDev ? undefined : crypto.randomBytes(20).toString("hex");
 
@@ -137,8 +143,10 @@ router.post("/register", async (req, res) => {
 
     await user.save();
     await bindPendingInvites(user);
+    // This browser signed the account up, so verifying here may sign it in (#219).
+    if (!isDev) setSignupCookie(res, user._id);
     // The user is already saved, so a mail failure must not turn this into a 500.
-    if (!isDev && token) await sendVerificationEmail(email, token).catch((err: any) =>
+    if (!isDev && token) await sendVerificationEmail(email, token, originSite(req).origin).catch((err: any) =>
       console.error("Register: verification email failed:", err.message));
 
     res.status(201).json({
@@ -146,6 +154,11 @@ router.post("/register", async (req, res) => {
       isVerified: isDev
     });
   } catch (error: any) {
+    // accounts.email is unique (citext). Login and forgot-password already say
+    // whether an email has an account, so saying it here gives nothing away.
+    if (error?.code === "23505") {
+      return res.status(409).json({ error: "An account with that email already exists. Sign in, or reset your password." });
+    }
     console.error("Register Error:", error);
     res.status(500).json({ error: "Failed to register user" });
   }
@@ -158,16 +171,32 @@ router.post("/verify-email", async (req, res) => {
     if (typeof token !== "string" || !token) return res.status(400).json({ error: "Token is required" });
 
     try {
-        const user = await Account.findOne({ emailVerificationToken: hashToken(token) });
+        // Spend the token as we find it. The model layer has no $unset; null clears the column.
+        const user: any = await Account.findOneAndUpdate(
+            { emailVerificationToken: hashToken(token) },
+            { $set: { isVerified: true, emailVerificationToken: null } },
+            { new: true }
+        );
         if (!user) return res.status(400).json({ error: "Invalid or expired token" });
 
-        // The model layer has no $unset; null clears the column.
-        await Account.updateOne(
-            { _id: user._id },
-            { $set: { isVerified: true, emailVerificationToken: null } }
-        );
+        await bindPendingInvites(user);
 
-        res.json({ message: "Email verified successfully" });
+        // Verifying is where a new account first gets a token (#215, #69), so it
+        // signs the person in: the session cookie, and the token for bearer
+        // clients, as login does. Someone who signed up on Hearthside is then
+        // signed in on both sites. But only in the browser that signed up
+        // (#219): otherwise whoever signed up with your email could have you
+        // click their link into their account. Verification tokens have no
+        // expiry column either, so only a link used within the day the email
+        // promises signs anyone in. Otherwise the email is verified, and the
+        // person logs in next.
+        const createdAt = user.createdAt ? new Date(user.createdAt).getTime() : NaN;
+        const recent = Date.now() - createdAt < VERIFY_SIGN_IN_WINDOW_S * 1000;
+        if (!recent || !signedUpHere(req, user._id)) {
+            return res.json({ message: "Email verified successfully" });
+        }
+        clearSignupCookie(res);
+        res.json({ message: "Email verified successfully", token: issueSession(res, user), user: publicUser(user) });
     } catch (error) {
         console.error("Verify Email Error:", error);
         res.status(500).json({ error: "Error verifying email" });
@@ -324,6 +353,21 @@ router.get("/me/capabilities", auth, async (req: any, res) => {
     } catch (err) {
         res.status(500).json({ error: "Failed to fetch capabilities" });
     }
+});
+
+/**
+ * A bearer token for the admin portal (#210). The portal is server-rendered
+ * and takes `?token=` in its URL (its pages call the API with it as a bearer),
+ * but the browser no longer holds a JWT: the session cookie is HttpOnly and
+ * nothing is kept in localStorage. So the nav asks for one as the admin link
+ * is opened.
+ *
+ * Admins only. A POST, so a cookie-authenticated call needs the CSRF header:
+ * no other page on the parent domain can mint one, and none could read the
+ * reply anyway (no CORS). Same lifetime as a login token.
+ */
+router.post("/me/admin-token", auth, requireAdmin(false), async (req: any, res) => {
+    res.json({ token: signToken({ _id: req.user.id, email: req.user.email }) });
 });
 
 router.put("/profile", auth, async (req: any, res) => {
@@ -494,7 +538,8 @@ router.post("/forgot-password", async (req, res) => {
             }
         );
 
-        await sendResetPasswordEmail(user.email, token);
+        // The link lands on the site the request came from, if it's an allowed one (#215).
+        await sendResetPasswordEmail(user.email, token, originSite(req).origin);
 
         // mockToken is for local testing (verify_reset.ts) only. Returning it in
         // prod would let anyone reset any account's password without the email.

@@ -3,7 +3,7 @@
 One WebSocket per signed-in person. It carries live events for every thread that person can see. The web app uses it now. The VTT, Electron and React Native clients will use it later, so keep it small, and change the version when it changes in a way old clients can't ignore.
 
 - Server: `backend/live/liveChannel.ts`
-- Web client: `frontend/src/lib/realtime/liveClient.ts`, wrapped by the `useLiveThread` hook (threads), `useTyping` (typing) and `useThreads` (the thread list)
+- Web client: `packages/shared/src/realtime/liveClient.ts` (`@gtd/shared/realtime`), wrapped by the `useLiveThread` hook (threads), `useTyping` (typing) and `useThreads` (the thread list) in `@gtd/shared/realtime/react` and `@gtd/shared/letters/react`, which both sites use
 - Tests: `backend/scripts/test-live-channel.ts` (campaigns, auth, heartbeat, client), `backend/scripts/test-live-cookie.ts` (session cookie on the upgrade), `backend/scripts/test-live-dms.ts` (DMs), `backend/scripts/test-live-typing.ts` (typing), `backend/scripts/test-live-list.ts` (`thread.updated`, `thread.read`), `backend/scripts/test-live-two-tasks.ts` (every frame across two backend processes), `backend/scripts/test-live-redis-recovery.ts` (Redis outages), `backend/scripts/test-live-access.ts` (access changes, token expiry), `backend/scripts/test-live-combined.ts` (how the tickets' frames combine: access changes with the thread list and typing, resends with unread counts, namespaces, per-stream dedupe), `backend/scripts/test-live-noticeboard.ts` (`noticeboard.changed`)
 
 ## Connecting
@@ -104,7 +104,7 @@ These keep a thread list (unread markers, newest-first order) current without po
 { "type": "noticeboard.changed", "thread": "campaign:<id>" }
 ```
 
-Sent to every socket subscribed to a campaign's thread, the actor's own included, when something on that campaign's Notice Board changes: a session kicked off, shortlisted, voted on, moved to its next step, scheduled or cancelled; a venue suggested; a quest assigned, claimed or done; the torch passed; the campaign's details or party changed. It carries nothing else: refetch the board (`GET /api/planning/campaigns/:campaignId`), which applies its own access rules. One action can send several (a last vote closes the poll and moves the step on), so clients wait a moment and refetch once. Live-only like everything here: refetch after a reconnect. The web client's `useNoticeBoard` hook (`frontend/src/components/NoticeBoard.tsx`) does both.
+Sent to every socket subscribed to a campaign's thread, the actor's own included, when something on that campaign's Notice Board changes: a session kicked off, shortlisted, voted on, moved to its next step, scheduled or cancelled; a venue suggested; a quest assigned, claimed, edited, done or undone; the torch passed; the campaign's details or party changed. It carries nothing else: refetch the board (`GET /api/planning/campaigns/:campaignId`), which applies its own access rules. One action can send several (a last vote closes the poll and moves the step on), so clients wait a moment and refetch once. Live-only like everything here: refetch after a reconnect. The web client's `useNoticeBoard` hook (`frontend/src/components/NoticeBoard.tsx`) does both. Since a socket gets the frame for every campaign it's subscribed to, a view across campaigns (Hearthside's Your Quests) can refetch on any of them; the web client hands the frame to person-level subscribers (`subscribePerson`'s `onNoticeBoard`) as well as to the thread's.
 
 Clients must ignore frame types they don't know. Later versions of the server will add frames (spec #58) without changing `v`.
 
@@ -141,11 +141,11 @@ Every socket subscribed to the thread then gets
 
 except the typist's own sockets, on any device: nobody sees themselves typing. A DM's `typing` reaches only the other one of the pair. `name` is the person's display name, never an email address.
 
-Clients show "Theo is writing…" and take it down `expiresInMs` (5 seconds) after that person's last `typing` frame, or as soon as a `message.created` from that person arrives on the thread. Nothing is replayed: a socket that connects mid-burst sees the indicator at the typist's next frame. The web client's logic is in `frontend/src/lib/realtime/typing.ts` (`TypingTracker`), wrapped by the `useTyping` hook.
+Clients show "Theo is writing…" and take it down `expiresInMs` (5 seconds) after that person's last `typing` frame, or as soon as a `message.created` from that person arrives on the thread. Nothing is replayed: a socket that connects mid-burst sees the indicator at the typist's next frame. The web client's logic is in `packages/shared/src/realtime/typing.ts` (`TypingTracker`), wrapped by the `useTyping` hook.
 
 ## Presence
 
-Added with #37. While a campaign's Table Talk is open, the client sends
+Added with #37. While a campaign's Table Talk is open, or the campaign's thread is open in Letters (Hearthside's rail, the portfolio's dock), the client sends
 
 ```json
 { "type": "presence", "thread": "campaign:<id>", "here": true }
@@ -159,7 +159,7 @@ Every socket subscribed to the thread then gets the whole list, the viewer inclu
 { "type": "presence", "thread": "campaign:<id>", "people": [{ "id": "<account id>", "name": "Theo" }] }
 ```
 
-Replace what you have with it; an empty `people` means nobody. `name` is the display name, never an email address. Like typing, presence never touches the database: each backend task publishes its own set on the bus's ephemeral path (`presence.changed`) when it changes and every 20 seconds while it isn't empty, and every task shows the union, leaving out a task it hasn't heard from in 60 seconds. So a task that dies takes its people off the list within a minute. After a reconnect, the list arrives once the client says `here: true` again. The web client's hook is `usePresence` (`frontend/src/lib/realtime/usePresence.ts`).
+Replace what you have with it; an empty `people` means nobody. `name` is the display name, never an email address. Like typing, presence never touches the database: each backend task publishes its own set on the bus's ephemeral path (`presence.changed`) when it changes and every 20 seconds while it isn't empty, and every task shows the union, leaving out a task it hasn't heard from in 60 seconds. So a task that dies takes its people off the list within a minute. After a reconnect, the list arrives once the client says `here: true` again. The web client's hook is `usePresence` (`packages/shared/src/realtime/react.ts`).
 
 ## Heartbeat
 

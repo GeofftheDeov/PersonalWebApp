@@ -1,0 +1,31 @@
+{
+  "name": "hearthside",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hearthside, the Game Night planner's own site (spec #69): a second Next.js app beside the portfolio, on the same backend.",
+  "scripts": {
+    "dev": "node https-server.js",
+    "build": "next build",
+    "start": "node https-server.js --production",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@gtd/shared": "*",
+    "framer-motion": "^12.34.0",
+    "lucide-react": "^0.577.0",
+    "next": "^13.5.6",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^18.3.27",
+    "@types/react-dom": "^18.3.7",
+    "autoprefixer": "^10.4.22",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.19",
+    "tsx": "^4.21.0",
+    "typescript": "^5"
+  }
+}

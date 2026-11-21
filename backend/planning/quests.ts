@@ -9,9 +9,10 @@
  *   createQuests()  the gated API the HTTP routes wrap. The Game Master (the
  *                   campaign's, the session's stand-in, or an admin) creates
  *                   and reassigns quests for party members; a quest's owner or
- *                   the Game Master marks it done. Each mutation runs in a
- *                   transaction with the quest's row locked, then publishes
- *                   its bus event and bell notification after the commit.
+ *                   the Game Master marks it done, or undoes that. Each
+ *                   mutation runs in a transaction with the quest's row
+ *                   locked, then publishes its bus event and bell
+ *                   notification after the commit.
  *
  *   insertQuest / setAssignee / getQuest / announceAssigned
  *                   the ungated building blocks, which take the caller's
@@ -32,6 +33,7 @@ import pool, { withTransaction } from "../db/index.js";
 import { isUuid } from "../db/model.js";
 import { bus } from "../events/index.js";
 import type { EventMap } from "../events/events.js";
+import { gameNightLinks } from "../utils/frontendSites.js";
 import { notify } from "../utils/notify.js";
 import { personDisplayName } from "../utils/personUtils.js";
 import { campaignParty } from "./availabilityStore.js";
@@ -46,6 +48,9 @@ const DAY = 24 * 60 * 60 * 1000;
 export const MAX_TITLE = 120;
 export const MAX_NOTES = 1000;
 export const MAX_ALMANAC_DAYS = 400;
+/** The Almanac's pages going back in time (#252): this many sessions unless asked for fewer or more, up to the max. */
+export const ALMANAC_PAGE = 50;
+export const MAX_ALMANAC_PAGE = 200;
 /** Reminder offsets (#91), in minutes before the due time. The table's CHECK allows the same range. */
 export const MAX_REMINDERS = 5;
 export const MAX_REMINDER_MINUTES = 14 * 24 * 60;
@@ -105,6 +110,14 @@ const QUEST_SQL = `
 const QUEST_ORDER = `ORDER BY (t.status <> 'open'), COALESCE(t.due_at, s.date) NULLS LAST, t.created_at, t.id`;
 
 const iso = (d: Date | null) => d?.toISOString() ?? null;
+
+/** The Almanac's sessions for $1: dated, not cancelled, in a campaign they're active in or standing in as its GM. Add the span and the order. */
+const ALMANAC_SESSIONS = `SELECT s.id, s.title, s.date, s.end_date, s.status, s.is_online, s.location,
+                                 s.campaign_id, c.title AS campaign_title
+                            FROM game_sessions s JOIN campaigns c ON c.id = s.campaign_id
+                           WHERE s.date IS NOT NULL AND s.status <> 'cancelled'
+                             AND (s.gm_override_id = $1 OR EXISTS (
+                                   SELECT 1 FROM campaign_members m WHERE m.campaign_id = s.campaign_id AND m.person_id = $1 AND m.is_active))`;
 
 function toQuestJson(r: any): QuestJson {
     return {
@@ -273,7 +286,7 @@ export async function announceAssigned(q: QuestJson, assignedBy: string | null, 
             type: "system",
             title: `New quest: ${q.title}`,
             body: `${q.session.campaign.title} — for "${q.session.title}".`,
-            link: `/game-night/sessions/${q.sessionId}#quests`,
+            link: gameNightLinks.sessionQuests(q.sessionId),
             sourceKey: `quest:${q.id}`,
             meta: { questId: q.id, sessionId: q.sessionId, campaignId: q.session.campaign.id },
         });
@@ -409,6 +422,12 @@ export function createQuests(deps: QuestDeps = { now: () => new Date() }) {
                 if (sets.length) await db.query(`UPDATE session_tasks SET ${sets.join(", ")} WHERE id = $1`, params);
                 const quest = (await getQuest(db, t.id))!;
                 if (previous !== undefined) effects.push(() => announceAssigned(quest, actor.id, previous!));
+                else if (sets.length) {
+                    effects.push(() => bus.publish("quest.updated", {
+                        questId: quest.id, sessionId: quest.sessionId, campaignId: quest.session.campaign.id,
+                        assigneeId: quest.assignee?.id ?? null, updatedBy: actor.id,
+                    }).catch(() => { /* bus down is non-fatal */ }));
+                }
                 return quest;
             });
         },
@@ -433,6 +452,26 @@ export function createQuests(deps: QuestDeps = { now: () => new Date() }) {
             });
         },
 
+        /** Undoes `complete`: the same people can tick a done quest back to open. Undoing an open one is harmless. */
+        async reopen(actor: Actor, questId: string): Promise<QuestJson> {
+            return mutate(async (db, effects) => {
+                const t = await lockQuest(db, questId);
+                if (t.assignee_id !== actor.id) {
+                    const role = await roleIn(db, actor.id, t.campaign_id, t.gm_override_id);
+                    if (!role.gm) throw new QuestError(403, `Only the quest's owner or the ${t.gm_title} can undo it.`);
+                }
+                if (t.status === "cancelled") throw new QuestError(409, "This quest was cancelled.");
+                if (t.status === "done") {
+                    await db.query(`UPDATE session_tasks SET status = 'open', completed_at = NULL WHERE id = $1`, [t.id]);
+                    effects.push(() => bus.publish("quest.reopened", {
+                        questId: t.id, sessionId: t.session_id, campaignId: t.campaign_id,
+                        assigneeId: t.assignee_id, reopenedBy: actor.id,
+                    }).catch(() => { /* bus down is non-fatal */ }));
+                }
+                return (await getQuest(db, t.id))!;
+            });
+        },
+
         /**
          * The quest's owner chooses when to be reminded (#91): minutes before
          * the due time. Only the owner -- it's their routine, not the Game
@@ -451,41 +490,70 @@ export function createQuests(deps: QuestDeps = { now: () => new Date() }) {
         },
 
         /**
-         * The Almanac: my sessions with a date in [start, end) -- every campaign
-         * I'm in, plus any I'm the stand-in GM of -- each with my quests on it.
+         * The Almanac: my sessions -- every campaign I'm in, plus any I'm the
+         * stand-in GM of -- each with my quests on it. Cancelled and undated
+         * sessions are left out. Two ways to ask:
+         *
+         *   ?start&end              those with a date in [start, end), soonest first (at most 400 days)
+         *   ?before[&beforeId][&limit]
+         *                           a page going back in time (#252, Played): the latest `limit`
+         *                           (default 50, at most 200) dated before `before` -- or, with
+         *                           `beforeId`, before the session (before, beforeId) -- latest first,
+         *                           and `more`: whether any older ones are left. The next page's
+         *                           cursor is the last session's date and id.
          */
-        async almanac(actor: Actor, q: { start?: unknown; end?: unknown }) {
+        async almanac(actor: Actor, q: { start?: unknown; end?: unknown; before?: unknown; beforeId?: unknown; limit?: unknown }) {
+            if (q.before !== undefined) {
+                if (q.start !== undefined || q.end !== undefined) throw new QuestError(400, "Send start and end, or before, not both.");
+                return almanacBefore(actor, q);
+            }
             const start = new Date(q.start as string), end = new Date(q.end as string);
             if (typeof q.start !== "string" || typeof q.end !== "string" || isNaN(+start) || isNaN(+end) || end <= start) {
                 throw new QuestError(400, "start and end must be ISO date-times, end after start.");
             }
             if (+end - +start > MAX_ALMANAC_DAYS * DAY) throw new QuestError(400, `The range is limited to ${MAX_ALMANAC_DAYS} days.`);
-            const { rows: sessions } = await pool.query(
-                `SELECT s.id, s.title, s.date, s.end_date, s.status, s.is_online, s.location,
-                        s.campaign_id, c.title AS campaign_title
-                   FROM game_sessions s JOIN campaigns c ON c.id = s.campaign_id
-                  WHERE s.date >= $2 AND s.date < $3 AND s.status <> 'cancelled'
-                    AND (s.gm_override_id = $1 OR EXISTS (
-                          SELECT 1 FROM campaign_members m WHERE m.campaign_id = s.campaign_id AND m.person_id = $1 AND m.is_active))
-                  ORDER BY s.date, s.id`, [actor.id, start, end]);
-            const { rows: quests } = sessions.length ? await pool.query(
-                `${QUEST_SQL} WHERE t.session_id = ANY($1) AND t.assignee_id = $2 AND t.status <> 'cancelled' ${QUEST_ORDER}`,
-                [sessions.map((s) => s.id), actor.id]) : { rows: [] };
-            const bySession = new Map<string, QuestJson[]>();
-            for (const r of quests) {
-                const quest = toQuestJson(r);
-                bySession.set(quest.sessionId, [...(bySession.get(quest.sessionId) ?? []), quest]);
-            }
-            return {
-                sessions: sessions.map((s) => ({
-                    id: s.id, title: s.title, date: iso(s.date), endDate: iso(s.end_date), status: s.status,
-                    isOnline: s.is_online, location: s.location,
-                    campaign: { id: s.campaign_id, title: s.campaign_title },
-                    quests: bySession.get(s.id) ?? [],
-                })),
-            };
+            const { rows } = await pool.query(
+                `${ALMANAC_SESSIONS} AND s.date >= $2 AND s.date < $3 ORDER BY s.date, s.id`, [actor.id, start, end]);
+            return { sessions: await withMyQuests(actor, rows) };
         },
     };
+
+    async function almanacBefore(actor: Actor, q: { before?: unknown; beforeId?: unknown; limit?: unknown }) {
+        const before = new Date(q.before as string);
+        if (typeof q.before !== "string" || isNaN(+before)) throw new QuestError(400, "before must be an ISO date-time.");
+        if (q.beforeId !== undefined && (typeof q.beforeId !== "string" || !isUuid(q.beforeId))) {
+            throw new QuestError(400, "beforeId must be a session id.");
+        }
+        const limit = q.limit === undefined ? ALMANAC_PAGE : Number(q.limit);
+        if (!Number.isInteger(limit) || limit < 1 || limit > MAX_ALMANAC_PAGE) {
+            throw new QuestError(400, `limit is a whole number from 1 to ${MAX_ALMANAC_PAGE}.`);
+        }
+        // One more than asked for, to know whether there are more.
+        const { rows } = q.beforeId === undefined
+            ? await pool.query(`${ALMANAC_SESSIONS} AND s.date < $2 ORDER BY s.date DESC, s.id DESC LIMIT $3`,
+                [actor.id, before, limit + 1])
+            : await pool.query(`${ALMANAC_SESSIONS} AND (s.date, s.id) < ($2::timestamptz, $3::uuid) ORDER BY s.date DESC, s.id DESC LIMIT $4`,
+                [actor.id, before, q.beforeId, limit + 1]);
+        return { sessions: await withMyQuests(actor, rows.slice(0, limit)), more: rows.length > limit };
+    }
+
+    /** The Almanac's sessions as JSON, each with my quests on it (done ones too). */
+    async function withMyQuests(actor: Actor, sessions: any[]) {
+        const { rows: quests } = sessions.length ? await pool.query(
+            `${QUEST_SQL} WHERE t.session_id = ANY($1) AND t.assignee_id = $2 AND t.status <> 'cancelled' ${QUEST_ORDER}`,
+            [sessions.map((s) => s.id), actor.id]) : { rows: [] };
+        const bySession = new Map<string, QuestJson[]>();
+        for (const r of quests) {
+            const quest = toQuestJson(r);
+            bySession.set(quest.sessionId, [...(bySession.get(quest.sessionId) ?? []), quest]);
+        }
+        return sessions.map((s) => ({
+            id: s.id, title: s.title, date: iso(s.date), endDate: iso(s.end_date), status: s.status,
+            isOnline: s.is_online, location: s.location,
+            campaign: { id: s.campaign_id, title: s.campaign_title },
+            quests: bySession.get(s.id) ?? [],
+        }));
+    }
 }
 
 export type Quests = ReturnType<typeof createQuests>;

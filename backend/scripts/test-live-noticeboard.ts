@@ -9,10 +9,11 @@
  *     socket as `noticeboard.changed` on the campaign's thread, the actor's
  *     own included, with no planning content in the frame;
  *   - someone outside the party, and a member of another campaign, get none;
- *   - quests, the torch and campaign changes (the other events the board
- *     shows) send it too, and a deleted campaign doesn't;
+ *   - quests (assigned, edited, done), the torch and campaign changes (the
+ *     other events the board shows) send it too, and a deleted campaign doesn't;
  *   - the shared realtime client hands the frame to the thread's
- *     `onNoticeBoard`, which the board's hook refetches on.
+ *     `onNoticeBoard`, which the board's hook refetches on, and to
+ *     person-level subscribers' (Hearthside's Your Quests).
  *
  * Run against a throwaway database loaded from db/schema.sql (it refuses to run
  * against anything but localhost). It deletes every row it creates.
@@ -43,10 +44,11 @@ const { createFakeIntegrations } = await import("../testing/fakeIntegrations.js"
 type LiveClientLike = {
   status: string;
   subscribe(thread: string, handlers: { onNoticeBoard?: (thread: string) => void }): () => void;
+  subscribePerson(handlers: { onNoticeBoard?: (thread: string) => void }): () => void;
   close(): void;
 };
 type LiveClientCtor = new (opts: { url: string; getToken: () => string | null; WebSocket: unknown }) => LiveClientLike;
-const LIVE_CLIENT = new URL("../../frontend/src/lib/realtime/liveClient.ts", import.meta.url).href;
+const LIVE_CLIENT = new URL("../../packages/shared/src/realtime/liveClient.ts", import.meta.url).href;
 
 let pass = 0, fail = 0;
 function check(name: string, ok: boolean, detail = "") {
@@ -212,10 +214,20 @@ async function main() {
     });
     check("a quest assigned", await grew(), counts());
     mark = lastCounts();
+    await bus.publish("quest.updated", {
+      questId: "00000000-0000-4000-8000-000000000001", sessionId: sid, campaignId: table, assigneeId: player.id, updatedBy: gm.id,
+    });
+    check("a quest edited", await grew(), counts());
+    mark = lastCounts();
     await bus.publish("quest.completed", {
       questId: "00000000-0000-4000-8000-000000000001", sessionId: sid, campaignId: table, assigneeId: player.id, completedBy: player.id,
     });
     check("a quest done", await grew(), counts());
+    mark = lastCounts();
+    await bus.publish("quest.reopened", {
+      questId: "00000000-0000-4000-8000-000000000001", sessionId: sid, campaignId: table, assigneeId: player.id, reopenedBy: player.id,
+    });
+    check("a quest undone", await grew(), counts());
     mark = lastCounts();
     await bus.publish("campaign.torch_passed", {
       campaignId: table, scope: "session", sessionId: sid, byId: gm.id, fromId: null, toId: player.id,
@@ -230,11 +242,15 @@ async function main() {
     const { LiveClient } = await import(LIVE_CLIENT) as { LiveClient: LiveClientCtor };
     liveClient = new LiveClient({ url: wsUrl, getToken: () => tokenFor(player), WebSocket });
     const heard: string[] = [];
+    const heardByPerson: string[] = [];
     liveClient.subscribe(thread, { onNoticeBoard: (t) => heard.push(t) });
+    liveClient.subscribePerson({ onNoticeBoard: (t) => heardByPerson.push(t) });
     await until(() => liveClient!.status === "open");
     await post(`/api/planning/sessions/${sid}/vote`, gm, { optionIds: [optionA] });
     check("LiveClient hands noticeboard.changed to the thread's onNoticeBoard",
       await until(() => heard.length > 0 && heard.every((t) => t === thread)), JSON.stringify(heard));
+    check("...and to person-level subscribers' onNoticeBoard (Your Quests, across campaigns)",
+      await until(() => heardByPerson.length > 0 && heardByPerson.every((t) => t === thread)), JSON.stringify(heardByPerson));
 
     console.log("\nnot after the campaign is gone\n");
 

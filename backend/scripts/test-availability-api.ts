@@ -231,6 +231,41 @@ async function main() {
         check("with nothing set, I show as unknown -- not unavailable",
             JSON.stringify(nothing.json.runs.map((r: any) => r.presence)) === JSON.stringify(["unknown"]), nothing.json);
 
+        // ── game nights already booked (in any campaign) ────────────────────
+        // newbie has set nothing, so is unknown everywhere (as the preview just showed) until something blocks them.
+        const { rows: [other] } = await pool.query(
+            `INSERT INTO campaigns (title, owner_id) VALUES ('Overlap test: another table', $1) RETURNING id`, [people.outsider.id]);
+        const { rows: [left] } = await pool.query(
+            `INSERT INTO campaigns (title, owner_id) VALUES ('Overlap test: a table newbie left', $1) RETURNING id`, [people.outsider.id]);
+        campaigns.push(other.id, left.id);
+        await pool.query(`INSERT INTO campaign_members (campaign_id, person_id, status, joined_at) VALUES ($1, $2, 'Player', '2026-01-05')`,
+            [other.id, people.newbie.id]);
+        await pool.query(`INSERT INTO campaign_members (campaign_id, person_id, status, joined_at, is_active) VALUES ($1, $2, 'Player', '2026-01-05', false)`,
+            [left.id, people.newbie.id]);
+        const session = (campaignId: string, title: string, date: string, endDate: string | null, status = "scheduled", stage: string | null = null) =>
+            pool.query(`INSERT INTO game_sessions (title, campaign_id, date, end_date, status, planning_stage) VALUES ($1, $2, $3, $4, $5, $6)`,
+                [title, campaignId, date, endDate, status, stage]);
+        // Counts: scheduled in another of newbie's campaigns, no end time (so four hours, 03:30-07:30Z).
+        await session(other.id, "Booked elsewhere", "2026-10-11T03:30Z", null);
+        // None of these count, all at 22:00-23:00Z: cancelled, its night still being picked, a campaign newbie left.
+        await session(other.id, "Called off", "2026-10-10T22:00Z", "2026-10-10T23:00Z", "cancelled");
+        await session(other.id, "Night being moved", "2026-10-10T22:00Z", "2026-10-10T23:00Z", "planning", "night");
+        await session(left.id, "Not my table any more", "2026-10-10T22:00Z", "2026-10-10T23:00Z");
+        const booked = await call("GET", path, "gm");
+        const at = (t: string) => booked.json.slots.find((s: any) => s.start === `2026-10-${t}:00:00.000Z`);
+        check("a game night newbie is booked for in another campaign makes them busy for slots it touches",
+            at("11T00").busy.includes(people.newbie.id) && at("11T01").busy.includes(people.newbie.id), [at("11T00"), at("11T01")]);
+        check("...but not for slots it doesn't",
+            at("10T23").unknown.includes(people.newbie.id), at("10T23"));
+        check("a cancelled session, one whose night is being picked, and one in a campaign they left don't count",
+            at("10T22").unknown.includes(people.newbie.id), at("10T22"));
+        check("...and the response never says what the booking is",
+            !/Booked elsewhere|another table/.test(booked.text));
+        // Planning past the night step (the venue or food step) has its night: that counts.
+        await session(other.id, "Venue being picked", "2026-10-10T22:00Z", "2026-10-10T23:00Z", "planning", "venue");
+        check("a session still being planned, with its night picked, counts",
+            (await call("GET", path, "gm")).json.slots.find((s: any) => s.start === "2026-10-10T22:00:00.000Z").busy.includes(people.newbie.id));
+
         // ── events ──────────────────────────────────────────────────────────
         const seen = events.map((e) => `${e.personId === people.alice.id ? "alice" : e.personId === people.gm.id ? "gm" : "other"}:${e.what}`);
         check("every change publishes availability.changed (and refused saves don't)",

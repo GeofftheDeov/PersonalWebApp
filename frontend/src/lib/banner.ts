@@ -3,6 +3,7 @@
  * backend hands out a presigned S3 PUT, the browser uploads the cropped image
  * straight to S3, and then saves the object key on the campaign.
  */
+import { api } from './api';
 
 /** Width : height of every banner. */
 export const BANNER_ASPECT = 4;
@@ -47,30 +48,20 @@ export async function cropToBanner(img: HTMLImageElement, crop: CropRect): Promi
     throw new Error('The cropped banner is still over 5 MB. Try a smaller image.');
 }
 
-async function api<T>(path: string, init: RequestInit, token: string): Promise<T> {
-    const res = await fetch(path, {
-        ...init,
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(init.headers || {}) },
-    });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
-    return body as T;
-}
-
 /** Upload a cropped banner to S3 and make it the campaign's banner. */
-export async function uploadBanner(campaignId: string, blob: Blob, token: string): Promise<Banner> {
-    const put = await api<{ url: string; method: 'PUT'; headers: Record<string, string>; key: string }>(
+export async function uploadBanner(campaignId: string, blob: Blob): Promise<Banner> {
+    const put = await api.post<{ url: string; method: 'PUT'; headers: Record<string, string>; key: string }>(
         `/api/campaigns/${campaignId}/banner/upload-url`,
-        { method: 'POST', body: JSON.stringify({ contentType: blob.type, size: blob.size }) },
-        token,
+        { contentType: blob.type, size: blob.size },
     );
+    // Straight to S3 with a plain fetch: the presigned URL is its own credential.
     const res = await fetch(put.url, { method: put.method, headers: put.headers, body: blob });
     if (!res.ok) throw new Error(`The upload to storage failed (${res.status}).`);
-    return api<Banner>(`/api/campaigns/${campaignId}/banner`, { method: 'PUT', body: JSON.stringify({ key: put.key }) }, token);
+    return api.put<Banner>(`/api/campaigns/${campaignId}/banner`, { key: put.key });
 }
 
-export const removeBanner = (campaignId: string, token: string) =>
-    api<Banner>(`/api/campaigns/${campaignId}/banner`, { method: 'DELETE' }, token);
+export const removeBanner = (campaignId: string) =>
+    api.delete<Banner>(`/api/campaigns/${campaignId}/banner`);
 
 /** A stable pick from a few on-palette gradients, so each campaign keeps its own fallback. */
 export function fallbackBannerStyle(seed: string): { background: string } {

@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { useState, type FormEvent } from 'react';
-import { ApiError } from '@gtd/shared/api';
 import SignInPage, { SignInForm } from '@/components/auth/SignInPage';
 import { api, errorOf } from '@/lib/api';
 
@@ -25,9 +24,7 @@ export default function ForgotPasswordPage() {
       await api.post('/api/users/forgot-password', { email: email.trim() });
       setSent(true);
     } catch (err) {
-      // The backend answers 404 for an email with no account; the page doesn't say so.
-      if (err instanceof ApiError && err.status === 404) setSent(true);
-      else setError(errorOf(err, 'We couldn’t send the reset link. Try again.'));
+      setError(errorOf(err, 'We couldn’t send the reset link. Try again.'));
     } finally {
       setBusy(false);
     }

@@ -10,6 +10,7 @@ import {
 } from '@/lib/room';
 import { session, useRequiredSession } from '@/lib/session';
 import { useRoom } from '@/lib/useRoom';
+import AvailabilityPanel from './AvailabilityPanel';
 import EditRecordDialog from './EditRecordDialog';
 import GoogleCalendarCard from './GoogleCalendarCard';
 import LedgerHead from './LedgerHead';
@@ -22,11 +23,13 @@ import RoomSessions from './RoomSessions';
  * Your Room (#230, spec #69): layout A, "The ledger", from
  * prototype/hearthside-player-profile. The head on the floor (photo, name,
  * handle and unique ID, counts, Edit), then a gilded tab strip with one
- * leather panel at a time: Record, Sessions, Campaigns and Integrations.
+ * leather panel at a time: Record, Availability (#275), Sessions, Campaigns
+ * and Integrations.
  * `/room` draws it, and so does `/players/<your own id>`.
  *
  * `?tab=` opens a tab; `?gcal=` (the way back from Google, #215) shows its
- * result on the Google Calendar card and opens Integrations. Both are taken
+ * result on the Google Calendar card and opens Integrations, or on
+ * Availability's calendars when Connect was started there. Both are taken
  * off the address once read.
  */
 export default function YourRoom() {
@@ -80,6 +83,7 @@ export default function YourRoom() {
 
   const tabs: LedgerTab<RoomTab>[] = [
     { id: 'record', label: ROOM_TAB_LABEL.record },
+    { id: 'availability', label: ROOM_TAB_LABEL.availability },
     { id: 'sessions', label: ROOM_TAB_LABEL.sessions, count: room.played?.length },
     { id: 'campaigns', label: ROOM_TAB_LABEL.campaigns, count: room.campaigns?.length },
     { id: 'integrations', label: ROOM_TAB_LABEL.integrations },
@@ -108,6 +112,7 @@ export default function YourRoom() {
             </div>
           </RecordPanel>
         )}
+        {tab === 'availability' && <AvailabilityPanel googleNotice={gcalNotice} />}
         {tab === 'sessions' && <RoomSessions comingUp={room.comingUp} played={room.played} now={now} />}
         {tab === 'campaigns' && <RoomCampaigns campaigns={room.campaigns} />}
         {tab === 'integrations' && <GoogleCalendarCard status={room.gcal} notice={gcalNotice} onChanged={room.reloadGcal} />}

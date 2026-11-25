@@ -398,12 +398,12 @@ async function main() {
 
     const withTab = await startConnect("hearthside.geoffthedeov.net", "?return=availability");
     const tabBack = await callback(withTab.state);
-    check("...but not to Hearthside's /room, which has no such tab",
-      tabBack.location === "https://hearthside.geoffthedeov.net/room?gcal=denied", `${tabBack.location}`);
+    check("...and to Hearthside's /room, which has its own Availability tab (#275)",
+      tabBack.location === "https://hearthside.geoffthedeov.net/room?gcal=denied&tab=availability", `${tabBack.location}`);
 
     const noCode = await callback(withTab.state, "");
     check("a callback with neither code nor error is an error on the site it started from",
-      noCode.location === "https://hearthside.geoffthedeov.net/room?gcal=error", `${noCode.location}`);
+      noCode.location === "https://hearthside.geoffthedeov.net/room?gcal=error&tab=availability", `${noCode.location}`);
 
     const authUrl = await call("GET", "/api/google-calendar/auth-url", { from: "hearthside.geoffthedeov.net", headers: bearer });
     check("Google still comes back through the portfolio's one redirect URI",

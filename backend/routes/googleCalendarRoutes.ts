@@ -33,7 +33,7 @@ import { originSite, portfolioSite, profilePath, siteForHost, type FrontendSite 
 
 const router = express.Router();
 
-/** Portfolio profile tabs the consent screen may send the person back to. */
+/** Profile tabs the consent screen may send the person back to: the portfolio's /profile and Hearthside's /room both have Availability (#275). */
 const RETURN_TABS = new Set(['availability']);
 
 const redirectUri = () =>
@@ -86,8 +86,7 @@ router.get('/callback', async (req: any, res: Response) => {
             if (!from) throw new Error(`state names a host that isn't allowed: ${String(decoded.host)}`);
             site = from;
         }
-        // The tabs are the portfolio profile's; Hearthside's /room has its own.
-        if (site.name === 'portfolio' && RETURN_TABS.has(decoded.back)) tab = `&tab=${decoded.back}`;
+        if (RETURN_TABS.has(decoded.back)) tab = `&tab=${decoded.back}`;
         if (error) return back('denied');
         if (!code) return back('error');
 

@@ -126,6 +126,8 @@ test("Google Calendar: the result line from ?gcal=, and the card's state", () =>
 test("the tab: ?tab= when it's one, Integrations after Google, else the Record", () => {
   assert.equal(roomTab("sessions", null), "sessions");
   assert.equal(roomTab(null, "connected"), "integrations");
+  // Connect started on Availability comes back to it (#275).
+  assert.equal(roomTab("availability", "connected"), "availability");
   assert.equal(roomTab("vault", null), "record");
 });
 

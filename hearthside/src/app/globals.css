@@ -850,6 +850,53 @@ a.hs-cp-row:hover .hs-cp-chev{color:var(--accent)}
 @media (max-width:479px){.hs-room-ig{grid-template-columns:40px minmax(0,1fr)}.hs-room-ig-btn{grid-column:2;justify-self:start}}
 @media (prefers-reduced-motion:reduce){.hs-room-photo-hint{transition:none}}
 
+/* Your Room's Availability tab (#275): the portfolio profile's editor (#57) on the leather. The week, exceptions,
+   busy-time sources, and the next two weeks as free / busy / unknown bars. */
+.hs-room-sec > .hs-fine{margin-bottom:10px;max-width:70ch}
+.hs-av-zone{display:flex;flex-wrap:wrap;align-items:flex-end;gap:6px 12px;margin-bottom:10px}
+.hs-av-zone .hs-field{flex:0 1 300px}
+.hs-av-warn{color:var(--accent)}
+.hs-av-ok{margin:0;font-size:13.5px;color:var(--moss)}
+.hs-av-rows{list-style:none;margin:0 0 10px;padding:0;display:flex;flex-direction:column}
+.hs-av-rows > li + li{border-top:1px solid var(--gold-rule)}
+.hs-av-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;padding:7px 0;min-width:0}
+.hs-av-day{width:auto;flex:0 1 140px}
+.hs-av-time{width:auto;flex:0 0 auto;padding:6px 8px}
+.hs-av-date{width:auto;flex:0 1 170px}
+.hs-av-note{flex:1 1 160px;width:auto}
+.hs-av-to{font-family:var(--font-label);font-size:13px;letter-spacing:.06em;color:var(--muted)}
+.hs-av-over{color:var(--accent)}
+.hs-av-what{flex:1 1 160px;min-width:0;font-size:14.5px;overflow-wrap:anywhere}
+.hs-av-what small{display:block;color:var(--muted);font-size:12.5px}
+.hs-av-x{margin-left:auto;flex:none;background:none;border:1px solid transparent;color:var(--muted);cursor:pointer;width:28px;height:28px;border-radius:50%;font-size:17px;line-height:1;padding:0}
+.hs-av-x:hover{color:#f3b7a5;border-color:var(--seal)}
+.hs-av-x:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.hs-av-acts{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-bottom:6px}
+.hs-av-btn{height:32px}
+.hs-av-xform{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:8px}
+.hs-av-kind{padding:0;border:0}
+.hs-av-check{display:inline-flex;align-items:center;gap:6px;font-size:14px;cursor:pointer}
+.hs-av-check input{accent-color:var(--accent);width:16px;height:16px}
+.hs-av-span{display:inline-flex;flex-wrap:wrap;align-items:center;gap:6px}
+.hs-av-src{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 12px;align-items:center;padding:10px 0}
+.hs-av-src-text{min-width:0}
+.hs-av-src-text h3{margin:0;font-family:var(--font-story);font-weight:400;font-size:18px;line-height:1.2}
+.hs-av-src-acts{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
+@media (max-width:479px){.hs-av-src{grid-template-columns:minmax(0,1fr)}.hs-av-src-acts{justify-content:flex-start}}
+.hs-av-key{display:flex;flex-wrap:wrap;gap:4px 14px;margin-bottom:8px;font-family:var(--font-label);font-size:13px;letter-spacing:.05em;color:var(--muted)}
+.hs-av-key span{display:inline-flex;align-items:center;gap:6px}
+.hs-av-key .hs-av-cell{display:inline-block;width:20px;height:11px;border:1px solid var(--gold-line);border-radius:2px}
+.hs-av-grid{display:flex;flex-direction:column;gap:4px}
+.hs-av-day-row{display:grid;grid-template-columns:minmax(78px,22%) minmax(0,1fr);gap:8px;align-items:center}
+.hs-av-day-name{font-family:var(--font-label);font-size:13px;letter-spacing:.04em;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hs-av-hours > div{display:grid;grid-template-columns:repeat(4,1fr);font-family:var(--font-label);font-size:11.5px;letter-spacing:.04em;color:var(--muted)}
+.hs-av-bar{display:flex;height:16px;border:1px solid var(--gold-line);border-radius:2px;overflow:hidden;background:var(--surface)}
+.hs-av-bar .hs-av-cell{flex:1}
+.hs-av-cell.is-free{background:var(--moss)}
+.hs-av-cell.is-busy{background:#120d09}
+.hs-av-cell.is-unknown{background:repeating-linear-gradient(45deg,rgba(229,161,58,.55) 0 2px,transparent 2px 6px)}
+.hs-av-bar .hs-av-cell.is-quarter{box-shadow:inset 1px 0 0 rgba(241,230,208,.28)}
+
 /* ---------- The Almanac (#228; prototype/hearthside-almanac, layout B "Chronicle") ----------
    A list by week or a calendar (Month / Week), with filters for both. Sessions on the calendar carry their
    campaign's banner (BannerArt, .hs-alm-bn) in a gilded panel's gold frame; quests are #227's paper slips. */

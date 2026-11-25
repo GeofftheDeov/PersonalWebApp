@@ -305,18 +305,24 @@ export function gcalState(s: GcalStatus | null): { pill: string; tone: 'ok' | 's
 
 /* ---------- The tabs ---------- */
 
-export type RoomTab = 'record' | 'sessions' | 'campaigns' | 'integrations';
+export type RoomTab = 'record' | 'availability' | 'sessions' | 'campaigns' | 'integrations';
 
-export const ROOM_TABS: readonly RoomTab[] = ['record', 'sessions', 'campaigns', 'integrations'];
+/** In the strip's order: Availability second, as on the portfolio's profile (#275). */
+export const ROOM_TABS: readonly RoomTab[] = ['record', 'availability', 'sessions', 'campaigns', 'integrations'];
 
 export const ROOM_TAB_LABEL: Record<RoomTab, string> = {
   record: 'Record',
+  availability: 'Availability',
   sessions: 'Sessions',
   campaigns: 'Campaigns',
   integrations: 'Integrations',
 };
 
-/** `?tab=` as a tab, falling back to the Record. A return from Google opens Integrations. */
+/**
+ * `?tab=` as a tab, falling back to the Record. A return from Google opens
+ * Integrations, unless Connect was started from Availability, which the
+ * callback names in `?tab=` (#275).
+ */
 export function roomTab(tab: string | null | undefined, gcal: string | null | undefined): RoomTab {
   if ((ROOM_TABS as readonly string[]).includes(tab ?? '')) return tab as RoomTab;
   return gcal ? 'integrations' : 'record';

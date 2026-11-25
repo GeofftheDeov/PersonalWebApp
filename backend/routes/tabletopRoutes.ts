@@ -21,6 +21,10 @@ import { followSessionStarts } from "../planning/questReminders.js";
 import { AttendanceError, confirmAttendance, getAttendance } from "../planning/attendance.js";
 import { forReader, prepNotesReader, withoutPrepNotes } from "../utils/prepNotes.js";
 import { sessionEventDescription } from "../utils/frontendSites.js";
+import {
+    AdventurerFileError, addArt, artOf, clearSheet, portraitUrls, removeArt, requestArtUpload, requestSheetUpload,
+    setPortrait, setSheet, sheetCopyOf, sheetUrlProblem,
+} from "../planning/adventurerFiles.js";
 
 // --- Sessions ---
 router.get("/sessions", auth, async (req: any, res) => {
@@ -342,8 +346,10 @@ router.get("/characters", auth, async (req: any, res) => {
                 CampaignMember.find({ campaign }).select("person isActive"),
             ]);
             const active = new Map(members.map((m: any) => [String(m.person), m.isActive !== false]));
+            const portraits = await portraitUrls(characters.map((c: any) => String(c._id)));
             return res.json(characters.map((c: any) => {
-                const obj = c.toObject();
+                const obj = withoutFileFields(c.toObject());
+                obj.portraitUrl = portraits.get(String(c._id)) ?? null;
                 const playerId = String(c.player?._id ?? c.player ?? "");
                 obj.player = c.player?._id
                     ? { _id: playerId, name: personDisplayName(c.player), handle: c.player.handle ?? null }
@@ -357,7 +363,8 @@ router.get("/characters", auth, async (req: any, res) => {
         // left), and everyone's in the campaigns you sit in (#235).
         const query = campaignIds ? { $or: [{ player: req.user.id }, { campaign: { $in: campaignIds } }] } : {};
         const characters = await Character.find(query).populate("campaign dungeon");
-        res.json(characters.map((c: any) => characterOut(c, campaignIds)));
+        const portraits = await portraitUrls(characters.map((c: any) => String(c._id)));
+        res.json(characters.map((c: any) => ({ ...characterOut(c, campaignIds), portraitUrl: portraits.get(String(c._id)) ?? null })));
     } catch (error: any) {
         res.status(500).json({ error: "Failed to fetch characters", details: error.message });
     }
@@ -376,6 +383,11 @@ function characterFields(body: any) {
         if (body?.[key] !== undefined) fields[field] = body[key];
     }
     if (typeof fields.name === "string") fields.name = fields.name.trim();
+    // The link to the full sheet (#274): "" or null clears it.
+    if (body?.sheetUrl !== undefined) {
+        const url = typeof body.sheetUrl === "string" ? body.sheetUrl.trim() : body.sheetUrl;
+        fields.sheetUrl = url === "" ? null : url;
+    }
     // The forms send "" for "no campaign".
     if (body?.campaign !== undefined) fields.campaign = body.campaign || null;
     return fields;
@@ -404,6 +416,7 @@ function characterProblem(fields: Record<string, unknown>, existing?: any): stri
         if (fields[key] != null && typeof fields[key] !== "string") return `${key} must be text`;
     }
     if (fields.isDead !== undefined && typeof fields.isDead !== "boolean") return "isDead must be true or false";
+    if (fields.sheetUrl !== undefined) return sheetUrlProblem(fields.sheetUrl);
     return null;
 }
 
@@ -417,7 +430,7 @@ const idOf = (ref: any) => (ref == null ? null : String(ref._id ?? ref));
  * `{ _id, name, handle }`, as the party's list (`?campaign=`) sends it.
  */
 function characterOut(character: any, campaignIds: string[] | null) {
-    const obj = character.toObject();
+    const obj = withoutFileFields(character.toObject());
     const campaignId = idOf(obj.campaign);
     if (obj.campaign && typeof obj.campaign === "object" && campaignIds !== null && !(campaignId && campaignIds.includes(campaignId))) {
         obj.campaign = { _id: campaignId, title: obj.campaign.title ?? null, status: obj.campaign.status ?? null };
@@ -426,6 +439,28 @@ function characterOut(character: any, campaignIds: string[] | null) {
         obj.player = { _id: idOf(obj.player), name: personDisplayName(obj.player), handle: obj.player.handle ?? null };
     }
     return obj;
+}
+
+/** A character's row without the storage details of its art and sheet (#273, #274): readers get URLs instead. */
+function withoutFileFields(obj: any) {
+    const { portraitArt: _p, sheetKey: _k, sheetName: _n, sheetType: _t, sheetSize: _s, ...rest } = obj;
+    return rest;
+}
+
+/**
+ * One character as its page reads it (#273, #274): characterOut plus its art,
+ * portrait and full sheet (the link, and the uploaded copy with a URL that
+ * expires). Only for someone canSeeCharacter lets in.
+ */
+async function characterPage(character: any, campaignIds: string[] | null) {
+    const id = String(character._id);
+    const art = await artOf(id);
+    return {
+        ...characterOut(character, campaignIds),
+        portraitUrl: art.find((a) => a.isPortrait)?.url ?? null,
+        art,
+        sheet: await sheetCopyOf(character),
+    };
 }
 
 /** One character, with its campaign and who plays it, as its page reads it. */
@@ -468,7 +503,7 @@ router.post("/characters", auth, async (req: any, res) => {
         }
         const character = new Character({ ...fields, player });
         await character.save();
-        res.status(201).json(character);
+        res.status(201).json({ ...withoutFileFields(character.toObject()), portraitUrl: null, art: [], sheet: null });
     } catch (error: any) {
         res.status(500).json({ error: "Failed to create character", details: error.message });
     }
@@ -481,7 +516,7 @@ router.get("/characters/:id", auth, async (req: any, res) => {
         if (!character) return res.status(404).json({ error: "Character not found" });
         const campaignIds = await getAuthorizedCampaignIds(req.user);
         if (!(await canSeeCharacter(req.user, campaignIds, character))) return res.status(403).json({ error: "Unauthorized" });
-        res.json(characterOut(character, campaignIds));
+        res.json(await characterPage(character, campaignIds));
     } catch (error: any) {
         res.status(500).json({ error: "Failed to fetch character", details: error.message });
     }
@@ -508,11 +543,34 @@ router.put("/characters/:id", auth, async (req: any, res) => {
         // The reply is the character as its page reads it (GET /characters/:id).
         const character = await characterById(req.params.id);
         if (!character) return res.status(404).json({ error: "Character not found" });
-        res.json(characterOut(character, campaignIds));
+        res.json(await characterPage(character, campaignIds));
     } catch (error: any) {
         res.status(500).json({ error: "Failed to update character", details: error.message });
     }
 });
+
+// An adventurer's art and their uploaded sheet (#273, #274), the player's or
+// an admin's to change (planning/adventurerFiles.ts checks). As with campaign
+// banners, the browser asks for an upload URL, PUTs the file straight to S3,
+// then saves the key it was given.
+const fileRoute = (fn: (actor: { id: string }, characterId: string, body: any) => Promise<unknown>) =>
+    async (req: any, res: any) => {
+        try {
+            res.json(await fn(req.user, String(req.params.id), req.body));
+        } catch (error: any) {
+            if (error instanceof AdventurerFileError) return res.status(error.status).json({ error: error.message });
+            console.error("Error updating an adventurer's art or sheet:", error);
+            res.status(500).json({ error: "Failed to update the adventurer" });
+        }
+    };
+router.post("/characters/:id/art/upload-url", auth, fileRoute(requestArtUpload));
+router.post("/characters/:id/art", auth, fileRoute(addArt));
+router.put("/characters/:id/portrait", auth, fileRoute(setPortrait));
+router.delete("/characters/:id/art/:artId", auth, (req: any, res: any) =>
+    fileRoute((actor, id) => removeArt(actor, id, String(req.params.artId)))(req, res));
+router.post("/characters/:id/sheet/upload-url", auth, fileRoute(requestSheetUpload));
+router.put("/characters/:id/sheet", auth, fileRoute(setSheet));
+router.delete("/characters/:id/sheet", auth, fileRoute(clearSheet));
 
 // --- Dungeons ---
 // Dungeons and encounters were readable with no login at all (#238). Now a

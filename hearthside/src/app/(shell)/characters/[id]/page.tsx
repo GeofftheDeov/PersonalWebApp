@@ -5,6 +5,8 @@ import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { ApiError } from '@gtd/shared/api';
 import AdventurerDialog from '@/components/adventurers/AdventurerDialog';
+import ArtPanel from '@/components/adventurers/ArtPanel';
+import FullSheet from '@/components/adventurers/FullSheet';
 import Portrait from '@/components/adventurers/Portrait';
 import GildedPanel from '@/components/design-system/GildedPanel';
 import BackLink from '@/components/shell/BackLink';
@@ -23,11 +25,11 @@ type Load =
 
 /**
  * An adventurer's page, `/characters/:id` (#229, spec #69): layout D's page
- * from prototype/hearthside-characters, with today's data. The hero (the
- * fallback medallion, their name, class and level), then their sheet: who
- * plays them, class, level, game, campaign and status, Travels with (the
- * party's other adventurers) and Edit. There's no Art panel and no road yet
- * (#198).
+ * from prototype/hearthside-characters. The hero (their portrait in the
+ * medallion, their name, class and level), their Art (#273), then their
+ * sheet: who plays them, class, level, game, campaign and status, The full
+ * sheet (#274: a link and/or an uploaded copy), Travels with (the party's
+ * other adventurers) and Edit. There's no road yet (#198).
  *
  * Who may open it is the server's (#202): the player, their friends and
  * campaign-mates, the adventurer's party, and admins. Edit is for the player
@@ -99,7 +101,7 @@ function AdventurerSheetPage({ id }: { id: string }) {
       <BackLink href="/characters" full="All adventurers">Adventurers</BackLink>
 
       <GildedPanel as="header" className={c.isDead ? 'hs-page-head hs-adv-hero is-fallen' : 'hs-page-head hs-adv-hero'}>
-        <span className="hs-adv-medal"><Portrait name={c.name} face /></span>
+        <span className="hs-adv-medal"><Portrait name={c.name} src={c.portraitUrl} face /></span>
         <div className="hs-adv-hero-who">
           <h1>{c.name}</h1>
           <p className="hs-adv-hero-k">{[classLine(c), c.gameType?.trim()].filter(Boolean).join(' · ')}</p>
@@ -109,6 +111,14 @@ function AdventurerSheetPage({ id }: { id: string }) {
           <span className="hs-adv-lvl" role="img" aria-label={`Level ${c.level}`}><small>Level</small><b>{c.level}</b></span>
         )}
       </GildedPanel>
+
+      <ArtPanel
+        characterId={c._id}
+        name={c.name}
+        art={c.art ?? []}
+        canEdit={canEdit}
+        onChange={(reply) => setLoad({ status: 'ready', adventurer: { ...c, ...reply } })}
+      />
 
       <section className="hs-adv-sheet-sec" aria-labelledby="hs-adv-sheet-h">
         <h2 className="hs-sec" id="hs-adv-sheet-h"><span>Their sheet</span></h2>
@@ -136,6 +146,15 @@ function AdventurerSheetPage({ id }: { id: string }) {
             <div><dt>Status</dt><dd>{statusOf(c)}</dd></div>
           </dl>
 
+          <FullSheet
+            characterId={c._id}
+            sheetUrl={c.sheetUrl}
+            sheet={c.sheet}
+            canEdit={canEdit}
+            onEditLink={() => setEditing(true)}
+            onChange={(sheet) => setLoad({ status: 'ready', adventurer: { ...c, sheet } })}
+          />
+
           {mates && (
             <div className="hs-adv-mates-sec">
               <h3 className="hs-adv-panel-h" id="hs-adv-mates-h">Travels with</h3>
@@ -144,7 +163,7 @@ function AdventurerSheetPage({ id }: { id: string }) {
                   {mates.map((m) => (
                     <li key={m._id}>
                       <Link href={`/characters/${encodeURIComponent(m._id)}`} className="hs-adv-mate">
-                        <span className="hs-adv-medal is-small"><Portrait name={m.name} face /></span>
+                        <span className="hs-adv-medal is-small"><Portrait name={m.name} src={m.portraitUrl} face /></span>
                         <span className="hs-adv-mate-text">
                           <b>{m.name}</b>
                           <small>

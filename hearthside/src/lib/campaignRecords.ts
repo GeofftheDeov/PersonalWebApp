@@ -152,6 +152,8 @@ export interface PartyCharacter {
   player: { _id: string; name: string; handle: string | null } | null;
   /** False once the player has been made inactive in this campaign (#37). */
   playerActive: boolean;
+  /** Their portrait (#273), or null for the initials. */
+  portraitUrl?: string | null;
 }
 
 /** The party's adventurers, and the former party's (players made inactive here): their history stays. */

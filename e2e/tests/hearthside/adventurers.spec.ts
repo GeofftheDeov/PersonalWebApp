@@ -5,11 +5,13 @@
  * fallen in the Hall of Heroes below; `/characters/:id` is the hero and their
  * sheet, with Travels with and Edit. New adventurer and Edit share one gilded
  * dialog. Someone else's adventurer opens read-only, and access follows the
- * server's character checks (#202, #235). At 375px nothing scrolls sideways.
- * Each test makes its own people, campaigns and adventurers, so the seeded
- * party is left alone.
+ * server's character checks (#202, #235). The player adds art and picks the
+ * portrait (#273), and links to or uploads the full sheet (#274). At 375px
+ * nothing scrolls sideways. Each test makes its own people, campaigns and
+ * adventurers, so the seeded party is left alone.
  */
-import type { APIRequestContext, APIResponse, Page } from "@playwright/test";
+import crypto from "node:crypto";
+import type { APIRequestContext, APIResponse, Page, Route } from "@playwright/test";
 import { test, expect } from "../../fixtures";
 
 /** A first visit compiles the route in dev mode, which can take most of the 15s assertion budget. */
@@ -183,7 +185,9 @@ test("someone else's adventurer opens read-only, to those the server lets see it
   const campaign = await campaignOf(ownerApi, [mateApi], title);
   await ok(ownerApi.patch(`/api/campaigns/${campaign}/settings`, { data: { tableLink: "https://table.example/brinewood" } }));
   await befriend(ownerApi, friendApi, friend.id);
-  const kestrel = await adventurer(ownerApi, { name: "Kestrel Vane", class: "Envoy", level: 3, gameType: "Starfinder", campaign });
+  const kestrel = await adventurer(ownerApi, {
+    name: "Kestrel Vane", class: "Envoy", level: 3, gameType: "Starfinder", campaign, sheetUrl: "https://www.dndbeyond.com/characters/42",
+  });
   await adventurer(mateApi, { name: "Brother Odran", class: "Cleric", level: 4, campaign });
 
   // A campaign-mate: the sheet, Travels with, and no Edit.
@@ -205,6 +209,11 @@ test("someone else's adventurer opens read-only, to those the server lets see it
   await expect(sheetRow(page, "Campaign").getByRole("link")).toHaveCount(0);
   await expect(main(page).getByRole("list", { name: "Travels with" })).toHaveCount(0);
   await expect(main(page).getByRole("button", { name: "Edit", exact: true })).toHaveCount(0);
+  // They open the full sheet, but get none of the owner's art or sheet controls (#273, #274).
+  await expect(main(page).getByRole("link", { name: /Open the sheet/ })).toHaveAttribute("href", "https://www.dndbeyond.com/characters/42");
+  await expect(main(page).getByRole("button", { name: "Add art" })).toHaveCount(0);
+  await expect(main(page).getByLabel("Upload a sheet")).toHaveCount(0);
+  await expect(main(page).getByRole("button", { name: "Link to it" })).toHaveCount(0);
   // The server doesn't send them the campaign's table link either (#235).
   const asFriend = await ok(friendApi.get(`/api/tabletop/characters/${kestrel}`));
   expect(Object.keys(asFriend.campaign).sort()).toEqual(["_id", "status", "title"]);
@@ -216,6 +225,87 @@ test("someone else's adventurer opens read-only, to those the server lets see it
   await expect(main(page).getByRole("heading", { level: 1, name: "A closed door" })).toBeVisible(FIRST_LOAD);
   await expect(main(page).getByText("This adventurer isn’t yours to see.", { exact: false })).toBeVisible();
   await expect(main(page).getByText("Kestrel Vane")).toHaveCount(0);
+});
+
+test("the player adds art, chooses the portrait, and links and uploads the full sheet", async ({ page, signIn, apiAs, newPerson, hearthside }) => {
+  const me = await newPerson("Sable Thorne");
+  const myApi = await apiAs(me);
+  const id = await adventurer(myApi, { name: "Ysolde Quill", class: "Witch", level: 5 });
+  // Uploads are switched off on the test stack, so storage's two hops are stood in for here: the presigned
+  // URL the backend would mint, and S3 taking the file. Saving the keys and the portrait, and removing, are the real backend's.
+  const mint = (prefix: string, ext: string, type: string) => (route: Route) => route.fulfill({
+    json: { url: hearthside.url("/fake-storage/put"), method: "PUT", headers: { "Content-Type": type }, key: `${prefix}/${id}/${crypto.randomUUID()}.${ext}` },
+  });
+  await page.route(`**/api/tabletop/characters/${id}/art/upload-url`, mint("character-art", "webp", "image/webp"));
+  await page.route(`**/api/tabletop/characters/${id}/sheet/upload-url`, mint("character-sheets", "pdf", "application/pdf"));
+  let stored = 0;
+  await page.route("**/fake-storage/put", (route) => { stored++; return route.fulfill({ status: 200 }); });
+  // 1 × 1 PNG: the cropper covers the 3:4 frame with it.
+  const png = {
+    name: "ysolde.png",
+    mimeType: "image/png",
+    buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64"),
+  };
+
+  await signIn(me);
+  await page.goto(`/characters/${id}`);
+  await expect(main(page).getByRole("heading", { level: 1, name: "Ysolde Quill" })).toBeVisible(FIRST_LOAD);
+  const art = main(page).getByRole("list", { name: "Ysolde Quill’s art" });
+
+  // Two pieces of art, through the 3:4 cropper. The first becomes the portrait.
+  for (const n of [1, 2]) {
+    await art.getByRole("button", { name: "Add art" }).click();
+    const crop = page.getByRole("dialog", { name: "Art for Ysolde Quill" });
+    await crop.getByLabel("Pick an image").setInputFiles(png);
+    await expect(crop.getByRole("slider", { name: "Zoom" })).toBeVisible();
+    await crop.getByRole("button", { name: "Add the art" }).click();
+    await expect(crop).toBeHidden();
+    await expect(art.getByRole("button", { name: /^Open piece/ })).toHaveCount(n);
+  }
+  expect(stored).toBe(2);
+  await expect(art.getByRole("button", { name: "Open piece 1 of 2, the portrait" })).toBeVisible();
+
+  // The second becomes the portrait from the viewer, then the first is removed.
+  await art.getByRole("button", { name: "Open piece 2 of 2" }).click();
+  const viewer = page.getByRole("dialog", { name: "Ysolde Quill’s art" });
+  await viewer.getByRole("button", { name: "Make this the portrait" }).click();
+  await expect(viewer.getByText("2 of 2 · the portrait")).toBeVisible();
+  await expect(viewer.getByRole("button", { name: "Make this the portrait" })).toHaveCount(0);
+  await viewer.getByRole("button", { name: "Previous piece" }).click();
+  await expect(viewer.getByText("1 of 2", { exact: true })).toBeVisible();
+  await viewer.getByRole("button", { name: "Remove" }).click();
+  await viewer.getByRole("button", { name: "Yes, remove it" }).click();
+  await expect(viewer.getByText("The only piece · the portrait")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(viewer).toBeHidden();
+  await expect(art.getByRole("button", { name: "Open piece 1 of 1, the portrait" })).toBeVisible();
+  const saved = await ok(myApi.get(`/api/tabletop/characters/${id}`));
+  expect(saved.art).toHaveLength(1);
+  expect(saved.art[0].isPortrait).toBe(true);
+
+  // The full sheet: a link, set in Edit, that must be a web address.
+  await main(page).getByRole("button", { name: "Link to it" }).click();
+  const edit = page.getByRole("dialog", { name: "Edit Ysolde Quill" });
+  const link = edit.getByRole("textbox", { name: "Link to the full sheet" });
+  await link.fill("javascript:alert(1)");
+  await edit.getByRole("button", { name: "Save" }).click();
+  await expect(edit.getByRole("alert")).toContainText("must start with https://");
+  await link.fill("https://www.dndbeyond.com/characters/9001");
+  await edit.getByRole("button", { name: "Save" }).click();
+  await expect(edit).toHaveCount(0);
+  await expect(main(page).getByRole("link", { name: /Open the sheet/ })).toHaveAttribute("href", "https://www.dndbeyond.com/characters/9001");
+  await expect(main(page).getByText("on dndbeyond.com")).toBeVisible();
+
+  // …and an uploaded copy, kept as it is, which can be removed again.
+  await main(page).getByLabel("Upload a sheet").setInputFiles({ name: "Ysolde.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n%%EOF\n") });
+  await expect(main(page).getByText("Ysolde.pdf")).toBeVisible();
+  await expect(main(page).getByLabel("Replace the copy")).toHaveCount(1);
+  expect((await ok(myApi.get(`/api/tabletop/characters/${id}`))).sheet).toMatchObject({ name: "Ysolde.pdf", contentType: "application/pdf" });
+  await main(page).getByRole("button", { name: "Remove the copy" }).click();
+  await main(page).getByRole("button", { name: "Yes, remove the copy" }).click();
+  await expect(main(page).getByText("Ysolde.pdf")).toHaveCount(0);
+  await expect(main(page).getByLabel("Upload a sheet")).toHaveCount(1);
+  expect((await ok(myApi.get(`/api/tabletop/characters/${id}`))).sheet).toBeNull();
 });
 
 test.describe("at 375px", () => {

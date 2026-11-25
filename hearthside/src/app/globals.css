@@ -194,6 +194,7 @@ body.hs-app{margin:0;min-height:100vh;-webkit-font-smoothing:antialiased}
 .hs-crop-pick{position:absolute;inset:0;display:grid;place-items:center;cursor:pointer;font-family:var(--font-label);letter-spacing:.06em;color:var(--muted)}
 .hs-crop-pick:hover,.hs-crop-pick:focus-within{color:var(--gold-hi)}
 .hs-crop-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px}
+.hs-crop.is-portrait{max-width:300px;margin:0 auto}
 .hs-zoom{flex:1;min-width:12rem;display:flex;gap:10px;align-items:center;font-family:var(--font-label);font-size:13px;color:var(--muted)}
 .hs-zoom input{flex:1;min-width:0;accent-color:var(--accent)}
 
@@ -1104,6 +1105,10 @@ a.hs-cp-row:hover .hs-cp-chev{color:var(--accent)}
 .hs-adv-pt.is-face .hs-adv-pt-none span{font-size:36cqw}
 /* The fallen lose their colour. */
 .is-fallen .hs-adv-pt-none,.hs-adv-frame.is-fallen .hs-adv-pt-none{filter:grayscale(1) brightness(.7)}
+/* Art (#273): the portrait fills the frame; a medallion zooms onto the head, the top of a 3:4 piece. */
+.hs-adv-pt-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% 50%}
+.hs-adv-pt.is-face .hs-adv-pt-img{object-position:50% 0;transform:scale(1.2);transform-origin:50% 12%}
+.is-fallen .hs-adv-pt-img,.hs-adv-frame.is-fallen .hs-adv-pt-img{filter:grayscale(1) brightness(.7)}
 /* A frame: the gilded panel's gold, a hairline inside. A medallion: the same gold, round. */
 .hs-adv-frame{position:relative;display:block;width:100%;border:3px solid transparent;border-radius:var(--radius-panel);overflow:hidden;
   background:linear-gradient(var(--leather),var(--leather)) padding-box,var(--hs-adv-gild) border-box;box-shadow:var(--shadow-panel)}
@@ -1186,6 +1191,28 @@ a.hs-cp-row:hover .hs-cp-chev{color:var(--accent)}
 .hs-adv-mate small{display:block;font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
 .hs-adv-empty-line{margin:0;padding:2px 14px 12px;font-size:14px;color:var(--muted)}
 .hs-adv-foot{display:flex;justify-content:flex-end;gap:10px;padding:10px 14px 8px;border-top:1px solid var(--gold-rule)}
+/* The Art panel and its viewer (#273). */
+.hs-adv-art-sec{max-width:720px}
+.hs-adv-art{list-style:none;margin:0 0 6px;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:14px}
+.hs-adv-art > li{min-width:0;display:flex}
+.hs-adv-art-piece,.hs-adv-art-add{position:relative;flex:1;display:block;padding:0;border:2px solid var(--gold-line);border-radius:var(--radius-panel);overflow:hidden;background:var(--leather);cursor:pointer;color:inherit;font:inherit}
+.hs-adv-art-piece:hover,.hs-adv-art-piece:focus-visible,.hs-adv-art-add:hover,.hs-adv-art-add:focus-visible{outline:0;border-color:var(--gold-hi);box-shadow:0 0 0 2px rgba(246,221,150,.5),0 0 18px 2px rgba(255,179,107,.35)}
+.hs-adv-art-mark{position:absolute;left:6px;bottom:6px;padding:2px 7px;border-radius:2px;font:500 11.5px/1.3 var(--font-label);letter-spacing:.06em;color:#2b1a06;background:var(--gold-hi);box-shadow:0 1px 3px rgba(0,0,0,.5)}
+.hs-adv-art-add{aspect-ratio:3/4;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border-style:dashed;background:var(--ground-2);color:var(--muted);font-family:var(--font-label);letter-spacing:.06em;font-size:14px}
+.hs-adv-art-add span{font-size:30px;line-height:1;color:var(--gold-hi)}
+.hs-adv-view{display:flex;flex-direction:column;gap:10px}
+.hs-adv-view-fig{margin:0;display:flex;flex-direction:column;align-items:center;gap:8px;outline:0}
+.hs-adv-view-fig img{display:block;max-width:100%;max-height:min(68vh,720px);width:auto;height:auto;border:2px solid var(--gold-line);border-radius:2px;background:var(--ground-2)}
+.hs-adv-view-acts{flex-wrap:wrap;justify-content:center}
+/* The full sheet (#274). */
+.hs-adv-full-list{list-style:none;margin:0;padding:2px 14px 8px;display:flex;flex-direction:column;gap:6px;font-size:14.5px}
+.hs-adv-full-list li{overflow-wrap:anywhere}
+.hs-adv-full-list small{font-size:12.5px;color:var(--muted)}
+.hs-adv-full-acts{display:flex;flex-wrap:wrap;gap:8px;padding:2px 14px 8px}
+.hs-adv-full-acts .hs-ghost{cursor:pointer}
+.hs-adv-full-acts .hs-ghost.is-busy{opacity:.6;cursor:progress}
+.hs-adv-full-acts .hs-ghost:focus-within{outline:2px solid var(--gold-hi);outline-offset:2px}
+.hs-adv-full-fine{padding:0 14px 10px}
 
 /* The dialog (New adventurer, Edit): the frame beside the name, then the rest of today's fields. */
 .hs-adv-form-top{display:grid;grid-template-columns:96px minmax(0,1fr);gap:14px;align-items:start}

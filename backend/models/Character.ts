@@ -12,6 +12,9 @@ const Character = defineModel({
     dungeon: { col: "dungeon_id", type: "uuid" },
     gameType: "game_type", class: "class", level: "level", isDead: "is_dead",
     sfID: "sf_id", createdAt: { col: "created_at", type: "date" },
+    // Art and the full sheet (#273, #274): see planning/adventurerFiles.ts.
+    portraitArt: { col: "portrait_art_id", type: "uuid" },
+    sheetUrl: "sheet_url", sheetKey: "sheet_key", sheetName: "sheet_name", sheetType: "sheet_type", sheetSize: "sheet_size",
   },
   refs: { player: () => Account, campaign: () => Campaign, dungeon: () => Dungeon },
 });

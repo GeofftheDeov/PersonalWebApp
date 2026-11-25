@@ -5,6 +5,9 @@
  * as the portfolio's (frontend/src/lib/banner.ts), through Hearthside's API client.
  */
 import { api } from './api';
+import { CROP_INPUT_TYPES, CROP_SOURCE_MAX_BYTES, cropImage, type CropRect } from './crop';
+
+export type { CropRect };
 
 /** Width : height of every banner. */
 export const BANNER_ASPECT = 4;
@@ -13,41 +16,15 @@ const BANNER_OUT_WIDTH = 1600;
 /** What the server accepts; the crop is re-encoded to fit. */
 const BANNER_MAX_BYTES = 5 * 1024 * 1024;
 /** Image types the picker offers. The crop re-encodes to WebP (or JPEG). */
-export const BANNER_INPUT_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+export const BANNER_INPUT_TYPES = CROP_INPUT_TYPES;
 /** The biggest source file the cropper will open (it's re-encoded far smaller). */
-export const BANNER_SOURCE_MAX_BYTES = 25 * 1024 * 1024;
+export const BANNER_SOURCE_MAX_BYTES = CROP_SOURCE_MAX_BYTES;
 
 export interface Banner { bannerKey: string | null; bannerUrl: string | null }
 
-/** A rectangle of the source image, in its natural pixels. */
-export interface CropRect { sx: number; sy: number; sw: number; sh: number }
-
-const toBlob = (canvas: HTMLCanvasElement, type: string, quality: number) =>
-    new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, type, quality));
-
-/**
- * Draws `crop` of `img` onto a 4:1 canvas and encodes it: WebP where the
- * browser can, else JPEG, stepping the quality down until it fits in 5 MB.
- */
-export async function cropToBanner(img: HTMLImageElement, crop: CropRect): Promise<Blob> {
-    const width = Math.max(1, Math.round(Math.min(BANNER_OUT_WIDTH, crop.sw)));
-    const height = Math.max(1, Math.round(width / BANNER_ASPECT));
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('This browser can’t crop images.');
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(img, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, width, height);
-
-    for (const quality of [0.85, 0.7, 0.5]) {
-        let blob = await toBlob(canvas, 'image/webp', quality);
-        // Browsers that can't encode WebP hand back a PNG instead.
-        if (!blob || blob.type !== 'image/webp') blob = await toBlob(canvas, 'image/jpeg', quality);
-        if (blob && blob.size <= BANNER_MAX_BYTES) return blob;
-    }
-    throw new Error('The cropped banner is still over 5 MB. Try a smaller image.');
-}
+/** Draws `crop` of `img` onto a 4:1 canvas and encodes it to fit in 5 MB (lib/crop.ts). */
+export const cropToBanner = (img: HTMLImageElement, crop: CropRect): Promise<Blob> =>
+    cropImage(img, crop, { aspect: BANNER_ASPECT, maxWidth: BANNER_OUT_WIDTH, maxBytes: BANNER_MAX_BYTES });
 
 /** Uploads a cropped banner to S3 and makes it the campaign's banner. */
 export async function uploadBanner(campaignId: string, blob: Blob): Promise<Banner> {

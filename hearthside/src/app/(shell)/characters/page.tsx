@@ -17,9 +17,9 @@ import { useRequiredSession } from '@/lib/session';
  * road", from prototype/hearthside-characters. The viewer's own adventurers
  * hang as portraits in gilded frames on the floor, each with a brass name
  * plate (name, class and level) and the next session in its campaign under
- * it; the fallen hang in the Hall of Heroes below. Every portrait is the
- * fallback until art exists (#198). New adventurer opens the gilded dialog,
- * then their page.
+ * it; the fallen hang in the Hall of Heroes below. Each frame holds their
+ * portrait (#273), or their initials until they have one. New adventurer
+ * opens the gilded dialog, then their page.
  */
 export default function AdventurersPage() {
   const router = useRouter();
@@ -57,7 +57,7 @@ export default function AdventurersPage() {
       <li key={c._id}>
         <Link href={`/characters/${encodeURIComponent(c._id)}`} className={c.isDead ? 'hs-adv-card is-fallen' : 'hs-adv-card'}>
           <span className="hs-adv-frame">
-            <Portrait name={c.name} />
+            <Portrait name={c.name} src={c.portraitUrl} />
             {c.isDead && <span className="hs-adv-ribbon">Fallen</span>}
           </span>
           <span className="hs-adv-plate"><b>{c.name}</b><small>{classLine(c)}</small></span>

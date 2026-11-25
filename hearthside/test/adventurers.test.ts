@@ -9,9 +9,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   EMPTY_ADVENTURER, adventurerPayload, campaignChoices, canEditAdventurer, classLine, formOf, formProblem, initialsOf,
-  nextLabel, nextSessions, playedByLine, rosterOf, statusOf, travelsWith,
+  nextLabel, nextSessions, playedByLine, rosterOf, sheetLinkHost, sheetLinkProblem, statusOf, travelsWith,
   type Adventurer, type RosterSession,
 } from "../src/lib/adventurers";
+import { fileSizeLabel, sheetFileProblem } from "../src/lib/adventurerFiles";
 import type { PartyCharacter } from "../src/lib/campaignRecords";
 
 const ME = "me-1";
@@ -99,8 +100,8 @@ test("Travels with is the rest of the party still travelling, by name", () => {
 });
 
 test("the form fills from an adventurer, and needs a name and a level from 1 to 20", () => {
-  const f = formOf(a("k", { name: "Kestrel", class: "Envoy", level: 4, gameType: "Starfinder", campaign: { _id: "c1", title: "Starfall" }, isDead: true }));
-  assert.deepEqual(f, { name: "Kestrel", class: "Envoy", level: "4", gameType: "Starfinder", campaign: "c1", isDead: true });
+  const f = formOf(a("k", { name: "Kestrel", class: "Envoy", level: 4, gameType: "Starfinder", campaign: { _id: "c1", title: "Starfall" }, isDead: true, sheetUrl: "https://dndbeyond.com/c/1" }));
+  assert.deepEqual(f, { name: "Kestrel", class: "Envoy", level: "4", gameType: "Starfinder", campaign: "c1", isDead: true, sheetUrl: "https://dndbeyond.com/c/1" });
   assert.deepEqual(formOf(a("k", { name: "Bare", class: null, level: null, campaign: null })),
     { ...EMPTY_ADVENTURER, name: "Bare" });
 
@@ -112,8 +113,30 @@ test("the form fills from an adventurer, and needs a name and a level from 1 to 
 });
 
 test("New adventurer and Edit send today's fields, trimmed, with the level as a number", () => {
-  const f = { name: "  Wren  ", class: " Bard ", level: "2", gameType: "D&D 5e", campaign: "", isDead: true };
-  assert.deepEqual(adventurerPayload(f), { name: "Wren", class: "Bard", level: 2, gameType: "D&D 5e", campaign: "", isDead: true });
+  const f = { name: "  Wren  ", class: " Bard ", level: "2", gameType: "D&D 5e", campaign: "", isDead: true, sheetUrl: " https://x.test/s " };
+  assert.deepEqual(adventurerPayload(f), { name: "Wren", class: "Bard", level: 2, gameType: "D&D 5e", campaign: "", isDead: true, sheetUrl: "https://x.test/s" });
+});
+
+test("the sheet's link is blank or a whole http(s) address, as the server allows (#274)", () => {
+  for (const ok of ["", "  ", "https://www.dndbeyond.com/characters/1", "http://sheets.test/a?b=c"]) {
+    assert.equal(sheetLinkProblem(ok), null, ok);
+  }
+  for (const bad of ["javascript:alert(1)", "data:text/html,hi", "ftp://x.test/a", "dndbeyond.com/characters/1", `https://x.test/${"a".repeat(2000)}`]) {
+    assert.notEqual(sheetLinkProblem(bad), null, bad);
+  }
+  assert.match(formProblem({ ...EMPTY_ADVENTURER, name: "Wren", sheetUrl: "javascript:alert(1)" }) ?? "", /link/);
+  assert.equal(sheetLinkHost("https://www.dndbeyond.com/characters/1"), "dndbeyond.com");
+  assert.equal(sheetLinkHost("https://app.demiplane.com/x"), "app.demiplane.com");
+});
+
+test("a sheet copy is a PDF or a picture up to 10 MB, and its size reads plainly (#274)", () => {
+  assert.equal(sheetFileProblem({ type: "application/pdf", size: 2048 }), null);
+  assert.equal(sheetFileProblem({ type: "image/gif", size: 2048 }), null);
+  assert.match(sheetFileProblem({ type: "text/html", size: 10 }) ?? "", /PDF/);
+  assert.match(sheetFileProblem({ type: "application/pdf", size: 10 * 1024 * 1024 + 1 }) ?? "", /10 MB/);
+  assert.equal(fileSizeLabel(340 * 1024), "340 KB");
+  assert.equal(fileSizeLabel(2.15 * 1024 * 1024), "2.1 MB");
+  assert.equal(fileSizeLabel(null), null);
 });
 
 test("the campaigns offered are the viewer's, plus the one it's already in", () => {

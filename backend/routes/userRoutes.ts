@@ -154,8 +154,9 @@ router.post("/register", async (req, res) => {
       isVerified: isDev
     });
   } catch (error: any) {
-    // accounts.email is unique (citext). Login and forgot-password already say
-    // whether an email has an account, so saying it here gives nothing away.
+    // accounts.email is unique (citext). Login and forgot-password no longer say
+    // whether an email has an account (#248), but signup can't avoid it: the
+    // person needs to know to sign in instead.
     if (error?.code === "23505") {
       return res.status(409).json({ error: "An account with that email already exists. Sign in, or reset your password." });
     }
@@ -203,6 +204,8 @@ router.post("/verify-email", async (req, res) => {
     }
 });
 
+const BAD_LOGIN = "That email and password don't match an account.";
+
 router.post("/login", async (req, res) => {
     try {
         let { email, password } = req.body;
@@ -217,9 +220,11 @@ router.post("/login", async (req, res) => {
         // no case-insensitive regex forcing a sequential scan.
         const user: any = await Account.findOne({ email });
 
+        // An unknown email and a wrong password get the same 401 (#248), so
+        // login doesn't say which emails have accounts.
         if (!user) {
             console.log(`[AUTH] No account with email "${email}"`);
-            return res.status(401).json({ error: "Invalid credentials" });
+            return res.status(401).json({ error: BAD_LOGIN });
         }
 
         // Most people merged in from Salesforce have no password: 34 of 40 dev
@@ -235,7 +240,7 @@ router.post("/login", async (req, res) => {
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
             console.log(`[AUTH] Bad password for "${email}"`);
-            return res.status(401).json({ error: "Incorrect Password" });
+            return res.status(401).json({ error: BAD_LOGIN });
         }
 
         await bindPendingInvites(user);
@@ -519,11 +524,19 @@ router.post("/profile/picture", auth, upload.single("profilePicture"), async (re
     }
 });
 
+// The same answer whether or not the email has an account (#248), so the API
+// doesn't say which emails do.
+const RESET_SENT = "If an account exists with that email, a password reset link is on its way.";
+
 router.post("/forgot-password", async (req, res) => {
-    const { email } = req.body;
+    const { email } = req.body ?? {};
     try {
-        const user: any = await Account.findOne({ email });
-        if (!user) return res.status(404).json({ error: "User not found" });
+        // A string only: the model layer reads an object filter value as
+        // operators, so {"$ne": null} would match some account.
+        const user: any = typeof email === "string" && email.trim()
+            ? await Account.findOne({ email: email.trim() })
+            : null;
+        if (!user) return res.json({ message: RESET_SENT });
 
         const token = crypto.randomBytes(20).toString("hex");
 
@@ -539,11 +552,14 @@ router.post("/forgot-password", async (req, res) => {
         );
 
         // The link lands on the site the request came from, if it's an allowed one (#215).
-        await sendResetPasswordEmail(user.email, token, originSite(req).origin);
+        // A mail failure must not answer differently from an email with no
+        // account, so it is logged, not returned.
+        await sendResetPasswordEmail(user.email, token, originSite(req).origin).catch((err: any) =>
+            console.error("Forgot password: reset email failed:", err.message));
 
         // mockToken is for local testing (verify_reset.ts) only. Returning it in
         // prod would let anyone reset any account's password without the email.
-        res.json({ message: "Password reset email sent", ...(isDevEnv() && { mockToken: token }) });
+        res.json({ message: RESET_SENT, ...(isDevEnv() && { mockToken: token }) });
     } catch (error) {
         console.error("Forgot Password Error:", error);
         res.status(500).json({ error: "Error sending email" });

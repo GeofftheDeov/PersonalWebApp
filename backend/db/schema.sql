@@ -537,9 +537,28 @@ CREATE TABLE characters (
   level      integer NOT NULL DEFAULT 1,
   is_dead    boolean NOT NULL DEFAULT false,
   sf_id      text,
-  created_at timestamptz NOT NULL DEFAULT now()
+  created_at timestamptz NOT NULL DEFAULT now(),
+  -- The full sheet (#274): a link to wherever it lives, and/or an uploaded copy
+  -- (a PDF or picture under character-sheets/<id>/), kept exactly as uploaded.
+  sheet_url  text CHECK (sheet_url IS NULL OR char_length(sheet_url) <= 2000),
+  sheet_key  text,
+  sheet_name text CHECK (sheet_name IS NULL OR char_length(sheet_name) <= 200),
+  sheet_type text,
+  sheet_size integer
 );
 CREATE INDEX idx_characters_player ON characters (player_id);
+
+-- An adventurer's art (#273): one row per piece, its object under
+-- character-art/<characterId>/. The character points at its portrait.
+CREATE TABLE character_art (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  character_id uuid NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+  file_key     text NOT NULL UNIQUE,
+  position     integer NOT NULL DEFAULT 0,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_character_art_character ON character_art (character_id, position);
+ALTER TABLE characters ADD COLUMN portrait_art_id uuid REFERENCES character_art(id) ON DELETE SET NULL;
 
 -- A saved place for a campaign (#57). Declared ahead of game_sessions, which
 -- references it.

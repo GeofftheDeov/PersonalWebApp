@@ -13,6 +13,8 @@
  *   POST /api/tabletop/characters          New adventurer: you play it
  *   PUT  /api/tabletop/characters/:id      Edit: its player, or an admin
  *
+ * Art and the full sheet (#273, #274) upload through lib/adventurerFiles.ts.
+ *
  * The paths keep the word `characters`; the pages say Adventurers.
  */
 import type { PartyCharacter } from './campaignRecords';
@@ -38,6 +40,30 @@ export interface Adventurer {
   /** The campaign: populated in both reads, or an id, or none. */
   campaign?: string | AdventurerCampaign | null;
   createdAt?: string | null;
+  /** The portrait (#273): a URL, or null for the initials. Every read carries it. */
+  portraitUrl?: string | null;
+  /** Every piece of art, in order (#273). Only on its own page. */
+  art?: AdventurerArt[];
+  /** Where the full sheet lives (#274): an http(s) link, or null. */
+  sheetUrl?: string | null;
+  /** The uploaded copy of the sheet (#274), or null. Only on its own page. */
+  sheet?: AdventurerSheetCopy | null;
+}
+
+/** A piece of an adventurer's art (#273). `url` is null when uploads are switched off. */
+export interface AdventurerArt {
+  _id: string;
+  url: string | null;
+  isPortrait: boolean;
+  createdAt?: string;
+}
+
+/** The uploaded copy of an adventurer's sheet (#274), kept exactly as uploaded. `url` expires. */
+export interface AdventurerSheetCopy {
+  name: string;
+  contentType: string;
+  size: number | null;
+  url: string | null;
 }
 
 /** A session as `GET /api/tabletop/sessions` sends it (the fields the roster reads). */
@@ -161,9 +187,11 @@ export interface AdventurerForm {
   /** A campaign id, or "" for none. */
   campaign: string;
   isDead: boolean;
+  /** The link to the full sheet (#274), as typed; "" for none. */
+  sheetUrl: string;
 }
 
-export const EMPTY_ADVENTURER: AdventurerForm = { name: '', class: '', level: '1', gameType: '', campaign: '', isDead: false };
+export const EMPTY_ADVENTURER: AdventurerForm = { name: '', class: '', level: '1', gameType: '', campaign: '', isDead: false, sheetUrl: '' };
 
 /** The form, filled from an adventurer to edit. */
 export function formOf(c: Adventurer): AdventurerForm {
@@ -174,6 +202,7 @@ export function formOf(c: Adventurer): AdventurerForm {
     gameType: c.gameType ?? '',
     campaign: campaignIdOf(c) ?? '',
     isDead: !!c.isDead,
+    sheetUrl: c.sheetUrl ?? '',
   };
 }
 
@@ -182,7 +211,26 @@ export function formProblem(f: AdventurerForm): string | null {
   if (!f.name.trim()) return 'Every adventurer needs a name.';
   const level = Number(f.level);
   if (!/^\d+$/.test(f.level.trim()) || level < 1 || level > MAX_LEVEL) return `The level is a whole number from 1 to ${MAX_LEVEL}.`;
+  return sheetLinkProblem(f.sheetUrl);
+}
+
+/**
+ * What's wrong with a link to the full sheet, or null: blank, or a whole
+ * http(s) link of at most 2,000 characters, as the server allows (#274).
+ */
+export function sheetLinkProblem(value: string): string | null {
+  const v = value.trim();
+  if (!v) return null;
+  if (v.length > 2000) return 'That link is too long.';
+  let url: URL;
+  try { url = new URL(v); } catch { return 'The sheet’s link must be a whole web address, starting with https://.'; }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return 'The sheet’s link must start with https:// or http://.';
   return null;
+}
+
+/** "dndbeyond.com" for a sheet link: where it goes, without the noise. */
+export function sheetLinkHost(link: string): string {
+  try { return new URL(link).hostname.replace(/^www\./, ''); } catch { return link; }
 }
 
 /** The body for `POST` or `PUT /api/tabletop/characters`. "" leaves it in no campaign. */
@@ -194,6 +242,7 @@ export function adventurerPayload(f: AdventurerForm) {
     gameType: f.gameType.trim(),
     campaign: f.campaign,
     isDead: f.isDead,
+    sheetUrl: f.sheetUrl.trim(),
   };
 }
 

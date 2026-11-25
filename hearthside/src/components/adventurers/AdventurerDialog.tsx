@@ -12,7 +12,7 @@ import {
 /**
  * New adventurer and Edit (#229, spec #69): one gilded dialog with today's
  * fields (name, class, level, game, campaign and whether they've fallen), as
- * the portfolio's forms have them. `POST /api/tabletop/characters` makes the
+ * the portfolio's forms have them, plus the link to their full sheet (#274). `POST /api/tabletop/characters` makes the
  * viewer its player; `PUT /api/tabletop/characters/:id` is its player's (or an
  * admin's). Whatever the server refuses, a 403 included, is said in the
  * dialog, which stays open (#235).
@@ -29,7 +29,7 @@ export default function AdventurerDialog({ adventurer, onClose, onSaved }: {
   const [campaigns, setCampaigns] = useState<{ _id: string; title: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const set = (k: 'name' | 'class' | 'level' | 'gameType' | 'campaign') =>
+  const set = (k: 'name' | 'class' | 'level' | 'gameType' | 'campaign' | 'sheetUrl') =>
     (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   // The campaigns to put them in: the viewer's own (an admin's list is every campaign, as the API allows).
@@ -65,12 +65,16 @@ export default function AdventurerDialog({ adventurer, onClose, onSaved }: {
     <GildedDialog title={adventurer ? `Edit ${adventurer.name}` : 'New adventurer'} onClose={onClose}>
       <form className="hs-form hs-adv-form" onSubmit={submit} noValidate>
         <div className="hs-adv-form-top">
-          <span className={form.isDead ? 'hs-adv-frame is-fallen' : 'hs-adv-frame'}><Portrait name={form.name || '?'} /></span>
+          <span className={form.isDead ? 'hs-adv-frame is-fallen' : 'hs-adv-frame'}><Portrait name={form.name || '?'} src={adventurer?.portraitUrl} /></span>
           <div className="hs-adv-form-who">
             <label className="hs-field"><span>Name</span>
               <input className="hs-input" required maxLength={120} autoComplete="off" value={form.name} onChange={set('name')} placeholder="What the party calls them" />
             </label>
-            <p className="hs-fine">Their portrait comes later. Until then, their initials hang in the frame.</p>
+            <p className="hs-fine">
+              {editing
+                ? 'Their art is on their page: add a piece there, or choose which one is the portrait.'
+                : 'Add their art from their page once they’re on the roster. Until then, their initials hang in the frame.'}
+            </p>
           </div>
         </div>
         <div className="hs-adv-form-cls">
@@ -89,6 +93,9 @@ export default function AdventurerDialog({ adventurer, onClose, onSaved }: {
             <option value="">Not in a campaign yet</option>
             {choices.map((c) => <option key={c._id} value={c._id}>{c.title}</option>)}
           </select>
+        </label>
+        <label className="hs-field"><span>Link to the full sheet</span>
+          <input className="hs-input" type="url" inputMode="url" maxLength={2000} autoComplete="off" value={form.sheetUrl} onChange={set('sheetUrl')} placeholder="https://www.dndbeyond.com/characters/…" />
         </label>
         <div className="hs-field"><span id="hs-adv-status">Status</span>
           <div className="hs-adv-seg" role="group" aria-labelledby="hs-adv-status">
